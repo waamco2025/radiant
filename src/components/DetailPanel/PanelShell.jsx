@@ -1,0 +1,198 @@
+import { useState } from 'react'
+import { PANEL_W, GUTTER, BTN_H, CATEGORY_CONFIG } from './constants'
+import HealthBar from './shared/HealthBar'
+import CopyBadge from './shared/CopyBadge'
+import { Tip } from './shared/Tooltip'
+
+function ClipIcon({ s = 14, c = 'var(--text-secondary)' }) {
+  return (
+    <svg width={s} height={s} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5" stroke={c} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function FooterBtn({ icon, label, onClick, disabled }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => !disabled && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        flex: 1,
+        height: BTN_H,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        padding: '0 8px',
+        borderRadius: 5,
+        border: `1px solid ${hovered && !disabled ? 'var(--border-hover)' : 'var(--border)'}`,
+        background: hovered && !disabled ? 'var(--bg-raised)' : 'transparent',
+        color: disabled ? 'var(--text-dim)' : hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+        fontSize: 11,
+        fontFamily: 'var(--font-mono)',
+        fontWeight: 500,
+        cursor: disabled ? 'default' : 'pointer',
+        transition: 'all 180ms',
+        opacity: disabled ? 0.3 : 1,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+      }}
+    >
+      <span style={{ flexShrink: 0, fontSize: 13, lineHeight: 1 }}>{icon}</span>
+      <span style={{
+        maxWidth: hovered ? 120 : 0,
+        overflow: 'hidden',
+        transition: 'max-width 200ms ease',
+        fontSize: 10,
+      }}>
+        {label}
+      </span>
+    </button>
+  )
+}
+
+export default function PanelShell({
+  node, tabs, tab, setTab, summary, onClose,
+  onClipClick, hasStack, hasParent, children,
+  onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, showPin, onConnect,
+}) {
+  const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
+
+  return (
+    <div style={{
+      width: '100%',
+      height: '100%',
+      background: 'var(--bg-card)',
+      borderLeft: '1px solid var(--border)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      fontFamily: 'var(--font-display)',
+    }}>
+      {/* Header */}
+      <div style={{ padding: `${GUTTER}px ${GUTTER}px 16px`, flexShrink: 0 }}>
+        {/* Category row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+          <span style={{ fontSize: 13, color: cat.color }}>{cat.icon}</span>
+          <span style={{
+            fontSize: 10.5, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            color: cat.color, letterSpacing: '0.08em',
+          }}>{node.category.toUpperCase()}</span>
+          <div style={{ flex: 1 }} />
+          {node.hasEvidence && onClipClick && (
+            <Tip text="View evidence details">
+              <span
+                onClick={onClipClick}
+                style={{
+                  cursor: 'pointer', display: 'inline-flex', padding: '2px 4px',
+                  borderRadius: 4, transition: 'background 150ms',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <ClipIcon s={14} c="var(--text-secondary)" />
+              </span>
+            </Tip>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', fontSize: 15,
+              color: 'var(--text-tertiary)', cursor: 'pointer',
+              padding: '2px 4px', borderRadius: 4, transition: 'color 150ms',
+            }}
+            onMouseEnter={e => e.target.style.color = 'var(--text-primary)'}
+            onMouseLeave={e => e.target.style.color = 'var(--text-tertiary)'}
+          >✕</button>
+        </div>
+
+        {/* Name + PIN */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{node.name}</span>
+          <CopyBadge value={node.pin} truncated />
+        </div>
+
+        {/* Owner + DOT */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{node.owner}</span>
+          <CopyBadge value={node.dot} />
+        </div>
+
+        {/* Health bar */}
+        <HealthBar health={node.health} />
+
+        {/* Summary */}
+        {summary && (
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginTop: 8 }}>{summary}</div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      {tabs.length > 0 && (
+        <div style={{ padding: `0 ${GUTTER}px 14px`, flexShrink: 0 }}>
+          <div style={{
+            display: 'flex', gap: 4,
+            background: 'var(--bg-surface)', borderRadius: 8,
+            padding: 4, border: '1px solid var(--border)',
+          }}>
+            {tabs.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
+                  cursor: 'pointer', fontSize: 11.5, fontFamily: 'var(--font-display)',
+                  fontWeight: tab === t.id ? 600 : 400,
+                  background: tab === t.id ? 'var(--accent-indigo)' : 'transparent',
+                  color: tab === t.id ? '#fff' : 'var(--text-tertiary)',
+                  transition: 'all 180ms',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Scrollable content */}
+      <div style={{
+        flex: 1,
+        overflow: 'auto',
+        padding: `14px ${GUTTER}px 28px`,
+        borderTop: '1px solid var(--border)',
+      }}>
+        {children}
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        borderTop: '1px solid var(--border)',
+        padding: `12px ${GUTTER}px`,
+        display: 'flex',
+        gap: 6,
+        flexShrink: 0,
+        background: 'var(--bg-card)',
+      }}>
+        <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} />
+        <FooterBtn
+          icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
+          label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Return' : 'Surface'}
+          onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
+          disabled={!isAnchor && !hasStack && !hasParent}
+        />
+        {showPin && (
+          <FooterBtn
+            icon={<svg width={12} height={12} viewBox="0 0 16 16" fill="none"><path d="M9.5 2.5L13.5 6.5L10 10L8 12L6.5 10.5L3 14L2 13L5.5 9.5L4 8L6 6L9.5 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            label="Pin"
+            onClick={onPinToSurface}
+          />
+        )}
+        <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} />
+      </div>
+    </div>
+  )
+}

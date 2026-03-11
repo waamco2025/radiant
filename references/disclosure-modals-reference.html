@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radiant — Disclosure Modals Reference</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;text-wrap:pretty}
+::selection{background:rgba(126,142,248,.3)}
+body{background:#090b10;color:#e3e6ec;font-family:'DM Sans',sans-serif;min-height:100vh}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2e3a4e;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useCallback,useRef,useEffect,useMemo}=React;
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOKENS
+   ═══════════════════════════════════════════════════════════════════════ */
+const T={
+  bg:"#090b10",surface:"#0d1017",card:"#111620",cardAlt:"#151b28",raised:"#1a2030",
+  border:"#1a2030",borderMd:"#232e40",borderLt:"#2e3a4e",
+  text:"#e3e6ec",textSec:"#b4b9c8",textMut:"#8892a8",textDim:"#5e6880",textFaint:"#343e52",
+  accent:"#7e8ef8",green:"#36d49a",red:"#f87171",amber:"#fbbf24",blue:"#60a5fa",
+  cyan:"#22d3ee",purple:"#a78bfa",indigo:"#818cf8",
+};
+const F="'DM Sans',sans-serif";
+const M="'JetBrains Mono',monospace";
+const SDA={
+  full:{c:"#7e8ef8",short:"FULL",label:"Full Disclosure",
+    desc:"Evaluators can extract data fields and run inference requirements against your evidence.",border:"solid"},
+  selective:{c:"#fbbf24",short:"SELECTIVE",label:"Selective Disclosure",
+    desc:"Evaluators can run inference requirements but cannot extract raw data from your evidence.",border:"dashed"},
+  proofonly:{c:"#36d49a",short:"PROOF-ONLY",label:"Proof-only Disclosure",
+    desc:"Shares the pass/fail result of a prior evaluation. No access to the evidence is granted, and no further evaluations can be run by other parties.",border:"dotted"},
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHARED PRIMITIVES
+   ═══════════════════════════════════════════════════════════════════════ */
+function Backdrop({children,onClose}){
+  return <div onClick={e=>{if(e.target===e.currentTarget)onClose?.()}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,animation:"fade-in 200ms ease"}}>
+    <style>{`@keyframes fade-in{from{opacity:0}to{opacity:1}} @keyframes modal-up{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    {children}
+  </div>;
+}
+function Modal({children,width=680}){
+  return <div style={{width,maxWidth:"94vw",maxHeight:"90vh",background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden",animation:"modal-up 250ms ease",boxShadow:"0 24px 80px rgba(0,0,0,.5)"}}>
+    {children}
+  </div>;
+}
+function ModalHeader({title,subtitle,step,totalSteps,onClose}){
+  return <div style={{padding:"22px 28px 18px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:subtitle?8:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        <span style={{fontSize:18,fontWeight:700,color:T.text,letterSpacing:"-0.01em"}}>{title}</span>
+        {step!=null&&totalSteps&&<span style={{fontSize:11,fontFamily:M,color:T.textDim,padding:"3px 10px",background:T.raised,borderRadius:10}}>Step {step} of {totalSteps}</span>}
+      </div>
+      <button onClick={onClose} style={{background:"none",border:"none",fontSize:16,color:T.textDim,cursor:"pointer",padding:"4px 8px",borderRadius:4}} onMouseEnter={e=>e.target.style.color=T.text} onMouseLeave={e=>e.target.style.color=T.textDim}>✕</button>
+    </div>
+    {subtitle&&<div style={{fontSize:13,color:T.textMut,lineHeight:1.6}}>{subtitle}</div>}
+  </div>;
+}
+function ModalBody({children}){
+  return <div style={{flex:1,overflow:"auto",padding:"22px 28px"}}>{children}</div>;
+}
+function ModalFooter({children}){
+  return <div style={{padding:"18px 28px",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,background:T.card}}>{children}</div>;
+}
+function Btn({label,onClick,accent,disabled,danger,style:sx}){
+  const[h,sh]=useState(false);
+  const bg=disabled?"transparent":accent?(h?`color-mix(in srgb,${T.accent} 85%,#fff)`:T.accent):danger?(h?`color-mix(in srgb,${T.red} 85%,#fff)`:T.red):h?T.cardAlt:"transparent";
+  const c=disabled?T.textFaint:accent||danger?"#fff":h?T.text:T.textMut;
+  const bc=disabled?T.border:accent?T.accent:danger?T.red:T.border;
+  return <button onClick={disabled?undefined:onClick} onMouseEnter={()=>!disabled&&sh(true)} onMouseLeave={()=>sh(false)} style={{height:38,padding:"0 20px",borderRadius:6,border:`1px solid ${bc}`,background:bg,color:c,fontSize:13,fontFamily:F,fontWeight:600,cursor:disabled?"default":"pointer",transition:"all 150ms",opacity:disabled?.4:1,whiteSpace:"nowrap",...(sx||{})}}>{label}</button>;
+}
+function FieldLabel({label,required}){
+  return <div style={{fontSize:12,fontWeight:600,color:T.textMut,marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+    {label}{required&&<span style={{color:T.red,fontSize:11}}>*</span>}
+  </div>;
+}
+function InfoRow({label,value,mono}){
+  return <div style={{display:"flex",alignItems:"center",minHeight:34,borderBottom:`1px solid ${T.border}`}}>
+    <div style={{width:140,flexShrink:0,fontSize:12,color:T.textDim,paddingLeft:4}}>{label}</div>
+    <div style={{flex:1,fontSize:12,fontFamily:mono?M:F,color:T.textMut}}>{value}</div>
+  </div>;
+}
+function CopyBadge({value}){
+  const[copied,setCopied]=useState(false);
+  const copy=()=>{navigator.clipboard?.writeText(value);setCopied(true);setTimeout(()=>setCopied(false),1200)};
+  return <span onClick={copy} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:4,background:T.raised,border:`1px solid ${T.border}`,fontFamily:M,fontSize:11,color:copied?T.green:T.textDim,cursor:"pointer",transition:"color 150ms",userSelect:"none"}}>{value}{copied?" ✓":""}</span>;
+}
+function SDATypeCard({type,selected,onSelect,disabled,disabledReason}){
+  const s=SDA[type];if(!s)return null;
+  const active=selected===type;
+  const[hov,setHov]=useState(false);
+  return <div onClick={disabled?undefined:()=>onSelect(type)} onMouseEnter={()=>!disabled&&setHov(true)} onMouseLeave={()=>setHov(false)} style={{flex:1,padding:"18px 16px",borderRadius:8,border:`1.5px ${s.border} ${active?s.c:hov?T.borderLt:T.border}`,background:active?`color-mix(in srgb,${s.c} 6%,transparent)`:hov?T.cardAlt:T.card,cursor:disabled?"default":"pointer",transition:"all 150ms",opacity:disabled?.35:1}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+      <div style={{width:8,height:8,borderRadius:"50%",background:active?s.c:T.textFaint,transition:"background 150ms"}}/>
+      <span style={{fontSize:13,fontWeight:700,fontFamily:M,color:active?s.c:hov?T.textSec:T.textMut,letterSpacing:"0.03em",transition:"color 150ms"}}>{s.short}</span>
+    </div>
+    <div style={{fontSize:12,color:active?T.textSec:hov?T.textMut:T.textDim,lineHeight:1.65,transition:"color 150ms",textWrap:"pretty"}}>{s.desc}</div>
+    {disabled&&disabledReason&&<div style={{marginTop:10,fontSize:11,fontFamily:M,color:T.textFaint,lineHeight:1.5,textWrap:"pretty"}}>{disabledReason}</div>}
+  </div>;
+}
+function StepDots({current,total}){
+  return <div style={{display:"flex",gap:6,alignItems:"center"}}>
+    {Array.from({length:total},(_,i)=><div key={i} style={{width:i===current?20:6,height:6,borderRadius:3,background:i===current?T.accent:i<current?T.green:T.borderLt,transition:"all 200ms"}}/>)}
+  </div>;
+}
+function DecisionCard({id,label,desc,color,icon,disabled,active,onClick}){
+  const[hov,setHov]=useState(false);
+  return <div onClick={disabled?undefined:onClick} onMouseEnter={()=>!disabled&&setHov(true)} onMouseLeave={()=>setHov(false)} style={{flex:1,padding:"16px",borderRadius:8,border:`1.5px solid ${active?color:hov?T.borderLt:T.border}`,background:active?`color-mix(in srgb,${color} 6%,transparent)`:hov?T.cardAlt:T.card,cursor:disabled?"default":"pointer",transition:"all 150ms",textAlign:"center",opacity:disabled?.35:1}}>
+    <div style={{fontSize:20,marginBottom:8,color:active?color:hov?T.textSec:T.textDim,transition:"color 150ms"}}>{icon}</div>
+    <div style={{fontSize:13,fontWeight:600,color:active?color:hov?T.textSec:T.textMut,marginBottom:4,transition:"color 150ms"}}>{label}</div>
+    <div style={{fontSize:11,color:active?T.textMut:T.textDim,lineHeight:1.5,textWrap:"pretty"}}>{desc}</div>
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DEMO DATA
+   ═══════════════════════════════════════════════════════════════════════ */
+const DEMO_ASSET={name:"Power Regulation Module",pin:"PIN-0x5e9a...d4c3",category:"product",owner:"MicroCo",dot:"DOT-0x4c8d...f3a7",health:{ok:9,bad:0},childCount:3,hasEvidence:true,
+  evaluations:[
+    {id:"eval-058",org:"MicroCo",date:"2026-02-15",requirements:"Internal Quality Audit",status:"completed",claims:[{status:"verified"},{status:"verified"},{status:"verified"},{status:"verified"}]},
+    {id:"eval-061",org:"GovCo",date:"2026-03-01",requirements:"System Integration Requirements",status:"completed",claims:[{status:"verified"},{status:"verified"},{status:"verified"},{status:"verified"},{status:"verified"}]},
+  ]};
+const DEMO_REQUEST={
+  id:"req-001",from:{name:"GovCo",dot:"DOT-0x7a3f...e1b2",role:"buyer"},
+  asset:{name:"Power Regulation Module",pin:"PIN-0x5e9a...d4c3"},
+  requestedLevel:"selective",
+  message:"We're evaluating MicroCo components for the Sentinel-4 satellite program. We need to run MIL-PRF-55681 compliance checks against your Power Regulation Module. Requesting Selective disclosure so our evaluators can run inference requirements.",
+  requirements:["MIL-PRF-55681 Compliance","System Integration Requirements"],
+  date:"2026-03-05",
+};
+const DEMO_REQUEST_2={
+  id:"req-002",from:{name:"Orbital Systems Corp",dot:"DOT-0x8b3e...d2f5",role:"buyer"},
+  asset:{name:"Ceramic Capacitor Array",pin:"PIN-0x2d7c...b5f0"},
+  requestedLevel:"full",
+  message:"Requesting full disclosure for component integration testing on the Orion-X platform. We need to run capacitance tolerance and thermal cycling evaluations.",
+  requirements:["Component Integration Check","Passive Component Screening"],
+  date:"2026-03-07",
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FLOW A — PUBLIC DISCLOSURE (seller-initiated)
+   4 steps: Confirm → Permission → Eval select (proof-only) → Expiry/Review
+   ═══════════════════════════════════════════════════════════════════════ */
+function FlowA({onClose}){
+  const[step,setStep]=useState(0);
+  const[level,setLevel]=useState(null);
+  const[selectedEvals,setSelectedEvals]=useState([]);
+  const[expiry,setExpiry]=useState("1-year");
+  const[customDate,setCustomDate]=useState("");
+  const[published,setPublished]=useState(false);
+  const asset=DEMO_ASSET;
+  const completedEvals=asset.evaluations?.filter(e=>e.status==="completed")||[];
+  const hasProofEval=completedEvals.length>0;
+
+  // Step count depends on whether proof-only needs eval selection
+  const needsEvalStep=level==="proofonly";
+  const totalSteps=needsEvalStep?4:3;
+
+  const nextStep=()=>{
+    if(step===1&&!needsEvalStep)setStep(step+2);// skip eval step
+    else setStep(step+1);
+  };
+  const prevStep=()=>{
+    if(step===3&&!needsEvalStep)setStep(1);// skip back over eval step
+    else setStep(step-1);
+  };
+  const currentStepNum=()=>{
+    if(!needsEvalStep&&step===3)return 3;
+    return step+1;
+  };
+
+  if(published){
+    return <Backdrop onClose={onClose}><Modal width={540}>
+      <div style={{padding:"52px 36px",textAlign:"center"}}>
+        <div style={{width:60,height:60,borderRadius:"50%",background:`color-mix(in srgb,${T.green} 12%,transparent)`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 22px",border:`2px solid ${T.green}`}}>
+          <span style={{fontSize:26,color:T.green}}>✓</span>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:10}}>Asset Published</div>
+        <div style={{fontSize:13,color:T.textMut,lineHeight:1.6,marginBottom:28}}>
+          <strong style={{color:T.text}}>{asset.name}</strong> is now discoverable in the public asset directory with <strong style={{color:SDA[level]?.c||T.accent}}>{SDA[level]?.label||"—"}</strong> access.
+        </div>
+        <div style={{padding:"14px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:28,textAlign:"left"}}>
+          <InfoRow label="PIN" value={<CopyBadge value={asset.pin}/>}/>
+          <InfoRow label="Permission" value={<span style={{color:SDA[level]?.c,fontWeight:600,fontFamily:M,fontSize:12}}>{SDA[level]?.short}</span>}/>
+          {level==="proofonly"&&selectedEvals.length>0&&<InfoRow label="Evaluation(s)" value={<div style={{display:"flex",flexDirection:"column",gap:2}}>{selectedEvals.map((ev,i)=><span key={i} style={{fontFamily:M,fontSize:11}}>{ev.requirements} ({ev.org})</span>)}</div>}/>}
+          <InfoRow label="Expires" value={expiry==="none"?"No expiry":expiry==="custom"?customDate:expiry==="1-year"?"March 2027":"March 2028"}/>
+          <InfoRow label="On-chain TX" value={<span style={{fontFamily:M,fontSize:11,color:T.textDim}}>0x7f3a...pending confirmation</span>}/>
+        </div>
+        <Btn label="Done" accent onClick={onClose}/>
+      </div>
+    </Modal></Backdrop>;
+  }
+
+  return <Backdrop onClose={onClose}><Modal>
+    <ModalHeader title="Publish to Directory" subtitle="Make this asset discoverable to all parties on the network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose}/>
+    <ModalBody>
+      {step===0&&<Step_A_Confirm asset={asset}/>}
+      {step===1&&<Step_A_Permission level={level} setLevel={setLevel} hasProofEval={hasProofEval}/>}
+      {step===2&&<Step_A_EvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals}/>}
+      {step===3&&<Step_A_Expiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals}/>}
+    </ModalBody>
+    <ModalFooter>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        {step>0&&<Btn label="← Back" onClick={prevStep}/>}
+        <StepDots current={step===3?(needsEvalStep?3:2):step} total={totalSteps}/>
+      </div>
+      {step===0&&<Btn label="Next →" accent onClick={()=>setStep(1)}/>}
+      {step===1&&<Btn label="Next →" accent disabled={!level} onClick={nextStep}/>}
+      {step===2&&<Btn label="Next →" accent disabled={selectedEvals.length===0} onClick={()=>setStep(3)}/>}
+      {step===3&&<Btn label="Publish to Directory" accent onClick={()=>setPublished(true)}/>}
+    </ModalFooter>
+  </Modal></Backdrop>;
+}
+
+function Step_A_Confirm({asset}){
+  return <div>
+    <div style={{padding:"18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:22}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+        <span style={{fontSize:12,color:T.blue}}>■</span>
+        <span style={{fontSize:11,fontFamily:M,fontWeight:700,color:T.blue,letterSpacing:"0.06em"}}>{asset.category.toUpperCase()}</span>
+      </div>
+      <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:6}}>{asset.name}</div>
+      <div style={{marginBottom:14}}><CopyBadge value={asset.pin}/></div>
+      <InfoRow label="Owner" value={<span style={{display:"flex",alignItems:"center",gap:8}}>{asset.owner}<CopyBadge value={asset.dot}/></span>}/>
+      <InfoRow label="Health" value={<span style={{color:T.green,fontFamily:M,fontWeight:600,fontSize:12}}>{asset.health.ok} verified · {asset.health.bad} failed</span>}/>
+      <InfoRow label="Children" value={asset.childCount>0?`${asset.childCount} sub-assets`:"None"}/>
+      <InfoRow label="Evidence" value={asset.hasEvidence?<span style={{color:T.green}}>Attached</span>:<span style={{color:T.textDim}}>None</span>}/>
+    </div>
+    <div style={{padding:"14px 16px",background:`color-mix(in srgb,${T.amber} 5%,transparent)`,border:`1px solid color-mix(in srgb,${T.amber} 20%,transparent)`,borderRadius:8,fontSize:12,color:T.textMut,lineHeight:1.7}}>
+      <strong style={{color:T.amber}}>Publishing this asset</strong> will make it visible in the public asset directory. Other parties can see the asset name, type, owner, and registration date — but not your evidence or evaluation results. They must request disclosure to access anything further.
+    </div>
+  </div>;
+}
+
+function Step_A_Permission({level,setLevel,hasProofEval}){
+  return <div>
+    <FieldLabel label="Choose access level for disclosure requests"/>
+    <div style={{fontSize:12,color:T.textDim,marginBottom:18,lineHeight:1.7}}>
+      When a party requests disclosure, this is the maximum access level they can receive. You can always downgrade on a per-request basis.
+    </div>
+    <div style={{display:"flex",gap:12}}>
+      <SDATypeCard type="full" selected={level} onSelect={setLevel}/>
+      <SDATypeCard type="selective" selected={level} onSelect={setLevel}/>
+      <SDATypeCard type="proofonly" selected={level} onSelect={setLevel} disabled={!hasProofEval} disabledReason={hasProofEval?null:"No completed evaluations exist for this asset. Run at least one evaluation before offering proof-only disclosure."}/>
+    </div>
+    {level&&<div style={{marginTop:18,padding:"14px 16px",background:T.card,border:`1px solid ${T.border}`,borderRadius:8}}>
+      <div style={{fontSize:12,color:T.textMut,lineHeight:1.7}}>
+        {level==="full"&&<>Requestors will be able to <strong style={{color:T.text}}>extract data fields</strong> and <strong style={{color:T.text}}>run inference requirements</strong> against your evidence. This is the highest access level.</>}
+        {level==="selective"&&<>Requestors will be able to <strong style={{color:T.text}}>run inference requirements</strong> against your evidence but <strong style={{color:T.text}}>cannot extract raw data</strong>. This protects sensitive specifics while allowing compliance verification.</>}
+        {level==="proofonly"&&<>Requestors will only see the <strong style={{color:T.text}}>pass/fail result</strong> of a completed evaluation. No access to the evidence is granted, and <strong style={{color:T.text}}>no further evaluations can be run</strong> by other parties on this asset.</>}
+      </div>
+    </div>}
+  </div>;
+}
+
+function Step_A_EvalSelect({evals,selected,setSelected}){
+  const toggle=(ev)=>{
+    setSelected(prev=>{
+      const exists=prev.find(e=>e.id===ev.id);
+      return exists?prev.filter(e=>e.id!==ev.id):[...prev,ev];
+    });
+  };
+  return <div>
+    <FieldLabel label="Select evaluation(s) to share"/>
+    <div style={{fontSize:12,color:T.textDim,marginBottom:18,lineHeight:1.7}}>
+      Proof-only disclosure shares the pass/fail result from completed evaluations. Select one or more evaluations to include in this listing.
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {evals.map(ev=>{
+        const active=!!selected.find(e=>e.id===ev.id);
+        const ok=ev.claims.filter(c=>c.status==="verified").length;
+        const bad=ev.claims.filter(c=>c.status!=="verified").length;
+        return <div key={ev.id} onClick={()=>toggle(ev)} style={{padding:"16px 18px",borderRadius:8,border:`1.5px solid ${active?T.green:T.border}`,background:active?`color-mix(in srgb,${T.green} 5%,transparent)`:T.card,cursor:"pointer",transition:"all 150ms",display:"flex",alignItems:"flex-start",gap:12}}>
+          <div style={{width:18,height:18,borderRadius:4,border:`1.5px solid ${active?T.green:T.borderLt}`,background:active?T.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 150ms",flexShrink:0,marginTop:1}}>
+            {active&&<span style={{fontSize:11,color:"#fff",lineHeight:1}}>✓</span>}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <span style={{fontSize:13,fontWeight:600,color:active?T.text:T.textMut}}>{ev.requirements}</span>
+              <span style={{fontSize:11,fontFamily:M,color:T.textDim}}>{ev.date}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:12,color:T.textDim}}>by {ev.org}</span>
+              <span style={{fontSize:11,fontFamily:M,color:T.green}}>{ok} verified</span>
+              {bad>0&&<span style={{fontSize:11,fontFamily:M,color:T.red}}>{bad} failed</span>}
+            </div>
+          </div>
+        </div>;
+      })}
+    </div>
+  </div>;
+}
+
+function Step_A_Expiry({expiry,setExpiry,customDate,setCustomDate,level,asset,selectedEvals}){
+  const opts=[
+    {id:"1-year",label:"1 year",desc:"Expires March 2027"},
+    {id:"2-year",label:"2 years",desc:"Expires March 2028"},
+    {id:"none",label:"No expiry",desc:"Active until manually revoked"},
+    {id:"custom",label:"Custom date",desc:"Set a specific expiration"},
+  ];
+  return <div>
+    <FieldLabel label="Set expiration"/>
+    <div style={{fontSize:12,color:T.textDim,marginBottom:18,lineHeight:1.7}}>
+      How long should this listing remain active in the directory? You can revoke at any time regardless of the expiration date.
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+      {opts.map(o=><div key={o.id} onClick={()=>setExpiry(o.id)} style={{padding:"14px 16px",borderRadius:8,border:`1px solid ${expiry===o.id?T.accent:T.border}`,background:expiry===o.id?`color-mix(in srgb,${T.accent} 5%,transparent)`:T.card,cursor:"pointer",transition:"all 150ms"}}>
+        <div style={{fontSize:13,fontWeight:600,color:expiry===o.id?T.accent:T.text,marginBottom:3}}>{o.label}</div>
+        <div style={{fontSize:11,color:T.textDim}}>{o.desc}</div>
+      </div>)}
+    </div>
+    {expiry==="custom"&&<div style={{marginBottom:18}}>
+      <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} style={{width:"100%",height:38,padding:"0 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.text,fontFamily:M,fontSize:12,outline:"none"}}/>
+    </div>}
+    <div style={{padding:"18px 20px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`}}>
+      <div style={{fontSize:11,fontFamily:M,fontWeight:700,color:T.textMut,letterSpacing:"0.04em",marginBottom:14}}>REVIEW</div>
+      <InfoRow label="Asset" value={<span style={{fontWeight:600,color:T.text}}>{asset.name}</span>}/>
+      <InfoRow label="PIN" value={<CopyBadge value={asset.pin}/>}/>
+      <InfoRow label="Permission" value={<span style={{color:SDA[level]?.c,fontFamily:M,fontWeight:600,fontSize:12}}>{SDA[level]?.short}</span>}/>
+      {level==="proofonly"&&selectedEvals.length>0&&<div style={{display:"flex",alignItems:"flex-start",minHeight:34,borderBottom:`1px solid ${T.border}`}}>
+        <div style={{width:140,flexShrink:0,fontSize:12,color:T.textDim,paddingLeft:4,paddingTop:8}}>Evaluation(s)</div>
+        <div style={{flex:1,paddingTop:6,paddingBottom:6}}>
+          {selectedEvals.map((ev,i)=><div key={i} style={{fontSize:12,fontFamily:M,color:T.textMut,lineHeight:1.8}}>{ev.requirements} ({ev.org})</div>)}
+        </div>
+      </div>}
+      <InfoRow label="Expiration" value={expiry==="none"?"No expiry":expiry==="custom"?(customDate||"Not set"):expiry==="1-year"?"March 2027":"March 2028"}/>
+      <InfoRow label="Visibility" value="Public asset directory"/>
+      <div style={{marginTop:14,fontSize:11,color:T.textDim,lineHeight:1.7}}>
+        Publishing is recorded on-chain and cannot be undone, but the listing can be revoked at any time. Revocation removes the asset from the directory and prevents new disclosure requests.
+      </div>
+    </div>
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FLOW B1 — BUYER REQUESTS DISCLOSURE
+   ═══════════════════════════════════════════════════════════════════════ */
+function FlowB_Request({onClose}){
+  const[pins,setPins]=useState("");
+  const[message,setMessage]=useState("");
+  const[level,setLevel]=useState("selective");
+  const[reqs,setReqs]=useState(["MIL-PRF-55681 Compliance"]);
+  const[step,setStep]=useState(0);
+  const[submitted,setSubmitted]=useState(false);
+  const reqOpts=["MIL-PRF-55681 Compliance","System Integration Requirements","Component Screening","Material Compliance","Calibration Verification"];
+
+  if(submitted){
+    return <Backdrop onClose={onClose}><Modal width={540}>
+      <div style={{padding:"52px 36px",textAlign:"center"}}>
+        <div style={{width:60,height:60,borderRadius:"50%",background:`color-mix(in srgb,${T.accent} 12%,transparent)`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 22px",border:`2px solid ${T.accent}`}}>
+          <span style={{fontSize:26,color:T.accent}}>↗</span>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:10}}>Request Sent</div>
+        <div style={{fontSize:13,color:T.textMut,lineHeight:1.6,marginBottom:28}}>
+          Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept, counter, or decline.
+        </div>
+        <div style={{padding:"14px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:28,textAlign:"left"}}>
+          <InfoRow label="PINs requested" value={pins.split("\n").filter(Boolean).length+" asset(s)"}/>
+          <InfoRow label="Requested level" value={<span style={{color:SDA[level]?.c,fontFamily:M,fontWeight:600,fontSize:12}}>{SDA[level]?.short}</span>}/>
+          <InfoRow label="Requirements" value={<div style={{display:"flex",flexDirection:"column",gap:2}}>{reqs.map((r,i)=><span key={i} style={{fontSize:11}}>{r}</span>)}</div>}/>
+          {message&&<InfoRow label="Message" value={<span style={{fontSize:11,color:T.textSec}}>{message.length>80?message.slice(0,80)+"…":message}</span>}/>}
+        </div>
+        <Btn label="Done" accent onClick={onClose}/>
+      </div>
+    </Modal></Backdrop>;
+  }
+
+  return <Backdrop onClose={onClose}><Modal>
+    <ModalHeader title="Connect Asset" subtitle="Find and request disclosure of an asset to connect it to your network." step={step+1} totalSteps={3} onClose={onClose}/>
+    <ModalBody>
+      {step===0&&<Step_BR_Path onSelectPath={()=>setStep(1)}/>}
+      {step===1&&<div>
+        <FieldLabel label="Asset PIN(s)" required/>
+        <div style={{fontSize:12,color:T.textDim,marginBottom:10}}>Enter one PIN per line. You can paste multiple PINs received from an off-platform conversation.</div>
+        <textarea value={pins} onChange={e=>setPins(e.target.value)} placeholder={"PIN-0x5e9a...d4c3\nPIN-0x2d7c...b5f0"} rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.text,fontFamily:M,fontSize:12,resize:"vertical",outline:"none",lineHeight:1.8}}/>
+        <div style={{marginTop:18}}/>
+        <FieldLabel label="Requested permission level"/>
+        <div style={{display:"flex",gap:12}}>
+          <SDATypeCard type="full" selected={level} onSelect={setLevel}/>
+          <SDATypeCard type="selective" selected={level} onSelect={setLevel}/>
+        </div>
+        <div style={{fontSize:11,color:T.textDim,marginTop:10,lineHeight:1.6}}>Proof-only cannot be requested — the asset owner must have a completed evaluation and choose to offer it themselves.</div>
+      </div>}
+      {step===2&&<div>
+        <FieldLabel label="Requirements you plan to evaluate"/>
+        <div style={{fontSize:12,color:T.textDim,marginBottom:14,lineHeight:1.7}}>Select the requirement sets you intend to run. This helps the owner understand your evaluation scope and prepare appropriate evidence.</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:22}}>
+          {reqOpts.map(r=>{const sel=reqs.includes(r);return <div key={r} onClick={()=>setReqs(p=>sel?p.filter(x=>x!==r):[...p,r])} style={{padding:"12px 16px",borderRadius:6,border:`1px solid ${sel?T.accent:T.border}`,background:sel?`color-mix(in srgb,${T.accent} 5%,transparent)`:T.card,cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"all 150ms"}}>
+            <div style={{width:18,height:18,borderRadius:4,border:`1.5px solid ${sel?T.accent:T.borderLt}`,background:sel?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 150ms",flexShrink:0}}>
+              {sel&&<span style={{fontSize:11,color:"#fff",lineHeight:1}}>✓</span>}
+            </div>
+            <span style={{fontSize:13,color:sel?T.text:T.textMut}}>{r}</span>
+          </div>})}
+        </div>
+        <FieldLabel label="Message to owner"/>
+        <textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Explain why you're requesting disclosure and how the data will be used..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.text,fontFamily:F,fontSize:13,resize:"vertical",outline:"none",lineHeight:1.6}}/>
+
+        {/* Review summary */}
+        <div style={{marginTop:22,padding:"16px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`}}>
+          <div style={{fontSize:11,fontFamily:M,fontWeight:700,color:T.textMut,letterSpacing:"0.04em",marginBottom:12}}>REVIEW</div>
+          <InfoRow label="PINs" value={pins.split("\n").filter(Boolean).length+" asset(s)"}/>
+          <InfoRow label="Level" value={<span style={{color:SDA[level]?.c,fontFamily:M,fontWeight:600}}>{SDA[level]?.short}</span>}/>
+          <div style={{display:"flex",alignItems:"flex-start",minHeight:34,borderBottom:`1px solid ${T.border}`}}>
+            <div style={{width:140,flexShrink:0,fontSize:12,color:T.textDim,paddingLeft:4,paddingTop:8}}>Requirements</div>
+            <div style={{flex:1,paddingTop:6,paddingBottom:6}}>
+              {reqs.map((r,i)=><div key={i} style={{fontSize:12,color:T.textMut,lineHeight:1.8}}>{r}</div>)}
+            </div>
+          </div>
+          {message&&<div style={{display:"flex",alignItems:"flex-start",minHeight:34,borderBottom:`1px solid ${T.border}`}}>
+            <div style={{width:140,flexShrink:0,fontSize:12,color:T.textDim,paddingLeft:4,paddingTop:8}}>Message</div>
+            <div style={{flex:1,fontSize:12,color:T.textSec,paddingTop:8,paddingBottom:8,lineHeight:1.6}}>{message}</div>
+          </div>}
+        </div>
+      </div>}
+    </ModalBody>
+    <ModalFooter>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        {step>0&&<Btn label="← Back" onClick={()=>setStep(s=>s-1)}/>}
+        <StepDots current={step} total={3}/>
+      </div>
+      {step===0&&<div style={{fontSize:12,color:T.textDim}}>Choose a path above</div>}
+      {step===1&&<Btn label="Next →" accent disabled={!pins.trim()} onClick={()=>setStep(2)}/>}
+      {step===2&&<Btn label="Send Request" accent disabled={!reqs.length} onClick={()=>setSubmitted(true)}/>}
+    </ModalFooter>
+  </Modal></Backdrop>;
+}
+
+function Step_BR_Path({onSelectPath}){
+  const[hov,setHov]=useState(null);
+  return <div>
+    <div style={{fontSize:12,color:T.textDim,marginBottom:20,lineHeight:1.7}}>
+      Choose how you'd like to find assets to connect to your network. You can enter PINs shared with you off-platform, or browse the public asset directory.
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* Known PINs — enabled */}
+      <div onClick={onSelectPath} onMouseEnter={()=>setHov("pins")} onMouseLeave={()=>setHov(null)} style={{padding:"22px 20px",borderRadius:10,border:`1.5px solid ${hov==="pins"?T.accent:T.borderLt}`,background:hov==="pins"?T.cardAlt:T.card,cursor:"pointer",transition:"all 180ms"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:36,height:36,borderRadius:8,background:`color-mix(in srgb,${T.accent} 10%,transparent)`,border:`1px solid color-mix(in srgb,${T.accent} 25%,transparent)`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <span style={{fontSize:14,color:T.accent,fontFamily:M,fontWeight:700}}>PIN</span>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:hov==="pins"?T.text:T.textSec,transition:"color 150ms"}}>Enter known PINs</div>
+          </div>
+        </div>
+        <div style={{fontSize:12,color:T.textDim,lineHeight:1.7,paddingLeft:46}}>
+          You have asset PINs from an off-platform conversation with the asset owner. Enter them to send a disclosure request directly.
+        </div>
+      </div>
+
+      {/* Public Directory — disabled */}
+      <div style={{padding:"22px 20px",borderRadius:10,border:`1.5px solid ${T.border}`,background:T.card,cursor:"default",opacity:.4,position:"relative"}}>
+        <div style={{position:"absolute",top:12,right:14,fontSize:9,fontFamily:M,fontWeight:700,color:T.textFaint,letterSpacing:"0.06em",padding:"3px 8px",background:T.raised,borderRadius:6}}>COMING SOON</div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:36,height:36,borderRadius:8,background:T.raised,border:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width={16} height={16} viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke={T.textDim} strokeWidth="1.3"/><line x1="10.5" y1="10.5" x2="14" y2="14" stroke={T.textDim} strokeWidth="1.3" strokeLinecap="round"/></svg>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:T.textDim}}>Browse Public Directory</div>
+          </div>
+        </div>
+        <div style={{fontSize:12,color:T.textFaint,lineHeight:1.7,paddingLeft:46}}>
+          Search the public asset directory for assets that owners have made discoverable. Request disclosure directly from the directory listing.
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FLOW B2 — SELLER RESPONDS TO REQUEST
+   ═══════════════════════════════════════════════════════════════════════ */
+function FlowB_Response({request,onClose}){
+  const[step,setStep]=useState(0);
+  const[decision,setDecision]=useState(null);
+  const[level,setLevel]=useState(request.requestedLevel);
+  const[expiry,setExpiry]=useState("1-year");
+  const[customDate,setCustomDate]=useState("");
+  const[declineReason,setDeclineReason]=useState("");
+  const[completed,setCompleted]=useState(false);
+  const hasProofEval=DEMO_ASSET.evaluations?.some(e=>e.status==="completed");
+
+  useEffect(()=>{
+    if(decision==="counter"){
+      const order=["full","selective","proofonly"];
+      const reqIdx=order.indexOf(request.requestedLevel);
+      const opts=order.slice(reqIdx+1);
+      if(opts.length>0)setLevel(opts[0]);
+    } else if(decision==="accept"){
+      setLevel(request.requestedLevel);
+    }
+  },[decision,request.requestedLevel]);
+
+  if(completed){
+    const isDecline=decision==="decline";
+    return <Backdrop onClose={onClose}><Modal width={540}>
+      <div style={{padding:"52px 36px",textAlign:"center"}}>
+        <div style={{width:60,height:60,borderRadius:"50%",background:`color-mix(in srgb,${isDecline?T.red:T.green} 12%,transparent)`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 22px",border:`2px solid ${isDecline?T.red:T.green}`}}>
+          <span style={{fontSize:26,color:isDecline?T.red:T.green}}>{isDecline?"✕":"✓"}</span>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:10}}>{isDecline?"Request Declined":"Disclosure Created"}</div>
+        <div style={{fontSize:13,color:T.textMut,lineHeight:1.6,marginBottom:28}}>
+          {isDecline?<>{request.from.name} has been notified that their disclosure request was declined.</>
+          :<>An SDA has been created between <strong style={{color:T.text}}>you</strong> and <strong style={{color:T.text}}>{request.from.name}</strong> for <strong style={{color:T.text}}>{request.asset.name}</strong>.</>}
+        </div>
+        {!isDecline&&<div style={{padding:"14px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:28,textAlign:"left"}}>
+          <InfoRow label="Asset" value={request.asset.name}/>
+          <InfoRow label="Party" value={request.from.name}/>
+          <InfoRow label="Permission" value={<span style={{color:SDA[level]?.c,fontFamily:M,fontWeight:600,fontSize:12}}>{SDA[level]?.short}{decision==="counter"?" (countered)":""}</span>}/>
+          <InfoRow label="Expires" value={expiry==="none"?"No expiry":expiry==="custom"?customDate:expiry==="1-year"?"March 2027":"March 2028"}/>
+          <InfoRow label="On-chain TX" value={<span style={{fontFamily:M,fontSize:11,color:T.textDim}}>0x{Math.random().toString(16).slice(2,6)}...pending</span>}/>
+        </div>}
+        <Btn label="Done" accent onClick={onClose}/>
+      </div>
+    </Modal></Backdrop>;
+  }
+
+  return <Backdrop onClose={onClose}><Modal width={720}>
+    <ModalHeader title="Disclosure Request" subtitle={`From ${request.from.name} · Received ${request.date}`} step={decision?step+2:step+1} totalSteps={decision==="decline"?2:3} onClose={onClose}/>
+    <ModalBody>
+      {step===0&&<Step_B_Review request={request} decision={decision} setDecision={setDecision}/>}
+      {step===1&&decision==="decline"&&<Step_B_Decline reason={declineReason} setReason={setDeclineReason} request={request}/>}
+      {step===1&&decision!=="decline"&&<Step_B_Terms level={level} setLevel={setLevel} expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} request={request} decision={decision} hasProofEval={hasProofEval}/>}
+    </ModalBody>
+    <ModalFooter>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        {step>0&&<Btn label="← Back" onClick={()=>{setStep(0);if(step===1)setDecision(null)}}/>}
+        <StepDots current={decision?step+1:step} total={decision==="decline"?2:3}/>
+      </div>
+      {step===0&&!decision&&<div style={{fontSize:12,color:T.textDim}}>Choose a response above</div>}
+      {step===0&&decision&&<Btn label={decision==="decline"?"Next →":"Set Terms →"} accent onClick={()=>setStep(1)}/>}
+      {step===1&&decision==="decline"&&<Btn label="Decline Request" danger onClick={()=>setCompleted(true)}/>}
+      {step===1&&decision!=="decline"&&<Btn label="Create Disclosure" accent onClick={()=>setCompleted(true)}/>}
+    </ModalFooter>
+  </Modal></Backdrop>;
+}
+
+function Step_B_Review({request,decision,setDecision}){
+  const order=["full","selective","proofonly"];
+  const reqIdx=order.indexOf(request.requestedLevel);
+  const hasCounterOptions=reqIdx<order.length-1;
+  return <div>
+    <div style={{padding:"18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:18}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <div style={{width:32,height:32,borderRadius:"50%",background:`color-mix(in srgb,${T.accent} 15%,transparent)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:T.accent,fontFamily:M}}>{request.from.name[0]}</div>
+        <div>
+          <div style={{fontSize:14,fontWeight:600,color:T.text}}>{request.from.name}</div>
+          <CopyBadge value={request.from.dot}/>
+        </div>
+      </div>
+      <InfoRow label="Requesting asset" value={<span style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontWeight:600,color:T.text}}>{request.asset.name}</span><CopyBadge value={request.asset.pin}/></span>}/>
+      <InfoRow label="Requested level" value={<span style={{color:SDA[request.requestedLevel]?.c,fontFamily:M,fontWeight:600,fontSize:12}}>{SDA[request.requestedLevel]?.short}</span>}/>
+      <div style={{display:"flex",alignItems:"flex-start",minHeight:34,borderBottom:`1px solid ${T.border}`}}>
+        <div style={{width:140,flexShrink:0,fontSize:12,color:T.textDim,paddingLeft:4,paddingTop:8}}>Requirements</div>
+        <div style={{flex:1,paddingTop:6,paddingBottom:6}}>
+          {request.requirements.map((r,i)=><div key={i} style={{fontSize:12,color:T.textMut,lineHeight:1.8}}>{r}</div>)}
+        </div>
+      </div>
+    </div>
+    {request.message&&<div style={{padding:"16px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,marginBottom:22}}>
+      <div style={{fontSize:11,fontFamily:M,color:T.textDim,marginBottom:8,letterSpacing:"0.03em"}}>MESSAGE FROM {request.from.name.toUpperCase()}</div>
+      <div style={{fontSize:13,color:T.textSec,lineHeight:1.7}}>{request.message}</div>
+    </div>}
+    <FieldLabel label="Your response"/>
+    {(()=>{
+      const options=[
+        {id:"accept",label:"Accept",desc:`Grant ${SDA[request.requestedLevel]?.label} access as requested`,color:T.green,icon:"✓"},
+        {id:"counter",label:"Counter",desc:hasCounterOptions?"Counter with a lower access level instead":"No lower permission levels are available",color:T.amber,icon:"⇋",disabled:!hasCounterOptions},
+        {id:"decline",label:"Decline",desc:"Reject this disclosure request entirely",color:T.red,icon:"✕"},
+      ];
+      return <div style={{display:"flex",gap:10}}>
+      {options.map(d=><DecisionCard key={d.id} {...d} active={decision===d.id} onClick={()=>setDecision(d.id)}/>)}
+    </div>})()}
+  </div>;
+}
+
+function Step_B_Terms({level,setLevel,expiry,setExpiry,customDate,setCustomDate,request,decision,hasProofEval}){
+  const isCounter=decision==="counter";
+  const reqLevel=request.requestedLevel;
+  const reqSDA=SDA[reqLevel];
+  const counterOptions=useMemo(()=>{
+    const order=["full","selective","proofonly"];
+    return order.slice(order.indexOf(reqLevel)+1);
+  },[reqLevel]);
+
+  return <div>
+    {!isCounter&&<div style={{padding:"16px 18px",background:`color-mix(in srgb,${reqSDA?.c||T.amber} 6%,transparent)`,border:`1px solid color-mix(in srgb,${reqSDA?.c||T.amber} 25%,transparent)`,borderRadius:8,marginBottom:22,display:"flex",alignItems:"center",gap:14}}>
+      <div style={{width:8,height:8,borderRadius:"50%",background:reqSDA?.c||T.amber,flexShrink:0}}/>
+      <div>
+        <div style={{fontSize:13,fontWeight:600,color:reqSDA?.c||T.amber,marginBottom:3}}>{reqSDA?.short} — as requested</div>
+        <div style={{fontSize:12,color:T.textMut,lineHeight:1.6}}>{reqSDA?.desc}</div>
+      </div>
+    </div>}
+
+    {isCounter&&<>
+      <div style={{padding:"14px 16px",background:`color-mix(in srgb,${T.amber} 5%,transparent)`,border:`1px solid color-mix(in srgb,${T.amber} 20%,transparent)`,borderRadius:8,fontSize:12,color:T.textMut,lineHeight:1.7,marginBottom:18}}>
+        <strong style={{color:T.amber}}>Countering:</strong> {request.from.name} requested <strong style={{color:reqSDA?.c}}>{reqSDA?.short}</strong>. You can counter with a lower access level. They will be notified of your counter-offer.
+      </div>
+      <FieldLabel label="Counter with a lower permission level"/>
+      {counterOptions.length===0?
+        <div style={{padding:"16px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`,fontSize:12,color:T.textDim,lineHeight:1.7,marginBottom:18}}>
+          There are no lower permission levels available to offer. The requested level is already the minimum. You can accept as-is or decline the request.
+        </div>
+      :
+        <div style={{display:"flex",gap:12,marginBottom:22}}>
+          {counterOptions.map(t=><SDATypeCard key={t} type={t} selected={level} onSelect={setLevel} disabled={t==="proofonly"&&!hasProofEval} disabledReason={t==="proofonly"&&!hasProofEval?"Requires a completed evaluation":null}/>)}
+        </div>
+      }
+    </>}
+
+    <FieldLabel label="Set expiration"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+      {[{id:"1-year",label:"1 year",desc:"Expires March 2027"},{id:"2-year",label:"2 years",desc:"Expires March 2028"},{id:"none",label:"No expiry",desc:"Active until manually revoked"},{id:"custom",label:"Custom date",desc:"Set a specific expiration"}].map(o=>
+        <div key={o.id} onClick={()=>setExpiry(o.id)} style={{padding:"12px 14px",borderRadius:8,border:`1px solid ${expiry===o.id?T.accent:T.border}`,background:expiry===o.id?`color-mix(in srgb,${T.accent} 5%,transparent)`:T.card,cursor:"pointer",transition:"all 150ms"}}>
+          <div style={{fontSize:13,fontWeight:600,color:expiry===o.id?T.accent:T.text,marginBottom:2}}>{o.label}</div>
+          <div style={{fontSize:11,color:T.textDim}}>{o.desc}</div>
+        </div>)}
+    </div>
+    {expiry==="custom"&&<div style={{marginBottom:18}}>
+      <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} style={{width:"100%",height:38,padding:"0 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.text,fontFamily:M,fontSize:12,outline:"none"}}/>
+    </div>}
+
+    <div style={{padding:"16px 18px",background:T.card,borderRadius:8,border:`1px solid ${T.border}`}}>
+      <div style={{fontSize:11,fontFamily:M,fontWeight:700,color:T.textDim,letterSpacing:"0.04em",marginBottom:12}}>DISCLOSURE SUMMARY</div>
+      <InfoRow label="Asset" value={request.asset.name}/>
+      <InfoRow label="To" value={request.from.name}/>
+      <InfoRow label="Permission" value={<span style={{color:SDA[isCounter?level:reqLevel]?.c,fontFamily:M,fontWeight:600,fontSize:12}}>{SDA[isCounter?level:reqLevel]?.short}{isCounter?" (countered)":""}</span>}/>
+      <InfoRow label="Expires" value={expiry==="none"?"No expiry":expiry==="custom"?(customDate||"Not set"):expiry==="1-year"?"March 2027":"March 2028"}/>
+      <div style={{marginTop:12,fontSize:12,color:T.textDim,lineHeight:1.7}}>
+        This creates a bilateral {SDA[isCounter?level:reqLevel]?.label?.toLowerCase()||"disclosure"} recorded on-chain. The receiving party will be able to run evaluations at the specified permission level.
+      </div>
+    </div>
+  </div>;
+}
+
+function Step_B_Decline({reason,setReason,request}){
+  return <div>
+    <div style={{padding:"14px 16px",background:`color-mix(in srgb,${T.red} 5%,transparent)`,border:`1px solid color-mix(in srgb,${T.red} 20%,transparent)`,borderRadius:8,fontSize:12,color:T.textMut,lineHeight:1.7,marginBottom:22}}>
+      <strong style={{color:T.red}}>Declining</strong> will notify {request.from.name} that their request was rejected. This is recorded on-chain but does not prevent them from sending future requests.
+    </div>
+    <FieldLabel label="Reason (optional)"/>
+    <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="Optionally provide a reason for declining..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.text,fontFamily:F,fontSize:13,resize:"vertical",outline:"none",lineHeight:1.6}}/>
+  </div>;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   APP
+   ═══════════════════════════════════════════════════════════════════════ */
+function App(){
+  const[active,setActive]=useState(null);
+  const[reqExample,setReqExample]=useState(DEMO_REQUEST);
+  return <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:F,padding:"36px 28px"}}>
+    <div style={{maxWidth:740,margin:"0 auto"}}>
+      <h1 style={{fontSize:24,fontWeight:700,letterSpacing:"-0.02em",marginBottom:8}}>Disclosure Modals — Reference</h1>
+      <p style={{fontSize:14,color:T.textMut,marginBottom:36,lineHeight:1.6}}>Two flows: public disclosure (seller publishes to directory) and private disclosure (buyer requests, seller responds).</p>
+
+      <div style={{background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,padding:28,marginBottom:22}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:T.green}}/>
+          <span style={{fontSize:15,fontWeight:600}}>Flow A — Public Disclosure</span>
+          <span style={{fontSize:11,fontFamily:M,color:T.textDim,padding:"3px 10px",background:T.raised,borderRadius:10}}>SELLER</span>
+        </div>
+        <p style={{fontSize:13,color:T.textMut,lineHeight:1.7,marginBottom:18}}>
+          Asset owner publishes to the public directory. Sets permission level and expiration. If choosing Proof-only, selects which completed evaluation to share. Other parties can discover the asset and send disclosure requests.
+        </p>
+        <div style={{fontSize:12,color:T.textDim,marginBottom:14}}>Entry point: <span style={{fontFamily:M,color:T.textMut}}>Detail Panel → Disclosures tab → ⇋ Disclose this Asset</span></div>
+        <Btn label="Open Flow A" accent onClick={()=>setActive("flowA")}/>
+      </div>
+
+      <div style={{background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,padding:28,marginBottom:22}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:T.accent}}/>
+          <span style={{fontSize:15,fontWeight:600}}>Flow B — Connect Asset (Request Disclosure)</span>
+          <span style={{fontSize:11,fontFamily:M,color:T.textDim,padding:"3px 10px",background:T.raised,borderRadius:10}}>BUYER</span>
+        </div>
+        <p style={{fontSize:13,color:T.textMut,lineHeight:1.7,marginBottom:18}}>
+          Buyer initiates from a node card's "+ Connect Asset" button. First chooses a path (known PINs or public directory), then enters PINs, selects permission level, requirement sets, and a message. The asset owner receives the request.
+        </p>
+        <div style={{fontSize:12,color:T.textDim,marginBottom:14}}>Entry point: <span style={{fontFamily:M,color:T.textMut}}>Node card action bar → + Connect Asset, or Detail Panel footer → + Connect</span></div>
+        <Btn label="Open Flow B (Connect Asset)" accent onClick={()=>setActive("flowB-request")}/>
+      </div>
+
+      <div style={{background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,padding:28,marginBottom:22}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:T.amber}}/>
+          <span style={{fontSize:15,fontWeight:600}}>Flow B — Respond to Request</span>
+          <span style={{fontSize:11,fontFamily:M,color:T.textDim,padding:"3px 10px",background:T.raised,borderRadius:10}}>SELLER</span>
+        </div>
+        <p style={{fontSize:13,color:T.textMut,lineHeight:1.7,marginBottom:18}}>
+          Asset owner receives a disclosure request. Can accept at the requested level, counter with a lower level, or decline with an optional reason. Creates a bilateral SDA on acceptance.
+        </p>
+        <div style={{display:"flex",gap:10,marginBottom:14}}>
+          <button onClick={()=>{setReqExample(DEMO_REQUEST);setActive("flowB-response")}} style={{padding:"8px 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.textMut,fontSize:12,fontFamily:M,cursor:"pointer"}}>GovCo → Selective</button>
+          <button onClick={()=>{setReqExample(DEMO_REQUEST_2);setActive("flowB-response")}} style={{padding:"8px 14px",borderRadius:6,border:`1px solid ${T.border}`,background:T.card,color:T.textMut,fontSize:12,fontFamily:M,cursor:"pointer"}}>Orbital → Full</button>
+        </div>
+        <div style={{fontSize:12,color:T.textDim}}>Entry point: <span style={{fontFamily:M,color:T.textMut}}>Notification inbox or invitation list</span></div>
+      </div>
+
+      <div style={{background:T.surface,borderRadius:12,border:`1px solid ${T.border}`,padding:28}}>
+        <h2 style={{fontSize:15,fontWeight:600,marginBottom:14}}>Architecture Notes</h2>
+        <div style={{fontSize:12,color:T.textMut,lineHeight:1.8}}>
+          <p style={{marginBottom:10}}><strong style={{color:T.text}}>Anti-spam design:</strong> sellers cannot push disclosures to arbitrary buyers. All private disclosures originate from buyer requests (Flow B). Sellers can only publish to the public directory (Flow A) or respond to incoming requests.</p>
+          <p style={{marginBottom:10}}><strong style={{color:T.text}}>Permission downgrade only:</strong> when responding to a request, the seller can match or downgrade the requested level — never upgrade. If Selective was requested, the seller can accept Selective or counter with Proof-only, but cannot offer Full.</p>
+          <p style={{marginBottom:10}}><strong style={{color:T.text}}>Cascade disclosures</strong> are not initiated through these flows. Cascade is a permission that an intermediary grants when forwarding an asset they received via an upstream SDA. That will be a separate flow.</p>
+          <p style={{marginBottom:10}}><strong style={{color:T.text}}>Proof-only</strong> requires at least one completed evaluation. It's available in Flow A (if the owner has a completed evaluation) and in Flow B responses. The option is disabled with an explanation when no evaluation qualifies.</p>
+          <p><strong style={{color:T.text}}>On-chain immutability:</strong> all disclosure events (publish, request, accept, counter, decline) are recorded on-chain. Revocation is a separate on-chain event that deactivates but doesn't delete the original record.</p>
+        </div>
+      </div>
+    </div>
+
+    {active==="flowA"&&<FlowA onClose={()=>setActive(null)}/>}
+    {active==="flowB-request"&&<FlowB_Request onClose={()=>setActive(null)}/>}
+    {active==="flowB-response"&&<FlowB_Response request={reqExample} onClose={()=>setActive(null)}/>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

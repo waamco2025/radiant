@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PCN — Prime Radiant</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0c;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: grab;
+  }
+  body:active { cursor: grabbing; }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(212, 175, 55, 0.35);
+    font-size: 11px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    pointer-events: none;
+    user-select: none;
+  }
+  #glow {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(212,175,55,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<div id="overlay">P R O V E N A N C E &nbsp; C H A I N &nbsp; N E T W O R K</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── Scene Setup ──
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 5;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+// ── Lighting ──
+const ambientLight = new THREE.AmbientLight(0x1a1408, 0.5);
+scene.add(ambientLight);
+
+const keyLight = new THREE.PointLight(0xd4af37, 2.5, 20);
+keyLight.position.set(3, 4, 5);
+scene.add(keyLight);
+
+const fillLight = new THREE.PointLight(0xffd700, 1.2, 15);
+fillLight.position.set(-4, -2, 3);
+scene.add(fillLight);
+
+const rimLight = new THREE.PointLight(0xffe08a, 1.8, 15);
+rimLight.position.set(0, -3, -4);
+scene.add(rimLight);
+
+const topLight = new THREE.PointLight(0xfff1c1, 0.8, 12);
+topLight.position.set(0, 5, 0);
+scene.add(topLight);
+
+// ── Materials ──
+const goldMat = new THREE.MeshStandardMaterial({
+  color: 0xd4af37,
+  metalness: 0.95,
+  roughness: 0.15,
+  emissive: 0x3d2b00,
+  emissiveIntensity: 0.3,
+});
+
+const goldWireMat = new THREE.MeshStandardMaterial({
+  color: 0xffd700,
+  metalness: 0.9,
+  roughness: 0.2,
+  emissive: 0x5c4200,
+  emissiveIntensity: 0.4,
+});
+
+const innerGoldMat = new THREE.MeshStandardMaterial({
+  color: 0xffe680,
+  metalness: 0.85,
+  roughness: 0.25,
+  emissive: 0x6b5000,
+  emissiveIntensity: 0.5,
+});
+
+const glassMat = new THREE.MeshStandardMaterial({
+  color: 0xfff8e1,
+  metalness: 0.1,
+  roughness: 0.05,
+  transparent: true,
+  opacity: 0.12,
+  side: THREE.DoubleSide,
+});
+
+const dashedLineMat = new THREE.LineDashedMaterial({
+  color: 0xffffff,
+  dashSize: 0.04,
+  gapSize: 0.03,
+  opacity: 0.45,
+  transparent: true,
+});
+
+const glowLineMat = new THREE.LineBasicMaterial({
+  color: 0xd4af37,
+  opacity: 0.2,
+  transparent: true,
+});
+
+// ── Root Group ──
+const rootGroup = new THREE.Group();
+scene.add(rootGroup);
+
+// ── Helper: Create struts along edges of a geometry ──
+function getEdges(geometry) {
+  const pos = geometry.getAttribute('position');
+  const idx = geometry.getIndex();
+  const edgeSet = new Set();
+  const triCount = idx ? idx.count / 3 : pos.count / 3;
+  
+  for (let i = 0; i < triCount; i++) {
+    const a = idx ? idx.getX(i*3) : i*3;
+    const b = idx ? idx.getX(i*3+1) : i*3+1;
+    const c = idx ? idx.getX(i*3+2) : i*3+2;
+    [[a,b],[b,c],[a,c]].forEach(([v1,v2]) => {
+      // Use rounded positions as keys to merge coincident vertices
+      const p1 = [pos.getX(v1).toFixed(4), pos.getY(v1).toFixed(4), pos.getZ(v1).toFixed(4)].join(',');
+      const p2 = [pos.getX(v2).toFixed(4), pos.getY(v2).toFixed(4), pos.getZ(v2).toFixed(4)].join(',');
+      const key = p1 < p2 ? p1 + '|' + p2 : p2 + '|' + p1;
+      if (!edgeSet.has(key)) {
+        edgeSet.set ? edgeSet.add(key) : edgeSet.add(key);
+      }
+    });
+  }
+  // Convert back to vertex pairs
+  const edges = [];
+  edgeSet.forEach(key => {
+    const [k1, k2] = key.split('|');
+    const [x1,y1,z1] = k1.split(',').map(Number);
+    const [x2,y2,z2] = k2.split(',').map(Number);
+    edges.push([new THREE.Vector3(x1,y1,z1), new THREE.Vector3(x2,y2,z2)]);
+  });
+  return edges;
+}
+
+function createStruts(geometry, material, radius, parent) {
+  const edges = getEdges(geometry);
+
+  edges.forEach(([v1, v2]) => {
+    const mid = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+    const dir = new THREE.Vector3().subVectors(v2, v1);
+    const len = dir.length();
+    
+    const cylGeo = new THREE.CylinderGeometry(radius, radius, len, 6, 1);
+    const cyl = new THREE.Mesh(cylGeo, material);
+    cyl.position.copy(mid);
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.normalize());
+    parent.add(cyl);
+  });
+}
+
+// ── Helper: Create dashed lines along edges ──
+function createDashedEdges(geometry, material, parent) {
+  const edges = getEdges(geometry);
+
+  edges.forEach(([v1, v2]) => {
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([v1, v2]);
+    const line = new THREE.Line(lineGeo, material.clone());
+    line.computeLineDistances();
+    parent.add(line);
+  });
+}
+
+// ── Helper: vertex nodes ──
+function createVertexNodes(geometry, material, radius, parent) {
+  const pos = geometry.getAttribute('position');
+  const seen = new Set();
+  const sphereGeo = new THREE.SphereGeometry(radius, 8, 8);
+  
+  for (let i = 0; i < pos.count; i++) {
+    const key = `${pos.getX(i).toFixed(4)},${pos.getY(i).toFixed(4)},${pos.getZ(i).toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const node = new THREE.Mesh(sphereGeo, material);
+    node.position.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+    parent.add(node);
+  }
+}
+
+// ── Layer 1: Outer Icosahedron Shell (glass + dashed edges) ──
+const outerIcoGeo = new THREE.IcosahedronGeometry(1.6, 0);
+const outerShell = new THREE.Mesh(outerIcoGeo, glassMat);
+rootGroup.add(outerShell);
+createDashedEdges(outerIcoGeo, dashedLineMat, rootGroup);
+
+// ── Layer 2: Mid Icosahedron (gold struts) ──
+const midIcoGeo = new THREE.IcosahedronGeometry(1.35, 0);
+createStruts(midIcoGeo, goldMat, 0.018, rootGroup);
+createVertexNodes(midIcoGeo, goldWireMat, 0.035, rootGroup);
+
+// ── Layer 3: Inner Dodecahedron (gold struts) ──
+const innerDodGeo = new THREE.DodecahedronGeometry(1.0, 0);
+createStruts(innerDodGeo, goldWireMat, 0.014, rootGroup);
+createVertexNodes(innerDodGeo, innerGoldMat, 0.028, rootGroup);
+
+// ── Layer 4: Inner Icosahedron ──
+const innerIcoGeo = new THREE.IcosahedronGeometry(0.7, 0);
+createStruts(innerIcoGeo, innerGoldMat, 0.012, rootGroup);
+createDashedEdges(innerIcoGeo, dashedLineMat, rootGroup);
+
+// ── Layer 5: Core Octahedron ──
+const coreGeo = new THREE.OctahedronGeometry(0.4, 0);
+createStruts(coreGeo, goldMat, 0.016, rootGroup);
+createVertexNodes(coreGeo, goldWireMat, 0.032, rootGroup);
+
+// ── Layer 6: Innermost Cube ──
+const cubeGeo = new THREE.BoxGeometry(0.32, 0.32, 0.32);
+const cubeEdges = new THREE.EdgesGeometry(cubeGeo);
+const cubeLine = new THREE.LineSegments(cubeEdges, new THREE.LineBasicMaterial({
+  color: 0xffd700,
+  opacity: 0.7,
+  transparent: true,
+}));
+rootGroup.add(cubeLine);
+
+// ── Connecting Radial Struts (outer vertices → core) ──
+{
+  const outerPos = midIcoGeo.getAttribute('position');
+  const seen = new Set();
+  for (let i = 0; i < outerPos.count; i++) {
+    const x = parseFloat(outerPos.getX(i).toFixed(3));
+    const y = parseFloat(outerPos.getY(i).toFixed(3));
+    const z = parseFloat(outerPos.getZ(i).toFixed(3));
+    const key = `${x},${y},${z}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const v = new THREE.Vector3(x, y, z);
+    const inner = v.clone().multiplyScalar(0.25);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([v, inner]);
+    const line = new THREE.Line(lineGeo, glowLineMat);
+    rootGroup.add(line);
+  }
+}
+
+// ── Subtle Particle Field ──
+const particleCount = 120;
+const particleGeo = new THREE.BufferGeometry();
+const pPositions = new Float32Array(particleCount * 3);
+for (let i = 0; i < particleCount; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const r = 1.0 + Math.random() * 0.55;
+  pPositions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+  pPositions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+  pPositions[i*3+2] = r * Math.cos(phi);
+}
+particleGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+const particleMat = new THREE.PointsMaterial({
+  color: 0xffd700,
+  size: 0.012,
+  transparent: true,
+  opacity: 0.5,
+  blending: THREE.AdditiveBlending,
+});
+const particles = new THREE.Points(particleGeo, particleMat);
+rootGroup.add(particles);
+
+// ── Mouse Interaction ──
+let isDragging = false;
+let prevMouse = { x: 0, y: 0 };
+let rotVelocity = { x: 0.003, y: 0.005 };
+const damping = 0.95;
+const sensitivity = 0.008;
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  isDragging = true;
+  prevMouse = { x: e.clientX, y: e.clientY };
+});
+
+window.addEventListener('pointerup', () => { isDragging = false; });
+
+window.addEventListener('pointermove', (e) => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevMouse.x;
+  const dy = e.clientY - prevMouse.y;
+  rotVelocity.y = dx * sensitivity;
+  rotVelocity.x = dy * sensitivity;
+  prevMouse = { x: e.clientX, y: e.clientY };
+});
+
+// Touch support
+renderer.domElement.addEventListener('touchstart', (e) => {
+  isDragging = true;
+  prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+
+window.addEventListener('touchend', () => { isDragging = false; });
+
+window.addEventListener('touchmove', (e) => {
+  if (!isDragging) return;
+  const dx = e.touches[0].clientX - prevMouse.x;
+  const dy = e.touches[0].clientY - prevMouse.y;
+  rotVelocity.y = dx * sensitivity;
+  rotVelocity.x = dy * sensitivity;
+  prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+
+// Scroll zoom
+renderer.domElement.addEventListener('wheel', (e) => {
+  camera.position.z = Math.max(2.5, Math.min(8, camera.position.z + e.deltaY * 0.005));
+}, { passive: true });
+
+// ── Animation Loop ──
+function animate(time) {
+  requestAnimationFrame(animate);
+  
+  const t = time * 0.001;
+
+  // Apply rotation
+  rootGroup.rotation.x += rotVelocity.x;
+  rootGroup.rotation.y += rotVelocity.y;
+
+  // Dampen when not dragging
+  if (!isDragging) {
+    rotVelocity.x *= damping;
+    rotVelocity.y *= damping;
+    // Maintain a slow drift
+    if (Math.abs(rotVelocity.x) < 0.001) rotVelocity.x = 0.001;
+    if (Math.abs(rotVelocity.y) < 0.002) rotVelocity.y = 0.002;
+  }
+
+  // Animate lights
+  keyLight.position.x = Math.sin(t * 0.5) * 4;
+  keyLight.position.z = Math.cos(t * 0.5) * 5;
+  fillLight.position.y = Math.sin(t * 0.3) * 3;
+  rimLight.position.x = Math.cos(t * 0.4) * 4;
+
+  // Pulse emissive on core
+  const pulse = 0.3 + Math.sin(t * 2) * 0.15;
+  goldMat.emissiveIntensity = pulse;
+  innerGoldMat.emissiveIntensity = pulse + 0.15;
+
+  // Particle shimmer
+  particleMat.opacity = 0.3 + Math.sin(t * 1.5) * 0.2;
+
+  renderer.render(scene, camera);
+}
+animate(0);
+
+// ── Resize ──
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

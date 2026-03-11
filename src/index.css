@@ -1,0 +1,390 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg-deep);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg-deep);
+}
+
+/* ═══ Theme Variables ═══ */
+:root {
+  view-transition-name: none;
+
+  /* Backgrounds */
+  --bg-deep: #0a0c10;
+  --bg-app: #0a0c10;
+  --bg-card: #0d1017;
+  --bg-app-header: #0d0f14;
+  --bg-surface: #111827;
+  --bg-raised: #1a1f2e;
+  --bg-input: #0d0f14;
+  --bg-overlay: rgba(13,15,20,0.92);
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-active: rgba(99,102,241,0.08);
+
+  /* Borders */
+  --border: #1e2433;
+  --border-hover: #374151;
+  --border-faint: #1e243322;
+  --border-subtle: #1e243344;
+  --border-mid: #1e243366;
+
+  /* Text */
+  --text-bright: #f3f4f6;
+  --text-primary: #d1d5db;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
+  --text-dim: #7a8399;
+  --text-muted: #4b5563;
+  --text-faint: #333333;
+  --text-heading: #e5e7eb;
+
+  /* Accent colors */
+  --accent-indigo: #818cf8;
+  --accent-indigo-dim: #6366f1;
+  --accent-indigo-bg: #1e1b4b;
+  --accent-indigo-text: #c7d2fe;
+  --accent-indigo-light: #a5b4fc;
+  --accent-green: #22c55e;
+  --accent-green-bg: #052e16;
+  --accent-red: #ef4444;
+  --accent-red-muted: #b91c1c;
+  --accent-red-bg: #450a0a;
+  --accent-amber: #f59e0b;
+  --accent-amber-bg: #451a03;
+  --accent-cyan: #22d3ee;
+  --accent-orange: #f97316;
+  --accent-purple: #a855f7;
+  --accent-purple-light: #c084fc;
+  --accent-blue: #3b82f6;
+  --accent-lime: #84cc16;
+  --accent-sda-full: #6b8aff;
+  --accent-sda-selective: #f59e0b;
+  --accent-sda-derivative: #22c55e;
+  --accent-sda-cascade: #a78bfa;
+
+  /* Shadows */
+  --shadow-dropdown: 0 8px 24px rgba(0,0,0,.5);
+  --shadow-modal: 0 20px 60px rgba(0,0,0,.7);
+
+  /* TT type tokens */
+  --tt-customer-bg: #1a1a2e;
+  --tt-customer-border: #818cf8;
+  --tt-customer-text: #c7d2fe;
+  --tt-program-bg: #1f1a2e;
+  --tt-program-border: #a855f7;
+  --tt-program-text: #d8b4fe;
+  --tt-system-bg: #1a2040;
+  --tt-system-border: #6366f1;
+  --tt-system-text: #a5b4fc;
+  --tt-assembly-bg: #1a2744;
+  --tt-assembly-border: #3b82f6;
+  --tt-assembly-text: #93bbfc;
+  --tt-subassembly-bg: #1a2f3a;
+  --tt-subassembly-border: #22d3ee;
+  --tt-subassembly-text: #a5f3fc;
+  --tt-component-bg: #1f2b1a;
+  --tt-component-border: #84cc16;
+  --tt-component-text: #d9f99d;
+  --tt-process-bg: #2a2517;
+  --tt-process-border: #f59e0b;
+  --tt-process-text: #fde68a;
+  --tt-material-bg: #2a1f1a;
+  --tt-material-border: #f97316;
+  --tt-material-text: #fed7aa;
+  --tt-chemical-bg: #2a1a2a;
+  --tt-chemical-border: #c084fc;
+  --tt-chemical-text: #e9d5ff;
+  --tt-rawsource-bg: #2a1a1a;
+  --tt-rawsource-border: #ef4444;
+  --tt-rawsource-text: #fca5a5;
+
+  /* TT border faint (alpha variants for backgrounds) */
+  --tt-customer-border-faint: #818cf844;
+  --tt-program-border-faint: #a855f744;
+  --tt-system-border-faint: #6366f144;
+  --tt-assembly-border-faint: #3b82f644;
+  --tt-subassembly-border-faint: #22d3ee44;
+  --tt-component-border-faint: #84cc1644;
+  --tt-process-border-faint: #f59e0b44;
+  --tt-material-border-faint: #f9731644;
+  --tt-chemical-border-faint: #c084fc44;
+  --tt-rawsource-border-faint: #ef444444;
+
+  /* Compliance status */
+  --cs-compliant-color: #22c55e;
+  --cs-compliant-bg: #052e16;
+  --cs-expiring-color: #f59e0b;
+  --cs-expiring-bg: #451a03;
+  --cs-expired-color: #ef4444;
+  --cs-expired-bg: #450a0a;
+  --cs-pending-color: #6b7280;
+  --cs-pending-bg: #1f2937;
+
+  /* Fonts */
+  --font-display: 'DM Sans','Segoe UI',system-ui,sans-serif;
+  --font-mono: 'JetBrains Mono',monospace;
+  --font-mono-plain: monospace;
+}
+
+/* ═══ Light Theme ═══ */
+[data-theme="light"] {
+  /* Backgrounds */
+  --bg-deep: #ede9e3;
+  --bg-app: #ede9e3;
+  --bg-card: #f5f2ee;
+  --bg-app-header: #faf8f5;
+  --bg-surface: #faf8f5;
+  --bg-raised: #f0ece6;
+  --bg-input: #f5f2ee;
+  --bg-overlay: rgba(250,248,245,0.95);
+  --bg-hover: rgba(0,0,0,0.04);
+  --bg-active: rgba(99,102,241,0.10);
+
+  /* Borders */
+  --border: #d4cfc8;
+  --border-hover: #b8b2a9;
+  --border-faint: #d4cfc822;
+  --border-subtle: #d4cfc844;
+  --border-mid: #d4cfc866;
+
+  /* Text */
+  --text-bright: #1a1816;
+  --text-primary: #2c2825;
+  --text-secondary: #5a5550;
+  --text-tertiary: #7a756e;
+  --text-dim: #b8b2a9;
+  --text-muted: #9e9890;
+  --text-faint: #c8c2ba;
+  --text-heading: #1a1816;
+
+  /* Accent colors — slightly more saturated for readability on light bg */
+  --accent-indigo: #6366f1;
+  --accent-indigo-dim: #4f46e5;
+  --accent-indigo-bg: #e8e7ff;
+  --accent-indigo-text: #3730a3;
+  --accent-indigo-light: #818cf8;
+  --accent-green: #16a34a;
+  --accent-green-bg: #dcfce7;
+  --accent-red: #dc2626;
+  --accent-red-muted: #ef4444;
+  --accent-red-bg: #fee2e2;
+  --accent-amber: #d97706;
+  --accent-amber-bg: #fef3c7;
+  --accent-cyan: #0891b2;
+  --accent-orange: #ea580c;
+  --accent-purple: #9333ea;
+  --accent-purple-light: #a855f7;
+  --accent-blue: #2563eb;
+  --accent-lime: #65a30d;
+  --accent-sda-full: #4f6ad0;
+  --accent-sda-selective: #d97706;
+  --accent-sda-derivative: #16a34a;
+  --accent-sda-cascade: #7c3aed;
+
+  /* Shadows */
+  --shadow-dropdown: 0 8px 24px rgba(0,0,0,.12);
+  --shadow-modal: 0 20px 60px rgba(0,0,0,.15);
+
+  /* TT type tokens — light mode */
+  --tt-customer-bg: #eeedf8;
+  --tt-customer-border: #6366f1;
+  --tt-customer-text: #3730a3;
+  --tt-program-bg: #f0edf8;
+  --tt-program-border: #9333ea;
+  --tt-program-text: #6b21a8;
+  --tt-system-bg: #edeffa;
+  --tt-system-border: #4f46e5;
+  --tt-system-text: #3730a3;
+  --tt-assembly-bg: #eff2fa;
+  --tt-assembly-border: #2563eb;
+  --tt-assembly-text: #1d4ed8;
+  --tt-subassembly-bg: #edf7f9;
+  --tt-subassembly-border: #0891b2;
+  --tt-subassembly-text: #155e75;
+  --tt-component-bg: #f0f4ea;
+  --tt-component-border: #65a30d;
+  --tt-component-text: #3f6212;
+  --tt-process-bg: #f6f1e6;
+  --tt-process-border: #d97706;
+  --tt-process-text: #92400e;
+  --tt-material-bg: #f6ede6;
+  --tt-material-border: #ea580c;
+  --tt-material-text: #9a3412;
+  --tt-chemical-bg: #f3edf8;
+  --tt-chemical-border: #a855f7;
+  --tt-chemical-text: #7e22ce;
+  --tt-rawsource-bg: #f6eaea;
+  --tt-rawsource-border: #dc2626;
+  --tt-rawsource-text: #991b1b;
+
+  /* TT border faint */
+  --tt-customer-border-faint: #6366f130;
+  --tt-program-border-faint: #9333ea30;
+  --tt-system-border-faint: #4f46e530;
+  --tt-assembly-border-faint: #2563eb30;
+  --tt-subassembly-border-faint: #0891b230;
+  --tt-component-border-faint: #65a30d30;
+  --tt-process-border-faint: #d9770630;
+  --tt-material-border-faint: #ea580c30;
+  --tt-chemical-border-faint: #a855f730;
+  --tt-rawsource-border-faint: #dc262630;
+
+  /* Compliance status — light mode */
+  --cs-compliant-color: #16a34a;
+  --cs-compliant-bg: #dcfce7;
+  --cs-expiring-color: #d97706;
+  --cs-expiring-bg: #fef3c7;
+  --cs-expired-color: #dc2626;
+  --cs-expired-bg: #fee2e2;
+  --cs-pending-color: #7a756e;
+  --cs-pending-bg: #f0ece6;
+
+  /* Fonts — same as dark mode for now */
+}
+
+/* ═══ View Transitions — V2 Canvas Layer Dive/Surface ═══ */
+
+/* Fix white flash: dark backdrop behind card-layer snapshots */
+::view-transition {
+  background: #0a0c10;
+}
+
+::view-transition-group(card-layer) {
+  isolation: auto;
+}
+
+::view-transition-image-pair(card-layer) {
+  isolation: auto;
+}
+
+/* Default dive animations (also used when types aren't supported) */
+::view-transition-old(card-layer) {
+  animation: dive-departure 350ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  transform-origin: center center;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(card-layer) {
+  animation: dive-arrival 300ms cubic-bezier(0.0, 0, 0.2, 1) forwards;
+  animation-delay: 80ms;
+  transform-origin: center center;
+  mix-blend-mode: normal;
+}
+
+@keyframes dive-departure {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+  40% {
+    opacity: 0.3;
+    filter: blur(3px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+    filter: blur(8px);
+  }
+}
+
+@keyframes dive-arrival {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+    filter: blur(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+
+/* Surface-specific animations (data attribute targeting for broad browser support) */
+[data-vt-direction="surface"]::view-transition-old(card-layer) {
+  animation: surface-departure 300ms cubic-bezier(0.4, 0, 0.7, 1) forwards;
+  transform-origin: center center;
+  mix-blend-mode: normal;
+}
+
+[data-vt-direction="surface"]::view-transition-new(card-layer) {
+  animation: surface-arrival 200ms cubic-bezier(0.0, 0, 0.2, 1) forwards;
+  animation-delay: 120ms;
+  transform-origin: center center;
+  mix-blend-mode: normal;
+}
+
+@keyframes surface-departure {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+  50% {
+    opacity: 0.2;
+    filter: blur(3px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.75);
+    filter: blur(6px);
+  }
+}
+
+@keyframes surface-arrival {
+  0% {
+    opacity: 0;
+    transform: scale(1.2);
+    filter: blur(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+
+/* Dive target card — browser morphs this between layers */
+::view-transition-group(dive-target) {
+  animation-duration: 400ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+::view-transition-old(dive-target) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(dive-target) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+
+/* Header Radiant logo glow on hover */
+.radiant-logo-hover {
+  border-radius: 50%;
+  transition: box-shadow 0.3s ease, background 0.3s ease;
+  box-shadow: 0 0 0px transparent;
+  background: transparent;
+}
+.radiant-logo-hover:hover {
+  box-shadow: 0 0 14px 4px rgba(212, 175, 55, 0.45), 0 0 30px 8px rgba(212, 175, 55, 0.15);
+  background: rgba(212, 175, 55, 0.06);
+}
+
+/* ═══ Detail Panel slide-in ═══ */
+@keyframes detail-panel-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
