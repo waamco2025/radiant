@@ -56,7 +56,7 @@ export function Backdrop({ children, onClose }) {
         background: 'rgba(0,0,0,.65)',
         backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000,
+        zIndex: 10000,
         animation: 'fade-in 200ms ease',
       }}
     >

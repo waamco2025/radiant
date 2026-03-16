@@ -527,7 +527,7 @@ export default function AssetNode({
 
 // LOD dot: shown when zoom < LOD_THRESHOLD
 // Hover shows full AssetNode card as tooltip via portal
-export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph }) {
+export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const dotRef = useRef(null)
@@ -622,6 +622,10 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             scale={1}
             onDive={isSelected ? onDive : undefined}
             onOpenSubgraph={isSelected ? onOpenSubgraph : undefined}
+            onConnect={isSelected ? onConnect : undefined}
+            onDisclose={isSelected ? onDisclose : undefined}
+            onAddEvidence={isSelected ? onAddEvidence : undefined}
+            activeParty={activeParty}
           />
         </div>,
         document.body

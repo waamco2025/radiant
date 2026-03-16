@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
@@ -94,7 +94,287 @@ const textareaStyle = {
   resize: 'vertical', outline: 'none', lineHeight: 1.6, marginBottom: 18,
 }
 
-export default function RegisterAssetModal({ parentNode, activeParty, onClose, onComplete, onBack, _noBackdrop }) {
+const tabStyle = (active) => ({
+  flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
+  cursor: 'pointer', fontSize: 11.5, fontFamily: 'var(--font-display)',
+  fontWeight: active ? 600 : 400,
+  background: active ? 'var(--accent-indigo)' : 'transparent',
+  color: active ? '#fff' : 'var(--text-tertiary)',
+  transition: 'all 180ms',
+})
+
+// ── Mock data generation ──
+
+function generateMockResults(parentNode, activeParty, debugErrors, nodeMap) {
+  if (!debugErrors) {
+    return [
+      { row: 1, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Thermal Sensor Array', category: 'product', evidenceUri: '', status: 'valid', error: null },
+      { row: 2, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Assembly Test Report', category: 'product', evidenceUri: 'provenance://evidence/atr-7f2a.pdf', status: 'valid', error: null },
+      { row: 3, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Quality Inspection Process', category: 'process', evidenceUri: '', status: 'valid', error: null },
+      { row: 4, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Environmental Test Chamber', category: 'place', evidenceUri: 'provenance://evidence/env-tc-9d1b.pdf', status: 'valid', error: null },
+    ]
+  }
+
+  const evidenceChildPin = (() => {
+    for (const n of Object.values(nodeMap)) {
+      if (n.isEvidence) return n.pin
+    }
+    return 'PIN-0xdead...beef'
+  })()
+
+  const notOwnedNode = Object.values(nodeMap).find(n => n.owner && n.owner !== activeParty)
+
+  return [
+    { row: 1, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Thermal Sensor Array', category: 'product', evidenceUri: '', status: 'valid', error: null },
+    { row: 2, parentPin: 'PIN-0x0000...ffff', parentName: null, name: 'Ghost Component', category: 'product', evidenceUri: '', status: 'error', error: 'Parent PIN not found on your network' },
+    { row: 3, parentPin: notOwnedNode?.pin || 'PIN-0xaaaa...bbbb', parentName: null, name: 'Unauthorized Part', category: 'product', evidenceUri: '', status: 'error', error: 'Parent PIN not found on your network' },
+    { row: 4, parentPin: evidenceChildPin, parentName: 'Evidence Node', name: 'Bad Attachment', category: 'product', evidenceUri: '', status: 'error', error: 'Cannot attach assets to an evidence node' },
+    { row: 5, parentPin: parentNode.pin, parentName: parentNode.name, name: 'Mystery Object', category: 'widget', evidenceUri: '', status: 'error', error: "Invalid category 'widget' — must be product, process, place, or person" },
+    { row: 6, parentPin: parentNode.pin, parentName: parentNode.name, name: '', category: 'product', evidenceUri: '', status: 'error', error: 'Asset name is required' },
+  ]
+}
+
+// ── Bulk sub-steps ──
+
+function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, parentNode, bulkFileRef }) {
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px',
+        background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+        borderRadius: 8, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+        marginBottom: 20,
+      }}>
+        Upload a CSV file to register multiple assets at once. Each row creates a new asset
+        connected to an existing node on your network via its Parent PIN.
+      </div>
+
+      <FieldLabel label="CSV format" />
+      <div style={{
+        padding: '12px 16px', borderRadius: 8,
+        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)',
+        lineHeight: 1.8, marginBottom: 8, overflowX: 'auto',
+      }}>
+        <div style={{ color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 4 }}>
+          parent_pin, name, category, evidence_uri
+        </div>
+        <div>{parentNode.pin}, Thermal Sensor Array, product,</div>
+        <div>{parentNode.pin}, Assembly Test Report, product, provenance://evidence/atr-001.pdf</div>
+        <div>{parentNode.pin}, Quality Inspection Log, process,</div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 20, lineHeight: 1.6 }}>
+        <strong style={{ color: 'var(--text-tertiary)' }}>Columns:</strong> parent_pin (required) · name (required) · category (required: product, process, place, person) · evidence_uri (optional)
+      </div>
+
+      <FieldLabel label="Select CSV file" required />
+      <div
+        onClick={() => bulkFileRef.current?.click()}
+        style={{
+          padding: '20px',
+          border: `1.5px dashed ${bulkFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
+          borderRadius: 8,
+          background: bulkFile
+            ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
+            : 'var(--bg-card)',
+          cursor: 'pointer', transition: 'all 150ms',
+          textAlign: 'center',
+        }}
+      >
+        {bulkFile ? (
+          <>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{bulkFile}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Click to change file</div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>↑</div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a CSV file...</div>
+          </>
+        )}
+      </div>
+      <input
+        ref={bulkFileRef}
+        type="file"
+        accept=".csv"
+        style={{ display: 'none' }}
+        onChange={onSelectFile}
+      />
+
+      <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div
+          onClick={() => setDebugErrors(prev => !prev)}
+          style={{
+            width: 32, height: 18, borderRadius: 9, cursor: 'pointer',
+            background: debugErrors ? 'var(--accent-red)' : 'var(--border)',
+            position: 'relative', transition: 'background 150ms',
+          }}
+        >
+          <div style={{
+            width: 14, height: 14, borderRadius: '50%',
+            background: '#fff', position: 'absolute', top: 2,
+            left: debugErrors ? 16 : 2, transition: 'left 150ms',
+          }} />
+        </div>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+          Simulate errors (demo)
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function BulkReviewStep({ results }) {
+  const validCount = results.filter(r => r.status === 'valid').length
+  const errorCount = results.filter(r => r.status === 'error').length
+
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
+        padding: '12px 16px', borderRadius: 8,
+        background: errorCount > 0
+          ? 'color-mix(in srgb, var(--accent-amber) 6%, transparent)'
+          : 'color-mix(in srgb, var(--accent-green) 6%, transparent)',
+        border: `1px solid ${errorCount > 0 ? 'color-mix(in srgb, var(--accent-amber) 20%, transparent)' : 'color-mix(in srgb, var(--accent-green) 20%, transparent)'}`,
+      }}>
+        <span style={{
+          fontSize: 12, fontWeight: 600,
+          color: errorCount > 0 ? 'var(--accent-amber)' : 'var(--accent-green)',
+        }}>
+          {validCount} of {results.length} valid
+        </span>
+        {errorCount > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--accent-red)' }}>
+            · {errorCount} error{errorCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+
+      <div style={{
+        border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '32px 1fr 1fr 80px 1fr',
+          padding: '8px 12px',
+          background: 'var(--bg-surface)',
+          borderBottom: '1px solid var(--border)',
+          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+          color: 'var(--text-dim)', letterSpacing: '0.04em',
+        }}>
+          <span>#</span>
+          <span>PARENT</span>
+          <span>ASSET NAME</span>
+          <span>CATEGORY</span>
+          <span>STATUS</span>
+        </div>
+
+        {results.map((r, i) => (
+          <div key={i} style={{
+            display: 'grid',
+            gridTemplateColumns: '32px 1fr 1fr 80px 1fr',
+            padding: '10px 12px',
+            borderBottom: i < results.length - 1 ? '1px solid var(--border)' : 'none',
+            background: r.status === 'error'
+              ? 'color-mix(in srgb, var(--accent-red) 3%, transparent)'
+              : 'transparent',
+            alignItems: 'center',
+            fontSize: 12,
+          }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.row}</span>
+            <span style={{
+              color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-secondary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              paddingRight: 8,
+              display: 'flex', flexDirection: 'column', gap: 2,
+            }}>
+              <span style={{
+                fontFamily: 'var(--font-mono)', fontSize: 10,
+                color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-tertiary)',
+              }}>
+                {r.parentPin}
+              </span>
+              {r.status === 'valid' && r.parentName && (
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                  {r.parentName}
+                </span>
+              )}
+            </span>
+            <span style={{
+              color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-primary)',
+              fontWeight: r.status === 'valid' ? 600 : 400,
+              textDecoration: r.status === 'error' ? 'line-through' : 'none',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              paddingRight: 8,
+            }}>
+              {r.name || '(empty)'}
+            </span>
+            <span style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10,
+              color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-tertiary)',
+            }}>
+              {r.category}
+            </span>
+            <span>
+              {r.status === 'valid' ? (
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-green)' }}>
+                  ✓ Verified
+                </span>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--accent-red)', lineHeight: 1.4 }}>
+                  {r.error}
+                </span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {errorCount > 0 && (
+        <div style={{
+          marginTop: 14, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7,
+        }}>
+          Rows with errors will be skipped. Only the {validCount} valid asset{validCount !== 1 ? 's' : ''} will be imported.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BulkConfirmStep({ results }) {
+  const validResults = results.filter(r => r.status === 'valid')
+  return (
+    <div style={{ padding: '52px 36px', textAlign: 'center' }}>
+      <div style={{
+        width: 60, height: 60, borderRadius: '50%',
+        background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        margin: '0 auto 22px', border: '2px solid var(--accent-green)',
+      }}>
+        <span style={{ fontSize: 26, color: 'var(--accent-green)' }}>✓</span>
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+        {validResults.length} Asset{validResults.length !== 1 ? 's' : ''} Registered
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 28 }}>
+        {validResults.length} new asset{validResults.length !== 1 ? 's have' : ' has'} been created and connected to your network.
+      </div>
+      <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
+        {validResults.map((r, i) => (
+          <InfoRow key={i} label={r.parentName} value={
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
+          } />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Main modal ──
+
+export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, onClose, onComplete, onBack, _noBackdrop }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [category, setCategory] = useState(null)
@@ -103,6 +383,16 @@ export default function RegisterAssetModal({ parentNode, activeParty, onClose, o
   const [generatedPin, setGeneratedPin] = useState(null)
   const [txHash] = useState(() => Math.random().toString(16).slice(2, 6))
 
+  // Mode: single vs bulk
+  const [mode, setMode] = useState('single')
+
+  // Bulk state
+  const [bulkStep, setBulkStep] = useState(0)
+  const [bulkFile, setBulkFile] = useState(null)
+  const [bulkResults, setBulkResults] = useState([])
+  const [debugErrors, setDebugErrors] = useState(false)
+  const bulkFileRef = useRef(null)
+
   const cat = ASSET_CATEGORIES.find(c => c.id === category)
   const canProceed = name.trim() && category
 
@@ -110,6 +400,21 @@ export default function RegisterAssetModal({ parentNode, activeParty, onClose, o
     const pin = makePin('new-' + name.toLowerCase().replace(/\s+/g, '-'))
     setGeneratedPin(pin)
     setCompleted(true)
+  }
+
+  const handleBulkFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file) setBulkFile(file.name)
+  }
+
+  const handleBulkValidate = () => {
+    const results = generateMockResults(parentNode, activeParty, debugErrors, nodeMap || {})
+    setBulkResults(results)
+    setBulkStep(1)
+  }
+
+  const handleBulkImport = () => {
+    setBulkStep(2)
   }
 
   if (completed) {
@@ -152,45 +457,83 @@ export default function RegisterAssetModal({ parentNode, activeParty, onClose, o
     return _noBackdrop ? completedContent : <Backdrop onClose={onClose}>{completedContent}</Backdrop>
   }
 
+  const validBulkCount = bulkResults.filter(r => r.status === 'valid').length
+
   const formContent = (
     <Modal width={780}>
       <ModalHeader
         title="Register Asset"
-        subtitle="Create a new asset on your network."
-        step={step + 1}
-        totalSteps={2}
+        subtitle={
+          <span>
+            Create {mode === 'bulk' ? 'assets' : 'a new asset'} on your network under{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>{parentNode.name}</strong>
+          </span>
+        }
+        step={mode === 'single' ? step + 1 : undefined}
+        totalSteps={mode === 'single' ? 2 : undefined}
         onClose={onClose}
       />
       <ModalBody>
-        {step === 0 && (
-          <div>
-            <FieldLabel label="Asset name" required />
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="e.g. Thermal Interface Pad"
-              style={inputStyle}
-            />
-
-            <FieldLabel label="Category" required />
-            <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
-              {ASSET_CATEGORIES.map(c => (
-                <CategoryCard key={c.id} cat={c} selected={category} onClick={setCategory} />
-              ))}
+        {/* Step 0: tab selector + single or bulk content */}
+        {(mode === 'single' ? step === 0 : bulkStep === 0) && (
+          <>
+            <div style={{
+              display: 'flex', gap: 4, marginBottom: 20,
+              background: 'var(--bg-surface)', borderRadius: 8,
+              padding: 4, border: '1px solid var(--border)',
+            }}>
+              <button onClick={() => setMode('single')} style={tabStyle(mode === 'single')}>
+                Single
+              </button>
+              <button onClick={() => setMode('bulk')} style={tabStyle(mode === 'bulk')}>
+                Bulk Import
+              </button>
             </div>
 
-            <FieldLabel label="Description" />
-            <textarea
-              value={desc}
-              onChange={e => setDesc(e.target.value)}
-              placeholder="Brief description of this asset..."
-              rows={3}
-              style={textareaStyle}
-            />
-          </div>
+            {mode === 'single' && (
+              <div>
+                <FieldLabel label="Asset name" required />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="e.g. Thermal Interface Pad"
+                  style={inputStyle}
+                />
+
+                <FieldLabel label="Category" required />
+                <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
+                  {ASSET_CATEGORIES.map(c => (
+                    <CategoryCard key={c.id} cat={c} selected={category} onClick={setCategory} />
+                  ))}
+                </div>
+
+                <FieldLabel label="Description" />
+                <textarea
+                  value={desc}
+                  onChange={e => setDesc(e.target.value)}
+                  placeholder="Brief description of this asset..."
+                  rows={3}
+                  style={textareaStyle}
+                />
+              </div>
+            )}
+
+            {mode === 'bulk' && (
+              <BulkUploadStep
+                bulkFile={bulkFile}
+                onSelectFile={handleBulkFileSelect}
+                debugErrors={debugErrors}
+                setDebugErrors={setDebugErrors}
+                parentNode={parentNode}
+                bulkFileRef={bulkFileRef}
+              />
+            )}
+          </>
         )}
-        {step === 1 && (
+
+        {/* Single step 1: review */}
+        {mode === 'single' && step === 1 && (
           <div>
             <div style={{ padding: 18, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 18 }}>
               <InfoRow label="Asset name" value={name} />
@@ -208,15 +551,62 @@ export default function RegisterAssetModal({ parentNode, activeParty, onClose, o
             </div>
           </div>
         )}
+
+        {/* Bulk step 1: review table */}
+        {mode === 'bulk' && bulkStep === 1 && (
+          <BulkReviewStep results={bulkResults} />
+        )}
+
+        {/* Bulk step 2: confirmation */}
+        {mode === 'bulk' && bulkStep === 2 && (
+          <BulkConfirmStep results={bulkResults} />
+        )}
       </ModalBody>
       <ModalFooter>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step === 0 && onBack && <Btn label="← Methods" onClick={onBack} />}
-          {step > 0 && <Btn label="← Back" onClick={() => setStep(0)} />}
-          <StepDots current={step} total={2} />
-        </div>
-        {step === 0 && <Btn label="Next → Review" accent disabled={!canProceed} onClick={() => setStep(1)} />}
-        {step === 1 && <Btn label="Register Asset" accent onClick={handleRegister} />}
+        {mode === 'single' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {step === 0 && onBack && <Btn label="← Methods" onClick={onBack} />}
+              {step > 0 && <Btn label="← Back" onClick={() => setStep(0)} />}
+              <StepDots current={step} total={2} />
+            </div>
+            {step === 0 && <Btn label="Next → Review" accent disabled={!canProceed} onClick={() => setStep(1)} />}
+            {step === 1 && <Btn label="Register Asset" accent onClick={handleRegister} />}
+          </>
+        )}
+        {mode === 'bulk' && bulkStep === 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {onBack && <Btn label="← Methods" onClick={onBack} />}
+            </div>
+            <Btn label="Upload & Validate" accent disabled={!bulkFile} onClick={handleBulkValidate} />
+          </>
+        )}
+        {mode === 'bulk' && bulkStep === 1 && (
+          <>
+            <Btn label="← Back" onClick={() => setBulkStep(0)} />
+            {validBulkCount > 0 ? (
+              <Btn
+                label={`Import ${validBulkCount} Asset${validBulkCount !== 1 ? 's' : ''}`}
+                accent
+                onClick={handleBulkImport}
+              />
+            ) : (
+              <Btn label="No valid assets to import" disabled />
+            )}
+          </>
+        )}
+        {mode === 'bulk' && bulkStep === 2 && (
+          <>
+            <div />
+            <Btn label="Done" accent onClick={() => {
+              onComplete({
+                bulk: true,
+                assets: bulkResults.filter(r => r.status === 'valid'),
+              })
+            }} />
+          </>
+        )}
       </ModalFooter>
     </Modal>
   )

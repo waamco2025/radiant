@@ -15,6 +15,23 @@ import { Backdrop } from '../components/modals/ModalShared.jsx'
 
 const SESSION_KEY = 'radiant-v2-booted'
 
+function findClearY(targetX, idealY, allNodes, spacingY = 300, toleranceX = 150) {
+  const occupiedYs = allNodes
+    .filter(n => n.x !== undefined && Math.abs(n.x - targetX) < toleranceX)
+    .map(n => n.y)
+    .sort((a, b) => a - b)
+
+  let y = idealY
+  let collision = true
+  let iterations = 0
+  while (collision && iterations < 50) {
+    collision = occupiedYs.some(oy => Math.abs(oy - y) < spacingY)
+    if (collision) y += spacingY
+    iterations++
+  }
+  return y
+}
+
 export default function V2App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('radiant-theme') || 'dark')
   const [roleId, setRoleId] = useState('bob-govco')
@@ -737,89 +754,209 @@ export default function V2App() {
         <RegisterAssetModal
           parentNode={registerNode}
           activeParty={activeRole.party}
+          nodeMap={nodeMap}
           onClose={() => setRegisterNode(null)}
           onBack={() => {
             const node = registerNode
             setRegisterNode(null)
             setConnectNode(node)
           }}
-          onComplete={({ name, category, description }) => {
-            const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
-            const nodeId = `${slug}-${Date.now().toString(36)}`
-            const today = new Date().toISOString().slice(0, 10)
+          onComplete={(result) => {
+            if (result.bulk) {
+              // Bulk import: create multiple nodes + edges
+              const today = new Date().toISOString().slice(0, 10)
+              const newNodes = []
+              const newEdges = []
+              let firstNodeId = null
 
-            // Find nodes already connected to the parent via edges
-            const connectedEdges = edges.filter(e => e.from === registerNode.id)
-            const connectedNodes = connectedEdges
-              .map(e => nodeMap[e.to])
-              .filter(Boolean)
+              result.assets.forEach((asset, index) => {
+                const slug = asset.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
+                const nodeId = `${slug}-${Date.now().toString(36)}-${index}`
+                if (!firstNodeId) firstNodeId = nodeId
 
-            let newX, newY
-            if (connectedNodes.length > 0) {
-              newX = connectedNodes[0].x
-              const lowestY = Math.max(...connectedNodes.map(n => n.y))
-              newY = lowestY + 200
+                const parentId = Object.values(nodeMap).find(n => n.pin === asset.parentPin)?.id || registerNode.id
+                const parentNodeRef = nodeMap[parentId] || registerNode
+
+                const connectedEdgesForParent = edges.filter(e => e.from === parentId)
+                const connectedNodesForParent = connectedEdgesForParent.map(e => nodeMap[e.to]).filter(Boolean)
+                const batchSiblings = newNodes.filter(n => newEdges.some(e => e.from === parentId && e.to === n.id))
+                const allSiblings = [...connectedNodesForParent, ...batchSiblings]
+
+                let newX, newY
+                if (allSiblings.length > 0) {
+                  newX = allSiblings[0].x
+                  const lowestY = Math.max(...allSiblings.map(n => n.y))
+                  newY = lowestY + 300
+                } else {
+                  newX = (parentNodeRef.x || 0) + 500
+                  newY = (parentNodeRef.y || 0) + index * 300
+                }
+
+                // Collision check against all existing + batch-created nodes
+                newY = findClearY(newX, newY, [...nodes, ...newNodes])
+
+                const newNode = {
+                  id: nodeId,
+                  pin: makePin(nodeId),
+                  dot: makeDot(activeRole.party),
+                  name: asset.name,
+                  category: asset.category,
+                  owner: activeRole.party,
+                  parentId: null,
+                  children: [],
+                  health: { ok: 0, warn: 0, bad: 0 },
+                  childHealth: null,
+                  totalHealth: null,
+                  displayHealth: { ok: 0, warn: 0, bad: 0 },
+                  claimCount: 0,
+                  displayClaimCount: 0,
+                  hasEvidence: !!asset.evidenceUri,
+                  hasStack: !!asset.evidenceUri,
+                  childCount: asset.evidenceUri ? 1 : 0,
+                  evidence: null,
+                  evaluations: [],
+                  sdas: [{
+                    type: 'full',
+                    party: activeRole.party,
+                    partyLabel: 'internal',
+                    partyDot: activeRole.partyDot,
+                    created: today,
+                    expires: null,
+                    pins: [],
+                    assetName: null,
+                    assetPin: null,
+                  }],
+                  x: newX,
+                  y: newY,
+                  parentOwner: activeRole.party,
+                  isCascade: false,
+                  cascadeVia: null,
+                  upstreamSda: null,
+                  upstreamAssets: null,
+                  isEvidence: false,
+                  lastEval: null,
+                  description: null,
+                }
+
+                if (asset.evidenceUri) {
+                  const evMeta = makeEvidence(
+                    nodeId,
+                    asset.name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
+                    activeRole.party + ' Lab',
+                    '10 years'
+                  )
+                  const uriFilename = asset.evidenceUri.split('/').pop() || 'evidence.pdf'
+                  evMeta.filename = uriFilename
+                  evMeta.uri = asset.evidenceUri
+
+                  const evNode = makeEvidenceNode(nodeId, evMeta, activeRole.party, [])
+                  newNode.children = [evNode]
+                  newNode.hasStack = true
+                  newNode.childCount = 1
+                  newNode.hasEvidence = true
+                }
+
+                newNodes.push(newNode)
+                newEdges.push({
+                  id: `e-${parentId}-${nodeId}`,
+                  from: parentId,
+                  to: nodeId,
+                  sdaType: 'full',
+                })
+              })
+
+              updateRoleState(roleId, prev => ({
+                ...prev,
+                addedNodes: [...prev.addedNodes, ...newNodes],
+                addedEdges: [...prev.addedEdges, ...newEdges],
+              }))
+
+              setRegisterNode(null)
+              if (firstNodeId) {
+                setTimeout(() => setSel(firstNodeId), 100)
+              }
             } else {
-              newX = (registerNode.x || 0) + 500
-              newY = registerNode.y || 0
+              // Single registration
+              const { name, category, description } = result
+              const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
+              const nodeId = `${slug}-${Date.now().toString(36)}`
+              const today = new Date().toISOString().slice(0, 10)
+
+              const connectedEdges = edges.filter(e => e.from === registerNode.id)
+              const connectedNodes = connectedEdges
+                .map(e => nodeMap[e.to])
+                .filter(Boolean)
+
+              let newX, newY
+              if (connectedNodes.length > 0) {
+                newX = connectedNodes[0].x
+                const lowestY = Math.max(...connectedNodes.map(n => n.y))
+                newY = lowestY + 300
+              } else {
+                newX = (registerNode.x || 0) + 500
+                newY = registerNode.y || 0
+              }
+
+              // Collision check against all nodes on the graph
+              newY = findClearY(newX, newY, nodes)
+
+              const newNode = {
+                id: nodeId,
+                pin: makePin(nodeId),
+                dot: makeDot(activeRole.party),
+                name,
+                category,
+                owner: activeRole.party,
+                parentId: null,
+                children: [],
+                health: { ok: 0, warn: 0, bad: 0 },
+                childHealth: null,
+                totalHealth: null,
+                displayHealth: { ok: 0, warn: 0, bad: 0 },
+                claimCount: 0,
+                displayClaimCount: 0,
+                hasEvidence: false,
+                hasStack: false,
+                childCount: 0,
+                evidence: null,
+                evaluations: [],
+                sdas: [{
+                  type: 'full',
+                  party: activeRole.party,
+                  partyLabel: 'internal',
+                  partyDot: activeRole.partyDot,
+                  created: today,
+                  expires: null,
+                  pins: [],
+                  assetName: null,
+                  assetPin: null,
+                }],
+                x: newX,
+                y: newY,
+                parentOwner: activeRole.party,
+                isCascade: false,
+                cascadeVia: null,
+                upstreamSda: null,
+                upstreamAssets: null,
+                isEvidence: false,
+                lastEval: null,
+                description: description || null,
+              }
+
+              updateRoleState(roleId, prev => ({
+                ...prev,
+                addedNodes: [...prev.addedNodes, newNode],
+                addedEdges: [...prev.addedEdges, {
+                  id: `e-${registerNode.id}-${nodeId}`,
+                  from: registerNode.id,
+                  to: nodeId,
+                  sdaType: 'full',
+                }],
+              }))
+
+              setRegisterNode(null)
+              setTimeout(() => setSel(nodeId), 100)
             }
-
-            const newNode = {
-              id: nodeId,
-              pin: makePin(nodeId),
-              dot: makeDot(activeRole.party),
-              name,
-              category,
-              owner: activeRole.party,
-              parentId: null,
-              children: [],
-              health: { ok: 0, warn: 0, bad: 0 },
-              childHealth: null,
-              totalHealth: null,
-              displayHealth: { ok: 0, warn: 0, bad: 0 },
-              claimCount: 0,
-              displayClaimCount: 0,
-              hasEvidence: false,
-              hasStack: false,
-              childCount: 0,
-              evidence: null,
-              evaluations: [],
-              sdas: [{
-                type: 'full',
-                party: activeRole.party,
-                partyLabel: 'internal',
-                partyDot: activeRole.partyDot,
-                created: today,
-                expires: null,
-                pins: [],
-                assetName: null,
-                assetPin: null,
-              }],
-              x: newX,
-              y: newY,
-              parentOwner: activeRole.party,
-              isCascade: false,
-              cascadeVia: null,
-              upstreamSda: null,
-              upstreamAssets: null,
-              isEvidence: false,
-              lastEval: null,
-              description: description || null,
-            }
-
-            updateRoleState(roleId, prev => ({
-              ...prev,
-              addedNodes: [...prev.addedNodes, newNode],
-              addedEdges: [...prev.addedEdges, {
-                id: `e-${registerNode.id}-${nodeId}`,
-                from: registerNode.id,
-                to: nodeId,
-                sdaType: 'full',
-              }],
-            }))
-
-            setRegisterNode(null)
-            setTimeout(() => setSel(nodeId), 100)
           }}
           _noBackdrop
         />
@@ -975,7 +1112,11 @@ export default function V2App() {
                 const lowestY = nodesInColumn.length > 0
                   ? Math.max(...nodesInColumn.map(n => n.y))
                   : (otherConnectNodeReal?.y || 0)
-                const newY = lowestY + 200
+                const idealY = lowestY + 300
+
+                // Collision check against the other role's full node set
+                const otherAllNodes = [...otherRoleData.nodes, ...existingDynamic]
+                const newY = findClearY(disclosedX, idealY, otherAllNodes)
 
                 // Build the disclosed asset node for the other role's network
                 const disclosedNodeForOther = {

@@ -1838,7 +1838,17 @@ const V2Canvas = forwardRef(function V2Canvas({
                 transition: 'opacity 200ms ease',
                 ...(isDiveTarget || isAnchor ? { viewTransitionName: 'dive-target' } : {}),
               }}>
-                <AssetNodeDot node={node} isSelected={selectedId === node.id} onSelect={onSelect} onDive={isAnchor ? undefined : handleDive} onOpenSubgraph={onOpenSubgraph} />
+                <AssetNodeDot
+                  node={node}
+                  isSelected={selectedId === node.id}
+                  onSelect={onSelect}
+                  onDive={isAnchor ? undefined : handleDive}
+                  onOpenSubgraph={onOpenSubgraph}
+                  onConnect={transitioning ? undefined : onConnect}
+                  onDisclose={transitioning ? undefined : onDisclose}
+                  onAddEvidence={transitioning ? undefined : onAddEvidence}
+                  activeParty={activeParty}
+                />
               </div>
             )
           }
