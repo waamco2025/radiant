@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PANEL_W, GUTTER, BTN_H, CATEGORY_CONFIG } from './constants'
 import HealthBar from './shared/HealthBar'
 import CopyBadge from './shared/CopyBadge'
@@ -12,15 +12,17 @@ function ClipIcon({ s = 14, c = 'var(--text-secondary)' }) {
   )
 }
 
-function FooterBtn({ icon, label, onClick, disabled }) {
-  const [hovered, setHovered] = useState(false)
+function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover }) {
+  const isHovered = hoveredId === btnId
+  const anotherHovered = hoveredId != null && hoveredId !== btnId
   return (
     <button
       onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => !disabled && setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => !disabled && onHover?.(btnId)}
+      onMouseLeave={() => onHover?.(null)}
       style={{
-        flex: 1,
+        flex: isHovered ? 'none' : 1,
+        minWidth: isHovered ? 'auto' : 0,
         height: BTN_H,
         display: 'flex',
         alignItems: 'center',
@@ -28,9 +30,9 @@ function FooterBtn({ icon, label, onClick, disabled }) {
         gap: 6,
         padding: '0 8px',
         borderRadius: 5,
-        border: `1px solid ${hovered && !disabled ? 'var(--border-hover)' : 'var(--border)'}`,
-        background: hovered && !disabled ? 'var(--bg-raised)' : 'transparent',
-        color: disabled ? 'var(--text-dim)' : hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+        border: `1px solid ${isHovered && !disabled ? 'var(--border-hover)' : 'var(--border)'}`,
+        background: isHovered && !disabled ? 'var(--bg-raised)' : 'transparent',
+        color: disabled ? 'var(--text-dim)' : isHovered ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontSize: 11,
         fontFamily: 'var(--font-mono)',
         fontWeight: 500,
@@ -43,7 +45,7 @@ function FooterBtn({ icon, label, onClick, disabled }) {
     >
       <span style={{ flexShrink: 0, fontSize: 13, lineHeight: 1 }}>{icon}</span>
       <span style={{
-        maxWidth: hovered ? 120 : 0,
+        maxWidth: isHovered ? 120 : 0,
         overflow: 'hidden',
         transition: 'max-width 200ms ease',
         fontSize: 10,
@@ -57,9 +59,12 @@ function FooterBtn({ icon, label, onClick, disabled }) {
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, showPin, onConnect,
+  onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, showPin, onConnect, onDisclose, onAddEvidence, isEvidence, isOwner,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
+  const [descExpanded, setDescExpanded] = useState(false)
+  const [hoveredFooterBtn, setHoveredFooterBtn] = useState(null)
+  useEffect(() => { setDescExpanded(false) }, [node.id])
 
   return (
     <div style={{
@@ -115,6 +120,16 @@ export default function PanelShell({
           <CopyBadge value={node.pin} truncated />
         </div>
 
+        {/* Description */}
+        {node.description && (
+          <div onClick={() => setDescExpanded(prev => !prev)} style={{ marginBottom: 8, cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: descExpanded ? 'unset' : 1, WebkitBoxOrient: 'vertical' }}>
+              {node.description}
+            </span>
+            <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0, marginTop: 2, transition: 'transform 150ms', transform: descExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
+          </div>
+        )}
+
         {/* Owner + DOT */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{node.owner}</span>
@@ -122,7 +137,7 @@ export default function PanelShell({
         </div>
 
         {/* Health bar */}
-        <HealthBar health={node.health} />
+        <HealthBar health={node.displayHealth || node.health} />
 
         {/* Summary */}
         {summary && (
@@ -177,21 +192,25 @@ export default function PanelShell({
         flexShrink: 0,
         background: 'var(--bg-card)',
       }}>
-        <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} />
+        {isOwner && !isEvidence && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
         <FooterBtn
           icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
           label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Return' : 'Surface'}
           onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
           disabled={!isAnchor && !hasStack && !hasParent}
+          btnId="layer" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn}
         />
         {showPin && (
           <FooterBtn
             icon={<svg width={12} height={12} viewBox="0 0 16 16" fill="none"><path d="M9.5 2.5L13.5 6.5L10 10L8 12L6.5 10.5L3 14L2 13L5.5 9.5L4 8L6 6L9.5 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
             label="Pin"
             onClick={onPinToSurface}
+            btnId="pin" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn}
           />
         )}
-        <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} />
+        <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} btnId="chain" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />
       </div>
     </div>
   )

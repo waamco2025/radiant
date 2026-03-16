@@ -10,35 +10,35 @@ export const MAX_ROWS = 8.5
 export const SDA_CONFIG = {
   full: {
     color: 'var(--accent-sda-full)',
-    label: 'Extraction + Inference',
+    label: 'Full access',
     short: 'FULL',
     borderStyle: 'solid',
-    tip: 'Full access. Evaluator can run both extraction and inference requirements against the evidence.',
-    permTip: 'Evaluator has full access — can extract specific values and run inference checks.',
+    tip: 'Full disclosure. The receiving party can access all parsed data fields and run evaluations against them.',
+    permTip: 'Full access to all parsed data fields. The receiving party can run any evaluation requirements against this data.',
   },
   selective: {
     color: 'var(--accent-sda-selective)',
-    label: 'Inference only',
+    label: 'Selected fields only',
     short: 'SELECTIVE',
     borderStyle: 'dashed',
-    tip: 'Selective access. Evaluator can only run inference requirements — no raw data extraction.',
-    permTip: 'Evaluator can run inference checks (yes/no/valid) but cannot extract specific values.',
+    tip: 'Selective disclosure. The receiving party can only access data fields chosen by the owner.',
+    permTip: 'Access to owner-selected data fields only. Evaluations can only run against disclosed fields — undisclosed fields produce unevaluable results.',
   },
   proofonly: {
     color: 'var(--accent-sda-derivative)',
-    label: 'POE pass/fail only',
+    label: 'Pass/fail results only',
     short: 'PROOF-ONLY',
     borderStyle: 'dotted',
-    tip: 'Proof-only. Recipient receives a pass/fail result from a prior evaluation — no evaluator access.',
-    permTip: 'Recipient sees only a pass/fail badge from a prior evaluation. No new evaluation possible.',
+    tip: 'Proof-only disclosure. The receiving party sees only pass/fail results from the owner\'s evaluations. No data field access.',
+    permTip: 'No data access. The receiving party sees only pass/fail badges from existing evaluations. No new evaluations can be run.',
   },
   cascade: {
     color: 'var(--accent-sda-cascade)',
     label: 'Cascaded access',
     short: 'CASCADE',
     borderStyle: 'dashed',
-    tip: 'Cascade disclosure. Access was passed through an intermediary — not directly from the asset owner. Permission is constrained by the upstream SDA.',
-    permTip: 'Permission was received through a cascade chain. The intermediary cannot grant more access than they received.',
+    tip: 'Cascade disclosure. Access was forwarded through an intermediary. Permission is capped at the intermediary\'s own access level.',
+    permTip: 'Access was received through a cascade chain. Permission cannot exceed what the intermediary was granted.',
   },
 }
 
@@ -48,6 +48,9 @@ export const CATEGORY_CONFIG = {
   place:   { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE' },
   product: { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT' },
   process: { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS' },
+  evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' },
+  parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
+  evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
 }
 
 export const REVOKE_WARNINGS = {

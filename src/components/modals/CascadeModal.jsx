@@ -6,7 +6,7 @@ import {
 } from './ModalShared'
 import UpstreamPicker from './UpstreamPicker'
 
-export default function CascadeModal({ node, sda, existingCascades, onClose }) {
+export default function CascadeModal({ node, sda, existingCascades, onClose, _noBackdrop }) {
   const [selected, setSelected] = useState([])
   const [step, setStep] = useState(0)
   const [completed, setCompleted] = useState(false)
@@ -19,27 +19,27 @@ export default function CascadeModal({ node, sda, existingCascades, onClose }) {
     [existingCascades, downstreamParty]
   )
 
-  // Build upstream asset list from node's children that have upstreamSda
+  // Build upstream asset list from node's upstreamAssets
   const upstreamAssets = useMemo(() => {
-    if (!node?.children) return []
-    return node.children
-      .filter(c => c.upstreamSda)
-      .map(c => ({
-        id: c.id,
-        name: c.name,
-        pin: c.pin || `PIN-${c.id}`,
-        category: c.category || 'product',
-        owner: c.upstreamSda.owner,
-        ownerDot: c.upstreamSda.ownerDot,
-        upstreamSdaType: c.upstreamSda.type,
-        cascadePolicy: c.upstreamSda.policy,
+    const assets = node?.upstreamAssets || []
+    return assets
+      .filter(a => a.upstreamSda)
+      .map(a => ({
+        id: a.id,
+        name: a.name,
+        pin: a.pin || `PIN-${a.id}`,
+        category: a.category || 'product',
+        owner: a.upstreamSda.owner,
+        ownerDot: a.upstreamSda.ownerDot,
+        upstreamSdaType: a.upstreamSda.type,
+        cascadePolicy: a.upstreamSda.policy,
         cascadeTo: downstreamParty,
       }))
   }, [node, downstreamParty])
 
   if (completed) {
-    return (
-      <Backdrop onClose={onClose}><Modal width={560}>
+    const completedContent = (
+      <Modal width={560}>
         <div style={{ padding: '52px 36px', textAlign: 'center' }}>
           <div style={{
             width: 60, height: 60, borderRadius: '50%',
@@ -78,12 +78,13 @@ export default function CascadeModal({ node, sda, existingCascades, onClose }) {
           )}
           <Btn label="Done" purple onClick={onClose} />
         </div>
-      </Modal></Backdrop>
+      </Modal>
     )
+    return _noBackdrop ? completedContent : <Backdrop onClose={onClose}>{completedContent}</Backdrop>
   }
 
-  return (
-    <Backdrop onClose={onClose}><Modal>
+  const formContent = (
+    <Modal>
       <ModalHeader
         title="Manage Cascading Disclosures"
         subtitle={<span>{node.name} → {downstreamParty} (<LevelInline type={downstreamLevel} tip />)</span>}
@@ -184,6 +185,7 @@ export default function CascadeModal({ node, sda, existingCascades, onClose }) {
           <Btn label={`Add ${selected.length} Cascading Disclosure${selected.length > 1 ? 's' : ''}`} purple onClick={() => setCompleted(true)} />
         )}
       </ModalFooter>
-    </Modal></Backdrop>
+    </Modal>
   )
+  return _noBackdrop ? formContent : <Backdrop onClose={onClose}>{formContent}</Backdrop>
 }

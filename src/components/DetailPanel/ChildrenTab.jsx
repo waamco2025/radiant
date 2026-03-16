@@ -54,7 +54,7 @@ function TinyBtn({ icon, tip, onClick }) {
   )
 }
 
-export default function ChildrenTab({ children, parentOwner }) {
+export default function ChildrenTab({ children, parentOwner, onViewChild }) {
   const [exp, setExp] = useState(() => {
     const o = {}
     children.forEach((_, i) => { o[i] = i === 0 })
@@ -144,6 +144,7 @@ export default function ChildrenTab({ children, parentOwner }) {
                 {ch.isCascade && <GridRow label="Via" value={<span style={{ color: 'var(--accent-purple)' }}>{ch.cascadeVia}</span>} />}
                 <div style={{ marginTop: 12 }}>
                   <span
+                    onClick={() => onViewChild && onViewChild(ch)}
                     style={{
                       fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
                       color: 'var(--accent-indigo)', cursor: 'pointer',

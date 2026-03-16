@@ -69,7 +69,7 @@ function ChainIcon({ s = 13, c = 'var(--accent-purple)' }) {
   )
 }
 
-export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade }) {
+export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner }) {
   const [allOpen, setAllOpen] = useState(false)
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
@@ -117,10 +117,29 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 transition: 'background 150ms',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
                 <SDABadge type={sda.type} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{sda.party}</span>
-                {sda.partyLabel && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{sda.partyLabel}</span>}
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>{sda.party}</span>
+                {sda.partyLabel && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{sda.partyLabel}</span>}
+                {sda.assetName && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0, minWidth: 0 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>&middot;&nbsp;</span>
+                    <Tip text={sda.assetName}>
+                      <span style={{
+                        fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        maxWidth: 160, cursor: 'default',
+                        borderBottom: '1px dashed transparent',
+                        transition: 'border-color 150ms',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'color-mix(in srgb, var(--text-dim) 40%, transparent)'}
+                      onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+                      >
+                        {sda.assetName}
+                      </span>
+                    </Tip>
+                  </span>
+                )}
               </div>
               <Chev open={o} />
             </div>
@@ -128,14 +147,9 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
             {/* Body */}
             {o && (
               <div style={{ padding: '6px 14px 16px' }}>
-                <GridRow
-                  label="Party DOT"
-                  labelTip="Data Object Title — a unique on-chain identifier for this organization. Each party on the network has exactly one DOT."
-                  value={<CopyBadge value={sda.partyDot} />}
-                />
                 <GridRow label="Created" value={sda.created} />
                 <GridRow label="Expires" value={sda.expires || 'Never'} />
-                <GridRow label="Permission" value={
+                <GridRow label="Disclosure type" value={
                   <Tip text={s.permTip} w={240}>
                     <span style={{
                       color: s.color, fontFamily: 'var(--font-mono)', fontSize: 11,
@@ -143,6 +157,25 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                       borderBottom: `1px dashed color-mix(in srgb, ${s.color} 30%, transparent)`,
                     }}>{s.label}</span>
                   </Tip>
+                } />
+                <GridRow label="Connected asset" value={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    {(sda.assetName || node?.name) && (
+                      <span
+                        style={{
+                          fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+                          cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap', maxWidth: 120, flexShrink: 1,
+                          borderBottom: '1px solid transparent', transition: 'border-color 150ms',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-indigo)'}
+                        onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+                      >
+                        {sda.assetName || node?.name}
+                      </span>
+                    )}
+                    <CopyBadge value={sda.assetPin || node?.pin} />
+                  </div>
                 } />
                 {sda.pins && <GridRow label="PINs" value={`${sda.pins.length} asset${sda.pins.length > 1 ? 's' : ''}`} />}
                 {sda.type === 'proofonly' && (
@@ -192,7 +225,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 )}
 
                 {/* Manage cascade */}
-                {node?.children?.some(c => c.upstreamSda) && (
+                {node?.upstreamAssets?.some(a => a.upstreamSda) && (
                   <div style={{ marginTop: 10 }}>
                     <Btn
                       label="⛓ Manage Cascading Disclosures"
@@ -264,9 +297,11 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
         )
       })}
 
-      <div style={{ marginTop: 12 }}>
-        <Btn label="⇋ Disclose this Asset" accent onClick={onDisclose} />
-      </div>
+      {!node?.isEvidence && isOwner && (
+        <div style={{ marginTop: 12 }}>
+          <Btn label="⇋ Disclose this Asset" accent onClick={onDisclose} />
+        </div>
+      )}
     </div>
   )
 }

@@ -8,6 +8,9 @@ html {
   background: var(--bg-deep);
 }
 
+/* Hide DOT badges until DOT model is finalized */
+[data-badge-type="dot"] { display: none !important; }
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -387,4 +390,9 @@ body {
 @keyframes detail-panel-slide-in {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes diveHintIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 0.9; transform: translateX(-50%) translateY(0); }
 }

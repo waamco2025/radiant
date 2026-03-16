@@ -58,48 +58,85 @@ function Btn({ label, onClick, accent, style: sx }) {
 export default function EvaluationsTab({
   evidence, evals, evalOpen, claimsOpen,
   toggleEval, toggleClaims, expandAll, collapseAll,
-  evOpen, toggleEv, isOwner,
+  evOpen, toggleEv, isOwner, isEvidence, attributedClaims,
 }) {
   return (
     <div>
+      {/* Evidence block — always open for evidence nodes, collapsible for asset nodes */}
       {evidence && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <ClipIcon s={14} c="var(--text-secondary)" />
-            <span style={{
-              fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              color: 'var(--text-secondary)', letterSpacing: '0.06em',
-            }}>EVIDENCE</span>
-          </div>
-          <EvidenceBlock evidence={evidence} open={!!evOpen} onToggle={toggleEv} isOwner={isOwner} />
+          {!isEvidence && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <ClipIcon s={14} c="var(--text-secondary)" />
+              <span style={{
+                fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                color: 'var(--text-secondary)', letterSpacing: '0.06em',
+              }}>EVIDENCE</span>
+            </div>
+          )}
+          <EvidenceBlock evidence={evidence} open={isEvidence ? true : !!evOpen} onToggle={isEvidence ? undefined : toggleEv} isOwner={isOwner} />
         </>
       )}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        marginBottom: 4, marginTop: evidence ? 6 : 0,
-      }}>
-        <span style={{
-          fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
-          color: 'var(--accent-indigo)', letterSpacing: '0.05em',
-        }}>EVALUATIONS</span>
-        <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{evals.length}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
-          <TinyBtn icon="⊞" tip="Expand all" onClick={expandAll} />
-          <TinyBtn icon="⊟" tip="Collapse all" onClick={collapseAll} />
+
+      {/* For evidence nodes: show attributed claims */}
+      {isEvidence && attributedClaims?.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 10 }}>
+            CLAIMS REFERENCING THIS EVIDENCE ({attributedClaims.length})
+          </div>
+          {attributedClaims.map((c, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 0', borderBottom: '1px solid var(--border)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.requirement}</span>
+              <span style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                color: c.status === 'verified' ? 'var(--accent-green)' : 'var(--accent-red)',
+              }}>{c.status === 'verified' ? '✓ VERIFIED' : '✗ FAILED'}</span>
+            </div>
+          ))}
         </div>
-        <div style={{ flex: 1 }} />
-        <Btn label="✦ Run Evaluation" accent />
-      </div>
-      {evals.map((ev, i) => (
-        <EvalPanel
-          key={ev.id}
-          ev={ev}
-          open={!!evalOpen[i]}
-          onToggle={() => toggleEval(i)}
-          claimsOpen={!!claimsOpen[i]}
-          onToggleClaims={() => toggleClaims(i)}
-        />
-      ))}
+      )}
+
+      {/* For evidence nodes with no claims yet */}
+      {isEvidence && (!attributedClaims || attributedClaims.length === 0) && (
+        <div style={{ marginTop: 16, padding: '14px 16px', background: 'var(--bg-raised)', borderRadius: 6, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          No claims reference this evidence yet. Run an evaluation on the parent asset to generate claims.
+        </div>
+      )}
+
+      {/* For asset nodes: show evaluation panels and Run Evaluation button */}
+      {!isEvidence && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginBottom: 4, marginTop: evidence ? 6 : 0,
+          }}>
+            <span style={{
+              fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: 'var(--accent-indigo)', letterSpacing: '0.05em',
+            }}>EVALUATIONS</span>
+            <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{evals.length}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+              <TinyBtn icon="⊞" tip="Expand all" onClick={expandAll} />
+              <TinyBtn icon="⊟" tip="Collapse all" onClick={collapseAll} />
+            </div>
+            <div style={{ flex: 1 }} />
+            <Btn label="✦ Run Evaluation" accent />
+          </div>
+          {evals.map((ev, i) => (
+            <EvalPanel
+              key={ev.id}
+              ev={ev}
+              open={!!evalOpen[i]}
+              onToggle={() => toggleEval(i)}
+              claimsOpen={!!claimsOpen[i]}
+              onToggleClaims={() => toggleClaims(i)}
+            />
+          ))}
+        </>
+      )}
     </div>
   )
 }

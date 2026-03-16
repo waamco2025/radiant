@@ -2,11 +2,14 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
 const CATEGORY_CONFIG = {
-  person:  { icon: '●', color: 'var(--accent-cyan)',   label: 'PERSON' },
-  place:   { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE' },
-  process: { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS' },
-  product: { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT' },
-  party:   { icon: '⬡', color: 'var(--accent-indigo)', label: 'PARTY' },
+  person:     { icon: '●', color: 'var(--accent-cyan)',   label: 'PERSON' },
+  place:      { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE' },
+  process:    { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS' },
+  product:    { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT' },
+  party:      { icon: '⬡', color: 'var(--accent-indigo)', label: 'PARTY' },
+  evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' },
+  parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
+  evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
 }
 
 const CARD_W = 210
@@ -204,11 +207,11 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onDive, onOpenSubgraph, onSurface, onPinToSurface, hasChildren, isAnchor, isChild, categoryColor }) {
-  const buttons = [
-    { icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset },
-    { icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA },
-  ]
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onDive, onOpenSubgraph, onSurface, onPinToSurface, hasChildren, isAnchor, isChild, categoryColor }) {
+  const buttons = []
+  if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
+  if (onCreateSDA) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
+  if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (isChild && !isAnchor && onPinToSurface) {
     buttons.push({ icon: <svg width={12} height={12} viewBox="0 0 16 16" fill="none"><path d="M9.5 2.5L13.5 6.5L10 10L8 12L6.5 10.5L3 14L2 13L5.5 9.5L4 8L6 6L9.5 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>, tooltip: 'Pin to Surface', onClick: onPinToSurface })
   }
@@ -259,10 +262,10 @@ function StackPeeks({ count, isHovered, categoryColor }) {
           background: 'var(--bg-deep)',
           border: `1px solid ${isHovered
             ? `color-mix(in srgb, ${categoryColor} 30%, var(--border))`
-            : 'var(--border)'}`,
+            : 'color-mix(in srgb, var(--border) 80%, transparent)'}`,
           borderRadius: 8,
-          top: isHovered ? 12 : 6,
-          left: isHovered ? 10 : 6,
+          top: isHovered ? 14 : 10,
+          left: isHovered ? 12 : 8,
           zIndex: -2,
           transition: isHovered
             ? `left 200ms ${ease}, top 200ms ${ease}, border-color 150ms ease 80ms`
@@ -277,10 +280,10 @@ function StackPeeks({ count, isHovered, categoryColor }) {
         background: 'var(--bg-deep)',
         border: `1px solid ${isHovered
           ? `color-mix(in srgb, ${categoryColor} 50%, var(--border))`
-          : 'var(--border)'}`,
+          : 'color-mix(in srgb, var(--border) 60%, transparent)'}`,
         borderRadius: 8,
-        top: isHovered ? 6 : 3,
-        left: isHovered ? 5 : 3,
+        top: isHovered ? 7 : 5,
+        left: isHovered ? 6 : 4,
         zIndex: -1,
         transition: isHovered
           ? `left 200ms ${ease}, top 200ms ${ease}, border-color 150ms ease 0ms`
@@ -303,6 +306,8 @@ export default function AssetNode({
   scale = 1,
   onConnect,
   onDisclose,
+  onAddEvidence,
+  activeParty,
 }) {
   const [hovered, setHovered] = useState(false)
   const clickTimerRef = useRef(null)
@@ -334,8 +339,10 @@ export default function AssetNode({
     }
   }, [])
 
-  const handleCreateAsset = () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id)
-  const handleCreateSDA = () => onDisclose?.(node)
+  const isOwnedByUser = !node.owner || node.owner === activeParty
+  const handleCreateAsset = (!node.isEvidence && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
+  const handleCreateSDA = (!node.isEvidence && isOwnedByUser) ? () => onDisclose?.(node) : undefined
+  const handleAddEvidence = (!node.isEvidence && isOwnedByUser && !isAnchor) ? () => onAddEvidence?.(node) : undefined
   const handlePinToSurface = () => console.log('Pin to surface:', node.id, node.name)
   const handleDive = () => onDive?.(node)
 
@@ -358,6 +365,30 @@ export default function AssetNode({
     >
       {hasChildren && !isAnchor && (
         <StackPeeks count={childCount} isHovered={hovered} categoryColor={cat.color} />
+      )}
+
+      {/* Dive hint tooltip — shows when selected node has children */}
+      {isSelected && !isAnchor && node.childCount > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: -44,
+          left: CARD_W / 2,
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+          padding: '4px 10px',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          fontSize: 10,
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-secondary)',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          animation: 'diveHintIn 250ms ease-out forwards',
+        }}>
+          {node.childCount} associated asset{node.childCount !== 1 ? 's' : ''} · Double-click to dive in
+        </div>
       )}
 
       <div
@@ -455,19 +486,22 @@ export default function AssetNode({
           alignItems: 'center',
           gap: 6,
         }}>
-          <HealthBar health={node.health} />
+          <HealthBar health={node.displayHealth || node.health} />
           <span style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
             color: 'var(--text-tertiary)',
             whiteSpace: 'nowrap',
           }}>
-            {node.health.bad > 0
-              ? `${node.health.ok} · ${node.health.bad}`
-              : node.claimCount > 0
-                ? `${node.claimCount}`
-                : '0 claims'
-            }
+            {(() => {
+              const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+              const dc = dh.ok + dh.bad
+              return dh.bad > 0
+                ? `${dh.ok} · ${dh.bad}`
+                : dc > 0
+                  ? `${dc}`
+                  : '0 claims'
+            })()}
           </span>
         </div>
       </div>
@@ -476,6 +510,7 @@ export default function AssetNode({
         <ActionBar
           onCreateAsset={handleCreateAsset}
           onCreateSDA={handleCreateSDA}
+          onAddEvidence={handleAddEvidence}
           onDive={handleDive}
           onOpenSubgraph={() => onOpenSubgraph?.(node)}
           onSurface={onSurface}

@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -26,6 +26,8 @@ export const SDA_TYPES = {
    LAYOUT PRIMITIVES
    ═══════════════════════════════════════════════════════════════════════ */
 export function Backdrop({ children, onClose }) {
+  const mouseDownOnBackdrop = useRef(false)
+
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'Escape') {
@@ -40,7 +42,15 @@ export function Backdrop({ children, onClose }) {
 
   return (
     <div
-      onClick={e => { if (e.target === e.currentTarget) onClose?.() }}
+      onMouseDown={e => {
+        mouseDownOnBackdrop.current = (e.target === e.currentTarget)
+      }}
+      onClick={e => {
+        if (e.target === e.currentTarget && mouseDownOnBackdrop.current) {
+          onClose?.()
+        }
+        mouseDownOnBackdrop.current = false
+      }}
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,.65)',
@@ -173,7 +183,7 @@ export function CopyBadge({ value }) {
   const [copied, setCopied] = useState(false)
   const copy = (e) => { e.stopPropagation(); navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
-    <span onClick={copy} style={{
+    <span data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined} onClick={copy} style={{
       display: 'inline-flex', alignItems: 'center', gap: 4,
       padding: '3px 9px', borderRadius: 4,
       background: 'var(--bg-raised)', border: '1px solid var(--border)',

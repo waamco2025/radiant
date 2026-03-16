@@ -105,10 +105,10 @@ function getGridParams(depthLevel) {
 
 // Layout children in a horizontal row centered at origin
 const SDA_LEGEND_TOOLTIPS = {
-  full: 'Full access — evaluators can extract data fields and run inference requirements against the evidence.',
-  selective: 'Inference only — evaluators can run requirement checks against the evidence but cannot extract raw data.',
-  proofonly: 'Proof of Evaluation — shares the pass/fail result of a prior evaluation without granting access to the evidence.',
-  cascade: 'Cascaded access — a disclosure passed through an intermediary, extending visibility to a downstream party.',
+  full: 'Full disclosure — the receiving party can access all parsed data fields and run evaluations against them.',
+  selective: 'Selective disclosure — the receiving party can only access data fields chosen by the asset owner.',
+  proofonly: 'Proof-only — the receiving party sees only pass/fail results from existing evaluations. No data field access.',
+  cascade: 'Cascade disclosure — access was forwarded through an intermediary. Permission is capped at the intermediary\'s own access level.',
 }
 
 function LegendBar() {
@@ -200,18 +200,19 @@ function LegendBar() {
 
 function snapToGrid(val, depthLevel) {
   const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
-  return Math.round(val / spacing) * spacing
+  return Math.round(Math.round(val / spacing) * spacing)
 }
 
 function layoutChildren(children, depthLevel = 1) {
-  const stepX = 260  // card width + gap
+  const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
+  const stepX = Math.ceil(300 / spacing) * spacing // at least 300px apart, snapped to grid
   const totalW = (children.length - 1) * stepX
-  const startX = -Math.round(totalW / 2)
+  const startX = -totalW / 2
 
   return children.map((child, i) => ({
     ...child,
     x: snapToGrid(startX + i * stepX, depthLevel),
-    y: 0, // y=0 is already grid-aligned (multiple of any spacing)
+    y: snapToGrid(0, depthLevel),
   }))
 }
 
@@ -228,6 +229,8 @@ const V2Canvas = forwardRef(function V2Canvas({
   onLayerChange,
   onConnect,
   onDisclose,
+  onAddEvidence,
+  activeParty,
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -245,6 +248,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   const zoomRef = useRef(0.7)
   const [zoom, setZoom] = useState(0.7)
   const dirtyRef = useRef(true)
+  const edgeAnimRef = useRef(null)
 
   // Pan state
   const draggingRef = useRef(false)
@@ -273,6 +277,13 @@ const V2Canvas = forwardRef(function V2Canvas({
     color: null,
     label: 'Root',
   }])
+
+  // Sync root layer when prop data changes (e.g. after disclosure acceptance adds nodes/edges)
+  useEffect(() => {
+    if (layerStack.length !== 1) return  // only sync at root depth
+    const filteredNodes = rootNodes.filter(n => n.x !== undefined && n.y !== undefined)
+    setLayerStack(prev => [{ ...prev[0], nodes: filteredNodes, edges: rootEdges }])
+  }, [rootNodes, rootEdges])
 
   const currentLayer = layerStack[layerStack.length - 1]
   const depth = layerStack.length - 1
@@ -463,9 +474,17 @@ const V2Canvas = forwardRef(function V2Canvas({
         x1 = fromNode.x; y1 = fromNode.y
         x2 = toNode.x; y2 = toNode.y
       } else {
-        // Card mode: right-center → left-center
-        x1 = fromNode.x + halfW; y1 = fromNode.y
-        x2 = toNode.x - halfW; y2 = toNode.y
+        // Card mode: exit/enter from the side facing the other node
+        const dx = toNode.x - fromNode.x
+        if (dx >= 0) {
+          // to is to the right: exit from right-center, enter from left-center
+          x1 = fromNode.x + halfW; y1 = fromNode.y
+          x2 = toNode.x - halfW;   y2 = toNode.y
+        } else {
+          // to is to the left: exit from left-center, enter from right-center
+          x1 = fromNode.x - halfW; y1 = fromNode.y
+          x2 = toNode.x + halfW;   y2 = toNode.y
+        }
       }
 
       // Apply scale factor (centered on midpoint for edge scale animation)
@@ -492,10 +511,18 @@ const V2Canvas = forwardRef(function V2Canvas({
         p1 = new THREE.Vector3(fx, -cpy, 0)
         p2 = new THREE.Vector3(tx, -cpy, 0)
       } else {
-        // Horizontal control points for smooth S-curve
-        const cpx = (fx + tx) / 2
-        p1 = new THREE.Vector3(cpx, -fy, 0)
-        p2 = new THREE.Vector3(cpx, -ty, 0)
+        // Horizontal control points for smooth curve
+        // Use 40% of horizontal distance as control arm length, with a minimum
+        // to prevent degenerate curves when nodes are nearly vertically aligned
+        const hDist = Math.abs(tx - fx)
+        const vDist = Math.abs(ty - fy)
+        const armLength = Math.max(hDist * 0.4, Math.min(60, vDist * 0.25))
+
+        // Control points extend horizontally from each endpoint
+        // Direction matches the edge flow (outward from source, inward to target)
+        const dirX = tx >= fx ? 1 : -1
+        p1 = new THREE.Vector3(fx + armLength * dirX, -fy, 0)
+        p2 = new THREE.Vector3(tx - armLength * dirX, -ty, 0)
       }
 
       const curve = new THREE.CubicBezierCurve3(p0, p1, p2, p3)
@@ -687,8 +714,9 @@ const V2Canvas = forwardRef(function V2Canvas({
     const isDark = document.documentElement.dataset.theme !== 'light'
     const gridColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
     const gridPoints = []
-    for (let gx = -GRID_RANGE; gx <= GRID_RANGE; gx += spacing) {
-      for (let gy = -GRID_RANGE; gy <= GRID_RANGE; gy += spacing) {
+    const gridStart = -Math.ceil(GRID_RANGE / spacing) * spacing
+    for (let gx = gridStart; gx <= GRID_RANGE; gx += spacing) {
+      for (let gy = gridStart; gy <= GRID_RANGE; gy += spacing) {
         gridPoints.push(new THREE.Vector3(gx, gy, -1))
       }
     }
@@ -1069,7 +1097,8 @@ const V2Canvas = forwardRef(function V2Canvas({
     const childrenWithPos = layoutChildren(node.children)
 
     // Prepend anchor card (parent node) above the children row, snapped to grid
-    const ANCHOR_GAP = 200 // vertical distance from children row to anchor
+    const childSpacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, targetDepth)
+    const ANCHOR_GAP = Math.round(200 / childSpacing) * childSpacing
     const childRowY = childrenWithPos.length > 0 ? childrenWithPos[0].y : 0
     const anchorY = snapToGrid(childRowY - ANCHOR_GAP, targetDepth)
     const anchorNode = { ...node, _isAnchor: true, x: 0, y: anchorY }
@@ -1142,6 +1171,7 @@ const V2Canvas = forwardRef(function V2Canvas({
         allNodes.forEach(n => { nMap[n.id] = n })
         buildEdges(edgeGroupRef.current, childEdges, nMap, 0.5)
         animateEdgeDraw(edgeGroupRef.current, 350, 150)
+        buildGrid(targetDepth)
         transitioningRef.current = false
         setTransitioning(false)
         requestAnimationFrame(() => setUnfurlSettle(true))
@@ -1183,14 +1213,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       delete document.documentElement.dataset.vtDirection
       transitioningRef.current = false
       setTransitioning(false)
+      buildGrid(targetDepth)
       // Fade in child cards after edges have drawn
       requestAnimationFrame(() => setUnfurlSettle(true))
     }).catch(() => {
       delete document.documentElement.dataset.vtDirection
       transitioningRef.current = false
       setTransitioning(false)
+      buildGrid(targetDepth)
     })
-  }, [layerStack, updateCamera, computeFitCamera, clearGroup, buildEdges, animateEdgeDraw, fadeEdgesIn, updateClearColor, worldToScreen, animateDotStreaks, onCloseSel])
+  }, [layerStack, updateCamera, computeFitCamera, clearGroup, buildEdges, animateEdgeDraw, fadeEdgesIn, updateClearColor, worldToScreen, animateDotStreaks, onCloseSel, buildGrid])
 
   // ===== SURFACE (View Transitions API + WebGL environmental effects) =====
   const handleSurface = useCallback(() => {
@@ -1270,6 +1302,7 @@ const V2Canvas = forwardRef(function V2Canvas({
       updateClearColor(targetDepth, parentLayer.color)
       requestAnimationFrame(() => {
         buildParentEdges()
+        buildGrid(targetDepth)
         transitioningRef.current = false
         setTransitioning(false)
         setDiveTargetId(null)
@@ -1311,14 +1344,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       setTransitioning(false)
       setDiveTargetId(null)
       setUnfurlSettle(false)
+      buildGrid(targetDepth)
     }).catch(() => {
       delete document.documentElement.dataset.vtDirection
       transitioningRef.current = false
       setTransitioning(false)
       setDiveTargetId(null)
       setUnfurlSettle(false)
+      buildGrid(targetDepth)
     })
-  }, [layerStack, currentLayer.parentNode, updateCamera, clearGroup, buildEdges, fadeEdgesIn, updateClearColor, worldToScreen, onSelect, animateDotStreaks])
+  }, [layerStack, currentLayer.parentNode, updateCamera, clearGroup, buildEdges, fadeEdgesIn, updateClearColor, worldToScreen, onSelect, animateDotStreaks, buildGrid])
 
   // Expose actions for Detail Panel footer
   useImperativeHandle(ref, () => ({
@@ -1349,37 +1384,89 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (!edgeGroupRef.current) return
     if (transitioningRef.current) return
     const lodMode = zoomRef.current < LOD_THRESHOLD
-    buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
+    // Defer to next frame to ensure dirty flag is picked up by the render loop
+    requestAnimationFrame(() => {
+      if (!edgeGroupRef.current) return
+      buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
+      dirtyRef.current = true
+    })
   }, [currentLayer, currentNodeMap, buildEdges, zoom])
 
-  // Dim non-chain edges when selection changes
+  // Dim non-chain edges + animate in-chain edges when selection changes
   useEffect(() => {
+    // Cancel any running edge animation
+    if (edgeAnimRef.current) {
+      cancelAnimationFrame(edgeAnimRef.current)
+      edgeAnimRef.current = null
+    }
+
     const group = edgeGroupRef.current
     if (!group) return
     const needsRender = group.children.length > 0
+
+    // Tag each edge as in-chain and set base opacity
     group.children.forEach(line => {
       const mat = line.material
       if (!mat) return
       const from = line.userData.from
       const to = line.userData.to
       const inChain = !chainNodeIds || (chainNodeIds.has(from) && chainNodeIds.has(to))
+      line.userData._inChain = inChain
+
       if (mat.userData?.isSolid) {
-        // Solid edges use pre-mixed color — switch to transparent mode for dimming
         if (inChain) {
-          mat.transparent = false
+          mat.transparent = true
           mat.opacity = 1.0
         } else {
           mat.transparent = true
           mat.opacity = 0.12
         }
       } else {
-        // Dashed edges already transparent
         mat.opacity = inChain ? 0.5 : 0.12
+        // Reset dashOffset when deselected
+        if (!chainNodeIds) mat.dashOffset = 0
       }
       mat.needsUpdate = true
     })
+
+    // Start edge animation loop when a chain is active
+    if (chainNodeIds && group.children.length > 0) {
+      const startTime = performance.now()
+      const tick = () => {
+        const t = (performance.now() - startTime) * 0.001 // seconds
+        let changed = false
+        group.children.forEach(line => {
+          if (!line.userData._inChain) return
+          const mat = line.material
+          if (!mat) return
+          if (mat.userData?.isSolid) {
+            // Solid: gentle opacity pulse
+            const pulse = 0.55 + 0.45 * Math.sin(t * 1.8)
+            mat.opacity = pulse
+            mat.needsUpdate = true
+            changed = true
+          } else {
+            // Dashed: marching ants via dashOffset
+            mat.dashOffset = -t * 12
+            mat.needsUpdate = true
+            changed = true
+          }
+        })
+        if (changed) dirtyRef.current = true
+        edgeAnimRef.current = requestAnimationFrame(tick)
+      }
+      edgeAnimRef.current = requestAnimationFrame(tick)
+    }
+
     if (needsRender && rendererRef.current && sceneRef.current && cameraRef.current) {
       rendererRef.current.render(sceneRef.current, cameraRef.current)
+    }
+
+    return () => {
+      if (edgeAnimRef.current) {
+        cancelAnimationFrame(edgeAnimRef.current)
+        edgeAnimRef.current = null
+      }
     }
   }, [chainNodeIds, zoom])
 
@@ -1462,12 +1549,15 @@ const V2Canvas = forwardRef(function V2Canvas({
   // Theme change rebuilds grid + edges + clear color
   useEffect(() => {
     const observer = new MutationObserver(() => {
-      buildGrid(depth)
-      if (edgeGroupRef.current) {
-        const lodMode = zoomRef.current < LOD_THRESHOLD
-        buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
-      }
-      updateClearColor(depth, currentLayer.color)
+      requestAnimationFrame(() => {
+        buildGrid(depth)
+        if (edgeGroupRef.current) {
+          const lodMode = zoomRef.current < LOD_THRESHOLD
+          buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
+        }
+        updateClearColor(depth, currentLayer.color)
+        dirtyRef.current = true
+      })
     })
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => observer.disconnect()
@@ -1597,8 +1687,8 @@ const V2Canvas = forwardRef(function V2Canvas({
       return
     }
 
-    // Zoom in ~8% centered on double-click position
-    const factor = 1.08
+    // Zoom in 2x centered on double-click position
+    const factor = 2
     const oldZoom = zoomRef.current
     const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * factor))
     const container = containerRef.current
@@ -1638,7 +1728,17 @@ const V2Canvas = forwardRef(function V2Canvas({
     const rc = raycasterRef.current
     if (!camera || !edgeGroup || !container || !rc) return
     if (transitioningRef.current) return
-    if (zoomRef.current < LOD_THRESHOLD) return
+
+    // Don't show edge tooltips when hovering over HTML card elements
+    const overlay = overlayRef.current
+    if (overlay) {
+      const target = document.elementFromPoint(e.clientX, e.clientY)
+      if (target && overlay.contains(target)) {
+        setHoveredEdge(null)
+        setEdgeTooltipPos(null)
+        return
+      }
+    }
 
     const rect = container.getBoundingClientRect()
     const mouse = new THREE.Vector2(
@@ -1781,6 +1881,8 @@ const V2Canvas = forwardRef(function V2Canvas({
                 zoom={zoom}
                 onConnect={transitioning ? undefined : onConnect}
                 onDisclose={transitioning ? undefined : onDisclose}
+                onAddEvidence={transitioning ? undefined : onAddEvidence}
+                activeParty={activeParty}
               />
             </div>
           )

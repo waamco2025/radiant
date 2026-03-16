@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { BTN_H } from './constants'
 import GridRow from './shared/GridRow'
-import CopyBadge from './shared/CopyBadge'
 import { SC, SX } from './shared/StatPills'
 import { Tip } from './shared/Tooltip'
 import ClaimsTable from './ClaimsTable'
@@ -94,11 +93,6 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
             fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
             fontWeight: 600, marginTop: 8, marginBottom: 14,
           }}>{ev.id}</div>
-          <GridRow
-            label="Party DOT"
-            labelTip="Data Object Title — a unique on-chain identifier for this organization. Used to verify the evaluating party's identity."
-            value={<CopyBadge value={ev.orgDot} />}
-          />
           <GridRow label="Requirements" value={ev.requirements} vc="var(--accent-indigo)" />
           <GridRow label="Reviewer" value={`${ev.reviewer} · ${ev.reviewDate}`} vc="var(--accent-green)" />
           <GridRow label="Credits" value={String(ev.creditsUsed)} />

@@ -3,12 +3,15 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode } from './v2Data.js'
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
 import RequestDisclosureModal from '../components/modals/RequestDisclosureModal.jsx'
 import DisclosureResponseModal from '../components/modals/DisclosureResponseModal.jsx'
 import CascadeModal from '../components/modals/CascadeModal.jsx'
+import RegisterAssetModal from '../components/modals/RegisterAssetModal.jsx'
+import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
+import { Backdrop } from '../components/modals/ModalShared.jsx'
 
 const SESSION_KEY = 'radiant-v2-booted'
 
@@ -19,7 +22,75 @@ export default function V2App() {
   const [modalNode, setModalNode] = useState(null)
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
-  const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => getDataForRole(roleId), [roleId])
+  const roleData = useMemo(() => getDataForRole(roleId), [roleId])
+
+  // Per-role dynamic state — persists across role switches
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {} }
+  const [perRoleState, setPerRoleState] = useState(() => {
+    const init = {}
+    ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
+    return init
+  })
+
+  const updateRoleState = useCallback((targetRoleId, updater) => {
+    setPerRoleState(prev => ({
+      ...prev,
+      [targetRoleId]: updater(prev[targetRoleId] || { ...emptyRoleState }),
+    }))
+  }, [])
+
+  const currentRoleState = perRoleState[roleId] || emptyRoleState
+  const { addedNodes, addedSDAs, addedEdges, dismissedReqs } = currentRoleState
+  const addedChildren = currentRoleState.addedChildren || {}
+
+  const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => {
+    const data = { ...roleData }
+
+    // Merge added nodes
+    if (addedNodes.length > 0) {
+      data.nodes = [...data.nodes, ...addedNodes]
+    }
+
+    // Merge added SDAs into matching nodes
+    if (Object.keys(addedSDAs).length > 0) {
+      data.nodes = data.nodes.map(n => {
+        const added = addedSDAs[n.id]
+        if (!added) return n
+        return { ...n, sdas: [...(n.sdas || []), ...added] }
+      })
+    }
+
+    // Merge added children into matching parent nodes
+    if (Object.keys(addedChildren).length > 0) {
+      data.nodes = data.nodes.map(n => {
+        const added = addedChildren[n.id]
+        if (!added) return n
+        const newChildren = [...(n.children || []), ...added]
+        return {
+          ...n,
+          children: newChildren,
+          hasStack: true,
+          childCount: newChildren.length,
+          hasEvidence: newChildren.some(c => c.isEvidence) || n.hasEvidence,
+        }
+      })
+    }
+
+    // Rebuild nodeMap
+    const newMap = {}
+    data.nodes.forEach(n => { newMap[n.id] = n })
+    data.nodes.forEach(n => {
+      if (n.children) n.children.forEach(c => { newMap[c.id] = c })
+    })
+    data.nodeMap = newMap
+
+    // Merge added edges
+    if (addedEdges.length > 0) {
+      data.edges = [...data.edges, ...addedEdges]
+    }
+
+    return data
+  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren])
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -27,13 +98,17 @@ export default function V2App() {
   const canvasRef = useRef(null)
   const [publishNode, setPublishNode] = useState(null)
   const [connectNode, setConnectNode] = useState(null)
+  const [registerNode, setRegisterNode] = useState(null)
   const [responseRequest, setResponseRequest] = useState(null)
   const [showInbox, setShowInbox] = useState(false)
-  const [dismissedReqs, setDismissedReqs] = useState([])
   const [cascadeContext, setCascadeContext] = useState(null)
+  const [evidenceNode, setEvidenceNode] = useState(null)
   const inboxRef = useRef(null)
+  const nodeMapRef = useRef(nodeMap)
+  useEffect(() => { nodeMapRef.current = nodeMap }, [nodeMap])
 
   const visibleRequests = pendingRequests.filter(r => !dismissedReqs.includes(r.id))
+  const [bellHover, setBellHover] = useState(false)
   const [glowIntensity, setGlowIntensity] = useState(0) // 0 = no glow, >0 = glow factor
   const [booted, setBooted] = useState(() => {
     const nav = performance.getEntriesByType?.('navigation')?.[0]
@@ -100,7 +175,6 @@ export default function V2App() {
     const role = ROLES.find(r => r.id === newRoleId)
     if (role) setCredits(role.credits)
     setShowAcct(false)
-    setDismissedReqs([])
   }, [roleId])
 
   // Detail Panel footer actions
@@ -115,6 +189,16 @@ export default function V2App() {
   const handlePanelSurface = useCallback(() => {
     canvasRef.current?.surface()
   }, [])
+
+  const handleViewChild = useCallback((childNode) => {
+    const parentNode = sel ? nodeMap[sel] : null
+    if (parentNode && canvasRef.current) {
+      canvasRef.current.dive(parentNode)
+      setTimeout(() => {
+        setSel(childNode.id)
+      }, 600)
+    }
+  }, [sel, nodeMap])
 
   const isAnchorSelected = layerInfo.depth > 0 && sel === layerInfo.anchorId
 
@@ -212,13 +296,17 @@ export default function V2App() {
           <div ref={inboxRef} style={{ position: 'relative' }}>
             <button
               onClick={() => { setShowInbox(v => !v); setShowCredits(false); setShowAcct(false) }}
+              onMouseEnter={() => setBellHover(true)}
+              onMouseLeave={() => setBellHover(false)}
               style={{
                 ...pillStyle,
                 color: visibleRequests.length > 0 ? 'var(--accent-amber)' : 'var(--text-secondary)',
                 position: 'relative',
+                borderColor: (bellHover || showInbox)
+                  ? (visibleRequests.length > 0 ? 'var(--accent-amber)' : 'var(--border-hover)')
+                  : 'var(--border)',
+                transition: 'border-color 150ms',
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = visibleRequests.length > 0 ? 'var(--accent-amber)' : 'var(--border-hover)' }}
-              onMouseLeave={e => { if (!showInbox) e.currentTarget.style.borderColor = 'var(--border)' }}
             >
               <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
                 <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-1.5 4-1.5 4h12s-1.5-1.5-1.5-4A4.5 4.5 0 008 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -290,15 +378,11 @@ export default function V2App() {
                         </div>
                         <span style={{
                           fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                          color: req.requestedLevel === 'full' ? '#6b8aff' : '#fbbf24',
+                          color: 'var(--accent-indigo)',
                           padding: '2px 6px',
-                          background: req.requestedLevel === 'full'
-                            ? 'color-mix(in srgb, #6b8aff 10%, transparent)'
-                            : 'color-mix(in srgb, #fbbf24 10%, transparent)',
+                          background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
                           borderRadius: 4,
-                        }}>
-                          {req.requestedLevel === 'full' ? 'FULL' : 'SELECTIVE'}
-                        </span>
+                        }}>REQUEST</span>
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 30 }}>
                         {req.asset.name}
@@ -532,6 +616,8 @@ export default function V2App() {
           onLayerChange={setLayerInfo}
           onConnect={(node) => setConnectNode(node)}
           onDisclose={(node) => setPublishNode(node)}
+          onAddEvidence={(node) => setEvidenceNode(node)}
+          activeParty={activeRole.party}
         />
 
         {/* Detail Panel overlay */}
@@ -556,8 +642,10 @@ export default function V2App() {
               depth={layerInfo.depth}
               onDisclose={() => sel && nodeMap[sel] && setPublishNode(nodeMap[sel])}
               onConnect={() => sel && nodeMap[sel] && setConnectNode(nodeMap[sel])}
+              onAddEvidence={() => sel && nodeMap[sel] && setEvidenceNode(nodeMap[sel])}
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
+              onViewChild={handleViewChild}
             />
           </div>
         )}
@@ -620,18 +708,356 @@ export default function V2App() {
         <V2SubgraphModal node={modalNode} onClose={handleCloseModal} />
       )}
 
-      {/* Disclosure modals */}
+      {/* Disclosure modals — shared persistent backdrop */}
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode) && (
+        <Backdrop onClose={() => {
+          if (connectNode) setConnectNode(null)
+          else if (registerNode) setRegisterNode(null)
+          else if (evidenceNode) setEvidenceNode(null)
+          else if (responseRequest) setResponseRequest(null)
+          else if (publishNode) setPublishNode(null)
+          else if (cascadeContext) setCascadeContext(null)
+        }}>
       {publishNode && (
-        <PublishModal node={publishNode} onClose={() => setPublishNode(null)} />
+        <PublishModal node={publishNode} onClose={() => setPublishNode(null)} _noBackdrop />
       )}
       {connectNode && (
-        <RequestDisclosureModal contextNode={connectNode} onClose={() => setConnectNode(null)} />
+        <RequestDisclosureModal
+          contextNode={connectNode}
+          onClose={() => setConnectNode(null)}
+          onRegisterAsset={() => {
+            const node = connectNode
+            setConnectNode(null)
+            setRegisterNode(node)
+          }}
+          _noBackdrop
+        />
+      )}
+      {registerNode && (
+        <RegisterAssetModal
+          parentNode={registerNode}
+          activeParty={activeRole.party}
+          onClose={() => setRegisterNode(null)}
+          onBack={() => {
+            const node = registerNode
+            setRegisterNode(null)
+            setConnectNode(node)
+          }}
+          onComplete={({ name, category, description }) => {
+            const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
+            const nodeId = `${slug}-${Date.now().toString(36)}`
+            const today = new Date().toISOString().slice(0, 10)
+
+            // Find nodes already connected to the parent via edges
+            const connectedEdges = edges.filter(e => e.from === registerNode.id)
+            const connectedNodes = connectedEdges
+              .map(e => nodeMap[e.to])
+              .filter(Boolean)
+
+            let newX, newY
+            if (connectedNodes.length > 0) {
+              newX = connectedNodes[0].x
+              const lowestY = Math.max(...connectedNodes.map(n => n.y))
+              newY = lowestY + 200
+            } else {
+              newX = (registerNode.x || 0) + 500
+              newY = registerNode.y || 0
+            }
+
+            const newNode = {
+              id: nodeId,
+              pin: makePin(nodeId),
+              dot: makeDot(activeRole.party),
+              name,
+              category,
+              owner: activeRole.party,
+              parentId: null,
+              children: [],
+              health: { ok: 0, warn: 0, bad: 0 },
+              childHealth: null,
+              totalHealth: null,
+              displayHealth: { ok: 0, warn: 0, bad: 0 },
+              claimCount: 0,
+              displayClaimCount: 0,
+              hasEvidence: false,
+              hasStack: false,
+              childCount: 0,
+              evidence: null,
+              evaluations: [],
+              sdas: [{
+                type: 'full',
+                party: activeRole.party,
+                partyLabel: 'internal',
+                partyDot: activeRole.partyDot,
+                created: today,
+                expires: null,
+                pins: [],
+                assetName: null,
+                assetPin: null,
+              }],
+              x: newX,
+              y: newY,
+              parentOwner: activeRole.party,
+              isCascade: false,
+              cascadeVia: null,
+              upstreamSda: null,
+              upstreamAssets: null,
+              isEvidence: false,
+              lastEval: null,
+              description: description || null,
+            }
+
+            updateRoleState(roleId, prev => ({
+              ...prev,
+              addedNodes: [...prev.addedNodes, newNode],
+              addedEdges: [...prev.addedEdges, {
+                id: `e-${registerNode.id}-${nodeId}`,
+                from: registerNode.id,
+                to: nodeId,
+                sdaType: 'full',
+              }],
+            }))
+
+            setRegisterNode(null)
+            setTimeout(() => setSel(nodeId), 100)
+          }}
+          _noBackdrop
+        />
       )}
       {responseRequest && (
-        <DisclosureResponseModal request={responseRequest} onClose={() => {
-          setDismissedReqs(prev => [...prev, responseRequest.id])
-          setResponseRequest(null)
-        }} />
+        <DisclosureResponseModal
+          request={responseRequest}
+          onClose={() => setResponseRequest(null)}
+          onComplete={(disclosureType) => {
+            const req = responseRequest
+            const reqNodeId = req.node?.id
+            const today = new Date().toISOString().slice(0, 10)
+
+            if (reqNodeId && disclosureType) {
+              // Find the other role for cross-role mutations
+              const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+
+              // 1. Create SDA on the target asset (current role)
+              const newSDA = {
+                type: disclosureType,
+                party: req.from.name,
+                partyDot: req.from.dot,
+                created: today,
+                expires: '2027-03-15',
+                pins: [],
+                assetName: req.connectTo?.name || null,
+                assetPin: req.connectTo?.pin || null,
+              }
+              updateRoleState(roleId, prev => ({
+                ...prev,
+                addedSDAs: {
+                  ...prev.addedSDAs,
+                  [reqNodeId]: [...(prev.addedSDAs[reqNodeId] || []), newSDA],
+                },
+              }))
+
+              // 2. If connectTo exists and the node isn't already on the network, add it
+              if (req.connectTo && !nodeMap[req.connectTo.id]) {
+                const connectNodeObj = {
+                  id: req.connectTo.id,
+                  pin: req.connectTo.pin,
+                  dot: req.from.dot,
+                  name: req.connectTo.name,
+                  category: req.connectTo.category || 'product',
+                  owner: req.connectTo.owner || req.from.name,
+                  parentId: null,
+                  children: [],
+                  health: { ok: 0, warn: 0, bad: 0 },
+                  childHealth: null,
+                  totalHealth: null,
+                  displayHealth: { ok: 0, warn: 0, bad: 0 },
+                  claimCount: 0,
+                  displayClaimCount: 0,
+                  hasEvidence: false,
+                  hasStack: false,
+                  childCount: 0,
+                  evidence: null,
+                  evaluations: [],
+                  sdas: [{
+                    type: disclosureType,
+                    party: activeRole.party,
+                    partyDot: activeRole.partyDot,
+                    created: today,
+                    expires: '2027-03-15',
+                    pins: [],
+                    assetName: req.asset.name,
+                    assetPin: req.node?.pin || null,
+                  }],
+                  x: (req.node?.x || 500) + 500,
+                  y: req.node?.y || 0,
+                  parentOwner: req.connectTo.owner || req.from.name,
+                  isCascade: false,
+                  cascadeVia: null,
+                  upstreamSda: null,
+                  upstreamAssets: null,
+                  isEvidence: false,
+                  lastEval: null,
+                }
+                updateRoleState(roleId, prev => ({
+                  ...prev,
+                  addedNodes: [...prev.addedNodes, connectNodeObj],
+                  addedEdges: [...prev.addedEdges, {
+                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                    from: req.connectTo.id,
+                    to: reqNodeId,
+                    sdaType: disclosureType,
+                  }],
+                }))
+              }
+              // If the connectTo node already exists, just add the edge + SDA
+              else if (req.connectTo && nodeMap[req.connectTo.id]) {
+                const connectSDA = {
+                  type: disclosureType,
+                  party: activeRole.party,
+                  partyDot: activeRole.partyDot,
+                  created: today,
+                  expires: '2027-03-15',
+                  pins: [],
+                  assetName: req.asset.name,
+                  assetPin: req.node?.pin || null,
+                }
+                updateRoleState(roleId, prev => ({
+                  ...prev,
+                  addedEdges: [...prev.addedEdges, {
+                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                    from: req.connectTo.id,
+                    to: reqNodeId,
+                    sdaType: disclosureType,
+                  }],
+                  addedSDAs: {
+                    ...prev.addedSDAs,
+                    [req.connectTo.id]: [...(prev.addedSDAs[req.connectTo.id] || []), connectSDA],
+                  },
+                }))
+              }
+
+              // 3. Cross-role mutation: write to the other role's state
+              if (otherRoleId && req.connectTo) {
+                // The other role (buyer) sees: SDA on their connectTo node + SDA on the disclosed asset + edge
+                const crossSdaOnConnectTo = {
+                  type: disclosureType,
+                  party: activeRole.party,
+                  partyDot: activeRole.partyDot,
+                  created: today,
+                  expires: '2027-03-15',
+                  pins: [],
+                  assetName: req.asset.name,
+                  assetPin: req.node?.pin || null,
+                }
+
+                const crossSdaOnAsset = {
+                  type: disclosureType,
+                  party: req.from.name,
+                  partyDot: req.from.dot,
+                  created: today,
+                  expires: '2027-03-15',
+                  pins: [],
+                  assetName: req.connectTo.name,
+                  assetPin: req.connectTo.pin || null,
+                }
+
+                // Compute position for the disclosed node in the target role's layout
+                const otherRoleData = getDataForRole(otherRoleId)
+                const otherConnectNodeReal = otherRoleData.nodeMap[req.connectTo.id]
+                const targetParty = ROLES.find(r => r.id === otherRoleId)?.party
+                const disclosedNodes = otherRoleData.nodes.filter(n => n.owner && n.owner !== targetParty && n.owner !== null)
+                const disclosedX = disclosedNodes.length > 0
+                  ? disclosedNodes[0].x
+                  : (otherConnectNodeReal?.x || 900) + 500
+                const existingDynamic = perRoleState[otherRoleId]?.addedNodes || []
+                const allRelevantNodes = [...disclosedNodes, ...existingDynamic]
+                const nodesInColumn = allRelevantNodes.filter(n => Math.abs(n.x - disclosedX) < 100)
+                const lowestY = nodesInColumn.length > 0
+                  ? Math.max(...nodesInColumn.map(n => n.y))
+                  : (otherConnectNodeReal?.y || 0)
+                const newY = lowestY + 200
+
+                // Build the disclosed asset node for the other role's network
+                const disclosedNodeForOther = {
+                  id: reqNodeId,
+                  pin: req.node?.pin || makePin(reqNodeId),
+                  dot: makeDot(activeRole.party),
+                  name: req.asset.name,
+                  category: 'product',
+                  owner: activeRole.party,
+                  parentId: null,
+                  children: [],
+                  health: { ok: 0, warn: 0, bad: 0 },
+                  childHealth: null,
+                  totalHealth: null,
+                  displayHealth: { ok: 0, warn: 0, bad: 0 },
+                  claimCount: 0,
+                  displayClaimCount: 0,
+                  hasEvidence: false,
+                  hasStack: false,
+                  childCount: 0,
+                  evidence: null,
+                  evaluations: [],
+                  sdas: [crossSdaOnAsset],
+                  x: disclosedX,
+                  y: newY,
+                  parentOwner: activeRole.party,
+                  isCascade: false,
+                  cascadeVia: null,
+                  upstreamSda: null,
+                  upstreamAssets: null,
+                  isEvidence: false,
+                  lastEval: null,
+                }
+
+                updateRoleState(otherRoleId, prev => {
+                  // Check if the asset node already exists in the other role's static or dynamic data
+                  const existsInStatic = !!otherRoleData.nodeMap[reqNodeId]
+                  const existsInDynamic = prev.addedNodes.some(n => n.id === reqNodeId)
+
+                  const newState = { ...prev }
+
+                  // Add SDA on the connectTo node (buyer's asset that requested disclosure)
+                  newState.addedSDAs = {
+                    ...prev.addedSDAs,
+                    [req.connectTo.id]: [...(prev.addedSDAs[req.connectTo.id] || []), crossSdaOnConnectTo],
+                  }
+
+                  // Add the disclosed asset node if it doesn't exist
+                  if (!existsInStatic && !existsInDynamic) {
+                    newState.addedNodes = [...prev.addedNodes, disclosedNodeForOther]
+                  } else {
+                    // Node exists — just add the SDA to it
+                    newState.addedSDAs = {
+                      ...newState.addedSDAs,
+                      [reqNodeId]: [...(newState.addedSDAs[reqNodeId] || []), crossSdaOnAsset],
+                    }
+                  }
+
+                  // Add edge between connectTo and disclosed asset
+                  newState.addedEdges = [...prev.addedEdges, {
+                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                    from: req.connectTo.id,
+                    to: reqNodeId,
+                    sdaType: disclosureType,
+                  }]
+
+                  return newState
+                })
+              }
+            }
+
+            updateRoleState(roleId, prev => ({
+              ...prev,
+              dismissedReqs: [...prev.dismissedReqs, req.id],
+            }))
+            setResponseRequest(null)
+            if (reqNodeId) {
+              setTimeout(() => setSel(reqNodeId), 100)
+            }
+          }}
+          _noBackdrop
+        />
       )}
       {cascadeContext && (
         <CascadeModal
@@ -639,7 +1065,55 @@ export default function V2App() {
           sda={cascadeContext.sda}
           existingCascades={existingCascades || []}
           onClose={() => setCascadeContext(null)}
+          _noBackdrop
         />
+      )}
+      {evidenceNode && (
+        <AddEvidenceModal
+          parentNode={evidenceNode}
+          activeParty={activeRole.party}
+          onClose={() => setEvidenceNode(null)}
+          onComplete={({ name, filename }) => {
+            const parentId = evidenceNode.id
+
+            const evidenceMeta = makeEvidence(
+              parentId + '-' + Date.now().toString(36),
+              name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
+              activeRole.party + ' Lab',
+              '10 years'
+            )
+            evidenceMeta.filename = filename
+
+            const evNode = makeEvidenceNode(parentId, evidenceMeta, activeRole.party, [])
+
+            updateRoleState(roleId, prev => {
+              const existingChildren = prev.addedChildren?.[parentId] || []
+              return {
+                ...prev,
+                addedChildren: {
+                  ...(prev.addedChildren || {}),
+                  [parentId]: [...existingChildren, evNode],
+                },
+              }
+            })
+
+            const parentNodeRef = evidenceNode
+            setEvidenceNode(null)
+
+            setTimeout(() => {
+              if (canvasRef.current) {
+                const updatedParent = nodeMapRef.current[parentNodeRef.id]
+                if (updatedParent) {
+                  canvasRef.current.dive(updatedParent)
+                  setTimeout(() => setSel(evNode.id), 600)
+                }
+              }
+            }, 150)
+          }}
+          _noBackdrop
+        />
+      )}
+        </Backdrop>
       )}
     </div>
   )

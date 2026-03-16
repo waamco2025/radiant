@@ -4,20 +4,24 @@ import EvaluationsTab from './EvaluationsTab'
 import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, depth = 0, onDisclose, onConnect, onManageCascade, isOwner }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onManageCascade, isOwner, onViewChild }) {
   if (!node) return null
 
   // Decide which tabs to show based on populated fields
   const tabs = useMemo(() => {
     const t = []
-    // Always show Evaluations tab — it contains the "Run Evaluation" entry point
-    t.push({ id: 'evaluations', label: `Evaluations · ${node.evaluations?.length || 0}` })
+    // Show Evaluations tab if: node has evaluations, node has evidence children, or user owns the node (can run evaluations)
+    const hasEvals = node.evaluations?.length > 0
+    const hasEvidenceChildren = node.children?.some(c => c.isEvidence)
+    const showEvalTab = hasEvals || hasEvidenceChildren || isOwner
+    if (showEvalTab)
+      t.push({ id: 'evaluations', label: `Evaluations · ${node.evaluations?.length || 0}` })
     if (node.children?.length)
       t.push({ id: 'children', label: `Children · ${node.children.length}` })
-    if (node.sdas?.length)
+    if (node.sdas?.length && !node.isEvidence)
       t.push({ id: 'disclosures', label: `Disclosures · ${node.sdas.length}` })
     return t
-  }, [node])
+  }, [node, isOwner])
 
   const [tab, setTab] = useState(() => tabs[0]?.id || 'evaluations')
 
@@ -59,12 +63,22 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
   // Compute summary line
   const summary = useMemo(() => {
     const parts = []
-    const h = node.health || { ok: 0, bad: 0 }
+    const h = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
     if (h.ok || h.bad) parts.push(`${h.ok} verified · ${h.bad} failed`)
-    if (node.childHealth) {
-      const ch = node.childHealth
-      parts.push(`${ch.ok + ch.bad} claims across ${node.childCount || node.children?.length || 0} children`)
+
+    // Child claim count — count all children's claims
+    const childNodes = node.children || []
+    if (childNodes.length > 0) {
+      let totalChildClaims = 0
+      for (const c of childNodes) {
+        const ch = c.displayHealth || c.health || { ok: 0, warn: 0, bad: 0 }
+        totalChildClaims += ch.ok + ch.bad
+      }
+      if (totalChildClaims > 0) {
+        parts.push(`${totalChildClaims} claims across ${childNodes.length} children`)
+      }
     }
+
     if (!parts.length && node.evaluations?.length) parts.push(`${node.evaluations.length} evaluations`)
     return parts.join(' · ') || null
   }, [node])
@@ -87,29 +101,41 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       isAnchor={isAnchor}
       showPin={depth > 0 && !isAnchor}
       onConnect={onConnect}
+      onDisclose={onDisclose}
+      onAddEvidence={onAddEvidence}
+      isEvidence={!!node.isEvidence}
+      isOwner={isOwner}
     >
-      {/* Always-mounted tabs — display:none/block preserves state */}
-      <div style={{ display: tab === 'evaluations' ? 'block' : 'none' }}>
-        <EvaluationsTab
-          evidence={node.evidence}
-          evals={node.evaluations || []}
-          evalOpen={evalOpen}
-          claimsOpen={claimsOpen}
-          toggleEval={toggleEval}
-          toggleClaims={toggleClaims}
-          expandAll={expandAll}
-          collapseAll={collapseAll}
-          evOpen={evOpen}
-          toggleEv={() => setEvOpen(p => !p)}
-          isOwner={isOwner}
-        />
-      </div>
-      <div style={{ display: tab === 'children' ? 'block' : 'none' }}>
-        <ChildrenTab children={node.children || []} parentOwner={node.owner} />
-      </div>
-      <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
-        <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} onManageCascade={onManageCascade} />
-      </div>
+      {/* Conditionally mounted tabs — only render if tab exists in tabs array */}
+      {tabs.some(t => t.id === 'evaluations') && (
+        <div style={{ display: tab === 'evaluations' ? 'block' : 'none' }}>
+          <EvaluationsTab
+            evidence={node.evidence}
+            evals={node.evaluations || []}
+            evalOpen={evalOpen}
+            claimsOpen={claimsOpen}
+            toggleEval={toggleEval}
+            toggleClaims={toggleClaims}
+            expandAll={expandAll}
+            collapseAll={collapseAll}
+            evOpen={evOpen}
+            toggleEv={() => setEvOpen(p => !p)}
+            isOwner={isOwner}
+            isEvidence={!!node.isEvidence}
+            attributedClaims={node.attributedClaims}
+          />
+        </div>
+      )}
+      {tabs.some(t => t.id === 'children') && (
+        <div style={{ display: tab === 'children' ? 'block' : 'none' }}>
+          <ChildrenTab children={node.children || []} parentOwner={node.owner} onViewChild={onViewChild} />
+        </div>
+      )}
+      {tabs.some(t => t.id === 'disclosures') && (
+        <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
+          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} onManageCascade={onManageCascade} isOwner={isOwner} />
+        </div>
+      )}
     </PanelShell>
   )
 }

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow,
-  SDATypeCard, SDA_TYPES,
 } from './ModalShared'
 
 const REQ_OPTS = [
@@ -14,14 +13,44 @@ const REQ_OPTS = [
 ]
 
 /* ─── Step 1: Choose path ─── */
-function StepPath({ onSelectPath }) {
+function StepPath({ onSelectPath, onRegisterAsset }) {
   const [hov, setHov] = useState(null)
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20, lineHeight: 1.7 }}>
-        Choose how you'd like to find assets to connect to your network. You can enter PINs shared with you off-platform, or browse the public asset directory.
+        Choose how you'd like to connect assets to your network. Register a new asset, enter PINs shared with you off-platform, or browse the public asset directory.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Register New Asset — enabled */}
+        <div
+          onClick={() => onRegisterAsset?.()}
+          onMouseEnter={() => setHov('register')}
+          onMouseLeave={() => setHov(null)}
+          style={{
+            padding: '22px 20px', borderRadius: 10,
+            border: `1.5px solid ${hov === 'register' ? 'var(--accent-green)' : 'var(--border)'}`,
+            background: hov === 'register' ? 'var(--bg-raised)' : 'var(--bg-card)',
+            cursor: 'pointer', transition: 'all 180ms',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 8,
+              background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-green) 25%, transparent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <span style={{ fontSize: 18, color: 'var(--accent-green)', fontWeight: 700 }}>+</span>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: hov === 'register' ? 'var(--text-primary)' : 'var(--text-secondary)', transition: 'color 150ms' }}>
+              Register New Asset
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, paddingLeft: 46 }}>
+            Create a new asset on your network. You can attach evidence and run evaluations after registration.
+          </div>
+        </div>
+
         {/* Known PINs — enabled */}
         <div
           onClick={onSelectPath}
@@ -89,17 +118,16 @@ function StepPath({ onSelectPath }) {
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequestDisclosureModal({ contextNode, onClose }) {
+export default function RequestDisclosureModal({ contextNode, onClose, onRegisterAsset, _noBackdrop }) {
   const [pins, setPins] = useState('')
   const [message, setMessage] = useState('')
-  const [level, setLevel] = useState('selective')
   const [reqs, setReqs] = useState(['MIL-PRF-55681 Compliance'])
   const [step, setStep] = useState(0)
   const [submitted, setSubmitted] = useState(false)
 
   if (submitted) {
-    return (
-      <Backdrop onClose={onClose}><Modal width={540}>
+    const submittedContent = (
+      <Modal width={540}>
         <div style={{ padding: '52px 36px', textAlign: 'center' }}>
           <div style={{
             width: 60, height: 60, borderRadius: '50%',
@@ -111,11 +139,10 @@ export default function RequestDisclosureModal({ contextNode, onClose }) {
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Request Sent</div>
           <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 28 }}>
-            Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept, counter, or decline.
+            Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept or decline. If accepted, they will determine the disclosure type and terms.
           </div>
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
             <InfoRow label="PINs requested" value={pins.split('\n').filter(Boolean).length + ' asset(s)'} />
-            <InfoRow label="Requested level" value={<span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
             <InfoRow label="Requirements" value={
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {reqs.map((r, i) => <span key={i} style={{ fontSize: 11 }}>{r}</span>)}
@@ -125,15 +152,16 @@ export default function RequestDisclosureModal({ contextNode, onClose }) {
           </div>
           <Btn label="Done" accent onClick={onClose} />
         </div>
-      </Modal></Backdrop>
+      </Modal>
     )
+    return _noBackdrop ? submittedContent : <Backdrop onClose={onClose}>{submittedContent}</Backdrop>
   }
 
-  return (
-    <Backdrop onClose={onClose}><Modal>
+  const formContent = (
+    <Modal>
       <ModalHeader title="Connect Asset" subtitle="Find and request disclosure of an asset to connect it to your network." step={step + 1} totalSteps={3} onClose={onClose} />
       <ModalBody>
-        {step === 0 && <StepPath onSelectPath={() => setStep(1)} />}
+        {step === 0 && <StepPath onSelectPath={() => setStep(1)} onRegisterAsset={onRegisterAsset} />}
         {step === 1 && (
           <div>
             <FieldLabel label="Asset PIN(s)" required />
@@ -149,14 +177,13 @@ export default function RequestDisclosureModal({ contextNode, onClose }) {
                 resize: 'vertical', outline: 'none', lineHeight: 1.8,
               }}
             />
-            <div style={{ marginTop: 18 }} />
-            <FieldLabel label="Requested permission level" />
-            <div style={{ display: 'flex', gap: 12 }}>
-              <SDATypeCard type="full" selected={level} onSelect={setLevel} />
-              <SDATypeCard type="selective" selected={level} onSelect={setLevel} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10, lineHeight: 1.6 }}>
-              Proof-only cannot be requested — the asset owner must have a completed evaluation and choose to offer it themselves.
+            <div style={{
+              marginTop: 18, padding: '14px 16px',
+              background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+              borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
+            }}>
+              The asset owner will determine the disclosure type and terms when they respond to your request.
             </div>
           </div>
         )}
@@ -206,7 +233,6 @@ export default function RequestDisclosureModal({ contextNode, onClose }) {
             <div style={{ marginTop: 22, padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.04em', marginBottom: 12 }}>REVIEW</div>
               <InfoRow label="PINs" value={pins.split('\n').filter(Boolean).length + ' asset(s)'} />
-              <InfoRow label="Level" value={<span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{SDA_TYPES[level]?.short}</span>} />
               <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Requirements</div>
                 <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
@@ -232,6 +258,7 @@ export default function RequestDisclosureModal({ contextNode, onClose }) {
         {step === 1 && <Btn label="Next →" accent disabled={!pins.trim()} onClick={() => setStep(2)} />}
         {step === 2 && <Btn label="Send Request" accent disabled={!reqs.length} onClick={() => setSubmitted(true)} />}
       </ModalFooter>
-    </Modal></Backdrop>
+    </Modal>
   )
+  return _noBackdrop ? formContent : <Backdrop onClose={onClose}>{formContent}</Backdrop>
 }

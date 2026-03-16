@@ -13,6 +13,7 @@ export default function CopyBadge({ value, truncated }) {
 
   return (
     <span
+      data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined}
       onClick={handleCopy}
       style={{
         display: 'inline-flex',

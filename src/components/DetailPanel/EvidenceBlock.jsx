@@ -29,13 +29,13 @@ export default function EvidenceBlock({ evidence, open, onToggle, isOwner = true
       marginBottom: 22,
     }}>
       <div
-        onClick={onToggle}
+        onClick={onToggle || undefined}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 10,
           padding: '12px 14px',
-          cursor: 'pointer',
+          cursor: onToggle ? 'pointer' : 'default',
           borderRadius: open ? '8px 8px 0 0' : '8px',
           background: open ? 'var(--bg-raised)' : 'transparent',
           transition: 'background 150ms',
@@ -46,7 +46,7 @@ export default function EvidenceBlock({ evidence, open, onToggle, isOwner = true
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{isOwner ? evidence.filename : 'Evidence attached'}</div>
           <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginTop: 1 }}>{evidence.block}</div>
         </div>
-        <Chev open={open} />
+        {onToggle && <Chev open={open} />}
       </div>
       <div style={{
         overflow: 'hidden',

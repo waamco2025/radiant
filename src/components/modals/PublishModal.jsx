@@ -186,7 +186,7 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function PublishModal({ node, onClose }) {
+export default function PublishModal({ node, onClose, _noBackdrop }) {
   const [step, setStep] = useState(0)
   const [level, setLevel] = useState(null)
   const [selectedEvals, setSelectedEvals] = useState([])
@@ -226,8 +226,8 @@ export default function PublishModal({ node, onClose }) {
   }
 
   if (published) {
-    return (
-      <Backdrop onClose={onClose}><Modal width={540}>
+    const publishedContent = (
+      <Modal width={540}>
         <div style={{ padding: '52px 36px', textAlign: 'center' }}>
           <div style={{
             width: 60, height: 60, borderRadius: '50%',
@@ -256,12 +256,13 @@ export default function PublishModal({ node, onClose }) {
           </div>
           <Btn label="Done" accent onClick={onClose} />
         </div>
-      </Modal></Backdrop>
+      </Modal>
     )
+    return _noBackdrop ? publishedContent : <Backdrop onClose={onClose}>{publishedContent}</Backdrop>
   }
 
-  return (
-    <Backdrop onClose={onClose}><Modal>
+  const formContent = (
+    <Modal>
       <ModalHeader title="Publish to Directory" subtitle="Make this asset discoverable to all parties on the network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
       <ModalBody>
         {step === 0 && <StepConfirm asset={asset} />}
@@ -279,6 +280,7 @@ export default function PublishModal({ node, onClose }) {
         {step === 2 && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={() => setStep(3)} />}
         {step === 3 && <Btn label="Publish to Directory" accent onClick={() => setPublished(true)} />}
       </ModalFooter>
-    </Modal></Backdrop>
+    </Modal>
   )
+  return _noBackdrop ? formContent : <Backdrop onClose={onClose}>{formContent}</Backdrop>
 }
