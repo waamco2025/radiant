@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow,
@@ -115,15 +115,164 @@ function StepPath({ onSelectPath, onRegisterAsset }) {
   )
 }
 
+function truncatePin(pin) {
+  return pin && pin.length > 24 ? pin.slice(0, 10) + '...' + pin.slice(-4) : pin
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequestDisclosureModal({ contextNode, onClose, onRegisterAsset, _noBackdrop }) {
-  const [pins, setPins] = useState('')
+export default function RequestDisclosureModal({ contextNode, onClose, onRegisterAsset, onSubmitRequest, onValidatePins, _noBackdrop }) {
+  const [pinRows, setPinRows] = useState([''])
   const [message, setMessage] = useState('')
   const [reqs, setReqs] = useState(['MIL-PRF-55681 Compliance'])
   const [step, setStep] = useState(0)
   const [submitted, setSubmitted] = useState(false)
+  const inputRefs = useRef([])
+
+  // Inline validation state: { [pin]: { status: 'pending'|'validating'|'valid'|'error', error, resolved } }
+  const [pinValidation, setPinValidation] = useState({})
+  const validationTimerRef = useRef(null)
+  const resolveTimerRef = useRef(null)
+
+  // Derive deduplicated non-empty PINs from rows
+  const pins = [...new Set(pinRows.map(p => p.trim()).filter(Boolean))]
+
+  // Debounced auto-validation on input change — prunes stale entries (Fix 3)
+  useEffect(() => {
+    if (step !== 1) return
+
+    if (pins.length === 0) {
+      setPinValidation({})
+      return
+    }
+
+    // Prune stale entries + show "pending" for new PINs
+    const pinSet = new Set(pins)
+    setPinValidation(prev => {
+      const next = {}
+      pins.forEach(pin => {
+        if (prev[pin] && prev[pin].status !== 'pending') {
+          next[pin] = prev[pin]
+        } else {
+          next[pin] = { status: 'pending' }
+        }
+      })
+      // Only keep keys that are still in the current pin list (prune stale)
+      return next
+    })
+
+    if (validationTimerRef.current) clearTimeout(validationTimerRef.current)
+    if (resolveTimerRef.current) clearTimeout(resolveTimerRef.current)
+
+    validationTimerRef.current = setTimeout(() => {
+      setPinValidation(prev => {
+        const next = {}
+        // Only update pins that are still current
+        pins.forEach(pin => {
+          if (prev[pin]?.status === 'pending') {
+            next[pin] = { status: 'validating' }
+          } else if (prev[pin]) {
+            next[pin] = prev[pin]
+          }
+        })
+        return next
+      })
+
+      resolveTimerRef.current = setTimeout(() => {
+        if (!onValidatePins) return
+        const results = onValidatePins(pins)
+        setPinValidation(() => {
+          const next = {}
+          results.forEach(r => {
+            // Only include if still in current pin list
+            if (pins.includes(r.pin)) {
+              next[r.pin] = {
+                status: r.status,
+                error: r.error,
+                resolved: r.resolved,
+              }
+            }
+          })
+          return next
+        })
+      }, 1500)
+    }, 1000)
+
+    return () => {
+      if (validationTimerRef.current) clearTimeout(validationTimerRef.current)
+      if (resolveTimerRef.current) clearTimeout(resolveTimerRef.current)
+    }
+  }, [pinRows.join('\n'), step, onValidatePins])
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (validationTimerRef.current) clearTimeout(validationTimerRef.current)
+      if (resolveTimerRef.current) clearTimeout(resolveTimerRef.current)
+    }
+  }, [])
+
+  const validEntries = Object.entries(pinValidation).filter(([_, r]) => r.status === 'valid')
+  const validCount = validEntries.length
+  const hasValidPins = validCount > 0
+  // Fix 3: require ALL current PINs resolved AND at least one valid
+  const allResolved = pins.length > 0 &&
+    pins.every(pin => pinValidation[pin]?.status === 'valid' || pinValidation[pin]?.status === 'error')
+  const [hoveredRow, setHoveredRow] = useState(null)
+
+  // Grid input handlers
+  const handleRowChange = (index, value) => {
+    // If pasting multiple lines, split and fill rows
+    if (value.includes('\n')) {
+      const pasted = value.split('\n').map(v => v.trim()).filter(Boolean)
+      setPinRows(prev => {
+        const next = [...prev]
+        next.splice(index, 1, ...pasted)
+        return next
+      })
+      // Focus last pasted row
+      setTimeout(() => inputRefs.current[index + pasted.length - 1]?.focus(), 0)
+      return
+    }
+    setPinRows(prev => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+  }
+
+  const handleRowKeyDown = (index, e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      setPinRows(prev => {
+        const next = [...prev]
+        next.splice(index + 1, 0, '')
+        return next
+      })
+      setTimeout(() => inputRefs.current[index + 1]?.focus(), 0)
+    } else if (e.key === 'Backspace' && pinRows[index] === '' && pinRows.length > 1) {
+      e.preventDefault()
+      setPinRows(prev => {
+        const next = [...prev]
+        next.splice(index, 1)
+        return next
+      })
+      setTimeout(() => inputRefs.current[Math.max(0, index - 1)]?.focus(), 0)
+    } else if (e.key === 'ArrowUp' && index > 0) {
+      e.preventDefault()
+      inputRefs.current[index - 1]?.focus()
+    } else if (e.key === 'ArrowDown' && index < pinRows.length - 1) {
+      e.preventDefault()
+      inputRefs.current[index + 1]?.focus()
+    }
+  }
+
+  const getRowValidation = (index) => {
+    const pin = pinRows[index]?.trim()
+    if (!pin) return null
+    return pinValidation[pin] || null
+  }
 
   if (submitted) {
     const submittedContent = (
@@ -142,7 +291,18 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
             Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept or decline. If accepted, they will determine the disclosure type and terms.
           </div>
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
-            <InfoRow label="PINs requested" value={pins.split('\n').filter(Boolean).length + ' asset(s)'} />
+            <InfoRow label="Assets" value={
+              validEntries.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {validEntries.map(([pin, r], i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.resolved?.name}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{r.resolved?.owner}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : pins.length + ' asset(s)'
+            } />
             <InfoRow label="Requirements" value={
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {reqs.map((r, i) => <span key={i} style={{ fontSize: 11 }}>{r}</span>)}
@@ -165,18 +325,135 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
         {step === 1 && (
           <div>
             <FieldLabel label="Asset PIN(s)" required />
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10 }}>Enter one PIN per line. You can paste multiple PINs received from an off-platform conversation.</div>
-            <textarea
-              value={pins} onChange={e => setPins(e.target.value)}
-              placeholder={'PIN-0x5e9a...d4c3\nPIN-0x2d7c...b5f0'}
-              rows={4}
-              style={{
-                width: '100%', padding: '12px 14px', borderRadius: 6,
-                border: '1px solid var(--border)', background: 'var(--bg-card)',
-                color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 12,
-                resize: 'vertical', outline: 'none', lineHeight: 1.8,
-              }}
-            />
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10 }}>Enter one PIN per line. Press Enter to add a row. You can paste multiple PINs.</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+            <div data-pin-grid style={{
+              border: '1px solid var(--border)', borderRadius: 6,
+              background: 'var(--bg-card)', overflow: 'hidden',
+            }}>
+              {pinRows.map((row, i) => {
+                const rv = getRowValidation(i)
+                const trimmed = row.trim()
+                const borderColor = rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 25%, transparent)'
+                  : rv?.status === 'error' ? 'color-mix(in srgb, var(--accent-red) 25%, transparent)'
+                  : 'transparent'
+                return (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center',
+                    borderBottom: i < pinRows.length - 1 ? '1px solid var(--border)' : 'none',
+                    background: rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 3%, transparent)'
+                      : rv?.status === 'error' ? 'color-mix(in srgb, var(--accent-red) 3%, transparent)'
+                      : 'transparent',
+                    borderLeft: `3px solid ${borderColor}`,
+                    transition: 'all 200ms',
+                  }}
+                    onMouseEnter={() => setHoveredRow(i)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                  >
+                    {/* Line number */}
+                    <span style={{
+                      width: 32, textAlign: 'right', paddingRight: 10, flexShrink: 0,
+                      fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                      userSelect: 'none',
+                    }}>{i + 1}</span>
+                    {/* Input */}
+                    <input
+                      ref={el => inputRefs.current[i] = el}
+                      value={row}
+                      onChange={e => handleRowChange(i, e.target.value)}
+                      onKeyDown={e => handleRowKeyDown(i, e)}
+                      onPaste={e => {
+                        e.preventDefault()
+                        const pasted = e.clipboardData.getData('text')
+                        const pastedLines = pasted.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean)
+                        if (pastedLines.length === 0) return
+                        setPinRows(prev => {
+                          const next = [...prev]
+                          const after = next.slice(i + 1).filter(l => l.trim())
+                          const before = next.slice(0, i)
+                          const merged = [...before, ...pastedLines, ...after]
+                          if (!merged[merged.length - 1] || merged[merged.length - 1].trim()) merged.push('')
+                          return merged
+                        })
+                        setTimeout(() => inputRefs.current[i + pastedLines.length - 1]?.focus(), 0)
+                      }}
+                      placeholder={i === 0 ? 'PIN-0x5e9a3b7c4d8f...' : ''}
+                      style={{
+                        flex: 1, padding: '9px 0', border: 'none', background: 'transparent',
+                        color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 12,
+                        outline: 'none', minWidth: 0,
+                      }}
+                    />
+                    {/* Inline validation status */}
+                    <span style={{ flexShrink: 0, padding: '0 10px 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {rv?.status === 'pending' && (
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: 2 }}>···</span>
+                      )}
+                      {rv?.status === 'validating' && (
+                        <span style={{
+                          display: 'inline-block', width: 12, height: 12,
+                          border: '2px solid var(--border)', borderTopColor: 'var(--accent-indigo)',
+                          borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+                        }} />
+                      )}
+                      {rv?.status === 'valid' && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-green)' }}>✓</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {rv.resolved?.name}
+                          </span>
+                          <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{rv.resolved?.owner}</span>
+                        </span>
+                      )}
+                      {rv?.status === 'error' && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-red)' }}>✕</span>
+                          <span style={{ fontSize: 10, color: 'var(--accent-red)' }}>{rv.error}</span>
+                        </span>
+                      )}
+                    </span>
+                    {/* Remove button — visible on hover for non-empty rows */}
+                    {hoveredRow === i && trimmed ? (
+                      <span
+                        onClick={() => {
+                          setPinRows(prev => {
+                            const next = [...prev]
+                            next.splice(i, 1)
+                            if (next.length === 0) next.push('')
+                            return next
+                          })
+                        }}
+                        style={{
+                          width: 20, flexShrink: 0, textAlign: 'center',
+                          fontSize: 11, color: 'var(--text-dim)', cursor: 'pointer',
+                          transition: 'color 100ms',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-red)'}
+                        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+                      >
+                        ×
+                      </span>
+                    ) : (
+                      <div style={{ width: 20, flexShrink: 0 }} />
+                    )}
+                  </div>
+                )
+              })}
+              {/* Add row button */}
+              <div
+                onClick={() => setPinRows(prev => [...prev, ''])}
+                style={{
+                  padding: '6px 0', textAlign: 'center', cursor: 'pointer',
+                  fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                  borderTop: '1px solid var(--border)',
+                  transition: 'color 150ms',
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+              >
+                + Add row
+              </div>
+            </div>
             <div style={{
               marginTop: 18, padding: '14px 16px',
               background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
@@ -232,7 +509,18 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
             {/* Review summary */}
             <div style={{ marginTop: 22, padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.04em', marginBottom: 12 }}>REVIEW</div>
-              <InfoRow label="PINs" value={pins.split('\n').filter(Boolean).length + ' asset(s)'} />
+              <InfoRow label="Assets" value={
+                validEntries.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {validEntries.map(([pin, r], i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.resolved?.name}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{r.resolved?.owner}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : pins.length + ' asset(s)'
+              } />
               <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Requirements</div>
                 <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
@@ -255,8 +543,30 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
           <StepDots current={step} total={3} />
         </div>
         {step === 0 && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a path above</div>}
-        {step === 1 && <Btn label="Next →" accent disabled={!pins.trim()} onClick={() => setStep(2)} />}
-        {step === 2 && <Btn label="Send Request" accent disabled={!reqs.length} onClick={() => setSubmitted(true)} />}
+        {step === 1 && (
+          <Btn
+            label={
+              !allResolved ? 'Validating...'
+              : !hasValidPins ? 'No valid PINs'
+              : `Connect ${validCount} Asset${validCount !== 1 ? 's' : ''} →`
+            }
+            accent
+            disabled={!hasValidPins}
+            onClick={() => setStep(2)}
+          />
+        )}
+        {step === 2 && <Btn label="Send Request" accent disabled={!reqs.length} onClick={() => {
+          const validPinValues = validEntries.map(([pin]) => pin)
+          if (onSubmitRequest) {
+            onSubmitRequest({
+              pins: validPinValues.length > 0 ? validPinValues : pins,
+              requirements: reqs,
+              message,
+              contextNode,
+            })
+          }
+          setSubmitted(true)
+        }} />}
       </ModalFooter>
     </Modal>
   )

@@ -207,18 +207,19 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onDive, onOpenSubgraph, onSurface, onPinToSurface, hasChildren, isAnchor, isChild, categoryColor }) {
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
   if (onCreateSDA) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
-  if (isChild && !isAnchor && onPinToSurface) {
-    buttons.push({ icon: <svg width={12} height={12} viewBox="0 0 16 16" fill="none"><path d="M9.5 2.5L13.5 6.5L10 10L8 12L6.5 10.5L3 14L2 13L5.5 9.5L4 8L6 6L9.5 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>, tooltip: 'Pin to Surface', onClick: onPinToSurface })
-  }
+  if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (isAnchor && onSurface) {
     buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   } else if (hasChildren) {
     buttons.push({ icon: '⊞', tooltip: 'Dive into stack', onClick: onDive })
+  }
+  if (isChild && !isAnchor && onSurface) {
+    buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   }
   buttons.push({ icon: '⛓', tooltip: 'View chain', onClick: onOpenSubgraph })
 
@@ -307,6 +308,7 @@ export default function AssetNode({
   onConnect,
   onDisclose,
   onAddEvidence,
+  onParseEvidence,
   activeParty,
 }) {
   const [hovered, setHovered] = useState(false)
@@ -340,15 +342,19 @@ export default function AssetNode({
   }, [])
 
   const isOwnedByUser = !node.owner || node.owner === activeParty
-  const handleCreateAsset = (!node.isEvidence && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
-  const handleCreateSDA = (!node.isEvidence && isOwnedByUser) ? () => onDisclose?.(node) : undefined
-  const handleAddEvidence = (!node.isEvidence && isOwnedByUser && !isAnchor) ? () => onAddEvidence?.(node) : undefined
-  const handlePinToSurface = () => console.log('Pin to surface:', node.id, node.name)
-  const handleDive = () => onDive?.(node)
+  const isTerminalNode = node.isParse || node.category === 'parse'
+  const isProvisional = !!node.provisional
+  const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
+  const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
+  const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
+  const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
+  const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
-  const borderColor = (hovered || isSelected)
-    ? cat.color
-    : `color-mix(in srgb, ${cat.color} 27%, transparent)`
+  const borderColor = isProvisional
+    ? 'var(--text-dim)'
+    : (hovered || isSelected)
+      ? cat.color
+      : `color-mix(in srgb, ${cat.color} 27%, transparent)`
 
   const showActionBar = isSelected || hovered
 
@@ -363,7 +369,7 @@ export default function AssetNode({
         overflow: 'visible',
       }}
     >
-      {hasChildren && !isAnchor && (
+      {hasChildren && !isAnchor && !isProvisional && (
         <StackPeeks count={childCount} isHovered={hovered} categoryColor={cat.color} />
       )}
 
@@ -396,10 +402,13 @@ export default function AssetNode({
         style={{
           width: CARD_W * scale,
           height: CARD_H * scale,
-          background: hovered
-            ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
-            : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
-          border: `1px solid ${borderColor}`,
+          background: isProvisional
+            ? 'var(--bg-deep)'
+            : hovered
+              ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
+              : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
+          border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
+          opacity: isProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,
           padding: `${9 * scale}px ${12 * scale}px`,
           cursor: 'pointer',
@@ -441,6 +450,30 @@ export default function AssetNode({
               fontSize: 8,
             }}>{cat.icon}</span>
             {cat.label}
+            {isProvisional && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4,
+                letterSpacing: '0.04em',
+                color: 'var(--text-dim)',
+                background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
+              }}>
+                PROVISIONAL
+              </span>
+            )}
+            {node.isEvidence && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4,
+                letterSpacing: '0.04em',
+                color: node._isParsed ? 'var(--accent-purple, #a78bfa)' : 'var(--accent-amber)',
+                background: node._isParsed
+                  ? 'color-mix(in srgb, var(--accent-purple, #a78bfa) 10%, transparent)'
+                  : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+              }}>
+                {node._isParsed ? 'PARSED' : 'UNPARSED'}
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {node.hasEvidence && <EvidenceClip />}
@@ -480,30 +513,41 @@ export default function AssetNode({
           </div>
         )}
 
-        {/* Row 4: health bar + claim count */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}>
-          <HealthBar health={node.displayHealth || node.health} />
-          <span style={{
+        {/* Row 4: health bar + claim count (or provisional message) */}
+        {isProvisional ? (
+          <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
-            color: 'var(--text-tertiary)',
-            whiteSpace: 'nowrap',
+            color: 'var(--text-dim)',
+            fontStyle: 'italic',
           }}>
-            {(() => {
-              const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
-              const dc = dh.ok + dh.bad
-              return dh.bad > 0
-                ? `${dh.ok} · ${dh.bad}`
-                : dc > 0
-                  ? `${dc}`
-                  : '0 claims'
-            })()}
-          </span>
-        </div>
+            Awaiting owner response
+          </div>
+        ) : (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <HealthBar health={node.displayHealth || node.health} />
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              color: 'var(--text-tertiary)',
+              whiteSpace: 'nowrap',
+            }}>
+              {(() => {
+                const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+                const dc = dh.ok + dh.bad
+                return dh.bad > 0
+                  ? `${dh.ok} · ${dh.bad}`
+                  : dc > 0
+                    ? `${dc}`
+                    : '0 claims'
+              })()}
+            </span>
+          </div>
+        )}
       </div>
 
       {showActionBar && (
@@ -511,10 +555,10 @@ export default function AssetNode({
           onCreateAsset={handleCreateAsset}
           onCreateSDA={handleCreateSDA}
           onAddEvidence={handleAddEvidence}
+          onParseEvidence={handleParseEvidence}
           onDive={handleDive}
           onOpenSubgraph={() => onOpenSubgraph?.(node)}
           onSurface={onSurface}
-          onPinToSurface={isChild ? handlePinToSurface : undefined}
           hasChildren={hasChildren}
           isAnchor={isAnchor}
           isChild={isChild}
@@ -527,7 +571,7 @@ export default function AssetNode({
 
 // LOD dot: shown when zoom < LOD_THRESHOLD
 // Hover shows full AssetNode card as tooltip via portal
-export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, activeParty }) {
+export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const dotRef = useRef(null)
@@ -563,6 +607,14 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
     rafId = requestAnimationFrame(track)
     return () => cancelAnimationFrame(rafId)
   }, [isSelected, computeTooltipPos])
+
+  // Cleanup tooltip on unmount — prevents ghost tooltips during layer transitions
+  useEffect(() => {
+    return () => {
+      setHovered(false)
+      setTooltipPos(null)
+    }
+  }, [])
 
   const showTooltip = (hovered || isSelected) && tooltipPos
 
@@ -625,6 +677,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             onConnect={isSelected ? onConnect : undefined}
             onDisclose={isSelected ? onDisclose : undefined}
             onAddEvidence={isSelected ? onAddEvidence : undefined}
+            onParseEvidence={isSelected ? onParseEvidence : undefined}
             activeParty={activeParty}
           />
         </div>,

@@ -3,7 +3,8 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, resolvePin } from './v2Data.js'
+import { PEP_TEMPLATES } from './pepTemplates.js'
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
 import RequestDisclosureModal from '../components/modals/RequestDisclosureModal.jsx'
@@ -11,6 +12,7 @@ import DisclosureResponseModal from '../components/modals/DisclosureResponseModa
 import CascadeModal from '../components/modals/CascadeModal.jsx'
 import RegisterAssetModal from '../components/modals/RegisterAssetModal.jsx'
 import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
+import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -21,15 +23,21 @@ function findClearY(targetX, idealY, allNodes, spacingY = 300, toleranceX = 150)
     .map(n => n.y)
     .sort((a, b) => a - b)
 
-  let y = idealY
-  let collision = true
-  let iterations = 0
-  while (collision && iterations < 50) {
-    collision = occupiedYs.some(oy => Math.abs(oy - y) < spacingY)
-    if (collision) y += spacingY
-    iterations++
+  const isClear = (y) => !occupiedYs.some(oy => Math.abs(oy - y) < spacingY)
+
+  if (isClear(idealY)) return idealY
+
+  // Search outward in both directions, return the closest clear slot
+  for (let offset = spacingY; offset < spacingY * 50; offset += spacingY) {
+    const below = idealY + offset
+    const above = idealY - offset
+    const belowClear = isClear(below)
+    const aboveClear = isClear(above)
+    if (belowClear && aboveClear) return below // tie: prefer below
+    if (aboveClear) return above
+    if (belowClear) return below
   }
-  return y
+  return idealY + spacingY * 50
 }
 
 export default function V2App() {
@@ -42,7 +50,7 @@ export default function V2App() {
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
 
   // Per-role dynamic state — persists across role switches
-  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {} }
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [] }
   const [perRoleState, setPerRoleState] = useState(() => {
     const init = {}
     ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
@@ -57,7 +65,7 @@ export default function V2App() {
   }, [])
 
   const currentRoleState = perRoleState[roleId] || emptyRoleState
-  const { addedNodes, addedSDAs, addedEdges, dismissedReqs } = currentRoleState
+  const { addedNodes, addedSDAs, addedEdges, dismissedReqs, addedRequests } = currentRoleState
   const addedChildren = currentRoleState.addedChildren || {}
 
   const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => {
@@ -93,6 +101,21 @@ export default function V2App() {
       })
     }
 
+    // Flag evidence nodes that have been parsed (a sibling 'parse' node references them)
+    data.nodes = data.nodes.map(n => {
+      if (!n.children || n.children.length === 0) return n
+      const parseNodes = n.children.filter(c => c.isParse || c.category === 'parse')
+      if (parseNodes.length === 0) return n
+      const parsedEvidenceIds = new Set(parseNodes.map(c => c.sourceEvidenceId))
+      const updatedChildren = n.children.map(c => {
+        if (c.isEvidence && parsedEvidenceIds.has(c.id)) {
+          return { ...c, _isParsed: true }
+        }
+        return c
+      })
+      return { ...n, children: updatedChildren }
+    })
+
     // Rebuild nodeMap
     const newMap = {}
     data.nodes.forEach(n => { newMap[n.id] = n })
@@ -106,8 +129,13 @@ export default function V2App() {
       data.edges = [...data.edges, ...addedEdges]
     }
 
+    // Merge added requests into pendingRequests
+    if (addedRequests && addedRequests.length > 0) {
+      data.pendingRequests = [...(data.pendingRequests || []), ...addedRequests]
+    }
+
     return data
-  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren])
+  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests])
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -120,6 +148,7 @@ export default function V2App() {
   const [showInbox, setShowInbox] = useState(false)
   const [cascadeContext, setCascadeContext] = useState(null)
   const [evidenceNode, setEvidenceNode] = useState(null)
+  const [parseContext, setParseContext] = useState(null)
   const inboxRef = useRef(null)
   const nodeMapRef = useRef(nodeMap)
   useEffect(() => { nodeMapRef.current = nodeMap }, [nodeMap])
@@ -208,14 +237,174 @@ export default function V2App() {
   }, [])
 
   const handleViewChild = useCallback((childNode) => {
-    const parentNode = sel ? nodeMap[sel] : null
-    if (parentNode && canvasRef.current) {
-      canvasRef.current.dive(parentNode)
-      setTimeout(() => {
-        setSel(childNode.id)
-      }, 600)
+    if (layerInfo.depth > 0) {
+      // Already in child layer — just select the child node
+      setSel(childNode.id)
+    } else {
+      // On parent layer — dive into the parent, then select the child
+      const parentNode = sel ? nodeMap[sel] : null
+      if (parentNode && canvasRef.current) {
+        canvasRef.current.dive(parentNode)
+        setTimeout(() => {
+          setSel(childNode.id)
+        }, 600)
+      }
     }
-  }, [sel, nodeMap])
+  }, [sel, nodeMap, layerInfo.depth])
+
+  // Validate PINs — used by RequestDisclosureModal before submission
+  const handleValidatePins = useCallback((pinList) => {
+    return pinList.map(pin => {
+      if (!pin.startsWith('PIN-0x')) {
+        return { pin, status: 'error', error: 'Invalid PIN format' }
+      }
+      const resolved = resolvePin(pin)
+      if (!resolved) {
+        return { pin, status: 'error', error: 'PIN not found on the network' }
+      }
+      if (nodeMap[resolved.id]) {
+        return { pin, status: 'error', error: 'Asset already on your network' }
+      }
+      const provId = `provisional-${resolved.id}`
+      if (nodeMap[provId] || addedNodes.some(n => n.id === provId)) {
+        return { pin, status: 'error', error: 'Disclosure already requested' }
+      }
+      if (pendingRequests.some(r => r.asset?.pin === resolved.pin && r.from?.name === activeRole.party)) {
+        return { pin, status: 'error', error: 'Disclosure already requested' }
+      }
+      return { pin, status: 'valid', resolved }
+    })
+  }, [nodeMap, addedNodes, pendingRequests, activeRole])
+
+  // Handle PIN-based disclosure request submission
+  const handleSubmitRequest = useCallback(({ pins, requirements, message, contextNode: ctxNode }) => {
+    const today = new Date().toISOString().slice(0, 10)
+    const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+
+    // Phase 1: validate all PINs
+    const validPins = []
+    pins.forEach(pin => {
+      if (!pin.startsWith('PIN-0x')) return
+      const resolved = resolvePin(pin)
+      if (!resolved) return
+      if (nodeMap[resolved.id]) return
+      const provId = `provisional-${resolved.id}`
+      if (nodeMap[provId]) return
+      if (addedNodes.some(n => n.id === provId)) return
+      if (pendingRequests.some(r => r.asset?.pin === resolved.pin && r.from?.name === activeRole.party)) return
+      validPins.push({ pin, resolved })
+    })
+
+    // Phase 2: accumulate all provisional nodes + edges, then commit in one update
+    const newProvNodes = []
+    const newProvEdges = []
+
+    validPins.forEach(({ pin, resolved }) => {
+      const provNodeId = `provisional-${resolved.id}`
+
+      const connectedEdgesFromCtx = edges.filter(e => e.from === ctxNode.id)
+      const connectedFromCtx = connectedEdgesFromCtx.map(e => nodeMap[e.to]).filter(Boolean)
+
+      let newX, newY
+      if (connectedFromCtx.length > 0) {
+        newX = connectedFromCtx[0].x
+        const lowestY = Math.max(...connectedFromCtx.map(n => n.y))
+        newY = lowestY + 300
+      } else {
+        newX = (ctxNode.x || 0) + 500
+        newY = ctxNode.y || 0
+      }
+
+      // Include previously created batch nodes in collision check
+      newY = findClearY(newX, newY, [...nodes, ...newProvNodes])
+
+      newProvNodes.push({
+        id: provNodeId,
+        pin: resolved.pin,
+        dot: resolved.dot,
+        name: resolved.name,
+        category: resolved.category || 'product',
+        owner: resolved.owner || '?',
+        parentId: null,
+        children: [],
+        health: { ok: 0, warn: 0, bad: 0 },
+        childHealth: null,
+        totalHealth: null,
+        displayHealth: { ok: 0, warn: 0, bad: 0 },
+        claimCount: 0,
+        displayClaimCount: 0,
+        hasEvidence: false,
+        hasStack: false,
+        childCount: 0,
+        evidence: null,
+        evaluations: [],
+        sdas: [],
+        x: newX,
+        y: newY,
+        parentOwner: resolved.owner,
+        isCascade: false,
+        cascadeVia: null,
+        upstreamSda: null,
+        upstreamAssets: null,
+        isEvidence: false,
+        lastEval: null,
+        provisional: true,
+      })
+
+      newProvEdges.push({
+        id: `e-prov-${ctxNode.id}-${provNodeId}`,
+        from: ctxNode.id,
+        to: provNodeId,
+        sdaType: 'provisional',
+      })
+    })
+
+    // Single state update with all provisional nodes + edges
+    if (newProvNodes.length > 0) {
+      updateRoleState(roleId, prev => ({
+        ...prev,
+        addedNodes: [...prev.addedNodes, ...newProvNodes],
+        addedEdges: [...prev.addedEdges, ...newProvEdges],
+      }))
+    }
+
+    // Cross-role requests — also batch into single update
+    if (otherRoleId) {
+      const newRequests = []
+      validPins.forEach(({ pin, resolved }, index) => {
+        if (resolved.owner !== ROLES.find(r => r.id === otherRoleId)?.party) return
+        newRequests.push({
+          id: `req-dynamic-${resolved.id}-${Date.now().toString(36)}-${index}`,
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: resolved.name, pin: resolved.pin },
+          connectTo: {
+            id: ctxNode.id,
+            name: ctxNode.name,
+            pin: ctxNode.pin,
+            category: ctxNode.category,
+            owner: activeRole.party,
+            x: ctxNode.x,
+            y: ctxNode.y,
+          },
+          message: message || '',
+          requirements: requirements,
+          date: today,
+        })
+      })
+
+      if (newRequests.length > 0) {
+        updateRoleState(otherRoleId, prev => {
+          const existingPins = new Set((prev.addedRequests || []).map(r => r.asset?.pin))
+          const filtered = newRequests.filter(r => !existingPins.has(r.asset?.pin))
+          if (filtered.length === 0) return prev
+          return {
+            ...prev,
+            addedRequests: [...(prev.addedRequests || []), ...filtered],
+          }
+        })
+      }
+    }
+  }, [roleId, nodeMap, nodes, edges, addedNodes, pendingRequests, activeRole, updateRoleState])
 
   const isAnchorSelected = layerInfo.depth > 0 && sel === layerInfo.anchorId
 
@@ -634,6 +823,14 @@ export default function V2App() {
           onConnect={(node) => setConnectNode(node)}
           onDisclose={(node) => setPublishNode(node)}
           onAddEvidence={(node) => setEvidenceNode(node)}
+          onParseEvidence={(evidenceNodeArg) => {
+            const parentAsset = nodes.find(n => n.children?.some(c => c.id === evidenceNodeArg.id))
+            setParseContext({
+              evidenceNode: evidenceNodeArg,
+              parentAssetId: parentAsset?.id || null,
+              parentAssetName: parentAsset?.name || 'Unknown Asset',
+            })
+          }}
           activeParty={activeRole.party}
         />
 
@@ -654,15 +851,30 @@ export default function V2App() {
               onViewChain={handlePanelViewChain}
               onExpandStack={handlePanelExpandStack}
               onSurface={handlePanelSurface}
-              onPinToSurface={() => console.log('Pin to surface:', sel)}
               isAnchor={isAnchorSelected}
               depth={layerInfo.depth}
               onDisclose={() => sel && nodeMap[sel] && setPublishNode(nodeMap[sel])}
               onConnect={() => sel && nodeMap[sel] && setConnectNode(nodeMap[sel])}
               onAddEvidence={() => sel && nodeMap[sel] && setEvidenceNode(nodeMap[sel])}
+              onParseEvidence={() => {
+                if (!sel || !nodeMap[sel]) return
+                const evNode = nodeMap[sel]
+                if (!evNode.isEvidence) return
+                const parentAsset = nodes.find(n => n.children?.some(c => c.id === evNode.id))
+                setParseContext({
+                  evidenceNode: evNode,
+                  parentAssetId: parentAsset?.id || null,
+                  parentAssetName: parentAsset?.name || 'Unknown Asset',
+                })
+              }}
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
               onViewChild={handleViewChild}
+              onSelectAsset={(pinOrId) => {
+                if (!pinOrId) return
+                const target = Object.values(nodeMap).find(n => n.pin === pinOrId || n.id === pinOrId)
+                if (target) setSel(target.id)
+              }}
             />
           </div>
         )}
@@ -726,11 +938,12 @@ export default function V2App() {
       )}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext) && (
         <Backdrop onClose={() => {
           if (connectNode) setConnectNode(null)
           else if (registerNode) setRegisterNode(null)
           else if (evidenceNode) setEvidenceNode(null)
+          else if (parseContext) setParseContext(null)
           else if (responseRequest) setResponseRequest(null)
           else if (publishNode) setPublishNode(null)
           else if (cascadeContext) setCascadeContext(null)
@@ -747,6 +960,8 @@ export default function V2App() {
             setConnectNode(null)
             setRegisterNode(node)
           }}
+          onSubmitRequest={handleSubmitRequest}
+          onValidatePins={handleValidatePins}
           _noBackdrop
         />
       )}
@@ -849,7 +1064,8 @@ export default function V2App() {
                   evMeta.filename = uriFilename
                   evMeta.uri = asset.evidenceUri
 
-                  const evNode = makeEvidenceNode(nodeId, evMeta, activeRole.party, [])
+                  const evUniqueId = `ev-${nodeId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+                  const evNode = makeEvidenceNode(nodeId, evMeta, activeRole.party, [], evUniqueId)
                   newNode.children = [evNode]
                   newNode.hasStack = true
                   newNode.childCount = 1
@@ -1154,7 +1370,9 @@ export default function V2App() {
                 updateRoleState(otherRoleId, prev => {
                   // Check if the asset node already exists in the other role's static or dynamic data
                   const existsInStatic = !!otherRoleData.nodeMap[reqNodeId]
-                  const existsInDynamic = prev.addedNodes.some(n => n.id === reqNodeId)
+                  const existsInDynamic = prev.addedNodes.some(n => n.id === reqNodeId && !n.provisional)
+                  const provId = `provisional-${reqNodeId}`
+                  const provisionalNode = prev.addedNodes.find(n => n.id === provId && n.provisional)
 
                   const newState = { ...prev }
 
@@ -1164,24 +1382,44 @@ export default function V2App() {
                     [req.connectTo.id]: [...(prev.addedSDAs[req.connectTo.id] || []), crossSdaOnConnectTo],
                   }
 
-                  // Add the disclosed asset node if it doesn't exist
-                  if (!existsInStatic && !existsInDynamic) {
+                  // Upgrade provisional → real, or add new node, or just add SDA
+                  if (provisionalNode) {
+                    // Replace provisional node with real disclosed node, keeping position
+                    newState.addedNodes = prev.addedNodes
+                      .filter(n => n.id !== provId)
+                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y })
+                    // Replace provisional edges with real disclosure edges
+                    newState.addedEdges = prev.addedEdges
+                      .filter(e => !((e.to === provId || e.from === provId) && e.sdaType === 'provisional'))
+                      .concat({
+                        id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                        from: req.connectTo.id,
+                        to: reqNodeId,
+                        sdaType: disclosureType,
+                      })
+                  } else if (!existsInStatic && !existsInDynamic) {
                     newState.addedNodes = [...prev.addedNodes, disclosedNodeForOther]
+                    // Add edge between connectTo and disclosed asset
+                    newState.addedEdges = [...prev.addedEdges, {
+                      id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                      from: req.connectTo.id,
+                      to: reqNodeId,
+                      sdaType: disclosureType,
+                    }]
                   } else {
                     // Node exists — just add the SDA to it
                     newState.addedSDAs = {
                       ...newState.addedSDAs,
                       [reqNodeId]: [...(newState.addedSDAs[reqNodeId] || []), crossSdaOnAsset],
                     }
+                    // Add edge between connectTo and disclosed asset
+                    newState.addedEdges = [...prev.addedEdges, {
+                      id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
+                      from: req.connectTo.id,
+                      to: reqNodeId,
+                      sdaType: disclosureType,
+                    }]
                   }
-
-                  // Add edge between connectTo and disclosed asset
-                  newState.addedEdges = [...prev.addedEdges, {
-                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                    from: req.connectTo.id,
-                    to: reqNodeId,
-                    sdaType: disclosureType,
-                  }]
 
                   return newState
                 })
@@ -1225,7 +1463,8 @@ export default function V2App() {
             )
             evidenceMeta.filename = filename
 
-            const evNode = makeEvidenceNode(parentId, evidenceMeta, activeRole.party, [])
+            const evUniqueId = `ev-${parentId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+            const evNode = makeEvidenceNode(parentId, evidenceMeta, activeRole.party, [], evUniqueId)
 
             updateRoleState(roleId, prev => {
               const existingChildren = prev.addedChildren?.[parentId] || []
@@ -1241,15 +1480,70 @@ export default function V2App() {
             const parentNodeRef = evidenceNode
             setEvidenceNode(null)
 
-            setTimeout(() => {
-              if (canvasRef.current) {
-                const updatedParent = nodeMapRef.current[parentNodeRef.id]
-                if (updatedParent) {
-                  canvasRef.current.dive(updatedParent)
-                  setTimeout(() => setSel(evNode.id), 600)
+            // If already in child layer of this parent, just select the new node
+            // The child layer sync will rebuild with the new evidence node
+            if (layerInfo.depth > 0 && layerInfo.anchorId === parentNodeRef.id) {
+              setTimeout(() => setSel(evNode.id), 200)
+            } else {
+              // Not in child layer — dive first, then select
+              setTimeout(() => {
+                if (canvasRef.current) {
+                  const updatedParent = nodeMapRef.current[parentNodeRef.id]
+                  if (updatedParent) {
+                    canvasRef.current.dive(updatedParent)
+                    setTimeout(() => setSel(evNode.id), 600)
+                  }
                 }
+              }, 150)
+            }
+          }}
+          _noBackdrop
+        />
+      )}
+      {parseContext && (
+        <ParseEvidenceModal
+          evidenceNode={parseContext.evidenceNode}
+          parentAssetName={parseContext.parentAssetName}
+          activeParty={activeRole.party}
+          existingParseTemplateIds={(() => {
+            const parentAsset = nodeMap[parseContext.parentAssetId]
+            if (!parentAsset?.children) return new Set()
+            const existingParses = parentAsset.children.filter(c =>
+              (c.isParse || c.category === 'parse') &&
+              c.sourceEvidenceId === parseContext.evidenceNode.id
+            )
+            const ids = new Set()
+            existingParses.forEach(p => {
+              const matched = PEP_TEMPLATES.find(t => t.name === p.name)
+              if (matched) ids.add(matched.id)
+            })
+            return ids
+          })()}
+          onClose={() => setParseContext(null)}
+          onComplete={({ template, parsedFields, creditCost }) => {
+            const pepNode = makePepNode(
+              parseContext.parentAssetId,
+              parseContext.evidenceNode.id,
+              template.name,
+              parsedFields,
+              activeRole.party
+            )
+
+            updateRoleState(roleId, prev => {
+              const parentId = parseContext.parentAssetId
+              const existingChildren = prev.addedChildren?.[parentId] || []
+              return {
+                ...prev,
+                addedChildren: {
+                  ...(prev.addedChildren || {}),
+                  [parentId]: [...existingChildren, pepNode],
+                },
               }
-            }, 150)
+            })
+
+            setCredits(c => c - creditCost)
+            setParseContext(null)
+            setTimeout(() => setSel(pepNode.id), 150)
           }}
           _noBackdrop
         />

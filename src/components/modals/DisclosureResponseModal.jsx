@@ -21,13 +21,13 @@ function StepReview({ request, decision, setDecision }) {
           }}>{request.from.name[0]}</div>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{request.from.name}</div>
-            <CopyBadge value={request.from.dot} />
+            <CopyBadge value={request.from.dot} truncated />
           </div>
         </div>
         <InfoRow label="Requesting asset" value={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{request.asset.name}</span>
-            <CopyBadge value={request.asset.pin} />
+            <CopyBadge value={request.asset.pin} truncated />
           </span>
         } />
         <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>

@@ -108,7 +108,7 @@ export default function ChildrenTab({ children, parentOwner, onViewChild }) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, color: cat.color }}>{cat.icon}</span>
+                <Tip text={cat.tipText || cat.label}><span style={{ fontSize: 12, color: cat.color }}>{cat.icon}</span></Tip>
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{ch.name}</span>
                 {ch.hasEvidence && <Tip text="Has attached evidence"><ClipIcon s={13} c="var(--text-tertiary)" /></Tip>}
                 {ch.isCascade && <Tip text="Received via cascade disclosure"><ChainIcon s={13} c="var(--accent-purple)" /></Tip>}
@@ -125,21 +125,21 @@ export default function ChildrenTab({ children, parentOwner, onViewChild }) {
               <div style={{ padding: '6px 14px 16px' }}>
                 <GridRow label="PIN" value={<CopyBadge value={ch.pin} truncated />} />
                 {/* Owner row — stacked name + DOT */}
-                <div style={{
-                  display: 'flex', alignItems: 'flex-start', minHeight: 44,
-                  borderBottom: '1px solid var(--border)', paddingTop: 6, paddingBottom: 6,
-                }}>
-                  <div style={{ width: LABEL_W, flexShrink: 0, fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 8, paddingTop: 4 }}>Owner</div>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                    <span style={{
-                      fontSize: 11, fontFamily: 'var(--font-mono)',
-                      color: diffOwner ? 'var(--accent-amber)' : 'var(--text-secondary)',
-                    }}>{ch.owner}</span>
-                    {ch.dot && <CopyBadge value={ch.dot} />}
-                  </div>
-                </div>
-                <GridRow label="Last eval" value={ch.lastEval || 'None'} />
-                <GridRow label="Claims" value={ch.health.ok + ch.health.bad > 0 ? `${ch.health.ok + ch.health.bad}` : '—'} />
+                <GridRow label="Owner" value={
+                  <span style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono)',
+                    color: diffOwner ? 'var(--accent-amber)' : 'var(--text-secondary)',
+                  }}>{ch.owner}</span>
+                } />
+                {ch.category !== 'parse' && !ch.isParse && (
+                  <>
+                    <GridRow label="Last eval" value={ch.lastEval || 'None'} />
+                    <GridRow label="Claims" value={ch.health.ok + ch.health.bad > 0 ? `${ch.health.ok + ch.health.bad}` : '—'} />
+                  </>
+                )}
+                {(ch.isParse || ch.category === 'parse') && ch.parsedFields?.length > 0 && (
+                  <GridRow label="Parsed fields" value={`${ch.parsedFields.length} fields`} />
+                )}
                 {ch.childCount > 0 && <GridRow label="Children" value={`${ch.childCount} sub-assets`} />}
                 {ch.isCascade && <GridRow label="Via" value={<span style={{ color: 'var(--accent-purple)' }}>{ch.cascadeVia}</span>} />}
                 <div style={{ marginTop: 12 }}>

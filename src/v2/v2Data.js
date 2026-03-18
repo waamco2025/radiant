@@ -12,27 +12,34 @@ function hashStr(str) {
 }
 
 function makePin(seed) {
-  const h = hashStr('pin-' + seed)
-  const a = (h >>> 0).toString(16).padStart(4, '0').slice(0, 4)
-  const b = (hashStr(seed + '-tail') >>> 0).toString(16).padStart(4, '0').slice(0, 4)
-  return `PIN-0x${a}...${b}`
+  let hex = ''
+  for (let i = 0; i < 8; i++) {
+    const h = hashStr('pin-' + seed + '-' + i)
+    hex += (h >>> 0).toString(16).padStart(8, '0')
+  }
+  return `PIN-0x${hex}`
 }
 
 function makeDot(seed) {
-  const h = hashStr('dot-' + seed)
-  const a = (h >>> 0).toString(16).padStart(4, '0').slice(0, 4)
-  const b = (hashStr(seed + '-dot-tail') >>> 0).toString(16).padStart(4, '0').slice(0, 4)
-  return `DOT-0x${a}...${b}`
+  let hex = ''
+  for (let i = 0; i < 8; i++) {
+    const h = hashStr('dot-' + seed + '-' + i)
+    hex += (h >>> 0).toString(16).padStart(8, '0')
+  }
+  return `DOT-0x${hex}`
 }
 
 // ── Roles ──
+
+const GOVCO_DOT = makeDot('GovCo')
+const MICROCO_DOT = makeDot('MicroCo')
 
 export const ROLES = [
   {
     id: 'bob-govco',
     user: 'Bob',
     party: 'GovCo',
-    partyDot: 'DOT-0x7a3f...e1b2',
+    partyDot: GOVCO_DOT,
     role: 'buyer',
     credits: 2400,
     vertical: 'Government / Satellite',
@@ -41,7 +48,7 @@ export const ROLES = [
     id: 'alice-microco',
     user: 'Alice',
     party: 'MicroCo',
-    partyDot: 'DOT-0x4c8d...f3a7',
+    partyDot: MICROCO_DOT,
     role: 'seller',
     credits: 2400,
     vertical: 'Electronics',
@@ -78,7 +85,7 @@ function sumHealth(nodes) {
 const EVAL_POWER_REG_BOB = {
   id: 'eval-001',
   org: 'GovCo',
-  orgDot: 'DOT-0x7a3f...e1b2',
+  orgDot: GOVCO_DOT,
   date: '2026-03-08',
   requirements: 'MIL-PRF-55681 Compliance',
   status: 'completed',
@@ -102,7 +109,7 @@ const EVAL_POWER_REG_BOB = {
 const SDA_POWER_REG_TO_GOVCO = {
   type: 'selective',
   party: 'GovCo',
-  partyDot: 'DOT-0x7a3f...e1b2',
+  partyDot: GOVCO_DOT,
   created: '2026-03-01',
   expires: '2027-03-01',
   pins: [],
@@ -114,7 +121,7 @@ const SDA_POWER_REG_TO_GOVCO = {
 const SDA_VREG_TO_GOVCO = {
   type: 'full',
   party: 'GovCo',
-  partyDot: 'DOT-0x7a3f...e1b2',
+  partyDot: GOVCO_DOT,
   created: '2026-03-04',
   expires: '2027-03-04',
   pins: [],
@@ -127,7 +134,7 @@ const SDA_INTERNAL_MICROCO = {
   type: 'full',
   party: 'MicroCo',
   partyLabel: 'internal',
-  partyDot: 'DOT-0x4c8d...f3a7',
+  partyDot: MICROCO_DOT,
   created: '2025-01-01',
   expires: null,
   pins: [],
@@ -140,7 +147,7 @@ const SDA_INTERNAL_GOVCO = {
   type: 'full',
   party: 'GovCo',
   partyLabel: 'internal',
-  partyDot: 'DOT-0x7a3f...e1b2',
+  partyDot: GOVCO_DOT,
   created: '2025-06-01',
   expires: null,
   pins: [],
@@ -174,8 +181,9 @@ function makeEvidence(nodeId, prefix, provider, retention) {
   }
 }
 
-function makeEvidenceNode(parentId, evidenceMeta, owner, claims = []) {
-  const evId = `ev-${parentId}-${evidenceMeta.filename.split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+function makeEvidenceNode(parentId, evidenceMeta, owner, claims = [], uniqueId = null) {
+  const fileSlug = evidenceMeta.filename.split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+  const evId = uniqueId || `ev-${parentId}-${fileSlug}`
 
   const health = { ok: 0, warn: 0, bad: 0 }
   for (const c of claims) {
@@ -215,6 +223,47 @@ function makeEvidenceNode(parentId, evidenceMeta, owner, claims = []) {
     isEvidence: true,
     lastEval: null,
     attributedClaims: claims,
+  }
+}
+
+// ── PEP Parse Node builder ──
+
+function makePepNode(parentAssetId, sourceEvidenceId, templateName, parsedFields, owner) {
+  const pepId = `pep-${sourceEvidenceId}-${templateName.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20)}`
+  const pin = makePin(pepId)
+  const dot = owner ? makeDot(owner) : makeDot(pepId)
+
+  return {
+    id: pepId,
+    pin,
+    dot,
+    name: templateName,
+    category: 'parse',
+    owner,
+    parentId: parentAssetId,
+    sourceEvidenceId,
+    children: [],
+    health: { ok: 0, warn: 0, bad: 0 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 0, warn: 0, bad: 0 },
+    claimCount: 0,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    parsedFields: parsedFields,
+    x: 0,
+    y: 0,
+    parentOwner: owner,
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    isEvidence: false,
+    isParse: true,
+    lastEval: null,
   }
 }
 
@@ -329,7 +378,7 @@ function buildBobData() {
       {
         type: 'selective',
         party: 'MicroCo',
-        partyDot: 'DOT-0x4c8d...f3a7',
+        partyDot: MICROCO_DOT,
         created: '2026-03-01',
         expires: '2027-03-01',
         pins: [],
@@ -339,7 +388,7 @@ function buildBobData() {
       {
         type: 'full',
         party: 'MicroCo',
-        partyDot: 'DOT-0x4c8d...f3a7',
+        partyDot: MICROCO_DOT,
         created: '2026-03-04',
         expires: '2027-03-04',
         pins: [],
@@ -356,10 +405,18 @@ function buildBobData() {
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
     'MicroCo', EVAL_POWER_REG_BOB.claims)
 
+  const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
+    { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
+    { id: 'f-power', name: 'Power dissipation', category: 'electrical', type: 'value', value: '< 2W at rated current', confidence: 'high' },
+    { id: 'f-temp', name: 'Temperature range', category: 'environmental', type: 'range', value: '-55°C to +125°C', confidence: 'high' },
+    { id: 'f-radiation', name: 'Radiation tolerance', category: 'environmental', type: 'value', value: 'TID > 100 krad(Si)', confidence: 'low' },
+    { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text', value: 'Category XV, §121.1', confidence: 'high' },
+  ], 'MicroCo')
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [EVAL_POWER_REG_BOB],
     sdas: [{ ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') }],
-    children: [powerRegEv],
+    children: [powerRegEv, powerRegPep],
     x: 1400, y: 0,
   })
 
@@ -412,7 +469,7 @@ function buildAliceData() {
       {
         type: 'selective',
         party: 'MicroCo',
-        partyDot: 'DOT-0x4c8d...f3a7',
+        partyDot: MICROCO_DOT,
         created: '2026-03-01',
         expires: '2027-03-01',
         pins: [],
@@ -422,7 +479,7 @@ function buildAliceData() {
       {
         type: 'full',
         party: 'MicroCo',
-        partyDot: 'DOT-0x4c8d...f3a7',
+        partyDot: MICROCO_DOT,
         created: '2026-03-04',
         expires: '2027-03-04',
         pins: [],
@@ -439,13 +496,21 @@ function buildAliceData() {
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
     'MicroCo', EVAL_POWER_REG_BOB.claims)
 
+  const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
+    { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
+    { id: 'f-power', name: 'Power dissipation', category: 'electrical', type: 'value', value: '< 2W at rated current', confidence: 'high' },
+    { id: 'f-temp', name: 'Temperature range', category: 'environmental', type: 'range', value: '-55°C to +125°C', confidence: 'high' },
+    { id: 'f-radiation', name: 'Radiation tolerance', category: 'environmental', type: 'value', value: 'TID > 100 krad(Si)', confidence: 'low' },
+    { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text', value: 'Category XV, §121.1', confidence: 'high' },
+  ], 'MicroCo')
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [EVAL_POWER_REG_BOB],
     sdas: [
       { ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
     ],
-    children: [powerRegEv],
+    children: [powerRegEv, powerRegPep],
     x: 500, y: -300,
   })
 
@@ -522,7 +587,7 @@ function buildAliceData() {
     pendingRequests: [
       {
         id: 'req-001',
-        from: { name: 'GovCo', dot: 'DOT-0x7a3f...e1b2' },
+        from: { name: 'GovCo', dot: GOVCO_DOT },
         asset: { name: 'PCB Substrate', pin: pcbSub.pin },
         connectTo: {
           id: 'avionics',
@@ -541,7 +606,16 @@ function buildAliceData() {
 
 // ── Public API ──
 
-export { makePin, makeDot, makeEvidence, makeEvidenceNode }
+function resolvePin(pin) {
+  const allData = [buildBobData(), buildAliceData()]
+  for (const data of allData) {
+    const match = Object.values(data.nodeMap).find(n => n.pin === pin)
+    if (match) return match
+  }
+  return null
+}
+
+export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, resolvePin }
 
 export function getDataForRole(roleId) {
   if (roleId === 'alice-microco') return buildAliceData()

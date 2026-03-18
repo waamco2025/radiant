@@ -20,8 +20,8 @@ function StepConfirm({ asset }) {
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: catColor, letterSpacing: '0.06em' }}>{asset.category.toUpperCase()}</span>
         </div>
         <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>{asset.name}</div>
-        <div style={{ marginBottom: 14 }}><CopyBadge value={asset.pin} /></div>
-        <InfoRow label="Owner" value={<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{asset.owner}<CopyBadge value={asset.dot} /></span>} />
+        <div style={{ marginBottom: 14 }}><CopyBadge value={asset.pin} truncated /></div>
+        <InfoRow label="Owner" value={<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{asset.owner}<CopyBadge value={asset.dot} truncated /></span>} />
         <InfoRow label="Health" value={
           <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
             {asset.health.ok} verified · {asset.health.bad} failed
@@ -158,7 +158,7 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
       <div style={{ padding: '18px 20px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.04em', marginBottom: 14 }}>REVIEW</div>
         <InfoRow label="Asset" value={<span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{asset.name}</span>} />
-        <InfoRow label="PIN" value={<CopyBadge value={asset.pin} />} />
+        <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
         <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
         {level === 'proofonly' && selectedEvals.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
@@ -242,7 +242,7 @@ export default function PublishModal({ node, onClose, _noBackdrop }) {
             <strong style={{ color: 'var(--text-primary)' }}>{asset.name}</strong> is now discoverable in the public asset directory with <strong style={{ color: SDA_TYPES[level]?.c || 'var(--accent-indigo)' }}>{SDA_TYPES[level]?.label || '—'}</strong> access.
           </div>
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
-            <InfoRow label="PIN" value={<CopyBadge value={asset.pin} />} />
+            <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
             <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
             {level === 'proofonly' && selectedEvals.length > 0 && (
               <InfoRow label="Evaluation(s)" value={

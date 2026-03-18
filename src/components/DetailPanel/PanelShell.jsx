@@ -59,7 +59,7 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover }
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, onPinToSurface, isAnchor, showPin, onConnect, onDisclose, onAddEvidence, isEvidence, isOwner,
+  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, isEvidence, isParse, isOwner,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
@@ -192,24 +192,17 @@ export default function PanelShell({
         flexShrink: 0,
         background: 'var(--bg-card)',
       }}>
-        {isOwner && !isEvidence && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && isEvidence && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
         <FooterBtn
           icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
-          label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Return' : 'Surface'}
+          label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Exit Layer' : 'Surface'}
           onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
           disabled={!isAnchor && !hasStack && !hasParent}
           btnId="layer" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn}
         />
-        {showPin && (
-          <FooterBtn
-            icon={<svg width={12} height={12} viewBox="0 0 16 16" fill="none"><path d="M9.5 2.5L13.5 6.5L10 10L8 12L6.5 10.5L3 14L2 13L5.5 9.5L4 8L6 6L9.5 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-            label="Pin"
-            onClick={onPinToSurface}
-            btnId="pin" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn}
-          />
-        )}
         <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} btnId="chain" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />
       </div>
     </div>

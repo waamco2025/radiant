@@ -43,14 +43,14 @@ export const SDA_CONFIG = {
 }
 
 export const CATEGORY_CONFIG = {
-  person:  { icon: '●', color: 'var(--accent-cyan)',   label: 'PERSON' },
-  party:   { icon: '⬡', color: 'var(--accent-indigo)', label: 'PARTY' },
-  place:   { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE' },
-  product: { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT' },
-  process: { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS' },
-  evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' },
-  parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
-  evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
+  person:  { icon: '●', color: 'var(--accent-cyan)',   label: 'PERSON', tipText: 'Person — an individual actor in the supply chain' },
+  party:   { icon: '⬡', color: 'var(--accent-indigo)', label: 'PARTY', tipText: 'Party — an organization or legal entity' },
+  place:   { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE', tipText: 'Place — a physical location or facility' },
+  product: { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT', tipText: 'Product — a manufactured item or component' },
+  process: { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS', tipText: 'Process — a manufacturing or operational workflow' },
+  evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE', tipText: 'Evidence — a source document or file attached to an asset' },
+  parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE', tipText: 'Parse — structured data extracted from evidence via PEP' },
+  evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION', tipText: 'Evaluation — results from running requirements against parsed data' },
 }
 
 export const REVOKE_WARNINGS = {

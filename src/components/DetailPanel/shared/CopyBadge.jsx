@@ -2,7 +2,9 @@ import { useState } from 'react'
 
 export default function CopyBadge({ value, truncated }) {
   const [copied, setCopied] = useState(false)
-  const display = truncated ? value.slice(0, 8) + '...' + value.slice(-4) : value
+  const display = truncated && value && value.length > 24
+    ? value.slice(0, 10) + '...' + value.slice(-4)
+    : value
 
   const handleCopy = (e) => {
     e.stopPropagation()

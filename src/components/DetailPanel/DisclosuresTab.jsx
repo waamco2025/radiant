@@ -69,7 +69,7 @@ function ChainIcon({ s = 13, c = 'var(--accent-purple)' }) {
   )
 }
 
-export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner }) {
+export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset }) {
   const [allOpen, setAllOpen] = useState(false)
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
@@ -158,25 +158,31 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                     }}>{s.label}</span>
                   </Tip>
                 } />
-                <GridRow label="Connected asset" value={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    {(sda.assetName || node?.name) && (
-                      <span
-                        style={{
-                          fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
-                          cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap', maxWidth: 120, flexShrink: 1,
-                          borderBottom: '1px solid transparent', transition: 'border-color 150ms',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-indigo)'}
-                        onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
-                      >
-                        {sda.assetName || node?.name}
-                      </span>
-                    )}
-                    <CopyBadge value={sda.assetPin || node?.pin} />
-                  </div>
-                } />
+                {sda.partyLabel !== 'internal' && (
+                  <GridRow label="Connected asset" value={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {(sda.assetName || node?.name) && (
+                        <span
+                          onClick={e => {
+                            e.stopPropagation()
+                            if (onSelectAsset && sda.assetPin) onSelectAsset(sda.assetPin)
+                          }}
+                          style={{
+                            fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+                            cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap', maxWidth: 120, flexShrink: 1,
+                            borderBottom: '1px solid transparent', transition: 'border-color 150ms',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-indigo)'}
+                          onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+                        >
+                          {sda.assetName || node?.name}
+                        </span>
+                      )}
+                      <CopyBadge value={sda.assetPin || node?.pin} />
+                    </div>
+                  } />
+                )}
                 {sda.pins && <GridRow label="PINs" value={`${sda.pins.length} asset${sda.pins.length > 1 ? 's' : ''}`} />}
                 {sda.type === 'proofonly' && (
                   <>

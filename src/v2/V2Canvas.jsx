@@ -21,18 +21,21 @@ const SDA_EDGE_CONFIG = {
   selective:  { color: 0xf59e0b, dash: 8, gap: 4,   label: 'Selective Disclosure' },
   proofonly:  { color: 0x22c55e, dash: 2, gap: 4,   label: 'Proof-only Disclosure' },
   cascade:    { color: 0xa78bfa, dash: 4, gap: 3,   label: 'Cascade Disclosure' },
+  provisional:{ color: 0x888888, dash: 6, gap: 5,   label: 'Provisional' },
 }
 const SDA_EDGE_CSS = {
   full:       '#6b8aff',
   selective:  '#f59e0b',
   proofonly:  '#22c55e',
   cascade:    '#a78bfa',
+  provisional:'#888888',
 }
 const SDA_EDGE_WIDTH = {
   full:       2.0,
   selective:  2.5,
   proofonly:  2.2,
   cascade:    2.0,
+  provisional:1.5,
 }
 
 // Dot grid params by depth
@@ -108,6 +111,7 @@ const SDA_LEGEND_TOOLTIPS = {
   full: 'Full disclosure — the receiving party can access all parsed data fields and run evaluations against them.',
   selective: 'Selective disclosure — the receiving party can only access data fields chosen by the asset owner.',
   proofonly: 'Proof-only — the receiving party sees only pass/fail results from existing evaluations. No data field access.',
+  provisional: 'Provisional — a disclosure request has been sent but the asset owner has not yet responded.',
   cascade: 'Cascade disclosure — access was forwarded through an intermediary. Permission is capped at the intermediary\'s own access level.',
 }
 
@@ -151,6 +155,7 @@ function LegendBar() {
                   type === 'selective' ? '6,3' :
                   type === 'proofonly' ? '2,3' :
                   type === 'cascade' ? '4,3' :
+                  type === 'provisional' ? '4,4' :
                   'none'
                 }
               />
@@ -205,15 +210,51 @@ function snapToGrid(val, depthLevel) {
 
 function layoutChildren(children, depthLevel = 1) {
   const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
-  const stepX = Math.ceil(300 / spacing) * spacing // at least 300px apart, snapped to grid
-  const totalW = (children.length - 1) * stepX
-  const startX = -totalW / 2
+  const stepX = Math.ceil(300 / spacing) * spacing
 
-  return children.map((child, i) => ({
+  // Separate children by tier
+  const tier1 = children.filter(c => c.category === 'evidence' || (!c.isParse && c.category !== 'parse'))
+  const tier2 = children.filter(c => c.isParse || c.category === 'parse')
+
+  // Layout tier 1 at y = 0
+  const tier1W = (tier1.length - 1) * stepX
+  const tier1StartX = -tier1W / 2
+  const positioned = tier1.map((child, i) => ({
     ...child,
-    x: snapToGrid(startX + i * stepX, depthLevel),
+    x: snapToGrid(tier1StartX + i * stepX, depthLevel),
     y: snapToGrid(0, depthLevel),
   }))
+
+  // Layout tier 2 below tier 1 — with cross-evidence collision avoidance
+  if (tier2.length > 0) {
+    const tierGap = Math.round(200 / spacing) * spacing
+    const occupiedTier2Xs = new Set()
+
+    tier2.forEach(pepNode => {
+      const sourceEvNode = positioned.find(p => p.id === pepNode.sourceEvidenceId)
+      let candidateX
+      if (sourceEvNode) {
+        candidateX = snapToGrid(sourceEvNode.x, depthLevel)
+        while (occupiedTier2Xs.has(candidateX)) {
+          candidateX += stepX
+        }
+      } else {
+        const lastX = positioned.length > 0 ? Math.max(...positioned.map(p => p.x)) : 0
+        candidateX = snapToGrid(lastX + stepX, depthLevel)
+        while (occupiedTier2Xs.has(candidateX)) {
+          candidateX += stepX
+        }
+      }
+      occupiedTier2Xs.add(candidateX)
+      positioned.push({
+        ...pepNode,
+        x: candidateX,
+        y: snapToGrid(tierGap, depthLevel),
+      })
+    })
+  }
+
+  return positioned
 }
 
 const V2Canvas = forwardRef(function V2Canvas({
@@ -230,6 +271,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onConnect,
   onDisclose,
   onAddEvidence,
+  onParseEvidence,
   activeParty,
 }, ref) {
   const containerRef = useRef(null)
@@ -278,12 +320,84 @@ const V2Canvas = forwardRef(function V2Canvas({
     label: 'Root',
   }])
 
-  // Sync root layer when prop data changes (e.g. after disclosure acceptance adds nodes/edges)
+  // Sync root layer when prop data changes — always keep layerStack[0] current,
+  // even when viewing child layers, so surfacing + re-diving sees updated children
   useEffect(() => {
-    if (layerStack.length !== 1) return  // only sync at root depth
     const filteredNodes = rootNodes.filter(n => n.x !== undefined && n.y !== undefined)
-    setLayerStack(prev => [{ ...prev[0], nodes: filteredNodes, edges: rootEdges }])
+    setLayerStack(prev => {
+      const root = prev[0]
+      const updatedRoot = { ...root, nodes: filteredNodes, edges: rootEdges }
+      if (prev.length === 1) return [updatedRoot]
+      return [updatedRoot, ...prev.slice(1)]
+    })
   }, [rootNodes, rootEdges])
+
+  // Ref to read layerStack without creating a dependency cycle
+  const layerStackRef = useRef(layerStack)
+  useEffect(() => { layerStackRef.current = layerStack }, [layerStack])
+
+  // Sync child layer when parent node's children change (e.g. after PEP parse or Add Evidence while diving)
+  useEffect(() => {
+    const stack = layerStackRef.current
+    if (stack.length <= 1) return
+    if (transitioningRef.current) return
+
+    const childLayer = stack[stack.length - 1]
+    const parentNode = childLayer.parentNode
+    if (!parentNode) return
+
+    const latestParent = rootNodeMap[parentNode.id]
+    if (!latestParent || !latestParent.children) return
+
+    const currentChildCount = childLayer.nodes.filter(n => !n._isAnchor).length
+    const latestChildCount = latestParent.children.length
+    if (latestChildCount === currentChildCount) return
+
+    const targetDepth = stack.length - 1
+    const childrenWithPos = layoutChildren(latestParent.children, targetDepth)
+    const childSpacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, targetDepth)
+    const ANCHOR_GAP = Math.round(200 / childSpacing) * childSpacing
+    const childRowY = childrenWithPos.length > 0 ? childrenWithPos[0].y : 0
+    const anchorY = snapToGrid(childRowY - ANCHOR_GAP, targetDepth)
+    const anchorNode = { ...latestParent, _isAnchor: true, x: 0, y: anchorY }
+    const allNodes = [anchorNode, ...childrenWithPos]
+
+    const childEdges = []
+    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse).forEach(child => {
+      childEdges.push({
+        id: `edge-anchor-${child.id}`,
+        from: anchorNode.id,
+        to: child.id,
+        sdaType: child.sda?.type || 'full',
+        _vertical: true,
+      })
+    })
+    childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+      childEdges.push({
+        id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`,
+        from: pepChild.sourceEvidenceId,
+        to: pepChild.id,
+        sdaType: 'full',
+        _vertical: true,
+      })
+    })
+
+    setLayerStack(prev => {
+      if (prev.length <= 1) return prev  // safety: don't update if we've already surfaced
+      const updated = [...prev]
+      updated[updated.length - 1] = {
+        ...updated[updated.length - 1],
+        parentNode: latestParent,
+        nodes: allNodes,
+        edges: childEdges,
+      }
+      return updated
+    })
+
+    requestAnimationFrame(() => {
+      dirtyRef.current = true
+    })
+  }, [rootNodeMap])
 
   const currentLayer = layerStack[layerStack.length - 1]
   const depth = layerStack.length - 1
@@ -1104,14 +1218,26 @@ const V2Canvas = forwardRef(function V2Canvas({
     const anchorNode = { ...node, _isAnchor: true, x: 0, y: anchorY }
     const allNodes = [anchorNode, ...childrenWithPos]
 
-    // Create full-disclosure edges from anchor to each child
-    const childEdges = childrenWithPos.map(child => ({
-      id: `edge-anchor-${child.id}`,
-      from: anchorNode.id,
-      to: child.id,
-      sdaType: child.sda?.type || 'full',
-      _vertical: true, // flag for vertical routing
-    }))
+    // Create edges: anchor → tier 1 children, evidence → PEP parse nodes
+    const childEdges = []
+    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse).forEach(child => {
+      childEdges.push({
+        id: `edge-anchor-${child.id}`,
+        from: anchorNode.id,
+        to: child.id,
+        sdaType: child.sda?.type || 'full',
+        _vertical: true,
+      })
+    })
+    childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+      childEdges.push({
+        id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`,
+        from: pepChild.sourceEvidenceId,
+        to: pepChild.id,
+        sdaType: 'full',
+        _vertical: true,
+      })
+    })
 
     // Compute final camera state BEFORE the transition so React renders
     // child cards at correct screen positions during the snapshot
@@ -1231,6 +1357,9 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     transitioningRef.current = true
     setTransitioning(true)
+
+    // Clear any stale selection from the child layer — prevents ghost tooltips
+    onCloseSel?.()
 
     const parentLayer = layerStack[layerStack.length - 2]
     const currentDepth = layerStack.length - 1
@@ -1847,6 +1976,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onConnect={transitioning ? undefined : onConnect}
                   onDisclose={transitioning ? undefined : onDisclose}
                   onAddEvidence={transitioning ? undefined : onAddEvidence}
+                  onParseEvidence={transitioning ? undefined : onParseEvidence}
                   activeParty={activeParty}
                 />
               </div>
@@ -1856,7 +1986,7 @@ const V2Canvas = forwardRef(function V2Canvas({
           // Build card style with dive-target and anchor modifications
           const cardStyle = isAnchor ? {
             ...getCardStyle(sp),
-            opacity: 0.7,
+            opacity: 1.0,
             viewTransitionName: 'dive-target',
             pointerEvents: transitioning ? 'none' : 'auto',
           } : {
@@ -1885,13 +2015,14 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onSelect={transitioning ? undefined : onSelect}
                 onOpenSubgraph={transitioning ? undefined : onOpenSubgraph}
                 onDive={(transitioning || isAnchor) ? undefined : handleDive}
-                onSurface={isAnchor ? handleSurface : undefined}
+                onSurface={depth > 0 ? handleSurface : undefined}
                 isAnchor={isAnchor}
                 isChild={depth > 0 && !isAnchor}
                 zoom={zoom}
                 onConnect={transitioning ? undefined : onConnect}
                 onDisclose={transitioning ? undefined : onDisclose}
                 onAddEvidence={transitioning ? undefined : onAddEvidence}
+                onParseEvidence={transitioning ? undefined : onParseEvidence}
                 activeParty={activeParty}
               />
             </div>

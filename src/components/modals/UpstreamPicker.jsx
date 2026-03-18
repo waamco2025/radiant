@@ -117,13 +117,13 @@ export default function UpstreamPicker({ assets, selected, setSelected, downstre
                 {/* Row 3: name + PIN */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: off ? 'var(--text-dim)' : 'var(--text-primary)' }}>{a.name}</span>
-                  <CopyBadge value={a.pin} />
+                  <CopyBadge value={a.pin} truncated />
                 </div>
 
                 {/* Row 4: owner + DOT */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{a.owner}</span>
-                  <CopyBadge value={a.ownerDot} />
+                  <CopyBadge value={a.ownerDot} truncated />
                 </div>
               </div>
             </div>

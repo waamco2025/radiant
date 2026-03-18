@@ -27,18 +27,29 @@ export const SDA_TYPES = {
    ═══════════════════════════════════════════════════════════════════════ */
 export function Backdrop({ children, onClose }) {
   const mouseDownOnBackdrop = useRef(false)
+  const [closing, setClosing] = useState(false)
+  const closingRef = useRef(false)
+
+  const handleClose = useCallback(() => {
+    if (closingRef.current) return
+    closingRef.current = true
+    setClosing(true)
+    setTimeout(() => {
+      onClose?.()
+    }, 180)
+  }, [onClose])
 
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
         e.preventDefault()
-        onClose?.()
+        handleClose()
       }
     }
     window.addEventListener('keydown', handleKey, true)
     return () => window.removeEventListener('keydown', handleKey, true)
-  }, [onClose])
+  }, [handleClose])
 
   return (
     <div
@@ -47,7 +58,7 @@ export function Backdrop({ children, onClose }) {
       }}
       onClick={e => {
         if (e.target === e.currentTarget && mouseDownOnBackdrop.current) {
-          onClose?.()
+          handleClose()
         }
         mouseDownOnBackdrop.current = false
       }}
@@ -57,10 +68,10 @@ export function Backdrop({ children, onClose }) {
         backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 10000,
-        animation: 'fade-in 200ms ease',
+        animation: closing ? 'fade-out 180ms ease forwards' : 'fade-in 200ms ease',
       }}
     >
-      <style>{`@keyframes fade-in{from{opacity:0}to{opacity:1}} @keyframes modal-up{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>
+      <style>{`@keyframes fade-in{from{opacity:0}to{opacity:1}} @keyframes fade-out{from{opacity:1}to{opacity:0}} @keyframes modal-up{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>
       {children}
     </div>
   )
@@ -179,19 +190,23 @@ export function InfoRow({ label, value, mono }) {
   )
 }
 
-export function CopyBadge({ value }) {
+export function CopyBadge({ value, truncated }) {
   const [copied, setCopied] = useState(false)
+  const display = truncated && value && value.length > 24
+    ? value.slice(0, 10) + '...' + value.slice(-4)
+    : value
   const copy = (e) => { e.stopPropagation(); navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
-    <span data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined} onClick={copy} style={{
+    <span data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined} onClick={copy} title="Click to copy" style={{
       display: 'inline-flex', alignItems: 'center', gap: 4,
       padding: '3px 9px', borderRadius: 4,
       background: 'var(--bg-raised)', border: '1px solid var(--border)',
       fontFamily: 'var(--font-mono)', fontSize: 11,
       color: copied ? 'var(--accent-green)' : 'var(--text-dim)',
       cursor: 'pointer', transition: 'color 150ms', userSelect: 'none',
+      whiteSpace: 'nowrap',
     }}>
-      {copied ? '✓ Copied' : value}
+      {copied ? '✓ Copied' : display}
     </span>
   )
 }

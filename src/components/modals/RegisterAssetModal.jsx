@@ -436,7 +436,7 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
           </div>
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
             <InfoRow label="Asset name" value={name} />
-            <InfoRow label="PIN" value={<CopyBadge value={generatedPin} />} />
+            <InfoRow label="PIN" value={<CopyBadge value={generatedPin} truncated />} />
             <InfoRow label="Category" value={
               <span style={{ color: cat?.color, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
                 {cat?.icon} {cat?.label}
