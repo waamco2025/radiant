@@ -112,6 +112,7 @@ function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDa
       <div style={{ padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12 }}>DISCLOSURE SUMMARY</div>
         <InfoRow label="Asset" value={request.asset.name} />
+        <InfoRow label="PIN" value={<CopyBadge value={request.asset.pin} truncated />} />
         <InfoRow label="To" value={request.from.name} />
         <InfoRow label="Disclosure type" value={
           <span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
@@ -269,7 +270,12 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
           </div>
           {!isDecline && (
             <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
-              <InfoRow label="Asset" value={request.asset.name} />
+              <InfoRow label="Asset" value={
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{request.asset.name}</span>
+                  <CopyBadge value={request.asset.pin} truncated />
+                </span>
+              } />
               <InfoRow label="Party" value={request.from.name} />
               <InfoRow label="Disclosure type" value={
                 <span style={{ color: SDA_TYPES[effectiveLevel]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>

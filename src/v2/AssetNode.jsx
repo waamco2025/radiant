@@ -344,6 +344,7 @@ export default function AssetNode({
   const isOwnedByUser = !node.owner || node.owner === activeParty
   const isTerminalNode = node.isParse || node.category === 'parse'
   const isProvisional = !!node.provisional
+  const isNew = !!node._isNew
   const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
   const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
@@ -371,6 +372,28 @@ export default function AssetNode({
     >
       {hasChildren && !isAnchor && !isProvisional && (
         <StackPeeks count={childCount} isHovered={hovered} categoryColor={cat.color} />
+      )}
+
+      {/* NEW badge */}
+      {isNew && (
+        <div style={{
+          position: 'absolute',
+          top: -8,
+          right: -8 + ACTION_BAR_W,
+          zIndex: 5,
+          fontSize: 8,
+          fontFamily: 'var(--font-mono)',
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          color: '#fff',
+          background: isProvisional ? 'var(--text-dim)' : 'var(--accent-green)',
+          padding: '2px 7px',
+          borderRadius: 4,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+          pointerEvents: 'none',
+        }}>
+          NEW
+        </div>
       )}
 
       {/* Dive hint tooltip — shows when selected node has children */}
@@ -404,9 +427,11 @@ export default function AssetNode({
           height: CARD_H * scale,
           background: isProvisional
             ? 'var(--bg-deep)'
-            : hovered
-              ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
-              : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
+            : isNew
+              ? `color-mix(in srgb, var(--bg-card) 85%, ${cat.color})`
+              : hovered
+                ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
+                : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
           border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
           opacity: isProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,

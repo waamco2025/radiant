@@ -5,11 +5,12 @@ import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 import ParsedFieldsTab from './ParsedFieldsTab'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onManageCascade, isOwner, onViewChild, onSelectAsset }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest }) {
   if (!node) return null
 
-  // Provisional nodes get a minimal panel with no tabs
+  // Provisional nodes get a minimal panel with request context
   if (node.provisional) {
+    const ctx = node.requestContext
     return (
       <PanelShell
         node={node}
@@ -24,34 +25,98 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
         isEvidence={false}
         isParse={false}
         isOwner={false}
+        onSurface={onSurface}
       >
-        <div style={{ padding: '24px 16px', textAlign: 'center' }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: '50%',
-            background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
-            border: '1.5px dashed var(--text-dim)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px',
-          }}>
-            <span style={{ fontSize: 20, color: 'var(--text-dim)' }}>⏳</span>
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            Awaiting Disclosure
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-            A disclosure request has been sent to the asset owner. Once they accept and choose a disclosure type, this node will be updated with the disclosed data.
-          </div>
-          {node.pin && (
+        <div style={{ padding: '24px 20px' }}>
+          {/* Status icon */}
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <div style={{
-              marginTop: 16, padding: '8px 12px',
-              background: 'var(--bg-card)', borderRadius: 6,
-              border: '1px solid var(--border)',
-              fontSize: 11, fontFamily: 'var(--font-mono)',
-              color: 'var(--text-tertiary)',
+              width: 48, height: 48, borderRadius: '50%',
+              background: 'color-mix(in srgb, var(--text-dim) 8%, transparent)',
+              border: '2px dashed var(--text-dim)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 14px', fontSize: 20, color: 'var(--text-dim)',
+            }}>⏳</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              Awaiting Disclosure
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              Request sent to <strong style={{ color: 'var(--text-tertiary)' }}>{node.owner}</strong>
+            </div>
+          </div>
+
+          {/* Request details */}
+          {ctx && (
+            <div style={{
+              background: 'var(--bg-surface)', borderRadius: 8,
+              border: '1px solid var(--border)', padding: '14px 16px',
             }}>
-              {node.pin}
+              <div style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12,
+              }}>
+                REQUEST DETAILS
+              </div>
+
+              <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Requested via</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ctx.contextNodeName}</span>
+              </div>
+
+              <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Date</span>
+                <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{ctx.date}</span>
+              </div>
+
+              {ctx.requirements && ctx.requirements.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Requirements</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {ctx.requirements.map((req, i) => (
+                      <div key={i} style={{
+                        fontSize: 11, color: 'var(--text-secondary)',
+                        padding: '6px 10px', borderRadius: 4,
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border)',
+                      }}>
+                        {req}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {ctx.message && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Message</div>
+                  <div style={{
+                    fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
+                    padding: '8px 10px', borderRadius: 4,
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    fontStyle: 'italic',
+                  }}>
+                    "{ctx.message}"
+                  </div>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Cancel button */}
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <span
+              onClick={() => onCancelRequest?.(node)}
+              style={{
+                fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)',
+                cursor: 'pointer', borderBottom: '1px solid transparent',
+                transition: 'border-color 150ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-red)'}
+              onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+            >
+              Cancel Request
+            </span>
+          </div>
         </div>
       </PanelShell>
     )

@@ -45,6 +45,7 @@ export default function V2App() {
   const [roleId, setRoleId] = useState('bob-govco')
   const [sel, setSel] = useState(null)
   const [modalNode, setModalNode] = useState(null)
+  const prevSelRef = useRef(null)
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
@@ -65,6 +66,21 @@ export default function V2App() {
   }, [])
 
   const currentRoleState = perRoleState[roleId] || emptyRoleState
+
+  // Clear _isNew from previously selected node on deselection
+  useEffect(() => {
+    const prevSel = prevSelRef.current
+    prevSelRef.current = sel
+    if (prevSel && prevSel !== sel) {
+      updateRoleState(roleId, prev => {
+        const idx = prev.addedNodes.findIndex(n => n.id === prevSel && n._isNew)
+        if (idx === -1) return prev
+        const updated = [...prev.addedNodes]
+        updated[idx] = { ...updated[idx], _isNew: false }
+        return { ...prev, addedNodes: updated }
+      })
+    }
+  }, [sel, roleId])
   const { addedNodes, addedSDAs, addedEdges, dismissedReqs, addedRequests } = currentRoleState
   const addedChildren = currentRoleState.addedChildren || {}
 
@@ -302,18 +318,9 @@ export default function V2App() {
     validPins.forEach(({ pin, resolved }) => {
       const provNodeId = `provisional-${resolved.id}`
 
-      const connectedEdgesFromCtx = edges.filter(e => e.from === ctxNode.id)
-      const connectedFromCtx = connectedEdgesFromCtx.map(e => nodeMap[e.to]).filter(Boolean)
-
-      let newX, newY
-      if (connectedFromCtx.length > 0) {
-        newX = connectedFromCtx[0].x
-        const lowestY = Math.max(...connectedFromCtx.map(n => n.y))
-        newY = lowestY + 300
-      } else {
-        newX = (ctxNode.x || 0) + 500
-        newY = ctxNode.y || 0
-      }
+      // Place one column right of the context node
+      const newX = (ctxNode.x || 0) + 500
+      let newY = ctxNode.y || 0
 
       // Include previously created batch nodes in collision check
       newY = findClearY(newX, newY, [...nodes, ...newProvNodes])
@@ -349,6 +356,14 @@ export default function V2App() {
         isEvidence: false,
         lastEval: null,
         provisional: true,
+        _isNew: true,
+        requestContext: {
+          requirements: requirements,
+          message: message || '',
+          date: today,
+          contextNodeName: ctxNode.name,
+          contextNodePin: ctxNode.pin,
+        },
       })
 
       newProvEdges.push({
@@ -366,6 +381,8 @@ export default function V2App() {
         addedNodes: [...prev.addedNodes, ...newProvNodes],
         addedEdges: [...prev.addedEdges, ...newProvEdges],
       }))
+      // Pan to the first provisional node after state settles
+      setTimeout(() => setSel(newProvNodes[0].id), 300)
     }
 
     // Cross-role requests — also batch into single update
@@ -870,6 +887,23 @@ export default function V2App() {
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
               onViewChild={handleViewChild}
+              onCancelRequest={(provNode) => {
+                updateRoleState(roleId, prev => ({
+                  ...prev,
+                  addedNodes: prev.addedNodes.filter(n => n.id !== provNode.id),
+                  addedEdges: prev.addedEdges.filter(e => e.to !== provNode.id && e.from !== provNode.id),
+                }))
+                const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+                if (otherRoleId) {
+                  updateRoleState(otherRoleId, prev => ({
+                    ...prev,
+                    addedRequests: (prev.addedRequests || []).filter(r =>
+                      r.asset?.pin !== provNode.pin
+                    ),
+                  }))
+                }
+                setSel(null)
+              }}
               onSelectAsset={(pinOrId) => {
                 if (!pinOrId) return
                 const target = Object.values(nodeMap).find(n => n.pin === pinOrId || n.id === pinOrId)
@@ -1000,11 +1034,10 @@ export default function V2App() {
                 let newX, newY
                 if (allSiblings.length > 0) {
                   newX = allSiblings[0].x
-                  const lowestY = Math.max(...allSiblings.map(n => n.y))
-                  newY = lowestY + 300
+                  newY = parentNodeRef.y || 0
                 } else {
                   newX = (parentNodeRef.x || 0) + 500
-                  newY = (parentNodeRef.y || 0) + index * 300
+                  newY = parentNodeRef.y || 0
                 }
 
                 // Collision check against all existing + batch-created nodes
@@ -1051,6 +1084,7 @@ export default function V2App() {
                   isEvidence: false,
                   lastEval: null,
                   description: null,
+                  _isNew: true,
                 }
 
                 if (asset.evidenceUri) {
@@ -1106,8 +1140,7 @@ export default function V2App() {
               let newX, newY
               if (connectedNodes.length > 0) {
                 newX = connectedNodes[0].x
-                const lowestY = Math.max(...connectedNodes.map(n => n.y))
-                newY = lowestY + 300
+                newY = registerNode.y || 0
               } else {
                 newX = (registerNode.x || 0) + 500
                 newY = registerNode.y || 0
@@ -1157,6 +1190,7 @@ export default function V2App() {
                 isEvidence: false,
                 lastEval: null,
                 description: description || null,
+                _isNew: true,
               }
 
               updateRoleState(roleId, prev => ({
@@ -1250,6 +1284,7 @@ export default function V2App() {
                   upstreamAssets: null,
                   isEvidence: false,
                   lastEval: null,
+                  _isNew: true,
                 }
                 updateRoleState(roleId, prev => ({
                   ...prev,
@@ -1365,6 +1400,7 @@ export default function V2App() {
                   upstreamAssets: null,
                   isEvidence: false,
                   lastEval: null,
+                  _isNew: true,
                 }
 
                 updateRoleState(otherRoleId, prev => {
@@ -1387,7 +1423,7 @@ export default function V2App() {
                     // Replace provisional node with real disclosed node, keeping position
                     newState.addedNodes = prev.addedNodes
                       .filter(n => n.id !== provId)
-                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y })
+                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y, _isNew: true })
                     // Replace provisional edges with real disclosure edges
                     newState.addedEdges = prev.addedEdges
                       .filter(e => !((e.to === provId || e.from === provId) && e.sdaType === 'provisional'))

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, StepDots, FieldLabel, InfoRow,
+  Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
 } from './ModalShared'
 
 const REQ_OPTS = [
@@ -295,8 +295,9 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
               validEntries.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {validEntries.map(([pin, r], i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
                       <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.resolved?.name}</span>
+                      <CopyBadge value={pin} truncated />
                       <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{r.resolved?.owner}</span>
                     </div>
                   ))}
@@ -332,16 +333,25 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
               background: 'var(--bg-card)', overflow: 'hidden',
             }}>
               {pinRows.map((row, i) => {
-                const rv = getRowValidation(i)
                 const trimmed = row.trim()
-                const borderColor = rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 25%, transparent)'
+                // Detect duplicate: same PIN appears earlier in the list
+                const isDuplicate = (() => {
+                  if (!trimmed) return false
+                  const lines = pinRows.map(l => l.trim())
+                  const firstIndex = lines.indexOf(trimmed)
+                  return firstIndex !== -1 && firstIndex < i
+                })()
+                const rv = isDuplicate ? null : getRowValidation(i)
+                const borderColor = isDuplicate ? 'color-mix(in srgb, var(--accent-amber) 25%, transparent)'
+                  : rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 25%, transparent)'
                   : rv?.status === 'error' ? 'color-mix(in srgb, var(--accent-red) 25%, transparent)'
                   : 'transparent'
                 return (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center',
                     borderBottom: i < pinRows.length - 1 ? '1px solid var(--border)' : 'none',
-                    background: rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 3%, transparent)'
+                    background: isDuplicate ? 'color-mix(in srgb, var(--accent-amber) 3%, transparent)'
+                      : rv?.status === 'valid' ? 'color-mix(in srgb, var(--accent-green) 3%, transparent)'
                       : rv?.status === 'error' ? 'color-mix(in srgb, var(--accent-red) 3%, transparent)'
                       : 'transparent',
                     borderLeft: `3px solid ${borderColor}`,
@@ -386,17 +396,22 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
                     />
                     {/* Inline validation status */}
                     <span style={{ flexShrink: 0, padding: '0 10px 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {rv?.status === 'pending' && (
+                      {isDuplicate && (
+                        <span style={{ fontSize: 10, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
+                          Duplicate — ignored
+                        </span>
+                      )}
+                      {!isDuplicate && rv?.status === 'pending' && (
                         <span style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: 2 }}>···</span>
                       )}
-                      {rv?.status === 'validating' && (
+                      {!isDuplicate && rv?.status === 'validating' && (
                         <span style={{
                           display: 'inline-block', width: 12, height: 12,
                           border: '2px solid var(--border)', borderTopColor: 'var(--accent-indigo)',
                           borderRadius: '50%', animation: 'spin 0.8s linear infinite',
                         }} />
                       )}
-                      {rv?.status === 'valid' && (
+                      {!isDuplicate && rv?.status === 'valid' && (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-green)' }}>✓</span>
                           <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -405,7 +420,7 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
                           <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{rv.resolved?.owner}</span>
                         </span>
                       )}
-                      {rv?.status === 'error' && (
+                      {!isDuplicate && rv?.status === 'error' && (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-red)' }}>✕</span>
                           <span style={{ fontSize: 10, color: 'var(--accent-red)' }}>{rv.error}</span>
@@ -513,8 +528,9 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
                 validEntries.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {validEntries.map(([pin, r], i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.resolved?.name}</span>
+                        <CopyBadge value={pin} truncated />
                         <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{r.resolved?.owner}</span>
                       </div>
                     ))}

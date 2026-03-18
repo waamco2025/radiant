@@ -179,7 +179,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                           {sda.assetName || node?.name}
                         </span>
                       )}
-                      <CopyBadge value={sda.assetPin || node?.pin} />
+                      <CopyBadge value={sda.assetPin || node?.pin} truncated />
                     </div>
                   } />
                 )}
