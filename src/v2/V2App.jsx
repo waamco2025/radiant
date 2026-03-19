@@ -13,6 +13,7 @@ import CascadeModal from '../components/modals/CascadeModal.jsx'
 import RegisterAssetModal from '../components/modals/RegisterAssetModal.jsx'
 import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
 import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
+import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -51,7 +52,7 @@ export default function V2App() {
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
 
   // Per-role dynamic state — persists across role switches
-  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [] }
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [] }
   const [perRoleState, setPerRoleState] = useState(() => {
     const init = {}
     ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
@@ -83,9 +84,36 @@ export default function V2App() {
   }, [sel, roleId])
   const { addedNodes, addedSDAs, addedEdges, dismissedReqs, addedRequests } = currentRoleState
   const addedChildren = currentRoleState.addedChildren || {}
+  const removedSDAs = currentRoleState.removedSDAs || []
+  const removedNodes = currentRoleState.removedNodes || []
+  const removedEdges = currentRoleState.removedEdges || []
 
   const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => {
     const data = { ...roleData }
+
+    // Step 0: Filter removed nodes from static data
+    if (removedNodes.length > 0) {
+      const removedSet = new Set(removedNodes)
+      data.nodes = data.nodes.filter(n => !removedSet.has(n.id))
+    }
+
+    // Step 0b: Filter removed edges from static data
+    if (removedEdges.length > 0) {
+      const removedEdgeSet = new Set(removedEdges)
+      data.edges = data.edges.filter(e => !removedEdgeSet.has(e.id))
+    }
+
+    // Step 0c: Filter removed SDAs from static data
+    if (removedSDAs.length > 0) {
+      data.nodes = data.nodes.map(n => {
+        const removals = removedSDAs.filter(r => r.nodeId === n.id)
+        if (removals.length === 0) return n
+        const filteredSDAs = (n.sdas || []).filter(sda =>
+          !removals.some(r => r.party === sda.party && r.type === sda.type && r.created === sda.created)
+        )
+        return { ...n, sdas: filteredSDAs }
+      })
+    }
 
     // Merge added nodes
     if (addedNodes.length > 0) {
@@ -151,7 +179,7 @@ export default function V2App() {
     }
 
     return data
-  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests])
+  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests, removedSDAs, removedNodes, removedEdges])
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -165,6 +193,7 @@ export default function V2App() {
   const [cascadeContext, setCascadeContext] = useState(null)
   const [evidenceNode, setEvidenceNode] = useState(null)
   const [parseContext, setParseContext] = useState(null)
+  const [revocationNotice, setRevocationNotice] = useState(null)
   const inboxRef = useRef(null)
   const nodeMapRef = useRef(nodeMap)
   useEffect(() => { nodeMapRef.current = nodeMap }, [nodeMap])
@@ -563,20 +592,39 @@ export default function V2App() {
                 overflow: 'hidden',
               }}>
                 <div style={{ padding: '10px 14px 8px', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '.08em' }}>DISCLOSURE REQUESTS</div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '.08em' }}>NOTIFICATIONS</div>
                 </div>
                 {visibleRequests.length === 0 ? (
                   <div style={{ padding: '20px 14px', textAlign: 'center', fontSize: 12, color: 'var(--text-dim)' }}>
-                    No pending requests
+                    No pending notifications
                   </div>
                 ) : (
-                  visibleRequests.map(req => (
+                  visibleRequests.map(req => {
+                    const isRevocation = req.type === 'revocation'
+                    const isAcceptance = req.type === 'acceptance'
+                    const badgeColor = isRevocation ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : 'REQUEST'
+                    return (
                     <div
                       key={req.id}
                       onClick={() => {
-                        const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
-                        setResponseRequest(reqNode ? { ...req, node: reqNode } : req)
                         setShowInbox(false)
+                        if (isRevocation) {
+                          setRevocationNotice(req)
+                        } else if (isAcceptance) {
+                          // Dismiss and pan to the disclosed asset
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
+                          if (targetNode) {
+                            setTimeout(() => setSel(targetNode.id), 100)
+                          }
+                        } else {
+                          const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
+                          setResponseRequest(reqNode ? { ...req, node: reqNode } : req)
+                        }
                       }}
                       style={{
                         padding: '10px 14px',
@@ -590,9 +638,10 @@ export default function V2App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                         <div style={{
                           width: 22, height: 22, borderRadius: '50%',
-                          background: 'color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+                          background: `color-mix(in srgb, ${badgeColor} 15%, transparent)`,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 9, fontWeight: 700, color: 'var(--accent-indigo)',
+                          fontSize: 9, fontWeight: 700,
+                          color: badgeColor,
                           fontFamily: 'var(--font-mono)', flexShrink: 0,
                         }}>{req.from.name[0]}</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -601,17 +650,23 @@ export default function V2App() {
                         </div>
                         <span style={{
                           fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                          color: 'var(--accent-indigo)',
+                          color: badgeColor,
                           padding: '2px 6px',
-                          background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                          background: `color-mix(in srgb, ${badgeColor} 10%, transparent)`,
                           borderRadius: 4,
-                        }}>REQUEST</span>
+                        }}>{badgeLabel}</span>
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 30 }}>
-                        {req.asset.name}
+                        {isRevocation
+                          ? `Revoked ${req.disclosureType} disclosure to ${req.asset?.name}`
+                          : isAcceptance
+                            ? `Granted ${req.disclosureType} disclosure to ${req.asset?.name}`
+                            : req.asset.name
+                        }
                       </div>
                     </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             )}
@@ -909,6 +964,200 @@ export default function V2App() {
                 const target = Object.values(nodeMap).find(n => n.pin === pinOrId || n.id === pinOrId)
                 if (target) setSel(target.id)
               }}
+              onRevokeSda={({ sda, nodeId, message }) => {
+                const today = new Date().toISOString().slice(0, 10)
+                const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+
+                const clickedNode = nodeMap[nodeId]
+                const connectorPin = sda.assetPin
+                const connectorNode = connectorPin
+                  ? Object.values(nodeMap).find(n => n.pin === connectorPin)
+                  : null
+
+                // Determine which side is "ours" and which is "theirs"
+                let ownAssetId, ownAssetPin, foreignNodeId, foreignNodePin
+
+                if (clickedNode?.owner === activeRole.party) {
+                  ownAssetId = nodeId
+                  ownAssetPin = clickedNode?.pin
+                  foreignNodeId = connectorNode?.id
+                  foreignNodePin = connectorPin
+                } else {
+                  foreignNodeId = nodeId
+                  foreignNodePin = clickedNode?.pin
+                  ownAssetId = connectorNode?.id
+                  ownAssetPin = connectorPin
+                }
+
+                // ===== STEP 1: Remove SDA from our own asset =====
+                if (ownAssetId) {
+                  updateRoleState(roleId, prev => {
+                    const addedForNode = prev.addedSDAs[ownAssetId] || []
+                    const matchIndex = addedForNode.findIndex(s =>
+                      s.party === sda.party && s.type === sda.type && s.created === sda.created
+                    )
+                    // Also try matching by type+created only (SDA party field varies by perspective)
+                    const matchIndex2 = matchIndex >= 0 ? matchIndex : addedForNode.findIndex(s =>
+                      s.type === sda.type && s.created === sda.created
+                    )
+
+                    const newState = { ...prev }
+                    if (matchIndex2 >= 0) {
+                      const updated = [...addedForNode]
+                      updated.splice(matchIndex2, 1)
+                      newState.addedSDAs = { ...prev.addedSDAs, [ownAssetId]: updated }
+                    } else {
+                      newState.removedSDAs = [...(prev.removedSDAs || []), {
+                        nodeId: ownAssetId,
+                        party: sda.party,
+                        type: sda.type,
+                        created: sda.created,
+                      }]
+                    }
+                    return newState
+                  })
+                }
+
+                // ===== STEP 1b: Remove the foreign node + edge from our own network =====
+                if (foreignNodeId) {
+                  updateRoleState(roleId, prev => {
+                    const newState = { ...prev }
+                    const ownRoleData = getDataForRole(roleId)
+
+                    // Remove edge between own asset and foreign node
+                    newState.addedEdges = prev.addedEdges.filter(e =>
+                      !((e.from === ownAssetId && e.to === foreignNodeId) || (e.from === foreignNodeId && e.to === ownAssetId))
+                    )
+                    const staticEdgesToRemove = ownRoleData.edges
+                      .filter(e =>
+                        (e.from === ownAssetId && e.to === foreignNodeId) ||
+                        (e.from === foreignNodeId && e.to === ownAssetId)
+                      )
+                      .map(e => e.id)
+                    if (staticEdgesToRemove.length > 0) {
+                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
+                    }
+
+                    // Remove SDA from the foreign node that references our asset
+                    const foreignNodeData = nodeMap[foreignNodeId]
+                    if (foreignNodeData) {
+                      const staticSda = (foreignNodeData.sdas || []).find(s => s.assetPin === ownAssetPin)
+                      if (staticSda) {
+                        newState.removedSDAs = [...(prev.removedSDAs || []), {
+                          nodeId: foreignNodeId,
+                          party: staticSda.party,
+                          type: staticSda.type,
+                          created: staticSda.created,
+                        }]
+                      }
+                      const dynamicSdas = prev.addedSDAs[foreignNodeId] || []
+                      if (dynamicSdas.length > 0) {
+                        newState.addedSDAs = {
+                          ...(newState.addedSDAs || prev.addedSDAs),
+                          [foreignNodeId]: dynamicSdas.filter(s => s.assetPin !== ownAssetPin),
+                        }
+                      }
+                    }
+
+                    // Check if foreign node has any remaining edges
+                    const allCurrentEdges = [
+                      ...ownRoleData.edges.filter(e =>
+                        !(prev.removedEdges || []).includes(e.id) && !staticEdgesToRemove.includes(e.id)
+                      ),
+                      ...newState.addedEdges,
+                    ]
+                    const remainingForeignEdges = allCurrentEdges.filter(e =>
+                      e.from === foreignNodeId || e.to === foreignNodeId
+                    )
+
+                    if (remainingForeignEdges.length === 0) {
+                      const isStaticNode = !!ownRoleData.nodeMap[foreignNodeId]
+                      const isDynamicNode = prev.addedNodes.some(n => n.id === foreignNodeId)
+                      if (isDynamicNode) {
+                        newState.addedNodes = prev.addedNodes.filter(n => n.id !== foreignNodeId)
+                      } else if (isStaticNode) {
+                        newState.removedNodes = [...(prev.removedNodes || []), foreignNodeId]
+                      }
+                    }
+
+                    return newState
+                  })
+                }
+
+                // ===== STEP 2: Cross-role — remove our asset from other role's network =====
+                if (otherRoleId && ownAssetId) {
+                  const otherRoleData = getDataForRole(otherRoleId)
+
+                  updateRoleState(otherRoleId, prev => {
+                    const newState = { ...prev }
+                    const targetNodeId = ownAssetId
+
+                    // Remove node — dynamic or static
+                    const isStatic = !!otherRoleData.nodeMap[targetNodeId]
+                    const isDynamic = prev.addedNodes.some(n => n.id === targetNodeId)
+                    if (isDynamic) {
+                      newState.addedNodes = prev.addedNodes.filter(n => n.id !== targetNodeId)
+                    } else if (isStatic) {
+                      newState.removedNodes = [...(prev.removedNodes || []), targetNodeId]
+                    }
+
+                    // Remove edges
+                    newState.addedEdges = prev.addedEdges.filter(e =>
+                      e.to !== targetNodeId && e.from !== targetNodeId
+                    )
+                    const staticEdgesToRemove = otherRoleData.edges
+                      .filter(e => e.to === targetNodeId || e.from === targetNodeId)
+                      .map(e => e.id)
+                    if (staticEdgesToRemove.length > 0) {
+                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
+                    }
+
+                    // Remove dynamic SDAs referencing our asset
+                    const updatedAddedSDAs = { ...prev.addedSDAs }
+                    Object.keys(updatedAddedSDAs).forEach(nid => {
+                      updatedAddedSDAs[nid] = (updatedAddedSDAs[nid] || []).filter(s =>
+                        s.assetPin !== ownAssetPin
+                      )
+                    })
+                    newState.addedSDAs = updatedAddedSDAs
+
+                    // Remove static SDAs on the other role's connector
+                    if (foreignNodeId) {
+                      const otherConnector = otherRoleData.nodes.find(n => n.id === foreignNodeId)
+                      if (otherConnector) {
+                        const staticSda = (otherConnector.sdas || []).find(s => s.assetPin === ownAssetPin)
+                        if (staticSda) {
+                          newState.removedSDAs = [...(prev.removedSDAs || []), {
+                            nodeId: foreignNodeId,
+                            party: staticSda.party,
+                            type: staticSda.type,
+                            created: staticSda.created,
+                          }]
+                        }
+                      }
+                    }
+
+                    // Revocation notification
+                    newState.addedRequests = [...(prev.addedRequests || []), {
+                      id: `revoke-${targetNodeId}-${Date.now().toString(36)}`,
+                      type: 'revocation',
+                      from: { name: activeRole.party, dot: activeRole.partyDot },
+                      asset: {
+                        name: nodeMap[ownAssetId]?.name || 'Unknown Asset',
+                        pin: ownAssetPin || '',
+                      },
+                      disclosureType: sda.type,
+                      message: message || '',
+                      date: today,
+                    }]
+
+                    return newState
+                  })
+                }
+
+                // Deselect after revoke (the selected node may have been removed)
+                setSel(null)
+              }}
             />
           </div>
         )}
@@ -972,7 +1221,7 @@ export default function V2App() {
       )}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice) && (
         <Backdrop onClose={() => {
           if (connectNode) setConnectNode(null)
           else if (registerNode) setRegisterNode(null)
@@ -981,6 +1230,7 @@ export default function V2App() {
           else if (responseRequest) setResponseRequest(null)
           else if (publishNode) setPublishNode(null)
           else if (cascadeContext) setCascadeContext(null)
+          else if (revocationNotice) setRevocationNotice(null)
         }}>
       {publishNode && (
         <PublishModal node={publishNode} onClose={() => setPublishNode(null)} _noBackdrop />
@@ -1457,6 +1707,19 @@ export default function V2App() {
                     }]
                   }
 
+                  // Add acceptance notification to the other role's inbox
+                  newState.addedRequests = [...(newState.addedRequests || prev.addedRequests || []), {
+                    id: `accept-${reqNodeId}-${Date.now().toString(36)}`,
+                    type: 'acceptance',
+                    from: { name: activeRole.party, dot: activeRole.partyDot },
+                    asset: {
+                      name: req.asset.name,
+                      pin: req.node?.pin || '',
+                    },
+                    disclosureType: disclosureType,
+                    date: today,
+                  }]
+
                   return newState
                 })
               }
@@ -1580,6 +1843,19 @@ export default function V2App() {
             setCredits(c => c - creditCost)
             setParseContext(null)
             setTimeout(() => setSel(pepNode.id), 150)
+          }}
+          _noBackdrop
+        />
+      )}
+      {revocationNotice && (
+        <RevocationNoticeModal
+          notification={revocationNotice}
+          onClose={() => {
+            updateRoleState(roleId, prev => ({
+              ...prev,
+              dismissedReqs: [...prev.dismissedReqs, revocationNotice.id],
+            }))
+            setRevocationNotice(null)
           }}
           _noBackdrop
         />

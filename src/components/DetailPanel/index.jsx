@@ -5,7 +5,7 @@ import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 import ParsedFieldsTab from './ParsedFieldsTab'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onRevokeSda }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -251,7 +251,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       )}
       {tabs.some(t => t.id === 'disclosures') && (
         <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
-          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} />
+          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} />
         </div>
       )}
       {tabs.some(t => t.id === 'parsed') && (
