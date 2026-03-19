@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
@@ -6,6 +6,7 @@ import {
   ToggleCard, LevelInline, SDABadge, ChainIcon, getEffectiveLevel,
 } from './ModalShared'
 import UpstreamPicker from './UpstreamPicker'
+import { FIELD_CATEGORIES } from '../../v2/pepTemplates.js'
 
 /* ─── Step 1: Review request + decide ─── */
 function StepReview({ request, decision, setDecision }) {
@@ -67,7 +68,7 @@ function StepReview({ request, decision, setDecision }) {
 }
 
 /* ─── Step 2a: Terms — owner chooses disclosure type ─── */
-function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDate, request, hasProofEval, cascadePolicy, setCascadePolicy, hasCascadableAssets }) {
+function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDate, request, hasProofEval, cascadePolicy, setCascadePolicy, hasCascadableAssets, hasPepFields }) {
   return (
     <div>
       <FieldLabel label="Choose disclosure type" />
@@ -82,6 +83,18 @@ function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDa
           disabledReason={!hasProofEval ? 'Requires a completed evaluation' : null}
         />
       </div>
+
+      {level === 'selective' && !hasPepFields && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 8, marginTop: -8, marginBottom: 14,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 12, color: 'var(--accent-amber)', lineHeight: 1.7,
+        }}>
+          This asset has no PEP-parsed data yet. Selective disclosure requires parsed evidence fields.
+          Run a PEP parse on the asset's evidence before creating a selective disclosure, or choose Full or Proof-only.
+        </div>
+      )}
 
       <FieldLabel label="Set expiration" />
       <ExpiryPicker expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} />
@@ -200,10 +213,182 @@ function StepCascade({ request, node, level, selected, setSelected, upstreamAsse
   )
 }
 
+/* ─── Step: Field Selection (Selective Disclosure) ─── */
+function StepFieldSelection({ pepFields, selectedFields, setSelectedFields, allFieldsSelected, setAllFieldsSelected }) {
+  const totalCount = pepFields.length
+  const selectedCount = selectedFields.size
+
+  // Group fields by templateName then by category
+  const grouped = useMemo(() => {
+    const byTemplate = {}
+    pepFields.forEach(f => {
+      if (!byTemplate[f.templateName]) byTemplate[f.templateName] = []
+      byTemplate[f.templateName].push(f)
+    })
+    return byTemplate
+  }, [pepFields])
+
+  const toggleField = (fieldKey) => {
+    setSelectedFields(prev => {
+      const next = new Set(prev)
+      if (next.has(fieldKey)) next.delete(fieldKey)
+      else next.add(fieldKey)
+      setAllFieldsSelected(next.size === totalCount)
+      return next
+    })
+  }
+
+  const toggleTemplate = (templateFields) => {
+    const keys = templateFields.map(f => f.fieldKey)
+    const allSelected = keys.every(k => selectedFields.has(k))
+    setSelectedFields(prev => {
+      const next = new Set(prev)
+      keys.forEach(k => allSelected ? next.delete(k) : next.add(k))
+      setAllFieldsSelected(next.size === totalCount)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (allFieldsSelected) {
+      setSelectedFields(new Set())
+      setAllFieldsSelected(false)
+    } else {
+      setSelectedFields(new Set(pepFields.map(f => f.fieldKey)))
+      setAllFieldsSelected(true)
+    }
+  }
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px',
+        background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+        borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+      }}>
+        <strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> — choose which parsed fields to share. Withheld fields will not be visible to the receiving party.
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {selectedCount} of {totalCount} fields selected
+        </span>
+        <span
+          onClick={toggleAll}
+          style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}
+        >
+          {allFieldsSelected ? 'Deselect All' : 'Select All'}
+        </span>
+      </div>
+
+      {Object.entries(grouped).map(([templateName, fields]) => {
+        const templateKeys = fields.map(f => f.fieldKey)
+        const allInTemplate = templateKeys.every(k => selectedFields.has(k))
+        const someInTemplate = templateKeys.some(k => selectedFields.has(k))
+
+        // Sub-group by category
+        const byCategory = {}
+        fields.forEach(f => {
+          if (!byCategory[f.category]) byCategory[f.category] = []
+          byCategory[f.category].push(f)
+        })
+
+        return (
+          <div key={templateName} style={{
+            marginBottom: 16, background: 'var(--bg-card)', borderRadius: 8,
+            border: '1px solid var(--border)', overflow: 'hidden',
+          }}>
+            {/* Template header */}
+            <div
+              onClick={() => toggleTemplate(fields)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 14px', cursor: 'pointer',
+                background: 'color-mix(in srgb, var(--accent-purple, #a78bfa) 5%, transparent)',
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <span style={{
+                width: 16, height: 16, borderRadius: 3,
+                border: `2px solid ${allInTemplate ? 'var(--accent-purple, #a78bfa)' : 'var(--border)'}`,
+                background: allInTemplate ? 'var(--accent-purple, #a78bfa)' : someInTemplate ? 'color-mix(in srgb, var(--accent-purple, #a78bfa) 30%, transparent)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, color: '#fff', fontWeight: 700, flexShrink: 0,
+              }}>
+                {allInTemplate ? '✓' : someInTemplate ? '–' : ''}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                {templateName}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 'auto' }}>
+                {templateKeys.filter(k => selectedFields.has(k)).length}/{templateKeys.length}
+              </span>
+            </div>
+
+            {/* Fields grouped by category */}
+            <div style={{ padding: '6px 0' }}>
+              {Object.entries(byCategory).map(([catKey, catFields]) => {
+                const catConfig = FIELD_CATEGORIES[catKey] || { label: catKey, color: 'var(--text-secondary)' }
+                return (
+                  <div key={catKey}>
+                    <div style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                      color: catConfig.color, letterSpacing: '0.06em',
+                      padding: '6px 14px 2px',
+                    }}>
+                      {catConfig.label.toUpperCase()}
+                    </div>
+                    {catFields.map(f => {
+                      const checked = selectedFields.has(f.fieldKey)
+                      return (
+                        <div
+                          key={f.fieldKey}
+                          onClick={() => toggleField(f.fieldKey)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '5px 14px', cursor: 'pointer',
+                            transition: 'background 100ms',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--text-primary) 3%, transparent)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <span style={{
+                            width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                            border: `2px solid ${checked ? 'var(--accent-blue)' : 'var(--border)'}`,
+                            background: checked ? 'var(--accent-blue)' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 9, color: '#fff', fontWeight: 700,
+                          }}>
+                            {checked ? '✓' : ''}
+                          </span>
+                          <span style={{ width: 130, flexShrink: 0, fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {f.name}
+                          </span>
+                          <span style={{
+                            flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)',
+                            color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {f.value?.length > 40 ? f.value.slice(0, 40) + '…' : f.value}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function DisclosureResponseModal({ request, onClose, onComplete, _noBackdrop }) {
+export default function DisclosureResponseModal({ request, assetNode, onClose, onComplete, _noBackdrop }) {
   const [step, setStep] = useState(0)
   const [decision, setDecision] = useState(null)
   const [level, setLevel] = useState('selective')
@@ -213,7 +398,28 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
   const [cascadePolicy, setCascadePolicy] = useState('closed')
   const [cascadeSelected, setCascadeSelected] = useState([])
   const [completed, setCompleted] = useState(false)
-  const hasProofEval = true // demo — assume owner has completed evaluations
+  const [selectedFields, setSelectedFields] = useState(new Set())
+  const [allFieldsSelected, setAllFieldsSelected] = useState(true)
+  const hasProofEval = false // No evaluations implemented yet
+
+  // Collect all PEP fields from asset's parse children
+  const pepFields = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children
+      .filter(c => c.isParse || c.category === 'parse')
+      .flatMap(pn => (pn.parsedFields || []).map(f => ({
+        ...f, templateName: pn.name, parseNodeId: pn.id,
+        fieldKey: `${pn.id}::${f.id}`,
+      })))
+  }, [assetNode])
+
+  // Initialize all fields selected when pepFields changes
+  useEffect(() => {
+    if (pepFields.length > 0) {
+      setSelectedFields(new Set(pepFields.map(f => f.fieldKey)))
+      setAllFieldsSelected(true)
+    }
+  }, [pepFields])
 
   // Build upstream asset list from node's upstreamAssets (if node is provided)
   const node = request.node
@@ -236,8 +442,9 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
 
   const hasCascadableAssets = upstreamAssets.some(a => a.cascadePolicy === 'open')
   const showCascadeStep = decision !== 'decline' && hasCascadableAssets && cascadePolicy === 'open'
+  const showFieldStep = decision !== 'decline' && level === 'selective' && pepFields.length > 0
 
-  const totalSteps = decision === 'decline' ? 2 : showCascadeStep ? 4 : 3
+  const totalSteps = decision === 'decline' ? 2 : (2 + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
   const effectiveLevel = level
 
   if (completed) {
@@ -300,12 +507,22 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
                   </div>
                 } />
               )}
+              {effectiveLevel === 'selective' && pepFields.length > 0 && (
+                <InfoRow label="Disclosed fields" value={
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
+                    {selectedFields.size} of {pepFields.length}
+                  </span>
+                } />
+              )}
               <InfoRow label="On-chain TX" value={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>0x{Math.random().toString(16).slice(2, 6)}...pending</span>} />
             </div>
           )}
           <Btn label="Done" accent onClick={() => {
             if (onComplete) {
-              onComplete(decision === 'decline' ? null : level)
+              onComplete(
+                decision === 'decline' ? null : level,
+                level === 'selective' && pepFields.length > 0 ? [...selectedFields] : null,
+              )
             } else if (onClose) {
               onClose()
             }
@@ -342,9 +559,19 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
             request={request} hasProofEval={hasProofEval}
             cascadePolicy={cascadePolicy} setCascadePolicy={setCascadePolicy}
             hasCascadableAssets={hasCascadableAssets}
+            hasPepFields={pepFields.length > 0}
           />
         )}
-        {step === 2 && decision !== 'decline' && (
+        {step === 2 && decision !== 'decline' && showFieldStep && (
+          <StepFieldSelection
+            pepFields={pepFields}
+            selectedFields={selectedFields}
+            setSelectedFields={setSelectedFields}
+            allFieldsSelected={allFieldsSelected}
+            setAllFieldsSelected={setAllFieldsSelected}
+          />
+        )}
+        {step === (showFieldStep ? 3 : 2) && decision !== 'decline' && showCascadeStep && (
           <StepCascade
             request={request} node={node} level={level}
             selected={cascadeSelected} setSelected={setCascadeSelected}
@@ -364,11 +591,20 @@ export default function DisclosureResponseModal({ request, onClose, onComplete, 
         {step === 0 && decision && <Btn label={decision === 'decline' ? 'Next →' : 'Set Terms →'} accent onClick={() => setStep(1)} />}
         {step === 1 && decision === 'decline' && <Btn label="Decline Request" danger onClick={() => setCompleted(true)} />}
         {step === 1 && decision !== 'decline' && (
-          showCascadeStep
-            ? <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(2)} />
-            : <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
+          showFieldStep
+            ? <Btn label="Select Fields →" accent onClick={() => setStep(2)} />
+            : level === 'selective' && pepFields.length === 0
+              ? <Btn label="No PEP Data Available" disabled />
+              : showCascadeStep
+                ? <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(2)} />
+                : <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
         )}
-        {step === 2 && decision !== 'decline' && (
+        {step === 2 && decision !== 'decline' && showFieldStep && (
+          showCascadeStep
+            ? <Btn label={`Disclose ${selectedFields.size} Fields — Next →`} accent disabled={selectedFields.size === 0} onClick={() => setStep(3)} />
+            : <Btn label={`Disclose ${selectedFields.size} Fields`} accent disabled={selectedFields.size === 0} onClick={() => setCompleted(true)} />
+        )}
+        {step === (showFieldStep ? 3 : 2) && decision !== 'decline' && showCascadeStep && (
           <Btn
             label={cascadeSelected.length > 0 ? `Create Disclosure (${cascadeSelected.length} cascading)` : 'Skip — No Cascading Assets'}
             purple={cascadeSelected.length > 0}

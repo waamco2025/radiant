@@ -9,7 +9,7 @@ function groupFieldsByCategory(fields) {
   return groups
 }
 
-export default function ParsedFieldsTab({ fields }) {
+export default function ParsedFieldsTab({ fields, isSelective }) {
   if (!fields || fields.length === 0) {
     return (
       <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-dim)' }}>
@@ -20,6 +20,16 @@ export default function ParsedFieldsTab({ fields }) {
 
   return (
     <div style={{ padding: '12px 0' }}>
+      {isSelective && (
+        <div style={{
+          padding: '10px 14px', marginBottom: 14, borderRadius: 6,
+          background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+          fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.6,
+        }}>
+          <strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> — additional fields may exist that are not included in this disclosure.
+        </div>
+      )}
       {Object.entries(groupFieldsByCategory(fields)).map(([catKey, catFields]) => {
         const catConfig = FIELD_CATEGORIES[catKey] || { label: catKey, color: 'var(--text-secondary)' }
         return (

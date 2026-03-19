@@ -4,7 +4,7 @@ Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS 
 
 ## Active Development: V2 Prototype
 
-V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–14.5 complete, Phases 0–4 done).
+V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–15.3 complete, Phases 0–4 + 9 done).
 
 **All new work targets V2 unless explicitly stated.**
 
@@ -77,6 +77,7 @@ Ingest → Curate → Consume: Register (DPP) → Prepare (PEP) → Share (SDP) 
 - `RegisterAssetModal.jsx` — Single + Bulk CSV import tabs. Category SVG icons. `_noBackdrop`, `onBack`.
 - `AddEvidenceModal.jsx` — File picker, auto-label from filename. Unique ID param prevents same-filename collision.
 - `ParseEvidenceModal.jsx` — PEP template selection via custom dropdown (portal to document.body). Field preview scrollbox. Duplicate template detection (`existingParseTemplateIds`). All-templates-used amber message. PrimeRadiant spinner during processing. Credit cost display.
+- `RevocationNoticeModal.jsx` — Read-only revocation notice. Red banner, asset details with PIN badge, disclosure type, revoker's message (or "No reason given"), explanatory text. Dismiss button.
 - `PublishModal.jsx` — Publish to directory. 3-4 steps.
 - `CascadeModal.jsx` — Manage cascading disclosures.
 
@@ -146,6 +147,8 @@ All components use CSS variables. Never hardcode colors. Use `color-mix(in srgb,
   upstreamSda?: { type, policy, owner, ownerDot },
   upstreamAssets?: Node[],
   provisional?: boolean,  // provisional nodes: awaiting disclosure response
+  requestContext?: { requirements, message, date, contextNodeName, contextNodePin },
+  _isNew?: boolean,  // freshly created nodes: renders NEW badge, cleared on deselection
   description?: string,
 }
 ```
@@ -163,13 +166,19 @@ V2App maintains `perRoleState` — an object keyed by role ID. Each role's state
   addedEdges: [],       // Edges created dynamically
   dismissedReqs: [],    // Request IDs dismissed from inbox
   addedChildren: {},    // { [parentNodeId]: childNode[] } — evidence + PEP nodes
-  addedRequests: [],    // Cross-role pending requests (from Connect by PIN)
+  addedRequests: [],    // Cross-role pending requests, revocation notices, acceptance notices
+  removedNodes: [],     // Node IDs to filter from static data (revocation)
+  removedEdges: [],     // Edge IDs to filter from static data (revocation)
+  removedSDAs: [],      // { nodeId, party, type, created } to filter from static data (revocation)
 }
 ```
 
 All mutations persist across role switches (keyed state, not reset). Cross-role mutations write to the OTHER role's state directly (e.g. Alice accepting disclosure writes to Bob's state).
 
 ### useMemo Merge Pipeline
+0. Filter `removedNodes` from static nodes
+0b. Filter `removedEdges` from static edges
+0c. Filter `removedSDAs` from static node SDAs
 1. Merge `addedNodes` into `data.nodes`
 2. Merge `addedSDAs` into matching nodes
 3. Merge `addedChildren` into parent nodes (updates `hasStack`, `childCount`, `hasEvidence`)
@@ -181,6 +190,21 @@ All mutations persist across role switches (keyed state, not reset). Cross-role 
 ### Provisional → Real Upgrade
 When owner accepts disclosure, `updateRoleState(otherRoleId, ...)` looks for `provisional-${reqNodeId}` in `addedNodes`. If found: replaces with real node (keeping position), recolors edge from `'provisional'` to actual disclosure type. If not found: creates fresh node (existing behavior).
 
+### Revoke Disclosures
+Ownership-aware handler: determines `ownAssetId` and `foreignNodeId` based on `node.owner === activeRole.party`, regardless of which panel initiated the revoke. Three steps:
+1. Remove SDA from own asset (dynamic splice or `removedSDAs` tracking for static)
+2. Remove foreign node + edge from own network (dynamic filter or `removedNodes`/`removedEdges` for static). Only removes foreign node if it has no remaining edges to other assets.
+3. Remove own asset + edge from other role's network (same static/dynamic pattern). Adds revocation notification to other role's `addedRequests`.
+
+### Notification Types
+`addedRequests` carries three notification types distinguished by `type` field:
+- **request** (default/no type field) — disclosure request, opens `DisclosureResponseModal`
+- **revocation** (`type: 'revocation'`) — red badge, opens `RevocationNoticeModal`
+- **acceptance** (`type: 'acceptance'`) — green badge, click dismisses + pans to asset
+
+### NEW Badge
+`_isNew: true` set on all created nodes (registration, provisional, disclosure acceptance, provisional→real upgrade). Cleared when the node is deselected for the first time via `useEffect` watching `sel` changes. Renders green badge (real nodes) or grey badge (provisional).
+
 ### Child Layer Sync
 `useEffect` in V2Canvas watches `rootNodeMap` for changes in parent node's children count. When it changes, rebuilds child layer nodes + edges using `layoutChildren` + `occupiedTier2Xs`. Uses `layerStackRef` (not `layerStack` in deps) to avoid circular dependency. Guarded by `transitioningRef.current`.
 
@@ -191,7 +215,7 @@ When owner accepts disclosure, `updateRoleState(otherRoleId, ...)` looks for `pr
 
 ## Batch History
 
-Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes, minibar roll-up), 7–7.8 (flat parent layer, clean datasets, disclosure flow redesign, ownership gating, terminology update), 8–8.7 (Detail Panel fixes, per-role keyed state, direction-aware edges, cross-role disclosure reflection), 9–9.2 (Register Asset with bulk CSV import, collision avoidance), 10–10.1 (Add Evidence modal, addedChildren mechanism, child layer sync), 11 (Bulk CSV evidence URI auto-creates child nodes), 12–12.3 (PEP Parse: templates, modal, multi-tier layout, child layer sync fix, root always-sync), 13–13.4 (Refinements: click-to-pan, template dropdown, credit display, tooltips, backdrop fade-out, duplicate PEP prevention, PrimeRadiant spinner), 14–14.5 (Connect by PIN: provisional cards, cross-role requests, PIN validation grid, full 256-bit PINs, evidence ID uniqueness, provisional stacking fix).
+Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes, minibar roll-up), 7–7.8 (flat parent layer, clean datasets, disclosure flow redesign, ownership gating, terminology update), 8–8.7 (Detail Panel fixes, per-role keyed state, direction-aware edges, cross-role disclosure reflection), 9–9.2 (Register Asset with bulk CSV import, collision avoidance), 10–10.1 (Add Evidence modal, addedChildren mechanism, child layer sync), 11 (Bulk CSV evidence URI auto-creates child nodes), 12–12.3 (PEP Parse: templates, modal, multi-tier layout, child layer sync fix, root always-sync), 13–13.4 (Refinements: click-to-pan, template dropdown, credit display, tooltips, backdrop fade-out, duplicate PEP prevention, PrimeRadiant spinner), 14–14.9 (Connect by PIN: provisional cards, cross-role requests, PIN validation grid, full 256-bit PINs, evidence ID uniqueness, provisional stacking fix, provisional detail panel with requirements, cancel request, bidirectional positioning, NEW badge), 15–15.3 (Revoke Disclosures: ownership-aware handler, removedNodes/removedEdges/removedSDAs, cross-role cleanup, revocation+acceptance notifications, RevocationNoticeModal), 16 (Selective Disclosure Field Selection: StepFieldSelection in DisclosureResponseModal, field picker with per-template/category grouping and tri-state checkboxes, selectedFieldIds on SDAs + disclosedNode, useMemo field filtering via _disclosedFieldIds, ParsedFieldsTab amber notice for _isSelective), 16.1 (No-PEP-data warning in StepTerms when selective chosen on asset without parse children, disabled footer button "No PEP Data Available"), 16.2 (Copy children into disclosedNodeForOther — full copies all, selective filters PEP fields, proof-only copies none; ownership-aware useMemo field filtering checks both _disclosedFieldIds and SDA selectedFieldIds, skips owned nodes; hasProofEval=false disables proof-only option), 16.3 (NEW badge for disclosure acceptance on existing static nodes — newlyDisclosedIds in perRoleState, set on cross-role mutation, applied in useMemo, cleared on deselection), 16.4 (Fix NEW badge clearing on role switch — prevRoleRef resets prevSelRef to null on roleId change, preventing cross-role _isNew clearing).
 
 ---
 

@@ -256,7 +256,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       )}
       {tabs.some(t => t.id === 'parsed') && (
         <div style={{ display: tab === 'parsed' ? 'block' : 'none' }}>
-          <ParsedFieldsTab fields={node.parsedFields || []} />
+          <ParsedFieldsTab fields={node.parsedFields || []} isSelective={!!node._isSelective} />
         </div>
       )}
     </PanelShell>

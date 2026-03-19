@@ -52,7 +52,7 @@ export default function V2App() {
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
 
   // Per-role dynamic state — persists across role switches
-  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [] }
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [] }
   const [perRoleState, setPerRoleState] = useState(() => {
     const init = {}
     ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
@@ -68,17 +68,41 @@ export default function V2App() {
 
   const currentRoleState = perRoleState[roleId] || emptyRoleState
 
+  // Reset prevSelRef on role switch to prevent cross-role _isNew clearing
+  const prevRoleRef = useRef(roleId)
+  useEffect(() => {
+    if (prevRoleRef.current !== roleId) {
+      prevSelRef.current = null
+      prevRoleRef.current = roleId
+    }
+  }, [roleId])
+
   // Clear _isNew from previously selected node on deselection
   useEffect(() => {
     const prevSel = prevSelRef.current
     prevSelRef.current = sel
     if (prevSel && prevSel !== sel) {
       updateRoleState(roleId, prev => {
+        let changed = false
+        let newState = { ...prev }
+
+        // Clear _isNew from addedNodes
         const idx = prev.addedNodes.findIndex(n => n.id === prevSel && n._isNew)
-        if (idx === -1) return prev
-        const updated = [...prev.addedNodes]
-        updated[idx] = { ...updated[idx], _isNew: false }
-        return { ...prev, addedNodes: updated }
+        if (idx >= 0) {
+          const updated = [...prev.addedNodes]
+          updated[idx] = { ...updated[idx], _isNew: false }
+          newState.addedNodes = updated
+          changed = true
+        }
+
+        // Clear from newlyDisclosedIds
+        const discIdx = (prev.newlyDisclosedIds || []).indexOf(prevSel)
+        if (discIdx >= 0) {
+          newState.newlyDisclosedIds = prev.newlyDisclosedIds.filter(id => id !== prevSel)
+          changed = true
+        }
+
+        return changed ? newState : prev
       })
     }
   }, [sel, roleId])
@@ -160,6 +184,31 @@ export default function V2App() {
       return { ...n, children: updatedChildren }
     })
 
+    // Filter disclosed fields for selective disclosures (non-owned nodes only)
+    data.nodes = data.nodes.map(n => {
+      // Only filter fields on nodes we don't own
+      if (n.owner === activeRole.party) return n
+
+      let fieldIds = n._disclosedFieldIds
+      if (!fieldIds) {
+        const selectiveSda = (n.sdas || []).find(s => s.type === 'selective' && s.selectedFieldIds)
+        if (selectiveSda) fieldIds = selectiveSda.selectedFieldIds
+      }
+
+      if (!fieldIds || !n.children) return n
+      const disclosedSet = new Set(fieldIds)
+      const filteredChildren = n.children.map(c => {
+        if (!c.isParse && c.category !== 'parse') return c
+        if (!c.parsedFields) return c
+        return {
+          ...c,
+          parsedFields: c.parsedFields.filter(f => disclosedSet.has(`${c.id}::${f.id}`)),
+          _isSelective: true,
+        }
+      })
+      return { ...n, children: filteredChildren, _isSelective: true }
+    })
+
     // Rebuild nodeMap
     const newMap = {}
     data.nodes.forEach(n => { newMap[n.id] = n })
@@ -178,8 +227,21 @@ export default function V2App() {
       data.pendingRequests = [...(data.pendingRequests || []), ...addedRequests]
     }
 
+    // Apply _isNew from newlyDisclosedIds (for disclosure acceptance on existing nodes)
+    const newlyDisclosed = new Set(currentRoleState.newlyDisclosedIds || [])
+    if (newlyDisclosed.size > 0) {
+      data.nodes = data.nodes.map(n => {
+        if (newlyDisclosed.has(n.id) && !n._isNew) {
+          return { ...n, _isNew: true }
+        }
+        return n
+      })
+      // Update nodeMap for flagged nodes
+      data.nodes.forEach(n => { if (newlyDisclosed.has(n.id)) data.nodeMap[n.id] = n })
+    }
+
     return data
-  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests, removedSDAs, removedNodes, removedEdges])
+  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests, removedSDAs, removedNodes, removedEdges, currentRoleState.newlyDisclosedIds])
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -1464,8 +1526,9 @@ export default function V2App() {
       {responseRequest && (
         <DisclosureResponseModal
           request={responseRequest}
+          assetNode={nodeMap[responseRequest.node?.id]}
           onClose={() => setResponseRequest(null)}
-          onComplete={(disclosureType) => {
+          onComplete={(disclosureType, selectedFieldIds) => {
             const req = responseRequest
             const reqNodeId = req.node?.id
             const today = new Date().toISOString().slice(0, 10)
@@ -1484,6 +1547,7 @@ export default function V2App() {
                 pins: [],
                 assetName: req.connectTo?.name || null,
                 assetPin: req.connectTo?.pin || null,
+                selectedFieldIds: selectedFieldIds || null,
               }
               updateRoleState(roleId, prev => ({
                 ...prev,
@@ -1586,6 +1650,7 @@ export default function V2App() {
                   pins: [],
                   assetName: req.asset.name,
                   assetPin: req.node?.pin || null,
+                  selectedFieldIds: selectedFieldIds || null,
                 }
 
                 const crossSdaOnAsset = {
@@ -1597,6 +1662,7 @@ export default function V2App() {
                   pins: [],
                   assetName: req.connectTo.name,
                   assetPin: req.connectTo.pin || null,
+                  selectedFieldIds: selectedFieldIds || null,
                 }
 
                 // Compute position for the disclosed node in the target role's layout
@@ -1619,6 +1685,32 @@ export default function V2App() {
                 const otherAllNodes = [...otherRoleData.nodes, ...existingDynamic]
                 const newY = findClearY(disclosedX, idealY, otherAllNodes)
 
+                // Copy children from the source asset for the disclosed node
+                const sourceAsset = nodeMap[reqNodeId]
+                let disclosedChildren = []
+
+                if (sourceAsset?.children && sourceAsset.children.length > 0) {
+                  if (disclosureType === 'selective' && selectedFieldIds && selectedFieldIds.length > 0) {
+                    // Selective: copy children but filter PEP fields
+                    const disclosedSet = new Set(selectedFieldIds)
+                    disclosedChildren = sourceAsset.children.map(c => {
+                      if (!c.isParse && c.category !== 'parse') return { ...c }
+                      if (!c.parsedFields) return { ...c }
+                      return {
+                        ...c,
+                        parsedFields: c.parsedFields.filter(f => disclosedSet.has(`${c.id}::${f.id}`)),
+                        _isSelective: true,
+                      }
+                    })
+                  } else if (disclosureType === 'proofonly') {
+                    // Proof-only: no children copied
+                    disclosedChildren = []
+                  } else {
+                    // Full: copy all children as-is
+                    disclosedChildren = sourceAsset.children.map(c => ({ ...c }))
+                  }
+                }
+
                 // Build the disclosed asset node for the other role's network
                 const disclosedNodeForOther = {
                   id: reqNodeId,
@@ -1628,16 +1720,16 @@ export default function V2App() {
                   category: 'product',
                   owner: activeRole.party,
                   parentId: null,
-                  children: [],
+                  children: disclosedChildren,
                   health: { ok: 0, warn: 0, bad: 0 },
                   childHealth: null,
                   totalHealth: null,
                   displayHealth: { ok: 0, warn: 0, bad: 0 },
                   claimCount: 0,
                   displayClaimCount: 0,
-                  hasEvidence: false,
-                  hasStack: false,
-                  childCount: 0,
+                  hasEvidence: disclosedChildren.some(c => c.isEvidence),
+                  hasStack: disclosedChildren.length > 0,
+                  childCount: disclosedChildren.length,
                   evidence: null,
                   evaluations: [],
                   sdas: [crossSdaOnAsset],
@@ -1651,6 +1743,8 @@ export default function V2App() {
                   isEvidence: false,
                   lastEval: null,
                   _isNew: true,
+                  _disclosedFieldIds: selectedFieldIds || null,
+                  _isSelective: disclosureType === 'selective' ? true : undefined,
                 }
 
                 updateRoleState(otherRoleId, prev => {
@@ -1719,6 +1813,9 @@ export default function V2App() {
                     disclosureType: disclosureType,
                     date: today,
                   }]
+
+                  // Track for NEW badge (works for both dynamic and static nodes)
+                  newState.newlyDisclosedIds = [...(prev.newlyDisclosedIds || []), reqNodeId]
 
                   return newState
                 })
