@@ -79,7 +79,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
                         background: 'var(--bg-card)',
                         border: '1px solid var(--border)',
                       }}>
-                        {req}
+                        {typeof req === 'string' ? req : req.name}
                       </div>
                     ))}
                   </div>

@@ -34,7 +34,14 @@ function StepReview({ request, decision, setDecision }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
           <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Requirements</div>
           <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-            {request.requirements.map((r, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>{r}</div>)}
+            {(!request.requirements || request.requirements.length === 0)
+              ? <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic', lineHeight: 1.8 }}>None specified</div>
+              : request.requirements.map((r, i) => (
+                <div key={i} style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>
+                  {typeof r === 'string' ? r : r.name}
+                </div>
+              ))
+            }
           </div>
         </div>
       </div>

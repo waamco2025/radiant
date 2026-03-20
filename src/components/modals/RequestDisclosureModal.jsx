@@ -4,13 +4,6 @@ import {
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
 } from './ModalShared'
 
-const REQ_OPTS = [
-  'MIL-PRF-55681 Compliance',
-  'System Integration Requirements',
-  'Component Screening',
-  'Material Compliance',
-  'Calibration Verification',
-]
 
 /* ─── Step 1: Choose path ─── */
 function StepPath({ onSelectPath, onRegisterAsset }) {
@@ -122,10 +115,10 @@ function truncatePin(pin) {
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequestDisclosureModal({ contextNode, onClose, onRegisterAsset, onSubmitRequest, onValidatePins, _noBackdrop }) {
+export default function RequestDisclosureModal({ contextNode, requirementSets, onClose, onRegisterAsset, onSubmitRequest, onValidatePins, _noBackdrop }) {
   const [pinRows, setPinRows] = useState([''])
   const [message, setMessage] = useState('')
-  const [reqs, setReqs] = useState(['MIL-PRF-55681 Compliance'])
+  const [selectedReqSets, setSelectedReqSets] = useState([])
   const [step, setStep] = useState(0)
   const [submitted, setSubmitted] = useState(false)
   const inputRefs = useRef([])
@@ -305,9 +298,14 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
               ) : pins.length + ' asset(s)'
             } />
             <InfoRow label="Requirements" value={
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {reqs.map((r, i) => <span key={i} style={{ fontSize: 11 }}>{r}</span>)}
-              </div>
+              selectedReqSets.length === 0
+                ? <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>None</span>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {selectedReqSets.map(id => {
+                      const rs = requirementSets?.find(s => s.id === id)
+                      return rs ? <span key={id} style={{ fontSize: 11 }}>{rs.name}</span> : null
+                    })}
+                  </div>
             } />
             {message && <InfoRow label="Message" value={<span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{message.length > 80 ? message.slice(0, 80) + '…' : message}</span>} />}
           </div>
@@ -483,32 +481,58 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
           <div>
             <FieldLabel label="Requirements you plan to evaluate" />
             <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.7 }}>
-              Select the requirement sets you intend to run. This helps the owner understand your evaluation scope and prepare appropriate evidence.
+              Select requirement sets to include with your request. This helps the owner understand your evaluation scope and prepare appropriate evidence.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 22 }}>
-              {REQ_OPTS.map(r => {
-                const sel = reqs.includes(r)
-                return (
-                  <div key={r} onClick={() => setReqs(p => sel ? p.filter(x => x !== r) : [...p, r])} style={{
-                    padding: '12px 16px', borderRadius: 6,
-                    border: `1px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                    background: sel ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 150ms',
-                  }}>
-                    <div style={{
-                      width: 18, height: 18, borderRadius: 4,
-                      border: `1.5px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                      background: sel ? 'var(--accent-indigo)' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 150ms', flexShrink: 0,
+
+            {(!requirementSets || requirementSets.length === 0) && (
+              <div style={{
+                padding: '24px 20px', textAlign: 'center', color: 'var(--text-dim)',
+                fontSize: 12, lineHeight: 1.7, marginBottom: 22,
+                border: '1px dashed var(--border)', borderRadius: 8,
+              }}>
+                No requirement sets in your library. You can still send the request without requirements, or create sets in the Requirements Library first.
+              </div>
+            )}
+
+            {requirementSets && requirementSets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 22 }}>
+                {requirementSets.map(rs => {
+                  const sel = selectedReqSets.includes(rs.id)
+                  return (
+                    <div key={rs.id} onClick={() => setSelectedReqSets(p => sel ? p.filter(x => x !== rs.id) : [...p, rs.id])} style={{
+                      padding: '14px 16px', borderRadius: 8,
+                      border: `1px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                      background: sel ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
+                      cursor: 'pointer', transition: 'all 150ms',
                     }}>
-                      {sel && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>✓</span>}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 4,
+                          border: `1.5px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                          background: sel ? 'var(--accent-indigo)' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 150ms', flexShrink: 0,
+                        }}>
+                          {sel && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>✓</span>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: sel ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{rs.name}</div>
+                          {rs.description && (
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.5 }}>{rs.description}</div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                          <span>{rs.requirements.length} req{rs.requirements.length !== 1 ? 's' : ''}</span>
+                          <span>{rs.requirements.filter(r => r.type === 'extraction').length}E</span>
+                          <span>{rs.requirements.filter(r => r.type === 'inference').length}I</span>
+                        </div>
+                      </div>
                     </div>
-                    <span style={{ fontSize: 13, color: sel ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{r}</span>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
+
             <FieldLabel label="Message to owner" />
             <textarea
               value={message} onChange={e => setMessage(e.target.value)}
@@ -540,7 +564,13 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
               <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Requirements</div>
                 <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-                  {reqs.map((r, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>{r}</div>)}
+                  {selectedReqSets.length === 0
+                    ? <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic', lineHeight: 1.8 }}>None selected</div>
+                    : selectedReqSets.map(id => {
+                        const rs = requirementSets?.find(s => s.id === id)
+                        return rs ? <div key={id} style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>{rs.name}</div> : null
+                      })
+                  }
                 </div>
               </div>
               {message && (
@@ -571,12 +601,15 @@ export default function RequestDisclosureModal({ contextNode, onClose, onRegiste
             onClick={() => setStep(2)}
           />
         )}
-        {step === 2 && <Btn label="Send Request" accent disabled={!reqs.length} onClick={() => {
+        {step === 2 && <Btn label="Send Request" accent onClick={() => {
           const validPinValues = validEntries.map(([pin]) => pin)
+          const fullSets = selectedReqSets
+            .map(id => requirementSets?.find(s => s.id === id))
+            .filter(Boolean)
           if (onSubmitRequest) {
             onSubmitRequest({
               pins: validPinValues.length > 0 ? validPinValues : pins,
-              requirements: reqs,
+              requirements: fullSets,
               message,
               contextNode,
             })

@@ -14,7 +14,9 @@ import RegisterAssetModal from '../components/modals/RegisterAssetModal.jsx'
 import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
 import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
 import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
+import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
+import { getRequirementSetsForRole } from './requirementSets.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
 
@@ -52,7 +54,7 @@ export default function V2App() {
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
 
   // Per-role dynamic state — persists across role switches
-  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [] }
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null }
   const [perRoleState, setPerRoleState] = useState(() => {
     const init = {}
     ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
@@ -256,6 +258,22 @@ export default function V2App() {
   const [evidenceNode, setEvidenceNode] = useState(null)
   const [parseContext, setParseContext] = useState(null)
   const [revocationNotice, setRevocationNotice] = useState(null)
+  const [showLibrary, setShowLibrary] = useState(false)
+
+  // Requirement sets — per-role, defaults from demo data
+  const requirementSets = useMemo(() => {
+    const custom = currentRoleState.requirementSets
+    if (custom !== null && custom !== undefined) return custom
+    return getRequirementSetsForRole(roleId)
+  }, [currentRoleState.requirementSets, roleId])
+
+  const handleSaveRequirementSet = useCallback((reqSet) => {
+    updateRoleState(roleId, prev => {
+      const existing = prev.requirementSets ?? getRequirementSetsForRole(roleId)
+      return { ...prev, requirementSets: [...existing, reqSet] }
+    })
+  }, [roleId, updateRoleState])
+
   const inboxRef = useRef(null)
   const nodeMapRef = useRef(nodeMap)
   useEffect(() => { nodeMapRef.current = nodeMap }, [nodeMap])
@@ -521,7 +539,7 @@ export default function V2App() {
     alignItems: 'center',
     gap: 5,
     padding: '4px 10px',
-    height: 28,
+    height: 36,
     background: 'var(--bg-surface)',
     border: '1px solid var(--border)',
     borderRadius: 5,
@@ -529,6 +547,16 @@ export default function V2App() {
     fontSize: 11,
     fontFamily: 'var(--font-mono)',
     transition: 'border-color .2s',
+  }
+
+  const iconBtnStyle = {
+    width: 36, height: 36, borderRadius: 8,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+    background: 'color-mix(in srgb, var(--bg-card) 80%, transparent)',
+    border: '1px solid var(--border)',
+    transition: 'background 100ms',
+    color: 'var(--text-secondary)',
   }
 
   return (
@@ -592,19 +620,32 @@ export default function V2App() {
         {/* Right group: theme toggle + credits + user menu */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Theme toggle */}
-          <button
+          <div
             onClick={toggleTheme}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: 16,
-              cursor: 'pointer',
-              color: 'var(--text-secondary)',
-              padding: '2px 6px',
-            }}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            style={{ ...iconBtnStyle, fontSize: 16 }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-card) 80%, transparent)'}
           >
             {theme === 'dark' ? '☀' : '☾'}
-          </button>
+          </div>
+
+          {/* Requirements Library */}
+          <div
+            onClick={() => setShowLibrary(true)}
+            style={iconBtnStyle}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-card) 80%, transparent)'}
+            title="Requirements Library"
+          >
+            <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="2.5" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
+              <rect x="5.5" y="1" width="5" height="2.5" rx="1" stroke="currentColor" strokeWidth="1.2" fill="var(--bg-deep)" />
+              <line x1="5.5" y1="7" x2="10.5" y2="7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+              <line x1="5.5" y1="9.5" x2="10.5" y2="9.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+              <line x1="5.5" y1="12" x2="8.5" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+          </div>
 
           {/* Notification inbox */}
           <div ref={inboxRef} style={{ position: 'relative' }}>
@@ -818,8 +859,9 @@ export default function V2App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 9,
+                fontSize: 10,
                 fontWeight: 700,
+                lineHeight: 1,
                 color: 'var(--text-bright)',
               }}>{activeRole.user[0]}</div>
               <span style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeRole.user}</span>
@@ -1264,17 +1306,6 @@ export default function V2App() {
             {activeRole.vertical}
           </span>
         </div>
-        <a
-          href="/index.html"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            color: 'var(--text-tertiary)',
-            textDecoration: 'none',
-          }}
-        >
-          v1
-        </a>
       </div>
 
       {/* SubgraphModal */}
@@ -1283,9 +1314,10 @@ export default function V2App() {
       )}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary) && (
         <Backdrop onClose={() => {
-          if (connectNode) setConnectNode(null)
+          if (showLibrary) setShowLibrary(false)
+          else if (connectNode) setConnectNode(null)
           else if (registerNode) setRegisterNode(null)
           else if (evidenceNode) setEvidenceNode(null)
           else if (parseContext) setParseContext(null)
@@ -1300,6 +1332,7 @@ export default function V2App() {
       {connectNode && (
         <RequestDisclosureModal
           contextNode={connectNode}
+          requirementSets={requirementSets}
           onClose={() => setConnectNode(null)}
           onRegisterAsset={() => {
             const node = connectNode
@@ -1954,6 +1987,14 @@ export default function V2App() {
             }))
             setRevocationNotice(null)
           }}
+          _noBackdrop
+        />
+      )}
+      {showLibrary && (
+        <RequirementsLibraryModal
+          requirementSets={requirementSets}
+          onClose={() => setShowLibrary(false)}
+          onSave={handleSaveRequirementSet}
           _noBackdrop
         />
       )}

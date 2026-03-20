@@ -4,7 +4,7 @@ Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS 
 
 ## Active Development: V2 Prototype
 
-V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–15.3 complete, Phases 0–4 + 9 done).
+V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–17.0 complete, Phases 0–4 + 6 + 7 partial + 9 done).
 
 **All new work targets V2 unless explicitly stated.**
 
@@ -78,6 +78,7 @@ Ingest → Curate → Consume: Register (DPP) → Prepare (PEP) → Share (SDP) 
 - `AddEvidenceModal.jsx` — File picker, auto-label from filename. Unique ID param prevents same-filename collision.
 - `ParseEvidenceModal.jsx` — PEP template selection via custom dropdown (portal to document.body). Field preview scrollbox. Duplicate template detection (`existingParseTemplateIds`). All-templates-used amber message. PrimeRadiant spinner during processing. Credit cost display.
 - `RevocationNoticeModal.jsx` — Read-only revocation notice. Red banner, asset details with PIN badge, disclosure type, revoker's message (or "No reason given"), explanatory text. Dismiss button.
+- `RequirementsLibraryModal.jsx` — Library list view (all sets with expand/edit/delete) + editor view (create/edit with extraction/inference requirement types). Needs split-panel refactor per client feedback.
 - `PublishModal.jsx` — Publish to directory. 3-4 steps.
 - `CascadeModal.jsx` — Manage cascading disclosures.
 
@@ -90,6 +91,9 @@ Key functions: `makeNode()`, `makeEvidenceNode(parentId, meta, owner, claims, un
 
 ### PEP Templates (`src/v2/pepTemplates.js`)
 3 templates: Electronics Component Profile (10 fields), Mechanical Assembly Profile (8 fields), Regulatory Compliance Profile (7 fields). `FIELD_CATEGORIES` for grouping. `generateMockParsedFields()` for mock data.
+
+### Requirement Sets (`src/v2/requirementSets.js`)
+Demo sets per role: Bob has 3 (MIL-PRF compliance, system integration, material compliance), Alice has 1 (incoming QC). Two requirement types: `extraction` (find a value) and `inference` (determine if condition holds). `getRequirementSetsForRole(roleId)` returns defaults.
 
 ---
 
@@ -170,6 +174,8 @@ V2App maintains `perRoleState` — an object keyed by role ID. Each role's state
   removedNodes: [],     // Node IDs to filter from static data (revocation)
   removedEdges: [],     // Edge IDs to filter from static data (revocation)
   removedSDAs: [],      // { nodeId, party, type, created } to filter from static data (revocation)
+  newlyDisclosedIds: [], // node IDs that just received disclosure — drives NEW badge
+  requirementSets: null, // null = use demo defaults; array = user-modified sets
 }
 ```
 
@@ -215,7 +221,7 @@ Ownership-aware handler: determines `ownAssetId` and `foreignNodeId` based on `n
 
 ## Batch History
 
-Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes, minibar roll-up), 7–7.8 (flat parent layer, clean datasets, disclosure flow redesign, ownership gating, terminology update), 8–8.7 (Detail Panel fixes, per-role keyed state, direction-aware edges, cross-role disclosure reflection), 9–9.2 (Register Asset with bulk CSV import, collision avoidance), 10–10.1 (Add Evidence modal, addedChildren mechanism, child layer sync), 11 (Bulk CSV evidence URI auto-creates child nodes), 12–12.3 (PEP Parse: templates, modal, multi-tier layout, child layer sync fix, root always-sync), 13–13.4 (Refinements: click-to-pan, template dropdown, credit display, tooltips, backdrop fade-out, duplicate PEP prevention, PrimeRadiant spinner), 14–14.9 (Connect by PIN: provisional cards, cross-role requests, PIN validation grid, full 256-bit PINs, evidence ID uniqueness, provisional stacking fix, provisional detail panel with requirements, cancel request, bidirectional positioning, NEW badge), 15–15.3 (Revoke Disclosures: ownership-aware handler, removedNodes/removedEdges/removedSDAs, cross-role cleanup, revocation+acceptance notifications, RevocationNoticeModal), 16 (Selective Disclosure Field Selection: StepFieldSelection in DisclosureResponseModal, field picker with per-template/category grouping and tri-state checkboxes, selectedFieldIds on SDAs + disclosedNode, useMemo field filtering via _disclosedFieldIds, ParsedFieldsTab amber notice for _isSelective), 16.1 (No-PEP-data warning in StepTerms when selective chosen on asset without parse children, disabled footer button "No PEP Data Available"), 16.2 (Copy children into disclosedNodeForOther — full copies all, selective filters PEP fields, proof-only copies none; ownership-aware useMemo field filtering checks both _disclosedFieldIds and SDA selectedFieldIds, skips owned nodes; hasProofEval=false disables proof-only option), 16.3 (NEW badge for disclosure acceptance on existing static nodes — newlyDisclosedIds in perRoleState, set on cross-role mutation, applied in useMemo, cleared on deselection), 16.4 (Fix NEW badge clearing on role switch — prevRoleRef resets prevSelRef to null on roleId change, preventing cross-role _isNew clearing).
+Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes, minibar roll-up), 7–7.8 (flat parent layer, clean datasets, disclosure flow redesign, ownership gating, terminology update), 8–8.7 (Detail Panel fixes, per-role keyed state, direction-aware edges, cross-role disclosure reflection), 9–9.2 (Register Asset with bulk CSV import, collision avoidance), 10–10.1 (Add Evidence modal, addedChildren mechanism, child layer sync), 11 (Bulk CSV evidence URI auto-creates child nodes), 12–12.3 (PEP Parse: templates, modal, multi-tier layout, child layer sync fix, root always-sync), 13–13.4 (Refinements: click-to-pan, template dropdown, credit display, tooltips, backdrop fade-out, duplicate PEP prevention, PrimeRadiant spinner), 14–14.9 (Connect by PIN: provisional cards, cross-role requests, PIN validation grid, full 256-bit PINs, evidence ID uniqueness, provisional stacking fix, provisional detail panel with requirements, cancel request, bidirectional positioning, NEW badge), 15–15.3 (Revoke Disclosures: ownership-aware handler, removedNodes/removedEdges/removedSDAs, cross-role cleanup, revocation+acceptance notifications, RevocationNoticeModal), 16–16.4 (Selective Disclosure: field picker, field filtering, no-PEP warning, children copy to disclosed nodes, NEW badge role-switch fix), 17–17.6 (Requirements Library: data structure, CRUD modal, Connect Asset integration, split-panel rewrite, Escape fix, styling refinements, versioning with lineageId/version fields, collapsed-by-lineage left panel, New Version replaces Edit, immutable sets with always-append save, search clear button + result count, Create button moved to modal header, PanelShell-style tabs, read-only name in New Version, top bar button normalization with 36px icon boxes, pill height 36px, V1 footer link removed).
 
 ---
 
