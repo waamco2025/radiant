@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
@@ -103,6 +103,113 @@ function StepPath({ onSelectPath, onRegisterAsset }) {
             Search the public asset directory for assets that owners have made discoverable. Request disclosure directly from the directory listing.
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Requirement Set Picker with expandable details ─── */
+function ReqSetPicker({ latestSets, selectedReqSets, setSelectedReqSets }) {
+  const [expandedSets, setExpandedSets] = useState({})
+
+  return (
+    <div style={{ maxHeight: 280, overflowY: 'auto', borderRadius: 8, marginBottom: 22 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {latestSets.map(rs => {
+          const sel = selectedReqSets.includes(rs.id)
+          const isExpanded = expandedSets[rs.id]
+          const extCount = rs.requirements.filter(r => r.type === 'extraction').length
+          const infCount = rs.requirements.filter(r => r.type === 'inference').length
+          return (
+            <div key={rs.id} onClick={() => setSelectedReqSets(p => sel ? p.filter(x => x !== rs.id) : [...p, rs.id])} style={{
+              padding: '14px 16px', borderRadius: 8,
+              border: `1px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
+              background: sel ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
+              cursor: 'pointer', transition: 'all 150ms',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  border: `1.5px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                  background: sel ? 'var(--accent-indigo)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 150ms', flexShrink: 0,
+                }}>
+                  {sel && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>✓</span>}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: sel ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{rs.name}</span>
+                    {rs.version && (
+                      <span style={{
+                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        padding: '2px 6px', borderRadius: 4,
+                        color: 'var(--accent-indigo)',
+                        background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                      }}>v{rs.version}</span>
+                    )}
+                  </div>
+                  {rs.description && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.5 }}>{rs.description}</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                  <span>{rs.requirements.length} req{rs.requirements.length !== 1 ? 's' : ''}</span>
+                  <span>{extCount}E</span>
+                  <span>{infCount}I</span>
+                </div>
+              </div>
+              {/* Expand trigger */}
+              <div
+                onClick={e => { e.stopPropagation(); setExpandedSets(p => ({ ...p, [rs.id]: !p[rs.id] })) }}
+                style={{
+                  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                  cursor: 'pointer', marginTop: 6, transition: 'color 100ms',
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+              >
+                {isExpanded ? '▾ Hide requirements' : '▸ View requirements'}
+              </div>
+              {/* Expanded requirement list */}
+              {isExpanded && (
+                <div
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    maxHeight: 200, overflowY: 'auto', marginTop: 8, padding: '10px 12px',
+                    background: 'var(--bg-deep)', borderRadius: 6,
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  {rs.requirements.map((req, i) => (
+                    <div key={req.id || i} style={{
+                      padding: '8px 0',
+                      borderBottom: i < rs.requirements.length - 1 ? '1px solid var(--border)' : 'none',
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                    }}>
+                      <span style={{
+                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        padding: '2px 7px', borderRadius: 4, flexShrink: 0, marginTop: 1,
+                        color: req.type === 'extraction' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                        background: req.type === 'extraction'
+                          ? 'color-mix(in srgb, var(--accent-cyan) 12%, transparent)'
+                          : 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                      }}>
+                        {req.type === 'extraction' ? 'EXTRACT' : 'INFER'}
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{req.label}</div>
+                        {req.description && (
+                          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 1 }}>{req.description}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -269,7 +376,7 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
 
   if (submitted) {
     const submittedContent = (
-      <Modal width={540}>
+      <Modal width={680}>
         <div style={{ padding: '52px 36px', textAlign: 'center' }}>
           <div style={{
             width: 60, height: 60, borderRadius: '50%',
@@ -283,7 +390,7 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
           <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 28 }}>
             Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept or decline. If accepted, they will determine the disclosure type and terms.
           </div>
-          <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
+          <div style={{ padding: '18px 22px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
             <InfoRow label="Assets" value={
               validEntries.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -494,44 +601,25 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
               </div>
             )}
 
-            {requirementSets && requirementSets.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 22 }}>
-                {requirementSets.map(rs => {
-                  const sel = selectedReqSets.includes(rs.id)
-                  return (
-                    <div key={rs.id} onClick={() => setSelectedReqSets(p => sel ? p.filter(x => x !== rs.id) : [...p, rs.id])} style={{
-                      padding: '14px 16px', borderRadius: 8,
-                      border: `1px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                      background: sel ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
-                      cursor: 'pointer', transition: 'all 150ms',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 18, height: 18, borderRadius: 4,
-                          border: `1.5px solid ${sel ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                          background: sel ? 'var(--accent-indigo)' : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transition: 'all 150ms', flexShrink: 0,
-                        }}>
-                          {sel && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>✓</span>}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: sel ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{rs.name}</div>
-                          {rs.description && (
-                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.5 }}>{rs.description}</div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
-                          <span>{rs.requirements.length} req{rs.requirements.length !== 1 ? 's' : ''}</span>
-                          <span>{rs.requirements.filter(r => r.type === 'extraction').length}E</span>
-                          <span>{rs.requirements.filter(r => r.type === 'inference').length}I</span>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            {requirementSets && requirementSets.length > 0 && (() => {
+              // Deduplicate by lineage — keep only latest version
+              const byLineage = {}
+              requirementSets.forEach(rs => {
+                const lid = rs.lineageId || rs.id
+                if (!byLineage[lid] || (rs.version || 1) > (byLineage[lid].version || 1)) {
+                  byLineage[lid] = rs
+                }
+              })
+              const latestSets = Object.values(byLineage)
+
+              return (
+                <ReqSetPicker
+                  latestSets={latestSets}
+                  selectedReqSets={selectedReqSets}
+                  setSelectedReqSets={setSelectedReqSets}
+                />
+              )
+            })()}
 
             <FieldLabel label="Message to owner" />
             <textarea

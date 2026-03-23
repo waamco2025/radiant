@@ -59,6 +59,7 @@ export default function EvaluationsTab({
   evidence, evals, evalOpen, claimsOpen,
   toggleEval, toggleClaims, expandAll, collapseAll,
   evOpen, toggleEv, isOwner, isEvidence, attributedClaims,
+  onRunEvaluation, canEvaluate,
 }) {
   return (
     <div>
@@ -92,8 +93,14 @@ export default function EvaluationsTab({
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.requirement}</span>
               <span style={{
                 fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                color: c.status === 'verified' ? 'var(--accent-green)' : 'var(--accent-red)',
-              }}>{c.status === 'verified' ? '✓ VERIFIED' : '✗ FAILED'}</span>
+                color: (c.status === 'satisfactory' || c.status === 'verified') ? 'var(--accent-green)'
+                     : (c.status === 'unsatisfactory' || c.status === 'contested' || c.status === 'failed') ? 'var(--accent-red)'
+                     : c.status === 'missing' ? 'var(--accent-amber)'
+                     : 'var(--text-dim)',
+              }}>{(c.status === 'satisfactory' || c.status === 'verified') ? '✓ SATISFACTORY'
+                : (c.status === 'unsatisfactory' || c.status === 'contested' || c.status === 'failed') ? '✕ UNSATISFACTORY'
+                : c.status === 'missing' ? '? MISSING'
+                : c.status?.toUpperCase() || '—'}</span>
             </div>
           ))}
         </div>
@@ -123,7 +130,7 @@ export default function EvaluationsTab({
               <TinyBtn icon="⊟" tip="Collapse all" onClick={collapseAll} />
             </div>
             <div style={{ flex: 1 }} />
-            <Btn label="✦ Run Evaluation" accent />
+            {canEvaluate && <Btn label="✦ Run Evaluation" accent onClick={onRunEvaluation} />}
           </div>
           {evals.map((ev, i) => (
             <EvalPanel

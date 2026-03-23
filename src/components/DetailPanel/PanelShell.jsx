@@ -59,7 +59,7 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover }
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, isEvidence, isParse, isOwner,
+  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, isEvidence, isParse, isEvaluation, isOwner,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
@@ -192,10 +192,11 @@ export default function PanelShell({
         flexShrink: 0,
         background: 'var(--bg-card)',
       }}>
-        {isOwner && !isEvidence && !isParse && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && !isParse && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && !isParse && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && isEvidence && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
+        {canEvaluate && !isEvaluation && <FooterBtn icon="◆" label="Run Evaluation" onClick={onRunEvaluation} btnId="evaluate" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
         <FooterBtn
           icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
           label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Exit Layer' : 'Surface'}

@@ -3,7 +3,7 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, resolvePin } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin } from './v2Data.js'
 import { PEP_TEMPLATES } from './pepTemplates.js'
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -15,6 +15,7 @@ import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
 import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
 import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
+import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
 
@@ -186,6 +187,65 @@ export default function V2App() {
       return { ...n, children: updatedChildren }
     })
 
+    // Unified health computation: eval child health, evidence cleanup, parent rollup
+    data.nodes = data.nodes.map(n => {
+      // Step A: Compute health on eval child nodes from their claims + zero evidence health
+      let children = n.children
+      if (children && children.length > 0) {
+        children = children.map(c => {
+          if ((c.isEvaluation || c.category === 'evaluation') && c.claims && c.claims.length > 0) {
+            const ok = c.claims.filter(cl => cl.status === 'satisfactory').length
+            const bad = c.claims.filter(cl => cl.status === 'unsatisfactory').length
+            const warn = c.claims.filter(cl => cl.status === 'missing').length
+            return {
+              ...c,
+              health: { ok, warn, bad },
+              displayHealth: { ok, warn, bad },
+              claimCount: c.claims.length,
+              displayClaimCount: c.claims.length,
+            }
+          }
+          if (c.isEvidence) {
+            return {
+              ...c,
+              health: { ok: 0, warn: 0, bad: 0 },
+              displayHealth: { ok: 0, warn: 0, bad: 0 },
+              claimCount: 0,
+              displayClaimCount: 0,
+            }
+          }
+          return c
+        })
+      }
+
+      // Step B: Roll up to parent from eval child nodes
+      let ok = 0, warn = 0, bad = 0, totalClaims = 0
+      if (children) {
+        const evalChildren = children.filter(c => c.isEvaluation || c.category === 'evaluation')
+        for (const ev of evalChildren) {
+          const h = ev.health || { ok: 0, warn: 0, bad: 0 }
+          ok += h.ok
+          warn += (h.warn || 0)
+          bad += h.bad
+          totalClaims += (ev.claimCount || 0)
+        }
+      }
+
+      const hasEvalData = totalClaims > 0
+      const combinedHealth = { ok, warn, bad }
+
+      return {
+        ...n,
+        children,
+        ...(hasEvalData ? {
+          childHealth: combinedHealth,
+          displayHealth: combinedHealth,
+          claimCount: totalClaims,
+          displayClaimCount: totalClaims,
+        } : {}),
+      }
+    })
+
     // Filter disclosed fields for selective disclosures (non-owned nodes only)
     data.nodes = data.nodes.map(n => {
       // Only filter fields on nodes we don't own
@@ -259,6 +319,8 @@ export default function V2App() {
   const [parseContext, setParseContext] = useState(null)
   const [revocationNotice, setRevocationNotice] = useState(null)
   const [showLibrary, setShowLibrary] = useState(false)
+  const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
+  const [evalContext, setEvalContext] = useState(null)
 
   // Requirement sets — per-role, defaults from demo data
   const requirementSets = useMemo(() => {
@@ -520,8 +582,14 @@ export default function V2App() {
 
       if (newRequests.length > 0) {
         updateRoleState(otherRoleId, prev => {
-          const existingPins = new Set((prev.addedRequests || []).map(r => r.asset?.pin))
-          const filtered = newRequests.filter(r => !existingPins.has(r.asset?.pin))
+          // Only deduplicate against pending disclosure requests (not acceptances/declines/revocations)
+          const dismissedSet = new Set(prev.dismissedReqs || [])
+          const pendingRequestPins = new Set(
+            (prev.addedRequests || [])
+              .filter(r => !r.type && !dismissedSet.has(r.id))
+              .map(r => r.asset?.pin)
+          )
+          const filtered = newRequests.filter(r => !pendingRequestPins.has(r.asset?.pin))
           if (filtered.length === 0) return prev
           return {
             ...prev,
@@ -553,7 +621,7 @@ export default function V2App() {
     width: 36, height: 36, borderRadius: 8,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     cursor: 'pointer',
-    background: 'color-mix(in srgb, var(--bg-card) 80%, transparent)',
+    background: 'var(--bg-surface)',
     border: '1px solid var(--border)',
     transition: 'background 100ms',
     color: 'var(--text-secondary)',
@@ -625,17 +693,17 @@ export default function V2App() {
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             style={{ ...iconBtnStyle, fontSize: 16 }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-card) 80%, transparent)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
           >
             {theme === 'dark' ? '☀' : '☾'}
           </div>
 
           {/* Requirements Library */}
           <div
-            onClick={() => setShowLibrary(true)}
+            onClick={() => { setLibraryInitialSetId(null); setShowLibrary(true) }}
             style={iconBtnStyle}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-card) 80%, transparent)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
             title="Requirements Library"
           >
             <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
@@ -705,8 +773,9 @@ export default function V2App() {
                   visibleRequests.map(req => {
                     const isRevocation = req.type === 'revocation'
                     const isAcceptance = req.type === 'acceptance'
-                    const badgeColor = isRevocation ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : 'REQUEST'
+                    const isDecline = req.type === 'decline'
+                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -714,15 +783,17 @@ export default function V2App() {
                         setShowInbox(false)
                         if (isRevocation) {
                           setRevocationNotice(req)
-                        } else if (isAcceptance) {
-                          // Dismiss and pan to the disclosed asset
+                        } else if (isAcceptance || isDecline) {
+                          // Dismiss notification (and pan to asset for acceptance)
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
-                          const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
-                          if (targetNode) {
-                            setTimeout(() => setSel(targetNode.id), 100)
+                          if (isAcceptance) {
+                            const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
+                            if (targetNode) {
+                              setTimeout(() => setSel(targetNode.id), 100)
+                            }
                           }
                         } else {
                           const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -764,7 +835,9 @@ export default function V2App() {
                           ? `Revoked ${req.disclosureType} disclosure to ${req.asset?.name}`
                           : isAcceptance
                             ? `Granted ${req.disclosureType} disclosure to ${req.asset?.name}`
-                            : req.asset.name
+                            : isDecline
+                              ? `Declined disclosure to ${req.asset?.name}`
+                              : req.asset.name
                         }
                       </div>
                     </div>
@@ -1007,6 +1080,11 @@ export default function V2App() {
               parentAssetName: parentAsset?.name || 'Unknown Asset',
             })
           }}
+          onRunEvaluation={(node) => {
+            const sda = (node.sdas || []).find(s => s.party === activeRole.party || s.party !== node.owner)
+            const disclosureType = sda?.type || 'full'
+            setEvalContext({ assetNode: node, disclosureType })
+          }}
           activeParty={activeRole.party}
         />
 
@@ -1043,6 +1121,26 @@ export default function V2App() {
                   parentAssetName: parentAsset?.name || 'Unknown Asset',
                 })
               }}
+              onRunEvaluation={() => {
+                if (!sel || !nodeMap[sel]) return
+                const n = nodeMap[sel]
+                // Detect disclosure type from SDAs
+                const sda = (n.sdas || []).find(s => s.party === activeRole.party || s.party !== n.owner)
+                const disclosureType = sda?.type || 'full'
+                setEvalContext({ assetNode: n, disclosureType })
+              }}
+              canEvaluate={(() => {
+                const n = nodeMap[sel]
+                if (!n) return false
+                if (n.isEvidence || n.isParse || n.category === 'parse' || n.isEvaluation || n.provisional) return false
+                // Must have PEP children (parsed data)
+                const hasPep = n.children?.some(c => c.isParse || c.category === 'parse')
+                if (!hasPep) return false
+                // Must own or have disclosure access
+                const isNodeOwner = n.owner === activeRole.party
+                const hasAccess = (n.sdas || []).some(s => s.type === 'full' || s.type === 'selective')
+                return isNodeOwner || hasAccess
+              })()}
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
               onViewChild={handleViewChild}
@@ -1067,6 +1165,10 @@ export default function V2App() {
                 if (!pinOrId) return
                 const target = Object.values(nodeMap).find(n => n.pin === pinOrId || n.id === pinOrId)
                 if (target) setSel(target.id)
+              }}
+              onOpenLibrary={(setId) => {
+                setLibraryInitialSetId(setId || null)
+                setShowLibrary(true)
               }}
               onRevokeSda={({ sda, nodeId, message }) => {
                 const today = new Date().toISOString().slice(0, 10)
@@ -1314,9 +1416,10 @@ export default function V2App() {
       )}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || evalContext) && (
         <Backdrop onClose={() => {
-          if (showLibrary) setShowLibrary(false)
+          if (evalContext) setEvalContext(null)
+          else if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
           else if (connectNode) setConnectNode(null)
           else if (registerNode) setRegisterNode(null)
           else if (evidenceNode) setEvidenceNode(null)
@@ -1853,6 +1956,29 @@ export default function V2App() {
                   return newState
                 })
               }
+            } else if (reqNodeId && !disclosureType) {
+              // DECLINE: notify the other role and clean up provisional
+              const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+              if (otherRoleId) {
+                updateRoleState(otherRoleId, prev => {
+                  const provId = `provisional-${reqNodeId}`
+                  return {
+                    ...prev,
+                    addedNodes: prev.addedNodes.filter(n => n.id !== provId),
+                    addedEdges: prev.addedEdges.filter(e => e.to !== provId && e.from !== provId),
+                    addedRequests: [...(prev.addedRequests || []), {
+                      id: `decline-${reqNodeId}-${Date.now().toString(36)}`,
+                      type: 'decline',
+                      from: { name: activeRole.party, dot: activeRole.partyDot },
+                      asset: {
+                        name: req.asset.name,
+                        pin: req.node?.pin || '',
+                      },
+                      date: today,
+                    }],
+                  }
+                })
+              }
             }
 
             updateRoleState(roleId, prev => ({
@@ -1993,8 +2119,63 @@ export default function V2App() {
       {showLibrary && (
         <RequirementsLibraryModal
           requirementSets={requirementSets}
-          onClose={() => setShowLibrary(false)}
+          onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
           onSave={handleSaveRequirementSet}
+          initialSelectedId={libraryInitialSetId}
+          _noBackdrop
+        />
+      )}
+      {evalContext && (
+        <RunEvaluationModal
+          assetNode={evalContext.assetNode}
+          disclosureType={evalContext.disclosureType}
+          requirementSets={requirementSets}
+          activeParty={activeRole.party}
+          activeUser={activeRole.user || activeRole.party}
+          credits={credits}
+          onClose={() => setEvalContext(null)}
+          onComplete={({ requirementSet, claims, creditCost }) => {
+            const assetNode = evalContext.assetNode
+            const evalNode = makeEvalNode(
+              assetNode.id,
+              requirementSet,
+              claims,
+              activeRole.party,
+              activeRole.user || activeRole.party,
+              evalContext.disclosureType
+            )
+
+            // Add eval node as child of the asset
+            updateRoleState(roleId, prev => {
+              const existingChildren = prev.addedChildren?.[assetNode.id] || []
+              return {
+                ...prev,
+                addedChildren: {
+                  ...(prev.addedChildren || {}),
+                  [assetNode.id]: [...existingChildren, evalNode],
+                },
+              }
+            })
+
+            // Deduct credits
+            setCredits(c => c - creditCost)
+            setEvalContext(null)
+
+            // Dive into the asset's child layer and select the eval node
+            if (layerInfo.depth > 0 && layerInfo.anchorId === assetNode.id) {
+              setTimeout(() => setSel(evalNode.id), 200)
+            } else {
+              setTimeout(() => {
+                if (canvasRef.current) {
+                  const updatedParent = nodeMapRef.current[assetNode.id]
+                  if (updatedParent) {
+                    canvasRef.current.dive(updatedParent)
+                    setTimeout(() => setSel(evalNode.id), 600)
+                  }
+                }
+              }, 150)
+            }
+          }}
           _noBackdrop
         />
       )}

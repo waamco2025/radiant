@@ -55,28 +55,6 @@ export const ROLES = [
   },
 ]
 
-// ── Health computation ──
-
-function computeHealth(evaluations) {
-  let ok = 0, bad = 0
-  for (const ev of evaluations) {
-    if (ev.status === 'superseded') continue
-    for (const c of ev.claims) {
-      if (c.status === 'verified') ok++
-      else bad++
-    }
-  }
-  return { ok, warn: 0, bad }
-}
-
-function sumHealth(nodes) {
-  let ok = 0, bad = 0
-  for (const n of nodes) {
-    ok += n.health.ok
-    bad += n.health.bad
-  }
-  return { ok, warn: 0, bad }
-}
 
 // ══════════════════════════════════════════════════════════════
 // SHARED EVALUATIONS
@@ -286,19 +264,12 @@ function makeNode(id, name, category, owner, opts = {}) {
     isEvidence = false,
   } = opts
 
-  const health = computeHealth(evaluations)
-  const childHealth = children.length > 0 ? sumHealth(children) : null
-  const totalHealth = childHealth
-    ? { ok: health.ok + childHealth.ok, warn: 0, bad: health.bad + childHealth.bad }
-    : null
-  // Display health: for nodes with evidence children, show pure child roll-up
-  // (parent's own claims are attributed to evidence children, so showing own health would double-count)
-  const hasEvidenceChildren = children.some(c => c.isEvidence)
-  const displayHealth = hasEvidenceChildren
-    ? (childHealth || health)
-    : (totalHealth || health)
-  const claimCount = health.ok + health.bad
-  const displayClaimCount = displayHealth.ok + displayHealth.bad
+  const health = { ok: 0, warn: 0, bad: 0 }
+  const childHealth = null
+  const totalHealth = null
+  const displayHealth = health
+  const claimCount = 0
+  const displayClaimCount = 0
   const pin = makePin(id)
   const dot = owner ? makeDot(owner) : makeDot(id)
   const hasEvidence = !!evidence
@@ -403,7 +374,7 @@ function buildBobData() {
   // Disclosed MicroCo assets
   const powerRegEv = makeEvidenceNode('power-reg',
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
-    'MicroCo', EVAL_POWER_REG_BOB.claims)
+    'MicroCo', [])
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -413,10 +384,61 @@ function buildBobData() {
     { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text', value: 'Category XV, §121.1', confidence: 'high' },
   ], 'MicroCo')
 
+  const powerRegEval = {
+    id: 'eval-power-reg-bob-001',
+    pin: makePin('eval-power-reg-bob-001'),
+    dot: makeDot('GovCo'),
+    name: 'MIL-PRF-55681 Compliance',
+    category: 'evaluation',
+    owner: 'GovCo',
+    parentId: 'power-reg',
+    children: [],
+    health: { ok: 4, warn: 0, bad: 1 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 4, warn: 0, bad: 1 },
+    claimCount: 5,
+    displayClaimCount: 5,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: 0, y: 0,
+    parentOwner: 'GovCo',
+    isEvidence: false,
+    isParse: false,
+    isEvaluation: true,
+    isTerminalNode: true,
+    requirementSetId: EVAL_POWER_REG_BOB.id,
+    requirementSetName: EVAL_POWER_REG_BOB.requirements,
+    requirementSetVersion: 1,
+    requirementSetLineageId: 'lineage-mil-prf-55681',
+    disclosureType: 'selective',
+    evaluator: EVAL_POWER_REG_BOB.reviewer,
+    evaluatorParty: 'GovCo',
+    date: EVAL_POWER_REG_BOB.reviewDate,
+    status: 'completed',
+    claims: [
+      { requirementId: 'req-001', label: 'Power output stability', description: 'Rated output voltage and tolerance under load', type: 'extraction', aiValue: '3.3V ±0.5% under load', aiConfidence: 0.95, humanValue: '3.3V ±0.5% under load', status: 'satisfactory' },
+      { requirementId: 'req-002', label: 'Thermal dissipation', description: 'Maximum power dissipation at rated current', type: 'extraction', aiValue: '< 2W at rated current', aiConfidence: 0.91, humanValue: '< 2W at rated current', status: 'satisfactory' },
+      { requirementId: 'req-003', label: 'Operating temperature range', description: 'Minimum and maximum operating temperature', type: 'extraction', aiValue: '-55°C to +125°C', aiConfidence: 0.93, humanValue: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementId: 'req-004', label: 'Radiation tolerance', description: 'Total ionizing dose tolerance level', type: 'extraction', aiValue: 'TID > 100 krad(Si)', aiConfidence: 0.72, humanValue: 'TID > 100 krad(Si)', status: 'unsatisfactory' },
+      { requirementId: 'req-005', label: 'ITAR classification', description: 'Export control classification under ITAR', type: 'extraction', aiValue: 'Category XV, §121.1', aiConfidence: 0.88, humanValue: 'Category XV, §121.1', status: 'satisfactory' },
+    ],
+    creditsUsed: 50,
+    description: 'MIL-PRF-55681 Compliance evaluation — 5 claims',
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    lastEval: null,
+  }
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
-    evaluations: [EVAL_POWER_REG_BOB],
+    evaluations: [],
     sdas: [{ ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') }],
-    children: [powerRegEv, powerRegPep],
+    children: [powerRegEv, powerRegPep, powerRegEval],
     x: 1400, y: 0,
   })
 
@@ -494,7 +516,7 @@ function buildAliceData() {
   // Power Reg: has evidence, selectively disclosed to GovCo, Bob evaluated it
   const powerRegEv = makeEvidenceNode('power-reg',
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
-    'MicroCo', EVAL_POWER_REG_BOB.claims)
+    'MicroCo', [])
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -504,13 +526,64 @@ function buildAliceData() {
     { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text', value: 'Category XV, §121.1', confidence: 'high' },
   ], 'MicroCo')
 
+  const powerRegEval = {
+    id: 'eval-power-reg-bob-001',
+    pin: makePin('eval-power-reg-bob-001'),
+    dot: makeDot('GovCo'),
+    name: 'MIL-PRF-55681 Compliance',
+    category: 'evaluation',
+    owner: 'GovCo',
+    parentId: 'power-reg',
+    children: [],
+    health: { ok: 4, warn: 0, bad: 1 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 4, warn: 0, bad: 1 },
+    claimCount: 5,
+    displayClaimCount: 5,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: 0, y: 0,
+    parentOwner: 'GovCo',
+    isEvidence: false,
+    isParse: false,
+    isEvaluation: true,
+    isTerminalNode: true,
+    requirementSetId: EVAL_POWER_REG_BOB.id,
+    requirementSetName: EVAL_POWER_REG_BOB.requirements,
+    requirementSetVersion: 1,
+    requirementSetLineageId: 'lineage-mil-prf-55681',
+    disclosureType: 'selective',
+    evaluator: EVAL_POWER_REG_BOB.reviewer,
+    evaluatorParty: 'GovCo',
+    date: EVAL_POWER_REG_BOB.reviewDate,
+    status: 'completed',
+    claims: [
+      { requirementId: 'req-001', label: 'Power output stability', description: 'Rated output voltage and tolerance under load', type: 'extraction', aiValue: '3.3V ±0.5% under load', aiConfidence: 0.95, humanValue: '3.3V ±0.5% under load', status: 'satisfactory' },
+      { requirementId: 'req-002', label: 'Thermal dissipation', description: 'Maximum power dissipation at rated current', type: 'extraction', aiValue: '< 2W at rated current', aiConfidence: 0.91, humanValue: '< 2W at rated current', status: 'satisfactory' },
+      { requirementId: 'req-003', label: 'Operating temperature range', description: 'Minimum and maximum operating temperature', type: 'extraction', aiValue: '-55°C to +125°C', aiConfidence: 0.93, humanValue: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementId: 'req-004', label: 'Radiation tolerance', description: 'Total ionizing dose tolerance level', type: 'extraction', aiValue: 'TID > 100 krad(Si)', aiConfidence: 0.72, humanValue: 'TID > 100 krad(Si)', status: 'unsatisfactory' },
+      { requirementId: 'req-005', label: 'ITAR classification', description: 'Export control classification under ITAR', type: 'extraction', aiValue: 'Category XV, §121.1', aiConfidence: 0.88, humanValue: 'Category XV, §121.1', status: 'satisfactory' },
+    ],
+    creditsUsed: 50,
+    description: 'MIL-PRF-55681 Compliance evaluation — 5 claims',
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    lastEval: null,
+  }
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
-    evaluations: [EVAL_POWER_REG_BOB],
+    evaluations: [],
     sdas: [
       { ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
     ],
-    children: [powerRegEv, powerRegPep],
+    children: [powerRegEv, powerRegPep, powerRegEval],
     x: 500, y: -300,
   })
 
@@ -584,23 +657,7 @@ function buildAliceData() {
   return {
     nodes, edges, nodeMap,
     existingCascades: [],
-    pendingRequests: [
-      {
-        id: 'req-001',
-        from: { name: 'GovCo', dot: GOVCO_DOT },
-        asset: { name: 'PCB Substrate', pin: pcbSub.pin },
-        connectTo: {
-          id: 'avionics',
-          name: 'Avionics Module',
-          pin: makePin('avionics'),
-          category: 'product',
-          owner: 'GovCo',
-        },
-        message: "We'd like to evaluate the PCB Substrate for the Sentinel-4 avionics subsystem. Requesting disclosure to run IPC-6012 qualification screening.",
-        requirements: ['IPC-6012 Class 3 Qualification'],
-        date: '2026-03-12',
-      },
-    ],
+    pendingRequests: [],
   }
 }
 
@@ -615,7 +672,58 @@ function resolvePin(pin) {
   return null
 }
 
-export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, resolvePin }
+function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, evaluatorUser, disclosureType) {
+  const id = `eval-${parentAssetId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  const pin = makePin(id)
+  const dot = makeDot(evaluatorParty)
+
+  return {
+    id,
+    pin,
+    dot,
+    name: requirementSet.name,
+    category: 'evaluation',
+    owner: evaluatorParty,
+    parentId: parentAssetId,
+    children: [],
+    health: { ok: 0, warn: 0, bad: 0 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 0, warn: 0, bad: 0 },
+    claimCount: claims.length,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: 0,
+    y: 0,
+    parentOwner: evaluatorParty,
+    isEvidence: false,
+    isParse: false,
+    isEvaluation: true,
+    isTerminalNode: true,
+    requirementSetId: requirementSet.id,
+    requirementSetName: requirementSet.name,
+    requirementSetVersion: requirementSet.version || 1,
+    requirementSetLineageId: requirementSet.lineageId || requirementSet.id,
+    disclosureType,
+    evaluator: evaluatorUser,
+    evaluatorParty,
+    date: new Date().toISOString().slice(0, 10),
+    status: 'completed',
+    claims,
+    creditsUsed: claims.length * 10,
+    description: `${requirementSet.name} evaluation — ${claims.length} claims`,
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    lastEval: null,
+  }
+}
+
+export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin }
 
 export function getDataForRole(roleId) {
   if (roleId === 'alice-microco') return buildAliceData()

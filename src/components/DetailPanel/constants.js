@@ -50,7 +50,7 @@ export const CATEGORY_CONFIG = {
   process: { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS', tipText: 'Process — a manufacturing or operational workflow' },
   evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE', tipText: 'Evidence — a source document or file attached to an asset' },
   parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE', tipText: 'Parse — structured data extracted from evidence via PEP' },
-  evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION', tipText: 'Evaluation — results from running requirements against parsed data' },
+  evaluation: { icon: '◆', color: 'var(--accent-indigo)', label: 'EVALUATION', tipText: 'AI-assisted evaluation of an asset against a published requirement set. Contains extraction values and inference determinations reviewed by a human evaluator.' },
 }
 
 export const REVOKE_WARNINGS = {

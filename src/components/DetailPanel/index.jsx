@@ -5,7 +5,7 @@ import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 import ParsedFieldsTab from './ParsedFieldsTab'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onRevokeSda }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onRevokeSda, onOpenLibrary }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -74,12 +74,33 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {ctx.requirements.map((req, i) => (
                       <div key={i} style={{
-                        fontSize: 11, color: 'var(--text-secondary)',
+                        fontSize: 11,
                         padding: '6px 10px', borderRadius: 4,
                         background: 'var(--bg-card)',
                         border: '1px solid var(--border)',
                       }}>
-                        {typeof req === 'string' ? req : req.name}
+                        {typeof req === 'string'
+                          ? <span style={{ color: 'var(--text-secondary)' }}>{req}</span>
+                          : (
+                            <span
+                              onClick={() => onOpenLibrary?.(req.id)}
+                              style={{
+                                color: 'var(--accent-indigo)', cursor: 'pointer',
+                                transition: 'opacity 100ms',
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                            >
+                              {req.name}
+                              {req.version && <span style={{
+                                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                marginLeft: 6, padding: '1px 5px', borderRadius: 3,
+                                background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                                color: 'var(--accent-indigo)',
+                              }}>v{req.version}</span>}
+                            </span>
+                          )
+                        }
                       </div>
                     ))}
                   </div>
@@ -122,15 +143,176 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
     )
   }
 
+  // Evaluation nodes get a specialized panel — no tabs
+  if (node.isEvaluation || node.category === 'evaluation') {
+    const claims = node.claims || []
+    const sat = claims.filter(c => c.status === 'satisfactory').length
+    const unsat = claims.filter(c => c.status === 'unsatisfactory').length
+    const miss = claims.filter(c => c.status === 'missing').length
+    const statusColor = node.status === 'completed' ? 'var(--accent-green)' : 'var(--accent-amber)'
+    const statusLabel = node.status === 'completed' ? 'COMPLETED' : 'IN PROGRESS'
+
+    return (
+      <PanelShell
+        node={node}
+        tabs={[]}
+        tab={null}
+        setTab={() => {}}
+        summary={null}
+        onClose={onClose}
+        hasStack={false}
+        hasParent={isAnchor || depth > 0}
+        onViewChain={onViewChain}
+        onSurface={onSurface}
+        isEvidence={false}
+        isParse={false}
+        isEvaluation
+        isOwner={isOwner}
+      >
+        <div style={{ padding: '4px 0' }}>
+          {/* Header info */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              {node.requirementSetVersion && (
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  padding: '1px 5px', borderRadius: 3,
+                  background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                  color: 'var(--accent-indigo)',
+                }}>v{node.requirementSetVersion}</span>
+              )}
+              {node.disclosureType && (
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  padding: '2px 6px', borderRadius: 3,
+                  textTransform: 'uppercase',
+                  color: node.disclosureType === 'full' ? 'var(--accent-indigo)' : 'var(--accent-amber)',
+                  background: node.disclosureType === 'full'
+                    ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)'
+                    : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+                }}>{node.disclosureType}</span>
+              )}
+              <span style={{
+                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 3,
+                color: statusColor,
+                background: `color-mix(in srgb, ${statusColor} 10%, transparent)`,
+              }}>{statusLabel}</span>
+            </div>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+              Evaluated by {node.evaluator || node.owner} · {node.date}
+            </div>
+          </div>
+
+          {/* Summary bar */}
+          <div style={{
+            padding: '10px 14px', borderRadius: 8, marginBottom: 14,
+            background: 'var(--bg-deep)', border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', gap: 14,
+            fontSize: 11, fontFamily: 'var(--font-mono)',
+          }}>
+            <span style={{ color: 'var(--text-dim)' }}>{claims.length} claims</span>
+            <span style={{ color: 'var(--accent-green)' }}>{sat} satisfactory</span>
+            <span style={{ color: 'var(--accent-red)' }}>{unsat} unsatisfactory</span>
+            <span style={{ color: 'var(--text-dim)' }}>{miss} missing</span>
+          </div>
+
+          {/* Claims list */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {claims.map((c, i) => {
+              const isExtraction = c.type === 'extraction'
+              const statusCfg = c.status === 'satisfactory'
+                ? { color: 'var(--accent-green)', label: 'Satisfactory', icon: '●' }
+                : c.status === 'unsatisfactory'
+                  ? { color: 'var(--accent-red)', label: 'Unsatisfactory', icon: '●' }
+                  : { color: 'var(--text-dim)', label: 'Missing', icon: '●' }
+              const confPct = Math.round((c.aiConfidence || 0) * 100)
+              const confColor = confPct >= 90 ? 'var(--accent-green)' : confPct >= 80 ? 'var(--accent-amber)' : 'var(--accent-red)'
+              return (
+                <div key={c.requirementId || i} style={{
+                  padding: '12px 14px', borderRadius: 8,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      padding: '2px 6px', borderRadius: 3,
+                      color: isExtraction ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                      background: isExtraction
+                        ? 'color-mix(in srgb, var(--accent-cyan) 10%, transparent)'
+                        : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+                    }}>{isExtraction ? 'EXTRACT' : 'INFER'}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.label}</span>
+                    <span style={{
+                      marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      padding: '2px 6px', borderRadius: 3,
+                      color: statusCfg.color,
+                      background: `color-mix(in srgb, ${statusCfg.color} 10%, transparent)`,
+                    }}>{statusCfg.label.toUpperCase()}</span>
+                  </div>
+                  {c.description && (
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 8, lineHeight: 1.5 }}>
+                      {c.description}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                      {isExtraction ? 'Value' : 'Determination'}:
+                    </span>
+                    <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                      {c.humanValue || c.aiValue || '—'}
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'var(--font-mono)', color: confColor }}>
+                      {confPct}% conf.
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Credits used */}
+          {node.creditsUsed != null && (
+            <div style={{ marginTop: 14, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+              Credits used: {node.creditsUsed}
+            </div>
+          )}
+        </div>
+      </PanelShell>
+    )
+  }
+
+  // Build evals from child eval nodes
+  const evals = useMemo(() => {
+    return (node.children || [])
+      .filter(c => c.isEvaluation || c.category === 'evaluation')
+      .map(ev => ({
+        id: ev.id,
+        org: ev.evaluatorParty || ev.owner,
+        orgDot: ev.dot,
+        date: ev.date,
+        requirements: ev.requirementSetName || ev.name,
+        status: ev.status || 'completed',
+        creditsUsed: ev.creditsUsed || 0,
+        reviewer: ev.evaluator || 'Unknown',
+        reviewDate: ev.date,
+        claims: (ev.claims || []).map(c => ({
+          requirement: c.label || c.requirementId,
+          output: c.humanValue || c.aiValue || '—',
+          type: c.type === 'extraction' ? 'extraction' : 'inference',
+          status: c.status,
+        })),
+      }))
+  }, [node])
+
   // Decide which tabs to show based on populated fields
   const tabs = useMemo(() => {
     const t = []
-    // Show Evaluations tab if: node has evaluations, node has evidence children, or user owns the node (can run evaluations)
-    const hasEvals = node.evaluations?.length > 0
+    const hasEvals = evals.length > 0
     const hasEvidenceChildren = node.children?.some(c => c.isEvidence)
     const showEvalTab = hasEvals || hasEvidenceChildren || isOwner
     if (showEvalTab)
-      t.push({ id: 'evaluations', label: `Evaluations · ${node.evaluations?.length || 0}` })
+      t.push({ id: 'evaluations', label: `Evaluations · ${evals.length}` })
     if (node.children?.length)
       t.push({ id: 'children', label: `Children · ${node.children.length}` })
     if (node.sdas?.length && !node.isEvidence)
@@ -162,15 +344,15 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
   const toggleClaims = useCallback(i => setClaimsOpen(p => ({ ...p, [i]: !p[i] })), [])
   const expandAll = useCallback(() => {
     const o = {}
-    node.evaluations?.forEach((_, i) => { o[i] = true })
+    evals.forEach((_, i) => { o[i] = true })
     setEvalOpen(o)
-  }, [node])
+  }, [evals])
   const collapseAll = useCallback(() => {
     const o = {}
-    node.evaluations?.forEach((_, i) => { o[i] = false })
+    evals.forEach((_, i) => { o[i] = false })
     setEvalOpen(o)
     setClaimsOpen(o)
-  }, [node])
+  }, [evals])
 
   // Paperclip click: switch to evals tab, then unfurl evidence after paint
   const handleClipClick = useCallback(() => {
@@ -182,7 +364,11 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
   const summary = useMemo(() => {
     const parts = []
     const h = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
-    if (h.ok || h.bad) parts.push(`${h.ok} verified · ${h.bad} failed`)
+    const segments = []
+    if (h.ok) segments.push(`${h.ok} satisfactory`)
+    if (h.warn) segments.push(`${h.warn} missing`)
+    if (h.bad) segments.push(`${h.bad} unsatisfactory`)
+    if (segments.length) parts.push(segments.join(' · '))
 
     // Child claim count — count all children's claims
     const childNodes = node.children || []
@@ -190,14 +376,14 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       let totalChildClaims = 0
       for (const c of childNodes) {
         const ch = c.displayHealth || c.health || { ok: 0, warn: 0, bad: 0 }
-        totalChildClaims += ch.ok + ch.bad
+        totalChildClaims += ch.ok + (ch.warn || 0) + ch.bad
       }
       if (totalChildClaims > 0) {
         parts.push(`${totalChildClaims} claims across ${childNodes.length} children`)
       }
     }
 
-    if (!parts.length && node.evaluations?.length) parts.push(`${node.evaluations.length} evaluations`)
+    if (!parts.length && evals.length) parts.push(`${evals.length} evaluations`)
     return parts.join(' · ') || null
   }, [node])
 
@@ -220,6 +406,8 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       onDisclose={onDisclose}
       onAddEvidence={onAddEvidence}
       onParseEvidence={onParseEvidence}
+      onRunEvaluation={onRunEvaluation}
+      canEvaluate={canEvaluate}
       isEvidence={!!node.isEvidence}
       isParse={!!node.isParse || node.category === 'parse'}
       isOwner={isOwner}
@@ -229,7 +417,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
         <div style={{ display: tab === 'evaluations' ? 'block' : 'none' }}>
           <EvaluationsTab
             evidence={node.evidence}
-            evals={node.evaluations || []}
+            evals={evals}
             evalOpen={evalOpen}
             claimsOpen={claimsOpen}
             toggleEval={toggleEval}
@@ -241,6 +429,8 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
             isOwner={isOwner}
             isEvidence={!!node.isEvidence}
             attributedClaims={node.attributedClaims}
+            onRunEvaluation={onRunEvaluation}
+            canEvaluate={canEvaluate}
           />
         </div>
       )}

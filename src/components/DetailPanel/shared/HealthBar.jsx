@@ -24,7 +24,7 @@ function Seg({ pct, color, label }) {
 }
 
 export default function HealthBar({ health }) {
-  const t = health.ok + health.bad
+  const t = health.ok + (health.warn || 0) + health.bad
   if (!t) {
     return <div style={{ height: 7, borderRadius: 4, background: 'var(--border)', width: '100%' }} />
   }
@@ -39,8 +39,9 @@ export default function HealthBar({ health }) {
         gap: 2,
         overflow: 'visible',
       }}>
-        {health.ok > 0 && <Seg pct={(health.ok / t) * 100} color="var(--accent-green)" label={`${health.ok} verified`} />}
-        {health.bad > 0 && <Seg pct={(health.bad / t) * 100} color="var(--accent-red)" label={`${health.bad} failed`} />}
+        {health.ok > 0 && <Seg pct={(health.ok / t) * 100} color="var(--accent-green)" label={`${health.ok} satisfactory`} />}
+        {health.warn > 0 && <Seg pct={(health.warn / t) * 100} color="var(--text-dim)" label={`${health.warn} missing`} />}
+        {health.bad > 0 && <Seg pct={(health.bad / t) * 100} color="var(--accent-red)" label={`${health.bad} unsatisfactory`} />}
       </div>
     </div>
   )

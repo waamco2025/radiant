@@ -1,7 +1,49 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 
-/* ─── Left Panel: Set List (grouped by lineage) ─── */
+/* ─── Version Item (inner selectable card) ─── */
+function VersionItem({ v, isSelected, onSelect }) {
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); onSelect(v.id) }}
+      style={{
+        padding: '8px 10px', borderRadius: 6, cursor: 'pointer', marginTop: 6,
+        background: isSelected
+          ? 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)'
+          : 'var(--bg-deep)',
+        border: `1px solid ${isSelected ? 'var(--accent-indigo)' : 'var(--border)'}`,
+        display: 'flex', alignItems: 'center', gap: 8,
+        transition: 'background 100ms, border-color 100ms',
+      }}
+      onMouseEnter={e => {
+        if (!isSelected) {
+          e.currentTarget.style.borderColor = 'var(--border-hover)'
+          e.currentTarget.style.background = 'var(--bg-raised)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!isSelected) {
+          e.currentTarget.style.borderColor = 'var(--border)'
+          e.currentTarget.style.background = 'var(--bg-deep)'
+        }
+      }}
+    >
+      <span style={{
+        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+        color: isSelected ? 'var(--accent-indigo)' : 'var(--text-dim)',
+        background: isSelected
+          ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)'
+          : 'var(--bg-raised)',
+      }}>v{v.version || 1}</span>
+      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+        Created {v.created}
+      </span>
+    </div>
+  )
+}
+
+/* ─── Left Panel: Set List (grouped by lineage, nested cards) ─── */
 function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineages, toggleLineage }) {
   // Group by lineage, newest version first
   const lineageGroups = useMemo(() => {
@@ -11,31 +53,37 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
       if (!map.has(lid)) map.set(lid, [])
       map.get(lid).push(s)
     }
-    // Sort each group: newest version first
     for (const [, arr] of map) arr.sort((a, b) => (b.version || 1) - (a.version || 1))
-    // Convert to array sorted by latest version's created date (newest first)
     return [...map.entries()]
       .map(([lid, versions]) => ({ lineageId: lid, versions, latest: versions[0] }))
       .sort((a, b) => (b.latest.created || '').localeCompare(a.latest.created || ''))
   }, [sets])
 
-  // Filter by search
-  const filtered = useMemo(() => {
-    if (!search.trim()) return lineageGroups
+  // Filter by search + auto-expand if match is in older version
+  const { filtered, autoExpandIds } = useMemo(() => {
+    if (!search.trim()) return { filtered: lineageGroups, autoExpandIds: new Set() }
     const q = search.toLowerCase()
-    return lineageGroups.filter(g =>
-      g.versions.some(s =>
+    const matched = []
+    const autoIds = new Set()
+    for (const g of lineageGroups) {
+      const anyMatch = g.versions.some(s =>
         s.name.toLowerCase().includes(q) ||
         (s.description || '').toLowerCase().includes(q) ||
         s.requirements.some(r => r.label.toLowerCase().includes(q))
       )
-    )
+      if (!anyMatch) continue
+      matched.push(g)
+      // Check if match is only in older versions (not latest)
+      const latestMatches =
+        g.latest.name.toLowerCase().includes(q) ||
+        (g.latest.description || '').toLowerCase().includes(q) ||
+        g.latest.requirements.some(r => r.label.toLowerCase().includes(q))
+      if (!latestMatches && g.versions.length > 1) {
+        autoIds.add(g.lineageId)
+      }
+    }
+    return { filtered: matched, autoExpandIds: autoIds }
   }, [lineageGroups, search])
-
-  // Total matching sets for result count
-  const matchingSetCount = useMemo(() => {
-    return filtered.reduce((sum, g) => sum + g.versions.length, 0)
-  }, [filtered])
 
   return (
     <div style={{
@@ -78,7 +126,7 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
           padding: '4px 14px', background: 'var(--bg-deep)',
           borderBottom: '1px solid var(--border)', flexShrink: 0,
         }}>
-          {matchingSetCount} result{matchingSetCount !== 1 ? 's' : ''}
+          {filtered.length} result{filtered.length !== 1 ? 's' : ''}
         </div>
       )}
 
@@ -96,92 +144,68 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
         )}
         {filtered.map(g => {
           const latest = g.latest
-          const isExpanded = expandedLineages[g.lineageId]
           const hasMultiple = g.versions.length > 1
-          const isLatestSelected = latest.id === selectedId
+          const olderCount = g.versions.length - 1
+          const isExpanded = expandedLineages[g.lineageId] || autoExpandIds.has(g.lineageId)
 
           return (
-            <div key={g.lineageId} style={{ marginBottom: 4, marginTop: 4 }}>
-              {/* Latest version row */}
-              <div
-                onClick={() => onSelect(latest.id)}
-                style={{
-                  padding: '12px 14px', cursor: 'pointer', borderRadius: 8,
-                  border: `1px solid ${isLatestSelected ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                  background: isLatestSelected
-                    ? 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)'
-                    : 'var(--bg-card)',
-                  transition: 'background 100ms',
-                }}
-                onMouseEnter={e => { if (!isLatestSelected) e.currentTarget.style.background = 'var(--bg-raised)' }}
-                onMouseLeave={e => { if (!isLatestSelected) e.currentTarget.style.background = isLatestSelected ? 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)' : 'var(--bg-card)' }}
-              >
-                {/* Row 1: Name + req count + version badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {latest.name}
-                  </div>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
-                    {latest.requirements.length} req{latest.requirements.length !== 1 ? 's' : ''}
-                  </span>
-                  <span style={{
-                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                    padding: '1px 5px', borderRadius: 3, flexShrink: 0,
-                    color: 'var(--accent-indigo)',
-                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
-                  }}>v{latest.version || 1}</span>
+            <div key={g.lineageId} style={{
+              marginBottom: 6, marginTop: 6,
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: 10,
+            }}>
+              {/* Header row (not clickable) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {latest.name}
                 </div>
-                {/* Row 2: Description (max 2 lines) */}
-                {latest.description && (
-                  <div style={{
-                    fontSize: 11, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.4,
-                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                  }}>{latest.description}</div>
-                )}
-                {/* Row 3: Version expand trigger (only if multiple versions) */}
-                {hasMultiple && (
-                  <>
-                    <div
-                      onClick={e => { e.stopPropagation(); toggleLineage(g.lineageId) }}
-                      style={{
-                        fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-                        cursor: 'pointer', marginTop: 6, transition: 'color 100ms',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
-                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
-                    >
-                      {isExpanded ? '▾' : '▸'} {g.versions.length} versions
-                    </div>
-
-                    {/* Expanded sub-rows */}
-                    {isExpanded && g.versions.slice(1).map((v, i) => {
-                      const isSelected = v.id === selectedId
-                      return (
-                        <div
-                          key={v.id}
-                          onClick={e => { e.stopPropagation(); onSelect(v.id) }}
-                          style={{
-                            paddingLeft: 12, padding: '6px 0 6px 12px',
-                            borderTop: '1px solid var(--border)',
-                            marginTop: i === 0 ? 6 : 0,
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            cursor: 'pointer', fontSize: 11, color: 'var(--text-dim)',
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontFamily: 'var(--font-mono)', fontWeight: 600,
-                              color: isSelected ? 'var(--accent-indigo)' : 'var(--text-tertiary)',
-                              transition: 'color 100ms',
-                            }}
-                          >v{v.version || 1}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)' }}>Created {v.created}</span>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
+                <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                  {latest.requirements.length} req{latest.requirements.length !== 1 ? 's' : ''}
+                </span>
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                  color: 'var(--accent-indigo)',
+                  background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                }}>v{latest.version || 1}</span>
               </div>
+
+              {/* Description */}
+              {latest.description && (
+                <div style={{
+                  fontSize: 11, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.4,
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>{latest.description}</div>
+              )}
+
+              {/* Latest version item (always visible) */}
+              <VersionItem v={latest} isSelected={latest.id === selectedId} onSelect={onSelect} />
+
+              {/* Expand trigger + older versions */}
+              {hasMultiple && (
+                <>
+                  <div
+                    onClick={() => toggleLineage(g.lineageId)}
+                    style={{
+                      fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                      cursor: 'pointer', padding: '4px 0', marginTop: 4,
+                      transition: 'color 100ms',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+                  >
+                    {isExpanded ? '▾' : '▸'} {olderCount} older version{olderCount !== 1 ? 's' : ''}
+                  </div>
+
+                  {isExpanded && (
+                    <div style={olderCount > 5 ? { maxHeight: 180, overflowY: 'auto' } : undefined}>
+                      {g.versions.slice(1).map(v => (
+                        <VersionItem key={v.id} v={v} isSelected={v.id === selectedId} onSelect={onSelect} />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )
         })}
@@ -192,7 +216,6 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
 
 /* ─── Right Panel: View Details ─── */
 function ViewDetails({ rs, onNewVersion, allSets }) {
-  // Check if a newer version exists in same lineage
   const newerExists = useMemo(() => {
     if (!rs.lineageId) return false
     return allSets.some(s => s.lineageId === rs.lineageId && (s.version || 1) > (rs.version || 1))
@@ -200,14 +223,26 @@ function ViewDetails({ rs, onNewVersion, allSets }) {
 
   return (
     <div style={{ padding: '24px 28px', overflowY: 'auto', flex: 1 }}>
+      {/* Title row: name + version + New Version button */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-bright)' }}>{rs.name}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-bright)', flex: 1, minWidth: 0 }}>{rs.name}</div>
         <span style={{
           fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-          padding: '2px 7px', borderRadius: 4,
+          padding: '2px 7px', borderRadius: 4, flexShrink: 0,
           color: 'var(--accent-indigo)',
           background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
         }}>v{rs.version || 1}</span>
+        <span
+          onClick={onNewVersion}
+          style={{
+            fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+            cursor: 'pointer', padding: '5px 10px', borderRadius: 4, flexShrink: 0,
+            border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
+            transition: 'background 100ms',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >New Version</span>
       </div>
       <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 4 }}>Created {rs.created}</div>
       <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginTop: 10 }}>{rs.description}</div>
@@ -224,19 +259,6 @@ function ViewDetails({ rs, onNewVersion, allSets }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-        <span
-          onClick={onNewVersion}
-          style={{
-            fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
-            cursor: 'pointer', padding: '5px 10px', borderRadius: 4,
-            border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
-            transition: 'background 100ms',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >New Version</span>
-      </div>
       <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
@@ -280,6 +302,67 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
   editRequirements, setEditRequirements, onSave, onCancel }) {
 
   const [activeTab, setActiveTab] = useState('manual')
+  const [csvStatus, setCsvStatus] = useState(null) // { type: 'success'|'error', msg }
+  const fileInputRef = useRef(null)
+
+  function parseCSV(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    const results = []
+    for (let i = 0; i < lines.length; i++) {
+      const fields = []
+      let current = ''
+      let inQuotes = false
+      for (const char of lines[i]) {
+        if (char === '"') { inQuotes = !inQuotes; continue }
+        if (char === ',' && !inQuotes) { fields.push(current.trim()); current = ''; continue }
+        current += char
+      }
+      fields.push(current.trim())
+      if (i === 0) {
+        const first = fields[0]?.toLowerCase()
+        if (['type', 'requirement type', 'req type', 'category'].includes(first)) continue
+      }
+      if (fields.length < 2) continue
+      const typeRaw = (fields[0] || '').toLowerCase()
+      const label = fields[1] || ''
+      const description = fields[2] || ''
+      if (!label) continue
+      const type = ['infer', 'inference', 'inf', 'i'].includes(typeRaw) ? 'inference' : 'extraction'
+      results.push({
+        id: `req-csv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+        type, label, description,
+      })
+    }
+    return results
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      const text = evt.target.result
+      const parsed = parseCSV(text)
+      if (parsed.length === 0) {
+        setCsvStatus({ type: 'error', msg: 'No valid requirements found in file' })
+        return
+      }
+      const nameFromFile = file.name.replace(/\.[^.]+$/, '')
+      setEditName(nameFromFile)
+      setEditDescription('')
+      setEditRequirements(parsed)
+      const extCount = parsed.filter(r => r.type === 'extraction').length
+      const infCount = parsed.filter(r => r.type === 'inference').length
+      setCsvStatus({ type: 'success', msg: `Imported ${parsed.length} requirements from ${file.name} (${extCount} extraction, ${infCount} inference)` })
+      setTimeout(() => { setActiveTab('manual'); setCsvStatus(null) }, 1500)
+    }
+    reader.onerror = () => {
+      setCsvStatus({ type: 'error', msg: 'Failed to read file' })
+    }
+    reader.readAsText(file)
+    // Reset input so the same file can be re-selected
+    e.target.value = ''
+  }
 
   const addRequirement = (type) => {
     const id = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`
@@ -294,7 +377,6 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
     setEditRequirements(prev => prev.filter(r => r.id !== id))
   }
 
-  // Save enabled when name + description filled AND ≥1 requirement with both label and description
   const completeReqCount = editRequirements.filter(r => r.label.trim() && r.description.trim()).length
   const canSave = editName.trim() && editDescription.trim() && completeReqCount > 0
 
@@ -353,7 +435,6 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
         )}
 
         {activeTab === 'csv' && !isNewVersion ? (
-          /* CSV Import placeholder */
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             padding: '48px 32px', textAlign: 'center',
@@ -365,21 +446,34 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
               Upload a CSV file with columns:<br />
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>Type (Extract/Infer), Label, Description</span>
               <br /><br />
-              Set name will be derived from the filename. You&apos;ll be asked to provide a description after import.
+              Set name will be derived from the filename. You can review and edit before saving.
             </div>
-            <span style={{
-              fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-              padding: '8px 20px', borderRadius: 6,
-              border: '1px solid var(--border)', opacity: 0.5, cursor: 'default',
-            }}>Upload CSV</span>
-            <div style={{
-              marginTop: 16, fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              color: 'var(--text-dim)', letterSpacing: '0.06em',
-              padding: '3px 8px', background: 'var(--bg-raised)', borderRadius: 6,
-            }}>COMING SOON</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+            <span
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+                padding: '8px 20px', borderRadius: 6, cursor: 'pointer',
+                border: '1px solid color-mix(in srgb, var(--accent-indigo) 30%, transparent)',
+                transition: 'background 100ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >Choose File</span>
+            {csvStatus && (
+              <div style={{
+                marginTop: 16, fontSize: 12, lineHeight: 1.6,
+                color: csvStatus.type === 'success' ? 'var(--accent-green)' : 'var(--accent-red)',
+              }}>{csvStatus.msg}</div>
+            )}
           </div>
         ) : (activeTab === 'manual' || isNewVersion) ? (
-          /* Manual form */
           <>
             {/* Name */}
             <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6, letterSpacing: '0.03em' }}>NAME</div>
@@ -426,9 +520,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
                 background: 'var(--bg-card)', borderRadius: 6,
                 border: '1px solid var(--border)',
               }}>
-                {/* Row 1: type toggle + label + delete */}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {/* Type toggle — fixed width column */}
                   <div style={{ width: 48, flexShrink: 0, display: 'flex', gap: 2 }}>
                     <span
                       onClick={() => updateReq(req.id, 'type', 'extraction')}
@@ -480,7 +572,6 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
                     onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
                   >×</span>
                 </div>
-                {/* Row 2: description aligned with label (same left edge: 48px toggle + 8px gap = 56px) */}
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <div style={{ width: 48, flexShrink: 0 }} />
                   <input
@@ -550,7 +641,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — Requirements Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, _noBackdrop }) {
+export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, _noBackdrop }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')        // 'view' | 'create' | 'newversion'
   const [search, setSearch] = useState('')
@@ -566,6 +657,18 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
   const [sourceName, setSourceName] = useState('')
   const [draftVersion, setDraftVersion] = useState(null)
 
+  // Auto-select initial set when opened with a specific ID
+  useEffect(() => {
+    if (initialSelectedId) {
+      setSelectedId(initialSelectedId)
+      setMode('view')
+      const rs = requirementSets.find(s => s.id === initialSelectedId)
+      if (rs?.lineageId) {
+        setExpandedLineages(prev => ({ ...prev, [rs.lineageId]: true }))
+      }
+    }
+  }, [initialSelectedId])
+
   const selectedSet = useMemo(() => requirementSets.find(s => s.id === selectedId), [requirementSets, selectedId])
 
   const toggleLineage = useCallback((lid) => {
@@ -576,7 +679,6 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
   useEffect(() => {
     const handler = (e) => {
       if (e.key !== 'Escape') return
-
       if (mode === 'create' || mode === 'newversion') {
         e.stopPropagation()
         e.preventDefault()
@@ -584,7 +686,6 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
         setMode('view')
         return
       }
-      // view or empty — do nothing, let Backdrop handle close
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
@@ -608,7 +709,6 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
   const handleNewVersion = () => {
     if (!selectedSet) return
     const lid = selectedSet.lineageId || selectedSet.id
-    // Find max version in this lineage
     const maxVersion = requirementSets
       .filter(s => (s.lineageId || s.id) === lid)
       .reduce((max, s) => Math.max(max, s.version || 1), 0)
@@ -622,17 +722,14 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
   }
 
   const handleSave = () => {
-    // Only include requirements with both label and description
     const completeReqs = editRequirements.filter(r => r.label.trim() && r.description.trim())
     const trimmedName = editName.trim()
 
     let lineageId, version
     if (mode === 'newversion' && sourceLineageId) {
-      // Name is locked in new version mode, always same lineage
       lineageId = sourceLineageId
       version = draftVersion
     } else {
-      // Brand new set
       lineageId = `lineage-${Date.now().toString(36)}`
       version = 1
     }
@@ -657,7 +754,6 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
 
   const isEditing = mode === 'create' || mode === 'newversion'
 
-  // Right panel content
   let rightContent
   if (isEditing) {
     rightContent = (

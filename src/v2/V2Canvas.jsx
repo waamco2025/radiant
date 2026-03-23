@@ -272,6 +272,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onDisclose,
   onAddEvidence,
   onParseEvidence,
+  onRunEvaluation,
   activeParty,
 }, ref) {
   const containerRef = useRef(null)
@@ -1977,6 +1978,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onDisclose={transitioning ? undefined : onDisclose}
                   onAddEvidence={transitioning ? undefined : onAddEvidence}
                   onParseEvidence={transitioning ? undefined : onParseEvidence}
+                  onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                   activeParty={activeParty}
                 />
               </div>
@@ -2023,6 +2025,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onDisclose={transitioning ? undefined : onDisclose}
                 onAddEvidence={transitioning ? undefined : onAddEvidence}
                 onParseEvidence={transitioning ? undefined : onParseEvidence}
+                onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                 activeParty={activeParty}
               />
             </div>

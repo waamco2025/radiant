@@ -8,8 +8,96 @@ import {
 import UpstreamPicker from './UpstreamPicker'
 import { FIELD_CATEGORIES } from '../../v2/pepTemplates.js'
 
+/* ─── Expandable Requirement Set Card (shared) ─── */
+function ReqSetCard({ rs }) {
+  const [expanded, setExpanded] = useState(false)
+  // Handle both full set objects and plain strings
+  if (typeof rs === 'string') {
+    return (
+      <div style={{
+        padding: '10px 12px', background: 'var(--bg-deep)', borderRadius: 6,
+        border: '1px solid var(--border)', marginBottom: 6,
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{rs}</div>
+      </div>
+    )
+  }
+  return (
+    <div style={{
+      padding: '10px 12px', background: 'var(--bg-deep)', borderRadius: 6,
+      border: '1px solid var(--border)', marginBottom: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{rs.name}</span>
+        {rs.version && (
+          <span style={{
+            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            padding: '2px 6px', borderRadius: 4,
+            color: 'var(--accent-indigo)',
+            background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+          }}>v{rs.version}</span>
+        )}
+      </div>
+      {rs.description && (
+        <div style={{
+          fontSize: 11, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.4,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{rs.description}</div>
+      )}
+      {rs.requirements && rs.requirements.length > 0 && (
+        <>
+          <div
+            onClick={e => { e.stopPropagation(); setExpanded(p => !p) }}
+            style={{
+              fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+              cursor: 'pointer', marginTop: 6, transition: 'color 100ms',
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+          >
+            {expanded ? `▾ Hide ${rs.requirements.length} requirements` : `▸ View ${rs.requirements.length} requirements`}
+          </div>
+          {expanded && (
+            <div style={{
+              maxHeight: 180, overflowY: 'auto', marginTop: 8, padding: '8px 10px',
+              background: 'var(--bg-card)', borderRadius: 6,
+              border: '1px solid var(--border)',
+            }}>
+              {rs.requirements.map((req, i) => (
+                <div key={req.id || i} style={{
+                  padding: '6px 0',
+                  borderBottom: i < rs.requirements.length - 1 ? '1px solid var(--border)' : 'none',
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                  <span style={{
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '2px 7px', borderRadius: 4, flexShrink: 0, marginTop: 1,
+                    color: req.type === 'extraction' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                    background: req.type === 'extraction'
+                      ? 'color-mix(in srgb, var(--accent-cyan) 12%, transparent)'
+                      : 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                  }}>
+                    {req.type === 'extraction' ? 'EXTRACT' : 'INFER'}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{req.label}</div>
+                    {req.description && (
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 1 }}>{req.description}</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ─── Step 1: Review request + decide ─── */
 function StepReview({ request, decision, setDecision }) {
+  const reqs = request.requirements || []
   return (
     <div>
       <div style={{ padding: 18, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 18 }}>
@@ -31,18 +119,25 @@ function StepReview({ request, decision, setDecision }) {
             <CopyBadge value={request.asset.pin} truncated />
           </span>
         } />
-        <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
-          <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Requirements</div>
-          <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-            {(!request.requirements || request.requirements.length === 0)
-              ? <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic', lineHeight: 1.8 }}>None specified</div>
-              : request.requirements.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>
-                  {typeof r === 'string' ? r : r.name}
-                </div>
-              ))
-            }
+        {/* Requirements section */}
+        <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4, paddingTop: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Requirements</span>
+            {reqs.length > 0 && (
+              <span style={{
+                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-dim)',
+                padding: '1px 6px', borderRadius: 4, background: 'var(--bg-raised)',
+              }}>{reqs.length} set{reqs.length !== 1 ? 's' : ''}</span>
+            )}
           </div>
+          {reqs.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic', paddingLeft: 4 }}>None specified</div>
+            : (
+              <div style={{ maxHeight: 240, overflowY: 'auto', paddingLeft: 4 }}>
+                {reqs.map((r, i) => <ReqSetCard key={i} rs={r} />)}
+              </div>
+            )
+          }
         </div>
       </div>
 
@@ -85,11 +180,20 @@ function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDa
       <div style={{ display: 'flex', gap: 12, marginBottom: 22 }}>
         <SDATypeCard type="full" selected={level} onSelect={setLevel} />
         <SDATypeCard type="selective" selected={level} onSelect={setLevel} />
-        <SDATypeCard type="proofonly" selected={level} onSelect={setLevel}
-          disabled={!hasProofEval}
-          disabledReason={!hasProofEval ? 'Requires a completed evaluation' : null}
-        />
+        <SDATypeCard type="proofonly" selected={level} onSelect={setLevel} />
       </div>
+
+      {level === 'proofonly' && !hasProofEval && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 8, marginTop: -8, marginBottom: 14,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 12, color: 'var(--accent-amber)', lineHeight: 1.7,
+        }}>
+          Proof-only disclosure requires a completed evaluation on this asset.
+          Run an evaluation before creating a proof-only disclosure, or choose Full or Selective.
+        </div>
+      )}
 
       {level === 'selective' && !hasPepFields && (
         <div style={{
@@ -103,54 +207,58 @@ function StepTerms({ level, setLevel, expiry, setExpiry, customDate, setCustomDa
         </div>
       )}
 
-      <FieldLabel label="Set expiration" />
-      <ExpiryPicker expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} />
-
-      {hasCascadableAssets && (
+      {!((level === 'selective' && !hasPepFields) || (level === 'proofonly' && !hasProofEval)) && (
         <>
-          <FieldLabel label="Disclose connected assets?" />
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.7 }}>
-            If enabled, select assets connected to <strong style={{ color: 'var(--text-primary)' }}>{request.asset.name}</strong> can also be disclosed to <strong style={{ color: 'var(--text-primary)' }}>{request.from.name}</strong>, and {request.from.name} can evaluate those assets. You control which assets are disclosed to {request.from.name}, and their disclosure permissions. You can revoke any of your disclosures at any time.
-          </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
-            <ToggleCard
-              selected={cascadePolicy === 'open'}
-              onClick={() => setCascadePolicy('open')}
-              label="Open"
-              desc={`Select assets connected to ${request.asset.name} will be disclosed to ${request.from.name}.`}
-            />
-            <ToggleCard
-              selected={cascadePolicy === 'closed'}
-              onClick={() => setCascadePolicy('closed')}
-              label="Closed"
-              desc={`No assets connected to ${request.asset.name} will be disclosed to ${request.from.name}.`}
-            />
+          <FieldLabel label="Set expiration" />
+          <ExpiryPicker expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} />
+
+          {hasCascadableAssets && (
+            <>
+              <FieldLabel label="Disclose connected assets?" />
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.7 }}>
+                If enabled, select assets connected to <strong style={{ color: 'var(--text-primary)' }}>{request.asset.name}</strong> can also be disclosed to <strong style={{ color: 'var(--text-primary)' }}>{request.from.name}</strong>, and {request.from.name} can evaluate those assets. You control which assets are disclosed to {request.from.name}, and their disclosure permissions. You can revoke any of your disclosures at any time.
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
+                <ToggleCard
+                  selected={cascadePolicy === 'open'}
+                  onClick={() => setCascadePolicy('open')}
+                  label="Open"
+                  desc={`Select assets connected to ${request.asset.name} will be disclosed to ${request.from.name}.`}
+                />
+                <ToggleCard
+                  selected={cascadePolicy === 'closed'}
+                  onClick={() => setCascadePolicy('closed')}
+                  label="Closed"
+                  desc={`No assets connected to ${request.asset.name} will be disclosed to ${request.from.name}.`}
+                />
+              </div>
+            </>
+          )}
+
+          <FieldLabel label="Disclosure summary" />
+          <div style={{ padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <InfoRow label="Asset" value={request.asset.name} />
+            <InfoRow label="PIN" value={<CopyBadge value={request.asset.pin} truncated />} />
+            <InfoRow label="To" value={request.from.name} />
+            <InfoRow label="Disclosure type" value={
+              <span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
+                {SDA_TYPES[level]?.short}
+              </span>
+            } />
+            <InfoRow label="Expires" value={expiryLabel(expiry, customDate)} />
+            {hasCascadableAssets && (
+              <InfoRow label="Cascade policy" value={
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: cascadePolicy === 'open' ? 'var(--accent-green)' : 'var(--text-dim)' }}>
+                  {cascadePolicy === 'open' ? 'Open' : 'Closed'}
+                </span>
+              } />
+            )}
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              This creates a bilateral disclosure recorded on-chain. {request.from.name} will be able to {level === 'full' ? 'access all data fields and run evaluations' : level === 'selective' ? 'access selected data fields and run evaluations on those fields' : 'see pass/fail results from your evaluations only'}.
+            </div>
           </div>
         </>
       )}
-
-      <div style={{ padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12 }}>DISCLOSURE SUMMARY</div>
-        <InfoRow label="Asset" value={request.asset.name} />
-        <InfoRow label="PIN" value={<CopyBadge value={request.asset.pin} truncated />} />
-        <InfoRow label="To" value={request.from.name} />
-        <InfoRow label="Disclosure type" value={
-          <span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
-            {SDA_TYPES[level]?.short}
-          </span>
-        } />
-        <InfoRow label="Expires" value={expiryLabel(expiry, customDate)} />
-        {hasCascadableAssets && (
-          <InfoRow label="Cascade policy" value={
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: cascadePolicy === 'open' ? 'var(--accent-green)' : 'var(--text-dim)' }}>
-              {cascadePolicy === 'open' ? 'Open' : 'Closed'}
-            </span>
-          } />
-        )}
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-          This creates a bilateral disclosure recorded on-chain. {request.from.name} will be able to {level === 'full' ? 'access all data fields and run evaluations' : level === 'selective' ? 'access selected data fields and run evaluations on those fields' : 'see pass/fail results from your evaluations only'}.
-        </div>
-      </div>
     </div>
   )
 }
@@ -541,9 +649,9 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   }
 
   const currentStepNum = () => {
-    if (!decision) return 1
-    if (decision === 'decline') return step + 2
-    return step + 2
+    if (step === 0) return 1
+    if (decision === 'decline') return 2
+    return step + 1
   }
 
   const formContent = (
@@ -602,9 +710,11 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
             ? <Btn label="Select Fields →" accent onClick={() => setStep(2)} />
             : level === 'selective' && pepFields.length === 0
               ? <Btn label="No PEP Data Available" disabled />
-              : showCascadeStep
-                ? <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(2)} />
-                : <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
+              : level === 'proofonly' && !hasProofEval
+                ? <Btn label="No Evaluation Available" disabled />
+                : showCascadeStep
+                  ? <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(2)} />
+                  : <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
         )}
         {step === 2 && decision !== 'decline' && showFieldStep && (
           showCascadeStep

@@ -76,7 +76,7 @@ function HealthBar({ health }) {
       gap: 1,
     }}>
       {okPct > 0 && <div style={{ width: `${okPct}%`, background: 'var(--accent-green, #22c55e)', borderRadius: 1.5 }} />}
-      {warnPct > 0 && <div style={{ width: `${warnPct}%`, background: 'var(--accent-amber, #f59e0b)', borderRadius: 1.5 }} />}
+      {warnPct > 0 && <div style={{ width: `${warnPct}%`, background: 'var(--text-dim)', borderRadius: 1.5 }} />}
       {badPct > 0 && <div style={{ width: `${badPct}%`, minWidth: 3, background: 'var(--accent-red, #ef4444)', borderRadius: 1.5 }} />}
     </div>
   )
@@ -207,12 +207,13 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor }) {
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
   if (onCreateSDA) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
+  if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })
   if (isAnchor && onSurface) {
     buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   } else if (hasChildren) {
@@ -309,6 +310,7 @@ export default function AssetNode({
   onDisclose,
   onAddEvidence,
   onParseEvidence,
+  onRunEvaluation,
   activeParty,
 }) {
   const [hovered, setHovered] = useState(false)
@@ -342,13 +344,15 @@ export default function AssetNode({
   }, [])
 
   const isOwnedByUser = !node.owner || node.owner === activeParty
-  const isTerminalNode = node.isParse || node.category === 'parse'
+  const isTerminalNode = node.isParse || node.category === 'parse' || node.isEvaluation || node.category === 'evaluation'
   const isProvisional = !!node.provisional
   const isNew = !!node._isNew
   const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
   const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
+  const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
+  const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && hasPepChildren && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
   const borderColor = isProvisional
@@ -400,23 +404,26 @@ export default function AssetNode({
       {isSelected && !isAnchor && node.childCount > 0 && (
         <div style={{
           position: 'absolute',
-          top: -44,
+          top: -50,
           left: CARD_W / 2,
           transform: 'translateX(-50%)',
           zIndex: 10,
-          padding: '4px 10px',
+          padding: '5px 10px',
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
-          fontSize: 10,
           fontFamily: 'var(--font-mono)',
-          color: 'var(--text-secondary)',
-          whiteSpace: 'nowrap',
+          textAlign: 'center',
           pointerEvents: 'none',
           boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
           animation: 'diveHintIn 250ms ease-out forwards',
         }}>
-          {node.childCount} associated asset{node.childCount !== 1 ? 's' : ''} · Double-click to dive in
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+            {node.childCount} associated asset{node.childCount !== 1 ? 's' : ''}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+            Double-click to dive in
+          </div>
         </div>
       )}
 
@@ -523,7 +530,7 @@ export default function AssetNode({
         </div>
 
         {/* Row 3: owner */}
-        {node.owner && (
+        {(node.isEvaluation ? node.evaluatorParty : node.owner) && (
           <div style={{
             fontFamily: 'var(--font-display)',
             fontSize: 11,
@@ -534,7 +541,7 @@ export default function AssetNode({
             lineHeight: 1.2,
             marginBottom: 4,
           }}>
-            {node.owner}
+            {node.isEvaluation ? node.evaluatorParty : node.owner}
           </div>
         )}
 
@@ -562,13 +569,18 @@ export default function AssetNode({
               whiteSpace: 'nowrap',
             }}>
               {(() => {
+                if (node.isEvidence) return null
+                if (node.isParse || node.category === 'parse') {
+                  const fc = node.parsedFields?.length || 0
+                  return `${fc} fields`
+                }
                 const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
-                const dc = dh.ok + dh.bad
+                const dc = dh.ok + (dh.warn || 0) + dh.bad
                 return dh.bad > 0
                   ? `${dh.ok} · ${dh.bad}`
                   : dc > 0
-                    ? `${dc}`
-                    : '0 claims'
+                    ? `${dc} claims`
+                    : null
               })()}
             </span>
           </div>
@@ -581,6 +593,7 @@ export default function AssetNode({
           onCreateSDA={handleCreateSDA}
           onAddEvidence={handleAddEvidence}
           onParseEvidence={handleParseEvidence}
+          onRunEvaluation={handleRunEvaluation}
           onDive={handleDive}
           onOpenSubgraph={() => onOpenSubgraph?.(node)}
           onSurface={onSurface}
@@ -596,7 +609,7 @@ export default function AssetNode({
 
 // LOD dot: shown when zoom < LOD_THRESHOLD
 // Hover shows full AssetNode card as tooltip via portal
-export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, activeParty }) {
+export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const dotRef = useRef(null)
@@ -703,6 +716,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             onDisclose={isSelected ? onDisclose : undefined}
             onAddEvidence={isSelected ? onAddEvidence : undefined}
             onParseEvidence={isSelected ? onParseEvidence : undefined}
+            onRunEvaluation={isSelected ? onRunEvaluation : undefined}
             activeParty={activeParty}
           />
         </div>,

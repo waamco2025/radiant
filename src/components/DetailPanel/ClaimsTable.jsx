@@ -31,7 +31,12 @@ function TruncCell({ text, bad, width }) {
 function ClaimCell({ output, type, bad }) {
   const ref = useRef(null)
   const [trunc, setTrunc] = useState(false)
-  const full = `${output} ${type === 'inferred' ? 'inferred' : 'direct'}`
+  const typeLabel = type === 'inference' ? 'inference'
+    : type === 'extraction' ? 'extraction'
+    : type === 'inferred' ? 'inference'
+    : type === 'direct' ? 'extraction'
+    : type || 'extraction'
+  const full = `${output} ${typeLabel}`
   useEffect(() => {
     if (ref.current) setTrunc(ref.current.scrollWidth > ref.current.clientWidth)
   }, [output, type])
@@ -56,7 +61,7 @@ function ClaimCell({ output, type, bad }) {
         {output}
       </span>
       <span style={{ fontSize: 10, color: 'var(--text-tertiary)', flexShrink: 0 }}>
-        {type === 'inferred' ? 'inferred' : 'direct'}
+        {typeLabel}
       </span>
     </div>
   )
@@ -121,7 +126,7 @@ export default function ClaimsTable({ claims }) {
           display: 'flex', alignItems: 'center',
         }}>Claim</div>
         <div style={{
-          width: 86, fontSize: 10.5, fontFamily: 'var(--font-mono)',
+          width: 110, fontSize: 10.5, fontFamily: 'var(--font-mono)',
           fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.02em',
           paddingLeft: 10, borderLeft: '1px solid var(--border-hover)',
           display: 'flex', alignItems: 'center',
@@ -131,7 +136,9 @@ export default function ClaimsTable({ claims }) {
       {/* Body */}
       <div ref={scrollRef} style={{ maxHeight: needsScroll ? maxH : 'none', overflowY: needsScroll ? 'auto' : 'visible' }}>
         {claims.map((c, i) => {
-          const bad = c.status === 'contested'
+          const isGood = c.status === 'verified' || c.status === 'satisfactory'
+          const isBad = c.status === 'contested' || c.status === 'failed' || c.status === 'unsatisfactory'
+          const isMissing = c.status === 'missing'
           const focused = i === focusIdx
           return (
             <div key={i}>
@@ -140,7 +147,7 @@ export default function ClaimsTable({ claims }) {
                   display: 'flex',
                   alignItems: 'stretch',
                   minHeight: ROW_H,
-                  borderBottom: (!bad && i < claims.length - 1) ? '1px solid var(--border)' : 'none',
+                  borderBottom: (!isBad && i < claims.length - 1) ? '1px solid var(--border)' : 'none',
                   transition: 'background 100ms',
                   background: focused ? 'var(--bg-raised)' : 'transparent',
                   outline: focused ? '1px solid var(--border-hover)' : 'none',
@@ -150,19 +157,21 @@ export default function ClaimsTable({ claims }) {
                 onMouseLeave={e => { if (!focused) e.currentTarget.style.background = 'transparent' }}
                 onClick={() => setFocusIdx(i)}
               >
-                <TruncCell text={c.requirement} bad={bad} width={LABEL_W} />
-                <ClaimCell output={c.output} type={c.type} bad={bad} />
+                <TruncCell text={c.requirement || c.label} bad={isBad} width={LABEL_W} />
+                <ClaimCell output={c.output || c.humanValue || c.aiValue || '—'} type={c.type} bad={isBad} />
                 <div style={{
-                  width: 86, display: 'flex', alignItems: 'center', gap: 4,
+                  width: 110, display: 'flex', alignItems: 'center', gap: 4,
                   paddingLeft: 10, borderLeft: '1px solid var(--border)',
                 }}>
-                  {bad
-                    ? <><XIcon s={11} /><span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)' }}>Failed</span></>
-                    : <><CheckIcon s={11} /><span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>Verified</span></>
+                  {isBad
+                    ? <><XIcon s={11} /><span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)' }}>Unsatisfactory</span></>
+                    : isMissing
+                      ? <><span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>?</span><span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>Missing</span></>
+                      : <><CheckIcon s={11} /><span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>Satisfactory</span></>
                   }
                 </div>
               </div>
-              {bad && c.dispute && (
+              {isBad && c.dispute && (
                 <div style={{
                   padding: '10px 14px 12px',
                   borderBottom: i < claims.length - 1 ? '1px solid var(--border)' : 'none',

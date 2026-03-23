@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { BTN_H } from './constants'
 import GridRow from './shared/GridRow'
-import { SC, SX } from './shared/StatPills'
 import { Tip } from './shared/Tooltip'
 import ClaimsTable from './ClaimsTable'
 
@@ -51,8 +50,9 @@ function Badge({ text, color, tooltip }) {
 
 export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClaims }) {
   const sup = ev.status === 'superseded'
-  const vn = ev.claims.filter(c => c.status === 'verified').length
-  const cn = ev.claims.filter(c => c.status === 'contested').length
+  const satCount = ev.claims.filter(c => c.status === 'satisfactory' || c.status === 'verified').length
+  const unsatCount = ev.claims.filter(c => c.status === 'unsatisfactory' || c.status === 'contested' || c.status === 'failed').length
+  const missCount = ev.claims.filter(c => c.status === 'missing').length
 
   return (
     <div style={{
@@ -80,8 +80,24 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{ev.date}</span>
-          {!sup && <SC n={vn} label="verified" />}
-          {!sup && <SX n={cn} label="failed" />}
+          {!sup && satCount > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--accent-green)' }}>✓</span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{satCount}</span>
+            </span>
+          )}
+          {!sup && unsatCount > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--accent-red)' }}>✕</span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{unsatCount}</span>
+            </span>
+          )}
+          {!sup && missCount > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--text-dim)' }}>?</span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{missCount}</span>
+            </span>
+          )}
           <Chev open={open} />
         </div>
       </div>
