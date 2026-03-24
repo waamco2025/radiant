@@ -209,8 +209,8 @@ function buildRadiantGroup(opts = {}) {
 }
 
 // ── Default rotation speeds ──
-const BASE_ROT_X = 0.004
-const BASE_ROT_Y = 0.006
+const BASE_ROT_X = 0.01
+const BASE_ROT_Y = 0.015
 const FRICTION = 0.96 // momentum decay per frame
 
 // ── React component ──

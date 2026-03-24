@@ -514,7 +514,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
               REQUIREMENTS ({editRequirements.length})
             </div>
 
-            {editRequirements.map(req => (
+            {editRequirements.map((req, reqIdx) => (
               <div key={req.id} style={{
                 marginBottom: 8, padding: '10px 12px',
                 background: 'var(--bg-card)', borderRadius: 6,
@@ -552,6 +552,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
                     >INF</span>
                   </div>
                   <input
+                    data-req-label-input
                     value={req.label}
                     onChange={e => updateReq(req.id, 'label', e.target.value)}
                     placeholder={req.type === 'extraction' ? 'Extraction requirement label' : 'Inference requirement label'}
@@ -577,6 +578,16 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
                   <input
                     value={req.description}
                     onChange={e => updateReq(req.id, 'description', e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Tab' && !e.shiftKey && reqIdx === editRequirements.length - 1) {
+                        e.preventDefault()
+                        addRequirement(req.type)
+                        setTimeout(() => {
+                          const inputs = document.querySelectorAll('[data-req-label-input]')
+                          if (inputs.length > 0) inputs[inputs.length - 1].focus()
+                        }, 50)
+                      }
+                    }}
                     placeholder={req.type === 'extraction'
                       ? 'Extraction prompt \u2014 what value should the AI extract?'
                       : 'Inference prompt \u2014 what condition should the AI evaluate?'}

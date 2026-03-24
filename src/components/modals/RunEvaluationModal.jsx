@@ -127,7 +127,7 @@ function StepProcessing({ messageIndex }) {
   const msg = PROCESSING_MESSAGES[messageIndex % PROCESSING_MESSAGES.length]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
-      <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.5} />
+      <PrimeRadiant size={80} fps={30} strutScale={2.2} brightness={0.4} />
       <div style={{ marginTop: 28, fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.7, minHeight: 40 }}>
         {msg}
       </div>
@@ -329,6 +329,24 @@ export default function RunEvaluationModal({
       .flatMap(pn => pn.parsedFields || [])
   }, [assetNode])
 
+  const isFullDisclosure = disclosureType === 'full'
+
+  const evidenceData = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children
+      .filter(c => c.isEvidence)
+      .map(ev => ({
+        id: ev.id,
+        filename: ev.evidence?.filename || ev.name,
+        hash: ev.evidence?.hash,
+        block: ev.evidence?.block,
+        provider: ev.evidence?.provider,
+        retention: ev.evidence?.retention,
+      }))
+  }, [assetNode])
+
+  const showSplitView = isFullDisclosure && evidenceData.length > 0
+
   // Processing step — cycle messages + auto-advance
   useEffect(() => {
     if (step !== 1) return
@@ -373,7 +391,7 @@ export default function RunEvaluationModal({
   }
 
   return (
-    <Modal width={step === 2 ? 760 : 680}>
+    <Modal width={step === 2 ? (showSplitView ? 1100 : 760) : 680}>
       <ModalHeader
         title="Run Evaluation"
         subtitle={step === 0 ? 'Select a requirement set to evaluate this asset against.'
@@ -384,8 +402,8 @@ export default function RunEvaluationModal({
         onClose={onClose}
       />
 
-      {/* Fixed summary tally — outside ModalBody, does not scroll */}
-      {step === 2 && (
+      {/* Fixed summary tally — outside ModalBody, does not scroll (non-split only) */}
+      {step === 2 && !showSplitView && (
         <div style={{
           padding: '10px 28px', borderBottom: '1px solid var(--border)',
           flexShrink: 0,
@@ -406,36 +424,168 @@ export default function RunEvaluationModal({
         </div>
       )}
 
-      <ModalBody>
-        {step === 0 && (
-          <StepSetup
-            assetNode={assetNode}
-            requirementSets={requirementSets}
-            selectedSetId={selectedSetId}
-            setSelectedSetId={setSelectedSetId}
-            credits={credits}
-            disclosureType={disclosureType}
-          />
-        )}
-        {step === 1 && <StepProcessing messageIndex={messageIndex} />}
-        {step === 2 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {claims.map(claim => (
-              <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
-                setClaims(prev => prev.map(c => c.requirementId === updated.requirementId ? updated : c))
-              }} />
-            ))}
+      {/* Split view for full disclosure Step 2 */}
+      {step === 2 && showSplitView ? (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Left panel — Evidence reference */}
+          <div style={{
+            width: 360, flexShrink: 0,
+            borderRight: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--bg-card)',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <svg width={16} height={16} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M4 1h5.5L13 4.5V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="var(--accent-orange)" strokeWidth="1.2" fill="none" />
+                  <path d="M9 1v4h4" stroke="var(--accent-orange)" strokeWidth="1" fill="none" strokeLinejoin="round" />
+                </svg>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Evidence Reference</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                {evidenceData.length} document{evidenceData.length !== 1 ? 's' : ''} · Full access
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+              {evidenceData.map(ev => (
+                <div key={ev.id} style={{
+                  marginBottom: 16,
+                  padding: '12px 14px', borderRadius: 8,
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
+                      <path d="M4 1h5.5L13 4.5V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="var(--text-secondary)" strokeWidth="1" fill="none" />
+                      <path d="M9 1v4h4" stroke="var(--text-secondary)" strokeWidth="1" fill="none" />
+                    </svg>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{ev.filename}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {ev.hash && (
+                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>SHA-256</span>
+                        <span style={{ color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.hash}</span>
+                      </div>
+                    )}
+                    {ev.block && (
+                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>On-chain</span>
+                        <span style={{ color: 'var(--text-tertiary)' }}>{ev.block}</span>
+                      </div>
+                    )}
+                    {ev.provider && (
+                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>Provider</span>
+                        <span style={{ color: 'var(--text-tertiary)' }}>{ev.provider}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {parsedFields.length > 0 && (
+                <div>
+                  <div style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: 'var(--accent-purple)', letterSpacing: '0.06em',
+                    marginBottom: 8,
+                  }}>
+                    PARSED DATA ({parsedFields.length} fields)
+                  </div>
+                  <div style={{
+                    borderRadius: 6, overflow: 'hidden',
+                    border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                  }}>
+                    {parsedFields.map((f, i) => (
+                      <div key={f.id || i} style={{
+                        display: 'flex', alignItems: 'center',
+                        padding: '6px 10px',
+                        borderBottom: i < parsedFields.length - 1 ? '1px solid var(--border)' : 'none',
+                      }}>
+                        <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
+                        <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {parsedFields.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 8 }}>
+                  No parsed data available. Claims will be evaluated against raw evidence.
+                </div>
+              )}
+            </div>
           </div>
-        )}
-        {step === 3 && (
-          <StepConfirmation
-            assetNode={assetNode}
-            selectedSet={selectedSet}
-            claims={claims}
-            creditCost={cost}
-          />
-        )}
-      </ModalBody>
+
+          {/* Right panel — Claim review */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+            <div style={{
+              padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 14,
+                padding: '8px 14px', borderRadius: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-card)',
+                fontSize: 11, fontFamily: 'var(--font-mono)', flex: 1,
+              }}>
+                <span style={{ color: 'var(--text-dim)' }}>{claims.length} claims</span>
+                <span style={{ color: 'var(--accent-green)' }}>{reviewSummary.sat} satisfactory</span>
+                <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
+                <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
+                {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {claims.map(claim => (
+                  <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
+                    setClaims(prev => prev.map(c => c.requirementId === updated.requirementId ? updated : c))
+                  }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ModalBody>
+          {step === 0 && (
+            <StepSetup
+              assetNode={assetNode}
+              requirementSets={requirementSets}
+              selectedSetId={selectedSetId}
+              setSelectedSetId={setSelectedSetId}
+              credits={credits}
+              disclosureType={disclosureType}
+            />
+          )}
+          {step === 1 && <StepProcessing messageIndex={messageIndex} />}
+          {step === 2 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {claims.map(claim => (
+                <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
+                  setClaims(prev => prev.map(c => c.requirementId === updated.requirementId ? updated : c))
+                }} />
+              ))}
+            </div>
+          )}
+          {step === 3 && (
+            <StepConfirmation
+              assetNode={assetNode}
+              selectedSet={selectedSet}
+              claims={claims}
+              creditCost={cost}
+            />
+          )}
+        </ModalBody>
+      )}
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <StepDots current={step} total={totalSteps} />

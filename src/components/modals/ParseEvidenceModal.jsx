@@ -254,7 +254,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
           <ModalBody>
             <div style={{ padding: '60px 36px', textAlign: 'center' }}>
               <div style={{ display: 'flex', justifyContent: 'center', margin: '0 auto 28px' }}>
-                <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.5} />
+                <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.3} />
               </div>
               <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
                 Parsing evidence...

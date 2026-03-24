@@ -20,7 +20,7 @@ const SDA_EDGE_CONFIG = {
   full:       { color: 0x6b8aff, dash: 0, gap: 0,   label: 'Full Disclosure' },
   selective:  { color: 0xf59e0b, dash: 8, gap: 4,   label: 'Selective Disclosure' },
   proofonly:  { color: 0x22c55e, dash: 2, gap: 4,   label: 'Proof-only Disclosure' },
-  cascade:    { color: 0xa78bfa, dash: 4, gap: 3,   label: 'Cascade Disclosure' },
+  cascade:    { color: 0xa78bfa, dash: 4, gap: 3,   label: 'Cascade Disclosure', hidden: true },
   provisional:{ color: 0x888888, dash: 6, gap: 5,   label: 'Provisional' },
 }
 const SDA_EDGE_CSS = {
@@ -139,7 +139,7 @@ function LegendBar() {
         border: '1px solid var(--border)',
         viewTransitionName: 'none',
       }}>
-        {Object.entries(SDA_EDGE_CONFIG).map(([type, cfg]) => (
+        {Object.entries(SDA_EDGE_CONFIG).filter(([, cfg]) => !cfg.hidden).map(([type, cfg]) => (
           <div
             key={type}
             style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'default' }}
@@ -1958,6 +1958,35 @@ const V2Canvas = forwardRef(function V2Canvas({
           const isDiveTarget = diveTargetId === node.id
 
           if (isLOD && !transitioning) {
+            // Concentric rings for nodes with children
+            const childRings = (() => {
+              const kids = node.children
+              if (!kids || kids.length === 0) return null
+              const ringColors = kids.slice(0, 3).map(c =>
+                c.isEvidence ? '#fb923c'
+                : (c.isParse || c.category === 'parse') ? '#a78bfa'
+                : (c.isEvaluation || c.category === 'evaluation') ? '#818cf8'
+                : 'var(--text-dim)'
+              )
+              const svgSize = 16 + ringColors.length * 8
+              return (
+                <svg
+                  width={svgSize} height={svgSize}
+                  style={{
+                    position: 'absolute',
+                    left: 8 - svgSize / 2,
+                    top: 8 - svgSize / 2,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {ringColors.map((color, ri) => {
+                    const r = 8 + ri * 4
+                    return <circle key={ri} cx={svgSize / 2} cy={svgSize / 2} r={r} fill="none" stroke={color} strokeWidth={2} opacity={0.7} />
+                  })}
+                </svg>
+              )
+            })()
+
             return (
               <div key={isAnchor ? `${node.id}-anchor` : node.id} style={{
                 position: 'absolute',
@@ -1968,6 +1997,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 transition: 'opacity 200ms ease',
                 ...(isDiveTarget || isAnchor ? { viewTransitionName: 'dive-target' } : {}),
               }}>
+                {childRings}
                 <AssetNodeDot
                   node={node}
                   isSelected={selectedId === node.id}
