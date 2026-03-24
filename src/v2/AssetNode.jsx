@@ -103,9 +103,9 @@ function StackBadge({ count, categoryColor }) {
       onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
       style={{
         minWidth: 20,
-        height: 16,
-        padding: '0 5px',
-        borderRadius: 4,
+        height: 20,
+        padding: '0 6px',
+        borderRadius: 6,
         background: hovered ? 'var(--bg-surface)' : 'var(--bg-surface)',
         border: hovered
           ? `1px solid ${categoryColor}`
@@ -129,6 +129,46 @@ function StackBadge({ count, categoryColor }) {
       </span>
       {hovered && tooltipPos && (
         <PortalTooltip text={tooltipText} x={tooltipPos.x} y={tooltipPos.y} anchor="above" maxWidth={260} />
+      )}
+    </div>
+  )
+}
+
+function GlobeBadge() {
+  const [hovered, setHovered] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState(null)
+
+  const handleMouseEnter = (e) => {
+    e.stopPropagation()
+    setHovered(true)
+    const rect = e.currentTarget.getBoundingClientRect()
+    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top })
+  }
+
+  return (
+    <div
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
+      style={{
+        width: 24, height: 20, borderRadius: 6,
+        background: hovered
+          ? 'color-mix(in srgb, #38bdf8 12%, transparent)'
+          : 'var(--bg-surface)',
+        border: hovered
+          ? '1px solid color-mix(in srgb, #38bdf8 30%, transparent)'
+          : '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, cursor: 'default',
+        transition: 'background 120ms, border-color 120ms',
+      }}
+    >
+      <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="1.2" />
+        <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
+        <line x1="2" y1="8" x2="14" y2="8" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
+      </svg>
+      {hovered && tooltipPos && (
+        <PortalTooltip text="Listed in Public Directory" x={tooltipPos.x} y={tooltipPos.y} anchor="above" />
       )}
     </div>
   )
@@ -346,6 +386,7 @@ export default function AssetNode({
   const isOwnedByUser = !node.owner || node.owner === activeParty
   const isTerminalNode = node.isParse || node.category === 'parse' || node.isEvaluation || node.category === 'evaluation'
   const isProvisional = !!node.provisional
+  const isDeclined = !!node._isDeclined
   const isNew = !!node._isNew
   const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
   const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
@@ -355,7 +396,9 @@ export default function AssetNode({
   const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && hasPepChildren && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
-  const borderColor = isProvisional
+  const borderColor = isDeclined
+    ? 'var(--accent-red)'
+    : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
       ? cat.color
@@ -482,7 +525,7 @@ export default function AssetNode({
               fontSize: 8,
             }}>{cat.icon}</span>
             {cat.label}
-            {isProvisional && (
+            {isProvisional && !isDeclined && (
               <span style={{
                 fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 padding: '2px 6px', borderRadius: 4,
@@ -491,6 +534,17 @@ export default function AssetNode({
                 background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
               }}>
                 PROVISIONAL
+              </span>
+            )}
+            {isDeclined && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4,
+                letterSpacing: '0.04em',
+                color: 'var(--accent-red)',
+                background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+              }}>
+                DECLINED
               </span>
             )}
             {node.isEvidence && (
@@ -509,6 +563,7 @@ export default function AssetNode({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {node.hasEvidence && <EvidenceClip />}
+            {(node.sdas || []).some(s => s.party === 'Radiant Network') && <GlobeBadge />}
             {!isAnchor && <StackBadge count={childCount} categoryColor={cat.color} />}
           </div>
         </div>
@@ -550,10 +605,10 @@ export default function AssetNode({
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
-            color: 'var(--text-dim)',
+            color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
             fontStyle: 'italic',
           }}>
-            Awaiting owner response
+            {isDeclined ? 'Disclosure declined' : 'Awaiting owner response'}
           </div>
         ) : (
           <div style={{

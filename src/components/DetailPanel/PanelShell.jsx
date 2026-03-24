@@ -12,17 +12,16 @@ function ClipIcon({ s = 14, c = 'var(--text-secondary)' }) {
   )
 }
 
-function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover }) {
+function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover, showLabels }) {
   const isHovered = hoveredId === btnId
-  const anotherHovered = hoveredId != null && hoveredId !== btnId
   return (
     <button
       onClick={disabled ? undefined : onClick}
       onMouseEnter={() => !disabled && onHover?.(btnId)}
       onMouseLeave={() => onHover?.(null)}
       style={{
-        flex: isHovered ? 'none' : 1,
-        minWidth: isHovered ? 'auto' : 0,
+        flex: showLabels ? 1 : (isHovered ? 'none' : 1),
+        minWidth: showLabels ? 0 : (isHovered ? 'auto' : 0),
         height: BTN_H,
         display: 'flex',
         alignItems: 'center',
@@ -45,10 +44,12 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover }
     >
       <span style={{ flexShrink: 0, fontSize: 13, lineHeight: 1 }}>{icon}</span>
       <span style={{
-        maxWidth: isHovered ? 120 : 0,
         overflow: 'hidden',
-        transition: 'max-width 200ms ease',
         fontSize: 10,
+        ...(showLabels
+          ? { maxWidth: 120 }
+          : { maxWidth: isHovered ? 120 : 0, transition: 'max-width 200ms ease' }
+        ),
       }}>
         {label}
       </span>
@@ -137,7 +138,9 @@ export default function PanelShell({
         </div>
 
         {/* Health bar */}
-        <HealthBar health={node.displayHealth || node.health} />
+        {!isParse && !isEvidence && (
+          <HealthBar health={node.displayHealth || node.health} />
+        )}
 
         {/* Summary */}
         {summary && (
@@ -184,28 +187,37 @@ export default function PanelShell({
       </div>
 
       {/* Footer */}
-      <div style={{
-        borderTop: '1px solid var(--border)',
-        padding: `12px ${GUTTER}px`,
-        display: 'flex',
-        gap: 6,
-        flexShrink: 0,
-        background: 'var(--bg-card)',
-      }}>
-        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        {canEvaluate && !isEvaluation && <FooterBtn icon="◆" label="Run Evaluation" onClick={onRunEvaluation} btnId="evaluate" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />}
-        <FooterBtn
-          icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
-          label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Exit Layer' : 'Surface'}
-          onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
-          disabled={!isAnchor && !hasStack && !hasParent}
-          btnId="layer" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn}
-        />
-        <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} btnId="chain" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} />
-      </div>
+      {(() => {
+        let btnCount = 2 // layer + chain always present
+        if (isOwner && !isEvidence && !isParse && !isEvaluation) btnCount += 3
+        if (isOwner && isEvidence && !isEvaluation) btnCount += 1
+        if (canEvaluate && !isEvaluation) btnCount += 1
+        const showLabels = btnCount <= 4
+        return (
+          <div style={{
+            borderTop: '1px solid var(--border)',
+            padding: `12px ${GUTTER}px`,
+            display: 'flex',
+            gap: 6,
+            flexShrink: 0,
+            background: 'var(--bg-card)',
+          }}>
+            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {canEvaluate && !isEvaluation && <FooterBtn icon="◆" label="Run Evaluation" onClick={onRunEvaluation} btnId="evaluate" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            <FooterBtn
+              icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
+              label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Exit Layer' : 'Surface'}
+              onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
+              disabled={!isAnchor && !hasStack && !hasParent}
+              btnId="layer" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels}
+            />
+            <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} btnId="chain" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />
+          </div>
+        )
+      })()}
     </div>
   )
 }

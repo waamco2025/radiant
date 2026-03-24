@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react'
-import GridRow from './shared/GridRow'
+import DataTable from './shared/DataTable'
 import CopyBadge from './shared/CopyBadge'
 
 function DocIcon({ s = 20 }) {
@@ -54,16 +54,32 @@ export default function EvidenceBlock({ evidence, open, onToggle, isOwner = true
         transition: 'max-height 250ms ease',
         opacity: open ? 1 : 0,
       }}>
-        <div ref={bodyRef} style={{ padding: '4px 16px 16px' }}>
-          <GridRow label="SHA-256" value={<CopyBadge value={evidence.hash} truncated />} />
-          <GridRow label="Status" value={
-            <span style={{ color: 'var(--accent-green)', fontWeight: 600, fontSize: 11, fontFamily: 'var(--font-mono)' }}>VERIFIED</span>
-          } />
-          <GridRow label="On-chain ref" value={evidence.block} />
-          <GridRow label="Retention" value={evidence.retention} />
-          {isOwner && <GridRow label="Filename" value={evidence.filename} />}
-          {isOwner && <GridRow label="Storage URI" value={<CopyBadge value={evidence.uri} truncated />} />}
-          {isOwner && <GridRow label="Provider" value={evidence.provider} />}
+        <div ref={bodyRef} style={{ padding: '4px 8px 16px' }}>
+          <DataTable
+            columns={[
+              { key: 'label', width: 120, color: 'var(--text-dim)' },
+              {
+                key: 'value', width: 'flex', mono: true,
+                render: (value, row) => {
+                  if (row.copyable) return <CopyBadge value={value} truncated />
+                  if (row.colored) return <span style={{ color: row.colored, fontWeight: 600, fontSize: 11, fontFamily: 'var(--font-mono)' }}>{value}</span>
+                  return <span style={{ color: 'var(--text-secondary)' }}>{value}</span>
+                },
+              },
+            ]}
+            rows={[
+              { label: 'SHA-256', value: evidence.hash, copyable: true },
+              { label: 'Status', value: 'VERIFIED', colored: 'var(--accent-green)' },
+              { label: 'On-chain ref', value: evidence.block },
+              { label: 'Retention', value: evidence.retention },
+              ...(isOwner ? [
+                { label: 'Filename', value: evidence.filename },
+                { label: 'Storage URI', value: evidence.uri, copyable: true },
+                { label: 'Provider', value: evidence.provider },
+              ] : []),
+            ]}
+            compact
+          />
           {!isOwner && (
             <div style={{
               marginTop: 10, padding: '10px 12px',
@@ -71,7 +87,7 @@ export default function EvidenceBlock({ evidence, open, onToggle, isOwner = true
               border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
               borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
             }}>
-              Some evidence details are restricted to the asset owner. The SHA-256 hash and on-chain reference can be used to independently verify the evidence exists and has not been tampered with.
+              Some evidence details are restricted to the asset owner.
             </div>
           )}
         </div>

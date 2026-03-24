@@ -53,7 +53,6 @@ export default function V2App() {
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
-
   // Per-role dynamic state — persists across role switches
   const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null }
   const [perRoleState, setPerRoleState] = useState(() => {
@@ -304,6 +303,64 @@ export default function V2App() {
 
     return data
   }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests, removedSDAs, removedNodes, removedEdges, currentRoleState.newlyDisclosedIds])
+
+  // Public listings from other role's merged state (sees dynamic publishes)
+  const publicListings = useMemo(() => {
+    const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+    if (!otherRoleId) return []
+
+    const otherData = getDataForRole(otherRoleId)
+    const otherState = perRoleState[otherRoleId] || emptyRoleState
+
+    let otherNodes = [...otherData.nodes]
+
+    if (otherState.removedNodes?.length > 0) {
+      const removedSet = new Set(otherState.removedNodes)
+      otherNodes = otherNodes.filter(n => !removedSet.has(n.id))
+    }
+    if (otherState.addedNodes?.length > 0) {
+      otherNodes = [...otherNodes, ...otherState.addedNodes]
+    }
+    if (Object.keys(otherState.addedSDAs || {}).length > 0) {
+      otherNodes = otherNodes.map(n => {
+        const added = otherState.addedSDAs[n.id]
+        if (!added) return n
+        return { ...n, sdas: [...(n.sdas || []), ...added] }
+      })
+    }
+    if (Object.keys(otherState.addedChildren || {}).length > 0) {
+      otherNodes = otherNodes.map(n => {
+        const added = otherState.addedChildren[n.id]
+        if (!added) return n
+        return { ...n, children: [...(n.children || []), ...added] }
+      })
+    }
+
+    const listings = []
+    for (const node of otherNodes) {
+      const publicSda = (node.sdas || []).find(s => s.party === 'Radiant Network')
+      if (!publicSda) continue
+      if (nodeMap[node.id]) continue
+      if (node.provisional) continue
+
+      listings.push({
+        id: node.id,
+        name: node.name,
+        pin: node.pin,
+        dot: node.dot,
+        category: node.category,
+        owner: node.owner,
+        description: node.description || null,
+        childCount: node.children?.length || 0,
+        hasEvidence: node.children?.some(c => c.isEvidence) || !!node.hasEvidence,
+        hasParsedData: node.children?.some(c => c.isParse || c.category === 'parse') || false,
+        hasEvaluations: node.children?.some(c => c.isEvaluation || c.category === 'evaluation') || false,
+        disclosureType: publicSda.type,
+      })
+    }
+    return listings
+  }, [roleId, perRoleState, nodeMap])
+
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -784,13 +841,21 @@ export default function V2App() {
                         if (isRevocation) {
                           setRevocationNotice(req)
                         } else if (isAcceptance || isDecline) {
-                          // Dismiss notification (and pan to asset for acceptance)
+                          // Dismiss notification and pan to asset
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
                           if (isAcceptance) {
                             const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
+                            if (targetNode) {
+                              setTimeout(() => setSel(targetNode.id), 100)
+                            }
+                          }
+                          if (isDecline) {
+                            const targetNode = Object.values(nodeMap).find(n =>
+                              n.pin === req.asset?.pin && n._isDeclined
+                            )
                             if (targetNode) {
                               setTimeout(() => setSel(targetNode.id), 100)
                             }
@@ -1170,15 +1235,73 @@ export default function V2App() {
                 setLibraryInitialSetId(setId || null)
                 setShowLibrary(true)
               }}
+              onDismissDeclined={(provNode) => {
+                updateRoleState(roleId, prev => ({
+                  ...prev,
+                  addedNodes: prev.addedNodes.filter(n => n.id !== provNode.id),
+                  addedEdges: prev.addedEdges.filter(e => e.to !== provNode.id && e.from !== provNode.id),
+                }))
+                setSel(null)
+              }}
               onRevokeSda={({ sda, nodeId, message }) => {
                 const today = new Date().toISOString().slice(0, 10)
                 const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-
                 const clickedNode = nodeMap[nodeId]
+
+                // ===== SELF-REVOCATION: removing own asset from own network =====
+                const isInternal = sda.partyLabel === 'internal' ||
+                  (clickedNode?.owner === activeRole.party && sda.party === activeRole.party)
+
+                if (isInternal) {
+                  updateRoleState(roleId, prev => {
+                    const newState = { ...prev }
+                    const ownRoleData = getDataForRole(roleId)
+
+                    const isStatic = !!ownRoleData.nodeMap[nodeId]
+                    const isDynamic = prev.addedNodes.some(n => n.id === nodeId)
+                    if (isDynamic) {
+                      newState.addedNodes = prev.addedNodes.filter(n => n.id !== nodeId)
+                    } else if (isStatic) {
+                      newState.removedNodes = [...(prev.removedNodes || []), nodeId]
+                    }
+
+                    newState.addedEdges = prev.addedEdges.filter(e =>
+                      e.from !== nodeId && e.to !== nodeId
+                    )
+                    const staticEdgesToRemove = ownRoleData.edges
+                      .filter(e => e.from === nodeId || e.to === nodeId)
+                      .map(e => e.id)
+                    if (staticEdgesToRemove.length > 0) {
+                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
+                    }
+
+                    if (prev.addedChildren?.[nodeId]) {
+                      const { [nodeId]: _, ...rest } = prev.addedChildren
+                      newState.addedChildren = rest
+                    }
+                    if (prev.addedSDAs?.[nodeId]) {
+                      const { [nodeId]: _, ...rest2 } = prev.addedSDAs
+                      newState.addedSDAs = rest2
+                    }
+
+                    return newState
+                  })
+                  setSel(null)
+                  return
+                }
+
+                // ===== FOREIGN DISCLOSURE REVOCATION =====
                 const connectorPin = sda.assetPin
-                const connectorNode = connectorPin
+                let connectorNode = connectorPin
                   ? Object.values(nodeMap).find(n => n.pin === connectorPin)
                   : null
+
+                // Fallback: find connected node via party name when assetPin is null
+                if (!connectorNode && sda.party) {
+                  connectorNode = Object.values(nodeMap).find(n =>
+                    n.name === sda.party || n.id === sda.party.toLowerCase().replace(/\s+/g, '-')
+                  ) || null
+                }
 
                 // Determine which side is "ours" and which is "theirs"
                 let ownAssetId, ownAssetPin, foreignNodeId, foreignNodePin
@@ -1430,12 +1553,104 @@ export default function V2App() {
           else if (revocationNotice) setRevocationNotice(null)
         }}>
       {publishNode && (
-        <PublishModal node={publishNode} onClose={() => setPublishNode(null)} _noBackdrop />
+        <PublishModal
+          node={nodeMap[publishNode.id] || publishNode}
+          onClose={() => setPublishNode(null)}
+          onComplete={({ assetId, disclosureType, expiry, customDate }) => {
+            const today = new Date().toISOString().slice(0, 10)
+            const radiantDot = makeDot('Radiant Network')
+            const publicSda = {
+              type: disclosureType,
+              party: 'Radiant Network',
+              partyDot: radiantDot,
+              created: today,
+              expires: expiry === 'no-expiry' ? null : expiry === 'custom' ? customDate : (() => {
+                const d = new Date()
+                if (expiry === '1-year') d.setFullYear(d.getFullYear() + 1)
+                if (expiry === '2-year') d.setFullYear(d.getFullYear() + 2)
+                return d.toISOString().slice(0, 10)
+              })(),
+              pins: [],
+              assetName: null,
+              assetPin: null,
+            }
+
+            updateRoleState(roleId, prev => {
+              const newState = { ...prev }
+
+              // Add SDA to the asset
+              newState.addedSDAs = {
+                ...prev.addedSDAs,
+                [assetId]: [...(prev.addedSDAs[assetId] || []), publicSda],
+              }
+
+              // Check if Radiant Network node already exists
+              const radiantExists = prev.addedNodes.some(n => n.id === 'radiant-network') ||
+                nodes.some(n => n.id === 'radiant-network')
+
+              if (!radiantExists) {
+                const radiantNode = {
+                  id: 'radiant-network',
+                  pin: makePin('radiant-network'),
+                  dot: radiantDot,
+                  name: 'Radiant Network',
+                  category: 'party',
+                  owner: 'Radiant Network',
+                  parentId: null,
+                  children: [],
+                  health: { ok: 0, warn: 0, bad: 0 },
+                  childHealth: null,
+                  totalHealth: null,
+                  displayHealth: { ok: 0, warn: 0, bad: 0 },
+                  claimCount: 0,
+                  displayClaimCount: 0,
+                  hasEvidence: false,
+                  hasStack: false,
+                  childCount: 0,
+                  evidence: null,
+                  evaluations: [],
+                  sdas: [],
+                  x: (publishNode.x || 0) + 600,
+                  y: (publishNode.y || 0),
+                  parentOwner: 'Radiant Network',
+                  isCascade: false,
+                  cascadeVia: null,
+                  upstreamSda: null,
+                  upstreamAssets: null,
+                  isEvidence: false,
+                  lastEval: null,
+                  description: 'Public asset directory — all published assets are discoverable here.',
+                  isNetworkNode: true,
+                  _isNew: true,
+                }
+                newState.addedNodes = [...prev.addedNodes, radiantNode]
+              }
+
+              // Add edge from published asset to Radiant Network
+              const edgeExists = prev.addedEdges.some(e =>
+                (e.from === assetId && e.to === 'radiant-network') ||
+                (e.from === 'radiant-network' && e.to === assetId)
+              )
+              if (!edgeExists) {
+                newState.addedEdges = [...prev.addedEdges, {
+                  id: `e-${assetId}-radiant-${Date.now().toString(36)}}`,
+                  from: assetId,
+                  to: 'radiant-network',
+                  sdaType: disclosureType,
+                }]
+              }
+
+              return newState
+            })
+          }}
+          _noBackdrop
+        />
       )}
       {connectNode && (
         <RequestDisclosureModal
           contextNode={connectNode}
           requirementSets={requirementSets}
+          publicListings={publicListings}
           onClose={() => setConnectNode(null)}
           onRegisterAsset={() => {
             const node = connectNode
@@ -1957,15 +2172,16 @@ export default function V2App() {
                 })
               }
             } else if (reqNodeId && !disclosureType) {
-              // DECLINE: notify the other role and clean up provisional
+              // DECLINE: mark provisional as declined (keep visible) and notify requester
               const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
               if (otherRoleId) {
                 updateRoleState(otherRoleId, prev => {
                   const provId = `provisional-${reqNodeId}`
                   return {
                     ...prev,
-                    addedNodes: prev.addedNodes.filter(n => n.id !== provId),
-                    addedEdges: prev.addedEdges.filter(e => e.to !== provId && e.from !== provId),
+                    addedNodes: prev.addedNodes.map(n =>
+                      n.id === provId ? { ...n, _isDeclined: true, _isNew: false } : n
+                    ),
                     addedRequests: [...(prev.addedRequests || []), {
                       id: `decline-${reqNodeId}-${Date.now().toString(36)}`,
                       type: 'decline',

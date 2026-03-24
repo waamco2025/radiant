@@ -1,4 +1,3 @@
-import { LABEL_W } from '../constants'
 import { Tip } from './Tooltip'
 
 export default function GridRow({ label, value, vc, labelTip }) {
@@ -16,10 +15,10 @@ export default function GridRow({ label, value, vc, labelTip }) {
       borderBottom: '1px solid var(--border)',
     }}>
       <div style={{
-        width: LABEL_W,
+        width: 130,
         flexShrink: 0,
         fontSize: 11,
-        color: 'var(--text-tertiary)',
+        color: 'var(--text-dim)',
         paddingLeft: 8,
       }}>
         {lbl}

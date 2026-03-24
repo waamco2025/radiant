@@ -243,88 +243,97 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 )}
 
                 {/* Revoke flow */}
-                <div style={{ marginTop: 14 }}>
-                  {!isRevoking ? (
-                    <Btn label="Revoke SDA" onClick={() => setRev(i)} />
-                  ) : (
-                    <div>
-                      {/* Message input */}
-                      <div style={{ marginBottom: 10 }}>
-                        <textarea
-                          value={revokeMessage}
-                          onChange={e => setRevokeMessage(e.target.value)}
-                          placeholder="Optional message to the other party..."
-                          rows={2}
-                          style={{
-                            width: '100%', padding: '8px 10px', borderRadius: 6,
-                            border: '1px solid var(--border)', background: 'var(--bg-card)',
-                            color: 'var(--text-primary)', fontFamily: 'var(--font-display)',
-                            fontSize: 11, resize: 'none', outline: 'none',
-                            boxSizing: 'border-box',
-                          }}
-                        />
-                      </div>
+                {(() => {
+                  const isSelfSda = sda.partyLabel === 'internal' || sda.party === node?.owner
+                  return (
+                    <div style={{ marginTop: 14 }}>
+                      {!isRevoking ? (
+                        <Btn label={isSelfSda ? 'Remove from Network' : 'Revoke SDA'} onClick={() => setRev(i)} />
+                      ) : (
+                        <div>
+                          {!isSelfSda && (
+                            <div style={{ marginBottom: 10 }}>
+                              <textarea
+                                value={revokeMessage}
+                                onChange={e => setRevokeMessage(e.target.value)}
+                                placeholder="Optional message to the other party..."
+                                rows={2}
+                                style={{
+                                  width: '100%', padding: '8px 10px', borderRadius: 6,
+                                  border: '1px solid var(--border)', background: 'var(--bg-card)',
+                                  color: 'var(--text-primary)', fontFamily: 'var(--font-display)',
+                                  fontSize: 11, resize: 'none', outline: 'none',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+                          )}
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: BTN_H }}>
-                        <span style={{ fontSize: 11, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                          Revoke this SDA?
-                        </span>
-                        <button
-                          onClick={() => {
-                            if (onRevokeSda) {
-                              onRevokeSda({
-                                sda,
-                                nodeId: node?.id,
-                                message: revokeMessage,
-                              })
-                            }
-                            setRev(null)
-                            setRevokeMessage('')
-                          }}
-                          style={{
-                            height: BTN_H - 2,
-                            background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-                            border: '1px solid var(--accent-red)',
-                            borderRadius: 5, padding: '0 12px', fontSize: 11,
-                            fontFamily: 'var(--font-mono)', fontWeight: 600,
-                            color: 'var(--accent-red)', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center',
-                          }}
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => { setRev(null); setRevokeMessage('') }}
-                          style={{
-                            height: BTN_H - 2,
-                            background: 'transparent',
-                            border: '1px solid var(--border)',
-                            borderRadius: 5, padding: '0 12px', fontSize: 11,
-                            fontFamily: 'var(--font-mono)',
-                            color: 'var(--text-tertiary)', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center',
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                      {w && (
-                        <div style={{
-                          marginTop: 10, padding: '12px 14px',
-                          background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
-                          borderRadius: 6,
-                          border: '1px solid color-mix(in srgb, var(--accent-red) 12%, transparent)',
-                        }}>
-                          <div style={{
-                            fontSize: 12, color: 'var(--accent-amber)',
-                            fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 5,
-                          }}>{w.title}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{w.message}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: BTN_H }}>
+                            <span style={{ fontSize: 11, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                              {isSelfSda
+                                ? `This will remove ${node?.name || 'this asset'} from your network. This action is recorded on-chain.`
+                                : 'Revoke this SDA?'}
+                            </span>
+                            <button
+                              onClick={() => {
+                                if (onRevokeSda) {
+                                  onRevokeSda({
+                                    sda,
+                                    nodeId: node?.id,
+                                    message: revokeMessage,
+                                  })
+                                }
+                                setRev(null)
+                                setRevokeMessage('')
+                              }}
+                              style={{
+                                height: BTN_H - 2,
+                                background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+                                border: '1px solid var(--accent-red)',
+                                borderRadius: 5, padding: '0 12px', fontSize: 11,
+                                fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                color: 'var(--accent-red)', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => { setRev(null); setRevokeMessage('') }}
+                              style={{
+                                height: BTN_H - 2,
+                                background: 'transparent',
+                                border: '1px solid var(--border)',
+                                borderRadius: 5, padding: '0 12px', fontSize: 11,
+                                fontFamily: 'var(--font-mono)',
+                                color: 'var(--text-tertiary)', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {!isSelfSda && w && (
+                            <div style={{
+                              marginTop: 10, padding: '12px 14px',
+                              background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
+                              borderRadius: 6,
+                              border: '1px solid color-mix(in srgb, var(--accent-red) 12%, transparent)',
+                            }}>
+                              <div style={{
+                                fontSize: 12, color: 'var(--accent-amber)',
+                                fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 5,
+                              }}>{w.title}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{w.message}</div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  )
+                })()}
               </div>
             )}
           </div>

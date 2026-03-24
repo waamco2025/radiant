@@ -1,17 +1,18 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
-  SDATypeCard, ExpiryPicker, expiryLabel, SDA_TYPES, ToggleCard,
+  SDATypeCard, ExpiryPicker, expiryLabel, SDA_TYPES,
 } from './ModalShared'
 
 const CATEGORY_ICONS = { person: '●', place: '◆', process: '◎', product: '■', party: '⬡' }
 const CATEGORY_COLORS = { person: 'var(--accent-cyan)', place: 'var(--accent-green)', process: 'var(--accent-amber)', product: 'var(--accent-blue)', party: 'var(--accent-indigo)' }
 
 /* ─── Step 1: Confirm asset ─── */
-function StepConfirm({ asset }) {
+function StepConfirm({ asset, isPublishReady }) {
   const catColor = CATEGORY_COLORS[asset.category] || CATEGORY_COLORS.product
   const catIcon = CATEGORY_ICONS[asset.category] || '■'
+  const h = asset.health || { ok: 0, warn: 0, bad: 0 }
   return (
     <div>
       <div style={{ padding: 18, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 22 }}>
@@ -23,13 +24,26 @@ function StepConfirm({ asset }) {
         <div style={{ marginBottom: 14 }}><CopyBadge value={asset.pin} truncated /></div>
         <InfoRow label="Owner" value={<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{asset.owner}<CopyBadge value={asset.dot} truncated /></span>} />
         <InfoRow label="Health" value={
-          <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
-            {asset.health.ok} verified · {asset.health.bad} failed
+          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
+            <span style={{ color: 'var(--accent-green)' }}>{h.ok} satisfactory</span>
+            {h.warn > 0 && <span style={{ color: 'var(--text-dim)' }}> · {h.warn} missing</span>}
+            <span style={{ color: 'var(--accent-red)' }}> · {h.bad} unsatisfactory</span>
           </span>
         } />
         <InfoRow label="Children" value={asset.childCount > 0 ? `${asset.childCount} sub-assets` : 'None'} />
         <InfoRow label="Evidence" value={asset.hasEvidence ? <span style={{ color: 'var(--accent-green)' }}>Attached</span> : <span style={{ color: 'var(--text-dim)' }}>None</span>} />
       </div>
+      {!isPublishReady && (
+        <div style={{
+          padding: '14px 16px',
+          background: 'color-mix(in srgb, var(--accent-red) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-red) 20%, transparent)',
+          borderRadius: 8, fontSize: 12, color: 'var(--accent-red)', lineHeight: 1.7,
+          marginBottom: 14,
+        }}>
+          This asset cannot be published yet. Add evidence and run a PEP parse before publishing to the directory.
+        </div>
+      )}
       <div style={{
         padding: '14px 16px',
         background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
@@ -53,11 +67,19 @@ function StepPermission({ level, setLevel, hasProofEval }) {
       <div style={{ display: 'flex', gap: 12 }}>
         <SDATypeCard type="full" selected={level} onSelect={setLevel} />
         <SDATypeCard type="selective" selected={level} onSelect={setLevel} />
-        <SDATypeCard type="proofonly" selected={level} onSelect={setLevel}
-          disabled={!hasProofEval}
-          disabledReason={hasProofEval ? null : 'No completed evaluations exist for this asset. Run at least one evaluation before offering proof-only disclosure.'}
-        />
+        <SDATypeCard type="proofonly" selected={level} onSelect={setLevel} />
       </div>
+      {level === 'proofonly' && !hasProofEval && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 8, marginTop: 14,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 12, color: 'var(--accent-amber)', lineHeight: 1.7,
+        }}>
+          Proof-only disclosure requires a completed evaluation on this asset.
+          Run an evaluation before creating a proof-only disclosure, or choose Full or Selective.
+        </div>
+      )}
       {level && (
         <div style={{ marginTop: 18, padding: '14px 16px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7 }}>
@@ -89,8 +111,9 @@ function StepEvalSelect({ evals, selected, setSelected }) {
         {evals.map(ev => {
           const active = !!selected.find(e => e.id === ev.id)
           const claims = ev.claims || []
-          const ok = claims.filter(c => c.status === 'verified').length
-          const bad = claims.filter(c => c.status !== 'verified').length
+          const ok = claims.filter(c => c.status === 'verified' || c.status === 'satisfactory').length
+          const bad = claims.filter(c => c.status === 'contested' || c.status === 'failed' || c.status === 'unsatisfactory').length
+          const miss = claims.filter(c => c.status === 'missing').length
           return (
             <div key={ev.id} onClick={() => toggle(ev)} style={{
               padding: '16px 18px', borderRadius: 8,
@@ -115,8 +138,9 @@ function StepEvalSelect({ evals, selected, setSelected }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>by {ev.org}</span>
-                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>{ok} verified</span>
-                  {bad > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)' }}>{bad} failed</span>}
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>{ok} satisfactory</span>
+                  {bad > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)' }}>{bad} unsatisfactory</span>}
+                  {miss > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{miss} missing</span>}
                 </div>
               </div>
             </div>
@@ -128,28 +152,9 @@ function StepEvalSelect({ evals, selected, setSelected }) {
 }
 
 /* ─── Step 4: Expiry + review ─── */
-function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset, selectedEvals, cascadePolicy, setCascadePolicy }) {
+function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset, selectedEvals }) {
   return (
     <div>
-      <FieldLabel label="Disclose connected assets?" />
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.7 }}>
-        If enabled, select assets connected to <strong style={{ color: 'var(--text-primary)' }}>{asset.name}</strong> can also be disclosed to parties who request access, and those parties can evaluate the connected assets. You control which assets are disclosed, and their disclosure permissions. You can revoke any of your disclosures at any time.
-      </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
-        <ToggleCard
-          selected={cascadePolicy === 'open'}
-          onClick={() => setCascadePolicy('open')}
-          label="Open"
-          desc={`Select assets connected to ${asset.name} can also be disclosed to requesting parties.`}
-        />
-        <ToggleCard
-          selected={cascadePolicy === 'closed'}
-          onClick={() => setCascadePolicy('closed')}
-          label="Closed"
-          desc={`No assets connected to ${asset.name} will be disclosed to requesting parties.`}
-        />
-      </div>
-
       <FieldLabel label="Set expiration" />
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 18, lineHeight: 1.7 }}>
         How long should this listing remain active in the directory? You can revoke at any time regardless of the expiration date.
@@ -169,11 +174,6 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
           </div>
         )}
         <InfoRow label="Expiration" value={expiryLabel(expiry, customDate)} />
-        <InfoRow label="Cascade policy" value={
-          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: cascadePolicy === 'open' ? 'var(--accent-green)' : 'var(--text-dim)' }}>
-            {cascadePolicy === 'open' ? 'Open' : 'Closed'}
-          </span>
-        } />
         <InfoRow label="Visibility" value="Public asset directory" />
         <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7 }}>
           Publishing is recorded on-chain and cannot be undone, but the listing can be revoked at any time. Revocation removes the asset from the directory and prevents new disclosure requests.
@@ -186,19 +186,37 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function PublishModal({ node, onClose, _noBackdrop }) {
+export default function PublishModal({ node, onClose, onComplete, _noBackdrop }) {
+  const isAlreadyPublished = (node.sdas || []).some(s => s.party === 'Radiant Network')
+
   const [step, setStep] = useState(0)
   const [level, setLevel] = useState(null)
   const [selectedEvals, setSelectedEvals] = useState([])
   const [expiry, setExpiry] = useState('1-year')
   const [customDate, setCustomDate] = useState('')
-  const [cascadePolicy, setCascadePolicy] = useState('closed')
   const [published, setPublished] = useState(false)
 
-  const completedEvals = node.evaluations?.filter(e => e.status === 'completed') || []
+  const completedEvals = useMemo(() => {
+    return (node.children || [])
+      .filter(c => c.isEvaluation || c.category === 'evaluation')
+      .filter(c => c.status === 'completed')
+      .map(ev => ({
+        id: ev.id,
+        org: ev.evaluatorParty || ev.owner,
+        date: ev.date,
+        requirements: ev.requirementSetName || ev.name,
+        status: ev.status,
+        claims: ev.claims || [],
+      }))
+  }, [node])
+
   const hasProofEval = completedEvals.length > 0
   const needsEvalStep = level === 'proofonly'
   const totalSteps = needsEvalStep ? 4 : 3
+
+  const hasChildren = node.children && node.children.length > 0
+  const hasParsedData = node.children?.some(c => c.isParse || c.category === 'parse')
+  const isPublishReady = hasChildren && hasParsedData
 
   const asset = {
     name: node.name,
@@ -206,7 +224,7 @@ export default function PublishModal({ node, onClose, _noBackdrop }) {
     category: node.category || 'product',
     owner: node.owner || 'Unknown',
     dot: node.dot || 'DOT-0x0000...0000',
-    health: node.health || { ok: 0, bad: 0 },
+    health: node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 },
     childCount: node.children?.length || 0,
     hasEvidence: !!node.hasEvidence,
     evaluations: completedEvals,
@@ -223,6 +241,69 @@ export default function PublishModal({ node, onClose, _noBackdrop }) {
   const currentStepNum = () => {
     if (!needsEvalStep && step === 3) return 3
     return step + 1
+  }
+
+  const handlePublish = () => {
+    onComplete?.({
+      assetId: node.id,
+      assetName: node.name,
+      assetPin: node.pin,
+      disclosureType: level,
+      selectedEvals: level === 'proofonly' ? selectedEvals : null,
+      expiry,
+      customDate,
+    })
+    setPublished(true)
+  }
+
+  if (isAlreadyPublished) {
+    const existingSda = (node.sdas || []).find(s => s.party === 'Radiant Network')
+    const alreadyContent = (
+      <Modal width={540}>
+        <ModalHeader title="Already Published" onClose={onClose} />
+        <ModalBody>
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%',
+              background: 'color-mix(in srgb, var(--accent-sky) 12%, transparent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', border: '2px solid var(--accent-sky)',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-sky)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{node.name}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 24 }}>
+              This asset is already listed in the Radiant Network public directory.
+            </div>
+          </div>
+          <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <InfoRow label="PIN" value={<CopyBadge value={node.pin} truncated />} />
+            <InfoRow label="Disclosure" value={
+              <span style={{ color: SDA_TYPES[existingSda?.type]?.c || 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
+                {SDA_TYPES[existingSda?.type]?.short || existingSda?.type || '—'}
+              </span>
+            } />
+            {existingSda?.created && <InfoRow label="Published" value={existingSda.created} />}
+          </div>
+          <div style={{
+            marginTop: 16, padding: '14px 16px',
+            background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+            borderRadius: 8, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+          }}>
+            To change the disclosure type or remove this listing, use the <strong style={{ color: 'var(--text-primary)' }}>Disclosures</strong> tab in the detail panel.
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <div />
+          <Btn label="Done" accent onClick={onClose} />
+        </ModalFooter>
+      </Modal>
+    )
+    return _noBackdrop ? alreadyContent : <Backdrop onClose={onClose}>{alreadyContent}</Backdrop>
   }
 
   if (published) {
@@ -263,22 +344,22 @@ export default function PublishModal({ node, onClose, _noBackdrop }) {
 
   const formContent = (
     <Modal>
-      <ModalHeader title="Publish to Directory" subtitle="Make this asset discoverable to all parties on the network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
+      <ModalHeader title="Disclose to Directory" subtitle="Make this asset discoverable on the Radiant Network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
       <ModalBody>
-        {step === 0 && <StepConfirm asset={asset} />}
+        {step === 0 && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
         {step === 1 && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}
         {step === 2 && <StepEvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals} />}
-        {step === 3 && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} cascadePolicy={cascadePolicy} setCascadePolicy={setCascadePolicy} />}
+        {step === 3 && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} />}
       </ModalBody>
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step > 0 && <Btn label="← Back" onClick={prevStep} />}
           <StepDots current={step === 3 ? (needsEvalStep ? 3 : 2) : step} total={totalSteps} />
         </div>
-        {step === 0 && <Btn label="Next →" accent onClick={() => setStep(1)} />}
-        {step === 1 && <Btn label="Next →" accent disabled={!level} onClick={nextStep} />}
+        {step === 0 && <Btn label="Next →" accent disabled={!isPublishReady} onClick={() => setStep(1)} />}
+        {step === 1 && <Btn label="Next →" accent disabled={!level || (level === 'proofonly' && !hasProofEval)} onClick={nextStep} />}
         {step === 2 && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={() => setStep(3)} />}
-        {step === 3 && <Btn label="Publish to Directory" accent onClick={() => setPublished(true)} />}
+        {step === 3 && <Btn label="Disclose to Directory" accent onClick={handlePublish} />}
       </ModalFooter>
     </Modal>
   )

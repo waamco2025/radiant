@@ -4,13 +4,18 @@ import EvaluationsTab from './EvaluationsTab'
 import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 import ParsedFieldsTab from './ParsedFieldsTab'
+import DataTable from './shared/DataTable'
+import CopyBadge from './shared/CopyBadge'
+import { Tip } from './shared/Tooltip'
+import { CLAIM_STATUS } from '../../v2/evaluationHelpers.js'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onRevokeSda, onOpenLibrary }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
   if (node.provisional) {
     const ctx = node.requestContext
+    const isDeclined = !!node._isDeclined
     return (
       <PanelShell
         node={node}
@@ -28,116 +33,177 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
         onSurface={onSurface}
       >
         <div style={{ padding: '24px 20px' }}>
-          {/* Status icon */}
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: '50%',
-              background: 'color-mix(in srgb, var(--text-dim) 8%, transparent)',
-              border: '2px dashed var(--text-dim)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 14px', fontSize: 20, color: 'var(--text-dim)',
-            }}>⏳</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-              Awaiting Disclosure
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-              Request sent to <strong style={{ color: 'var(--text-tertiary)' }}>{node.owner}</strong>
-            </div>
-          </div>
-
-          {/* Request details */}
-          {ctx && (
-            <div style={{
-              background: 'var(--bg-surface)', borderRadius: 8,
-              border: '1px solid var(--border)', padding: '14px 16px',
-            }}>
-              <div style={{
-                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12,
-              }}>
-                REQUEST DETAILS
-              </div>
-
-              <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
-                <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Requested via</span>
-                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ctx.contextNodeName}</span>
-              </div>
-
-              <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
-                <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Date</span>
-                <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{ctx.date}</span>
-              </div>
-
-              {ctx.requirements && ctx.requirements.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Requirements</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {ctx.requirements.map((req, i) => (
-                      <div key={i} style={{
-                        fontSize: 11,
-                        padding: '6px 10px', borderRadius: 4,
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border)',
-                      }}>
-                        {typeof req === 'string'
-                          ? <span style={{ color: 'var(--text-secondary)' }}>{req}</span>
-                          : (
-                            <span
-                              onClick={() => onOpenLibrary?.(req.id)}
-                              style={{
-                                color: 'var(--accent-indigo)', cursor: 'pointer',
-                                transition: 'opacity 100ms',
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
-                              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                            >
-                              {req.name}
-                              {req.version && <span style={{
-                                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                                marginLeft: 6, padding: '1px 5px', borderRadius: 3,
-                                background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
-                                color: 'var(--accent-indigo)',
-                              }}>v{req.version}</span>}
-                            </span>
-                          )
-                        }
-                      </div>
-                    ))}
-                  </div>
+          {isDeclined ? (
+            <>
+              {/* Declined state */}
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+                  border: '2px solid var(--accent-red)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto 14px', fontSize: 20, color: 'var(--accent-red)',
+                }}>✕</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent-red)', marginBottom: 6 }}>
+                  Disclosure Declined
                 </div>
-              )}
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                  <strong style={{ color: 'var(--text-tertiary)' }}>{node.owner}</strong> has declined your disclosure request for this asset.
+                </div>
+              </div>
 
-              {ctx.message && (
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Message</div>
+              {ctx && (
+                <div style={{
+                  background: 'var(--bg-surface)', borderRadius: 8,
+                  border: '1px solid var(--border)', padding: '14px 16px',
+                  marginBottom: 16,
+                }}>
                   <div style={{
-                    fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
-                    padding: '8px 10px', borderRadius: 4,
-                    background: 'var(--bg-card)', border: '1px solid var(--border)',
-                    fontStyle: 'italic',
+                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12,
                   }}>
-                    "{ctx.message}"
+                    ORIGINAL REQUEST
+                  </div>
+                  <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                    <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Requested via</span>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ctx.contextNodeName}</span>
+                  </div>
+                  <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                    <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Date</span>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{ctx.date}</span>
                   </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* Cancel button */}
-          <div style={{ marginTop: 16, textAlign: 'center' }}>
-            <span
-              onClick={() => onCancelRequest?.(node)}
-              style={{
-                fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)',
-                cursor: 'pointer', borderBottom: '1px solid transparent',
-                transition: 'border-color 150ms',
-              }}
-              onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-red)'}
-              onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
-            >
-              Cancel Request
-            </span>
-          </div>
+              <div style={{ textAlign: 'center' }}>
+                <span
+                  onClick={() => onDismissDeclined?.(node)}
+                  style={{
+                    display: 'inline-block',
+                    fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    color: '#fff', background: 'var(--accent-red)',
+                    padding: '8px 24px', borderRadius: 6,
+                    cursor: 'pointer', transition: 'opacity 150ms',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                >
+                  Remove from Network
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Awaiting disclosure state */}
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'color-mix(in srgb, var(--text-dim) 8%, transparent)',
+                  border: '2px dashed var(--text-dim)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto 14px', fontSize: 20, color: 'var(--text-dim)',
+                }}>⏳</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Awaiting Disclosure
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                  Request sent to <strong style={{ color: 'var(--text-tertiary)' }}>{node.owner}</strong>
+                </div>
+              </div>
+
+              {ctx && (
+                <div style={{
+                  background: 'var(--bg-surface)', borderRadius: 8,
+                  border: '1px solid var(--border)', padding: '14px 16px',
+                }}>
+                  <div style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 12,
+                  }}>
+                    REQUEST DETAILS
+                  </div>
+
+                  <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                    <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Requested via</span>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ctx.contextNodeName}</span>
+                  </div>
+
+                  <div style={{ display: 'flex', marginBottom: 10, fontSize: 12 }}>
+                    <span style={{ width: 90, flexShrink: 0, color: 'var(--text-dim)' }}>Date</span>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{ctx.date}</span>
+                  </div>
+
+                  {ctx.requirements && ctx.requirements.length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Requirements</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {ctx.requirements.map((req, i) => (
+                          <div key={i} style={{
+                            fontSize: 11,
+                            padding: '6px 10px', borderRadius: 4,
+                            background: 'var(--bg-card)',
+                            border: '1px solid var(--border)',
+                          }}>
+                            {typeof req === 'string'
+                              ? <span style={{ color: 'var(--text-secondary)' }}>{req}</span>
+                              : (
+                                <span
+                                  onClick={() => onOpenLibrary?.(req.id)}
+                                  style={{
+                                    color: 'var(--accent-indigo)', cursor: 'pointer',
+                                    transition: 'opacity 100ms',
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                                >
+                                  {req.name}
+                                  {req.version && <span style={{
+                                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                    marginLeft: 6, padding: '1px 5px', borderRadius: 3,
+                                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                                    color: 'var(--accent-indigo)',
+                                  }}>v{req.version}</span>}
+                                </span>
+                              )
+                            }
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {ctx.message && (
+                    <div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Message</div>
+                      <div style={{
+                        fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
+                        padding: '8px 10px', borderRadius: 4,
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
+                        fontStyle: 'italic',
+                      }}>
+                        "{ctx.message}"
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ marginTop: 16, textAlign: 'center' }}>
+                <span
+                  onClick={() => onCancelRequest?.(node)}
+                  style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-red)',
+                    cursor: 'pointer', borderBottom: '1px solid transparent',
+                    transition: 'border-color 150ms',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--accent-red)'}
+                  onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+                >
+                  Cancel Request
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </PanelShell>
     )
@@ -149,9 +215,6 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
     const sat = claims.filter(c => c.status === 'satisfactory').length
     const unsat = claims.filter(c => c.status === 'unsatisfactory').length
     const miss = claims.filter(c => c.status === 'missing').length
-    const statusColor = node.status === 'completed' ? 'var(--accent-green)' : 'var(--accent-amber)'
-    const statusLabel = node.status === 'completed' ? 'COMPLETED' : 'IN PROGRESS'
-
     return (
       <PanelShell
         node={node}
@@ -192,12 +255,6 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
                     : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
                 }}>{node.disclosureType}</span>
               )}
-              <span style={{
-                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                padding: '2px 6px', borderRadius: 3,
-                color: statusColor,
-                background: `color-mix(in srgb, ${statusColor} 10%, transparent)`,
-              }}>{statusLabel}</span>
             </div>
             <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
               Evaluated by {node.evaluator || node.owner} · {node.date}
@@ -217,59 +274,79 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
             <span style={{ color: 'var(--text-dim)' }}>{miss} missing</span>
           </div>
 
-          {/* Claims list */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {claims.map((c, i) => {
-              const isExtraction = c.type === 'extraction'
-              const statusCfg = c.status === 'satisfactory'
-                ? { color: 'var(--accent-green)', label: 'Satisfactory', icon: '●' }
-                : c.status === 'unsatisfactory'
-                  ? { color: 'var(--accent-red)', label: 'Unsatisfactory', icon: '●' }
-                  : { color: 'var(--text-dim)', label: 'Missing', icon: '●' }
-              const confPct = Math.round((c.aiConfidence || 0) * 100)
-              const confColor = confPct >= 90 ? 'var(--accent-green)' : confPct >= 80 ? 'var(--accent-amber)' : 'var(--accent-red)'
-              return (
-                <div key={c.requirementId || i} style={{
-                  padding: '12px 14px', borderRadius: 8,
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{
-                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                      padding: '2px 6px', borderRadius: 3,
-                      color: isExtraction ? 'var(--accent-cyan)' : 'var(--accent-amber)',
-                      background: isExtraction
-                        ? 'color-mix(in srgb, var(--accent-cyan) 10%, transparent)'
-                        : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
-                    }}>{isExtraction ? 'EXTRACT' : 'INFER'}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.label}</span>
-                    <span style={{
-                      marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                      padding: '2px 6px', borderRadius: 3,
-                      color: statusCfg.color,
-                      background: `color-mix(in srgb, ${statusCfg.color} 10%, transparent)`,
-                    }}>{statusCfg.label.toUpperCase()}</span>
-                  </div>
-                  {c.description && (
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 8, lineHeight: 1.5 }}>
-                      {c.description}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      {isExtraction ? 'Value' : 'Determination'}:
-                    </span>
-                    <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                      {c.humanValue || c.aiValue || '—'}
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'var(--font-mono)', color: confColor }}>
-                      {confPct}% conf.
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          {/* Claims table */}
+          {claims.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                color: 'var(--text-dim)', letterSpacing: '0.06em', marginBottom: 8,
+              }}>
+                CLAIMS ({claims.length})
+              </div>
+              <DataTable
+                columns={[
+                  {
+                    key: 'type', header: null, width: 60,
+                    render: (value) => (
+                      <Tip text={value === 'extraction' ? 'Extraction — AI finds a specific value' : 'Inference — AI determines if a condition holds'}>
+                        <span style={{
+                          fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          padding: '2px 6px', borderRadius: 3,
+                          color: value === 'extraction' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                          background: value === 'extraction'
+                            ? 'color-mix(in srgb, var(--accent-cyan) 12%, transparent)'
+                            : 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                          cursor: 'default',
+                        }}>
+                          {value === 'extraction' ? 'EXT' : 'INF'}
+                        </span>
+                      </Tip>
+                    ),
+                  },
+                  { key: 'label', header: 'Requirement', width: 'flex', bold: true, color: 'var(--text-primary)' },
+                  {
+                    key: 'humanValue', header: 'Value', width: 120, mono: true,
+                    render: (value, row) => (
+                      <span style={{ color: 'var(--text-primary)' }}>
+                        {value || row.aiValue || '—'}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'aiConfidence', header: 'Conf.', width: 60, mono: true,
+                    render: (value) => {
+                      const pct = Math.round((value || 0) * 100)
+                      const color = pct >= 90 ? 'var(--accent-green)' : pct >= 80 ? 'var(--accent-amber)' : 'var(--accent-red)'
+                      return <span style={{ fontSize: 10, color }}>{pct}%</span>
+                    },
+                  },
+                  {
+                    key: 'status', header: 'Result', width: 100,
+                    render: (value) => {
+                      const cfg = CLAIM_STATUS[value]
+                      if (!cfg) return <span style={{ color: 'var(--text-dim)' }}>—</span>
+                      return (
+                        <Tip text={cfg.label}>
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '2px 7px', borderRadius: 4,
+                            color: cfg.color,
+                            background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
+                            cursor: 'default',
+                          }}>
+                            {cfg.short}
+                          </span>
+                        </Tip>
+                      )
+                    },
+                  },
+                ]}
+                rows={claims}
+                maxRows={8}
+                compact
+              />
+            </div>
+          )}
 
           {/* Credits used */}
           {node.creditsUsed != null && (
@@ -278,6 +355,103 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
             </div>
           )}
         </div>
+      </PanelShell>
+    )
+  }
+
+  // Parse nodes get a tabless panel — just their parsed fields
+  if (node.isParse || node.category === 'parse') {
+    const fields = node.parsedFields || []
+    return (
+      <PanelShell
+        node={node}
+        tabs={[]}
+        tab={null}
+        setTab={() => {}}
+        summary={`${fields.length} parsed field${fields.length !== 1 ? 's' : ''}`}
+        onClose={onClose}
+        hasStack={false}
+        hasParent={isAnchor || depth > 0}
+        onViewChain={onViewChain}
+        onSurface={onSurface}
+        isEvidence={false}
+        isParse
+        isEvaluation={false}
+        isOwner={isOwner}
+        onParseEvidence={onParseEvidence}
+      >
+        <ParsedFieldsTab fields={fields} isSelective={!!node._isSelective} />
+      </PanelShell>
+    )
+  }
+
+  // Evidence nodes get a tabless panel — flat DataTable of evidence metadata
+  if (node.isEvidence) {
+    const ev = node.evidence
+    const evidenceRows = []
+    if (ev) {
+      evidenceRows.push({ label: 'SHA-256', value: ev.hash, copyable: true })
+      evidenceRows.push({ label: 'On-chain ref', value: ev.block, copyable: true })
+      evidenceRows.push({ label: 'Retention', value: ev.retention })
+      if (isOwner) {
+        evidenceRows.push({ label: 'Filename', value: ev.filename })
+        evidenceRows.push({ label: 'Storage URI', value: ev.uri, copyable: true })
+        evidenceRows.push({ label: 'Provider', value: ev.provider })
+      }
+    }
+
+    return (
+      <PanelShell
+        node={node}
+        tabs={[]}
+        tab={null}
+        setTab={() => {}}
+        summary={isOwner ? ev?.filename : 'Evidence attached'}
+        onClose={onClose}
+        hasStack={false}
+        hasParent={isAnchor || depth > 0}
+        onViewChain={onViewChain}
+        onSurface={onSurface}
+        isEvidence
+        isParse={false}
+        isEvaluation={false}
+        isOwner={isOwner}
+        onParseEvidence={onParseEvidence}
+      >
+        {ev ? (
+          <div>
+            <DataTable
+              columns={[
+                { key: 'label', width: 120, color: 'var(--text-dim)' },
+                {
+                  key: 'value', width: 'flex', mono: true,
+                  render: (value, row) => {
+                    if (row.copyable) {
+                      return <CopyBadge value={value} truncated />
+                    }
+                    return <span style={{ color: 'var(--text-secondary)' }}>{value}</span>
+                  },
+                },
+              ]}
+              rows={evidenceRows}
+              compact
+            />
+            {!isOwner && (
+              <div style={{
+                marginTop: 12, padding: '10px 12px',
+                background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+                borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+              }}>
+                Some evidence details are restricted to the asset owner.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-dim)' }}>
+            Evidence metadata not available
+          </div>
+        )}
       </PanelShell>
     )
   }

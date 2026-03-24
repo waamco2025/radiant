@@ -1,13 +1,5 @@
+import DataTable from './shared/DataTable'
 import { FIELD_CATEGORIES } from '../../v2/pepTemplates.js'
-
-function groupFieldsByCategory(fields) {
-  const groups = {}
-  fields.forEach(f => {
-    if (!groups[f.category]) groups[f.category] = []
-    groups[f.category].push(f)
-  })
-  return groups
-}
 
 export default function ParsedFieldsTab({ fields, isSelective }) {
   if (!fields || fields.length === 0) {
@@ -17,6 +9,36 @@ export default function ParsedFieldsTab({ fields, isSelective }) {
       </div>
     )
   }
+
+  const groupColors = {}
+  const groupLabels = {}
+  Object.entries(FIELD_CATEGORIES).forEach(([key, cfg]) => {
+    groupColors[key] = cfg.color
+    groupLabels[key] = cfg.label
+  })
+
+  const columns = [
+    { key: 'name', header: 'Field', width: 150, bold: true, color: 'var(--text-secondary)' },
+    { key: 'value', header: 'Value', width: 'flex', mono: true },
+    {
+      key: 'confidence', header: 'Conf.', width: 70, mono: true,
+      render: (value) => {
+        const color = value === 'high' ? 'var(--accent-green)'
+          : value === 'medium' ? 'var(--accent-amber)'
+          : 'var(--accent-red)'
+        return (
+          <span style={{
+            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+            padding: '2px 6px', borderRadius: 4,
+            color,
+            background: `color-mix(in srgb, ${color} 10%, transparent)`,
+          }}>
+            {value?.toUpperCase()}
+          </span>
+        )
+      },
+    },
+  ]
 
   return (
     <div style={{ padding: '12px 0' }}>
@@ -30,41 +52,15 @@ export default function ParsedFieldsTab({ fields, isSelective }) {
           <strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> — additional fields may exist that are not included in this disclosure.
         </div>
       )}
-      {Object.entries(groupFieldsByCategory(fields)).map(([catKey, catFields]) => {
-        const catConfig = FIELD_CATEGORIES[catKey] || { label: catKey, color: 'var(--text-secondary)' }
-        return (
-          <div key={catKey} style={{ marginBottom: 16 }}>
-            <div style={{
-              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-              color: catConfig.color, letterSpacing: '0.06em', marginBottom: 8,
-            }}>
-              {catConfig.label.toUpperCase()}
-            </div>
-            {catFields.map((f, i) => (
-              <div key={f.id} style={{
-                display: 'flex', alignItems: 'center',
-                padding: '7px 0',
-                borderBottom: i < catFields.length - 1 ? '1px solid var(--border)' : 'none',
-              }}>
-                <span style={{ width: 140, flexShrink: 0, fontSize: 11, color: 'var(--text-dim)' }}>{f.name}</span>
-                <span style={{ flex: 1, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{f.value}</span>
-                <span style={{
-                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                  padding: '2px 6px', borderRadius: 4,
-                  color: f.confidence === 'high' ? 'var(--accent-green)' : f.confidence === 'medium' ? 'var(--accent-amber)' : 'var(--accent-red)',
-                  background: f.confidence === 'high'
-                    ? 'color-mix(in srgb, var(--accent-green) 10%, transparent)'
-                    : f.confidence === 'medium'
-                      ? 'color-mix(in srgb, var(--accent-amber) 10%, transparent)'
-                      : 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-                }}>
-                  {f.confidence.toUpperCase()}
-                </span>
-              </div>
-            ))}
-          </div>
-        )
-      })}
+      <DataTable
+        columns={columns}
+        rows={fields}
+        groupBy="category"
+        groupColors={groupColors}
+        groupLabels={groupLabels}
+        maxRows={12}
+        compact
+      />
     </div>
   )
 }

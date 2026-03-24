@@ -29,6 +29,13 @@ function makeDot(seed) {
   return `DOT-0x${hex}`
 }
 
+// Globe icon paths for public directory nodes
+export const GLOBE_ICON_PATHS = {
+  circle: 'M8 1a7 7 0 100 14A7 7 0 008 1z',
+  meridian: 'M8 1c-2.2 0-4 3.13-4 7s1.8 7 4 7 4-3.13 4-7-1.8-7-4-7z',
+  equator: 'M1 8h14',
+}
+
 // ── Roles ──
 
 const GOVCO_DOT = makeDot('GovCo')
@@ -132,6 +139,11 @@ const SDA_INTERNAL_GOVCO = {
   assetName: null,
   assetPin: null,
 }
+
+// ── Radiant Network (public directory) ──
+
+const RADIANT_NETWORK_PIN = makePin('radiant-network')
+const RADIANT_NETWORK_DOT = makeDot('Radiant Network')
 
 function addChildrenToMap(nodes, map) {
   for (const node of nodes) {
@@ -447,10 +459,18 @@ function buildBobData() {
     makeEvidence('vreg-ic', 'SPEC-VR', 'MicroCo Component Lab', '10 years per ITAR'),
     'MicroCo', [])  // no claims — Bob hasn't evaluated yet
 
+  const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
+    { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
+    { id: 'f-vout', name: 'Output voltage', category: 'electrical', type: 'value', value: '3.3V ±2%', confidence: 'high' },
+    { id: 'f-iout', name: 'Output current', category: 'electrical', type: 'value', value: '500mA max', confidence: 'high' },
+    { id: 'f-dropout', name: 'Dropout voltage', category: 'electrical', type: 'value', value: '350mV @ 500mA', confidence: 'medium' },
+    { id: 'f-pkg', name: 'Package type', category: 'mechanical', type: 'text', value: 'SOT-223', confidence: 'high' },
+  ], 'MicroCo')
+
   const vregIc = makeNode('vreg-ic', 'Voltage Regulator IC', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [{ ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') }],
-    children: [vregEv],
+    children: [vregEv, vregPep],
     x: 1400, y: 400,
   })
 
@@ -577,11 +597,34 @@ function buildAliceData() {
     lastEval: null,
   }
 
+  const SDA_RADIANT_POWERREG = {
+    type: 'selective',
+    party: 'Radiant Network',
+    partyDot: RADIANT_NETWORK_DOT,
+    created: '2026-02-01',
+    expires: null,
+    pins: [],
+    assetName: 'Radiant Network',
+    assetPin: RADIANT_NETWORK_PIN,
+  }
+
+  const SDA_RADIANT_VREG = {
+    type: 'full',
+    party: 'Radiant Network',
+    partyDot: RADIANT_NETWORK_DOT,
+    created: '2026-02-01',
+    expires: null,
+    pins: [],
+    assetName: 'Radiant Network',
+    assetPin: RADIANT_NETWORK_PIN,
+  }
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [
       { ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
+      SDA_RADIANT_POWERREG,
     ],
     children: [powerRegEv, powerRegPep, powerRegEval],
     x: 500, y: -300,
@@ -592,13 +635,22 @@ function buildAliceData() {
     makeEvidence('vreg-ic', 'SPEC-VR', 'MicroCo Component Lab', '10 years per ITAR'),
     'MicroCo', [])  // no claims yet — no evaluations run
 
+  const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
+    { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
+    { id: 'f-vout', name: 'Output voltage', category: 'electrical', type: 'value', value: '3.3V ±2%', confidence: 'high' },
+    { id: 'f-iout', name: 'Output current', category: 'electrical', type: 'value', value: '500mA max', confidence: 'high' },
+    { id: 'f-dropout', name: 'Dropout voltage', category: 'electrical', type: 'value', value: '350mV @ 500mA', confidence: 'medium' },
+    { id: 'f-pkg', name: 'Package type', category: 'mechanical', type: 'text', value: 'SOT-223', confidence: 'high' },
+  ], 'MicroCo')
+
   const vregIc = makeNode('vreg-ic', 'Voltage Regulator IC', 'product', 'MicroCo', {
-    evaluations: [],  // removed self-eval — will become PEP later
+    evaluations: [],
     sdas: [
       { ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
+      SDA_RADIANT_VREG,
     ],
-    children: [vregEv],
+    children: [vregEv, vregPep],
     x: 500, y: 0,
   })
 
@@ -610,12 +662,37 @@ function buildAliceData() {
     x: 500, y: 300,
   })
 
-  // EMI Shield: shell, no evidence yet
+  // EMI Shield: evidence + parse + published to directory
+  const emiShieldEv = makeEvidenceNode('emi-shield',
+    makeEvidence('emi-shield', 'EMI-TST', 'MicroCo EMC Lab', '7 years per MIL-STD-461'),
+    'MicroCo', [])
+
+  const emiShieldPep = makePepNode('emi-shield', emiShieldEv.id, 'Mechanical Assembly Profile', [
+    { id: 'f-material', name: 'Shield material', category: 'mechanical', type: 'text', value: 'Nickel silver alloy', confidence: 'high' },
+    { id: 'f-thickness', name: 'Wall thickness', category: 'mechanical', type: 'value', value: '0.3mm ±0.02', confidence: 'high' },
+    { id: 'f-freq', name: 'Shielding frequency range', category: 'electrical', type: 'range', value: '100 MHz – 10 GHz', confidence: 'high' },
+    { id: 'f-effectiveness', name: 'Shielding effectiveness', category: 'electrical', type: 'value', value: '> 60 dB @ 1 GHz', confidence: 'medium' },
+    { id: 'f-mounting', name: 'Mounting method', category: 'mechanical', type: 'text', value: 'Soldered perimeter with snap-fit lid', confidence: 'high' },
+  ], 'MicroCo')
+
   const emiShield = makeNode('emi-shield', 'EMI Shield Assembly', 'product', 'MicroCo', {
     evaluations: [],
-    sdas: [{ ...SDA_INTERNAL_MICROCO, pins: [] }],
-    children: [],
+    sdas: [
+      { ...SDA_INTERNAL_MICROCO, pins: [] },
+      {
+        type: 'full',
+        party: 'Radiant Network',
+        partyDot: RADIANT_NETWORK_DOT,
+        created: '2026-02-10',
+        expires: null,
+        pins: [],
+        assetName: null,
+        assetPin: null,
+      },
+    ],
+    children: [emiShieldEv, emiShieldPep],
     x: 500, y: 600,
+    description: 'Board-level EMI shielding assembly for high-frequency noise suppression.',
   })
 
   // Thermal Interface Pad: shell, no evidence — Register Asset demo
@@ -634,7 +711,40 @@ function buildAliceData() {
     x: 500, y: 1200,
   })
 
-  const nodes = [microco, avionics, powerReg, vregIc, pcbSub, emiShield, thermalPad, connectorAssy]
+  const radiantNetwork = {
+    id: 'radiant-network',
+    pin: RADIANT_NETWORK_PIN,
+    dot: RADIANT_NETWORK_DOT,
+    name: 'Radiant Network',
+    category: 'party',
+    owner: 'Radiant Network',
+    parentId: null,
+    children: [],
+    health: { ok: 0, warn: 0, bad: 0 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 0, warn: 0, bad: 0 },
+    claimCount: 0,
+    displayClaimCount: 0,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: 1400, y: 600,
+    parentOwner: 'Radiant Network',
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    upstreamAssets: null,
+    isEvidence: false,
+    lastEval: null,
+    description: 'Public asset directory — all published assets are discoverable here.',
+    isNetworkNode: true,
+  }
+
+  const nodes = [microco, avionics, powerReg, vregIc, pcbSub, emiShield, thermalPad, connectorAssy, radiantNetwork]
 
   const edges = [
     // MicroCo's product catalog (internal full edges)
@@ -648,6 +758,11 @@ function buildAliceData() {
     // Bob's Avionics connected to Alice's disclosed assets
     { id: 'e-avionics-powerreg', from: 'avionics', to: 'power-reg', sdaType: 'selective' },
     { id: 'e-avionics-vreg', from: 'avionics', to: 'vreg-ic', sdaType: 'full' },
+
+    // Public directory edges
+    { id: 'e-powerreg-radiant', from: 'power-reg', to: 'radiant-network', sdaType: 'selective' },
+    { id: 'e-vreg-radiant', from: 'vreg-ic', to: 'radiant-network', sdaType: 'full' },
+    { id: 'e-emi-public', from: 'emi-shield', to: 'radiant-network', sdaType: 'full' },
   ]
 
   const nodeMap = {}
@@ -722,6 +837,7 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
     lastEval: null,
   }
 }
+
 
 export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin }
 

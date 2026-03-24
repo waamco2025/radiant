@@ -6,7 +6,7 @@ import {
 
 
 /* ─── Step 1: Choose path ─── */
-function StepPath({ onSelectPath, onRegisterAsset }) {
+function StepPath({ onSelectPath, onRegisterAsset, onSelectDirectory }) {
   const [hov, setHov] = useState(null)
   return (
     <div>
@@ -74,30 +74,34 @@ function StepPath({ onSelectPath, onRegisterAsset }) {
           </div>
         </div>
 
-        {/* Public Directory — disabled */}
-        <div style={{
-          padding: '22px 20px', borderRadius: 10,
-          border: '1.5px solid var(--border)', background: 'var(--bg-card)',
-          cursor: 'default', opacity: 0.4, position: 'relative',
-        }}>
-          <div style={{
-            position: 'absolute', top: 12, right: 14,
-            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-            color: 'var(--text-dim)', letterSpacing: '0.06em',
-            padding: '3px 8px', background: 'var(--bg-raised)', borderRadius: 6,
-          }}>COMING SOON</div>
+        {/* Public Directory — enabled */}
+        <div
+          onClick={onSelectDirectory}
+          onMouseEnter={() => setHov('directory')}
+          onMouseLeave={() => setHov(null)}
+          style={{
+            padding: '22px 20px', borderRadius: 10,
+            border: `1.5px solid ${hov === 'directory' ? '#38bdf8' : 'var(--border)'}`,
+            background: hov === 'directory' ? 'var(--bg-raised)' : 'var(--bg-card)',
+            cursor: 'pointer', transition: 'all 180ms',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{
               width: 36, height: 36, borderRadius: 8,
-              background: 'var(--bg-raised)', border: '1px solid var(--border)',
+              background: hov === 'directory' ? 'color-mix(in srgb, #38bdf8 10%, transparent)' : 'var(--bg-raised)',
+              border: `1px solid ${hov === 'directory' ? 'color-mix(in srgb, #38bdf8 25%, transparent)' : 'var(--border)'}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
-                <circle cx="7" cy="7" r="4.5" stroke="var(--text-dim)" strokeWidth="1.3" />
-                <line x1="10.5" y1="10.5" x2="14" y2="14" stroke="var(--text-dim)" strokeWidth="1.3" strokeLinecap="round" />
+                <circle cx="8" cy="8" r="6" stroke={hov === 'directory' ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="1.2" />
+                <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke={hov === 'directory' ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
+                <line x1="2" y1="8" x2="14" y2="8" stroke={hov === 'directory' ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
               </svg>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-dim)' }}>Browse Public Directory</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: hov === 'directory' ? 'var(--text-primary)' : 'var(--text-secondary)', transition: 'color 150ms' }}>
+              Browse Public Directory
+            </div>
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, paddingLeft: 46 }}>
             Search the public asset directory for assets that owners have made discoverable. Request disclosure directly from the directory listing.
@@ -215,6 +219,114 @@ function ReqSetPicker({ latestSets, selectedReqSets, setSelectedReqSets }) {
   )
 }
 
+/* ─── Directory Browser ─── */
+const DIR_CAT_COLORS = { product: 'var(--accent-blue)', process: 'var(--accent-amber)', place: 'var(--accent-green)', person: 'var(--accent-cyan)', party: 'var(--accent-indigo)' }
+const DIR_CAT_ICONS = { product: '■', process: '◎', place: '◆', person: '●', party: '⬡' }
+
+function DirectoryBrowser({ listings, selectedAsset, onSelect, contextNodeName }) {
+  const [search, setSearch] = useState('')
+
+  const filtered = listings.filter(a => {
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return a.name.toLowerCase().includes(q) ||
+      a.owner?.toLowerCase().includes(q) ||
+      a.category?.toLowerCase().includes(q) ||
+      (a.description || '').toLowerCase().includes(q)
+  })
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <svg width={18} height={18} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+          <circle cx="8" cy="8" r="6" stroke="#38bdf8" strokeWidth="1.2" />
+          <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="#38bdf8" strokeWidth="0.9" />
+          <line x1="2" y1="8" x2="14" y2="8" stroke="#38bdf8" strokeWidth="0.9" />
+        </svg>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Public Asset Directory</span>
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{listings.length} discoverable</span>
+      </div>
+
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.7 }}>
+        Select an asset to request disclosure. The owner will be notified and can accept or decline.
+        Any accepted disclosure will connect to <strong style={{ color: 'var(--text-primary)' }}>{contextNodeName}</strong>.
+      </div>
+
+      <input
+        value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Search assets by name, owner, or category..."
+        style={{
+          width: '100%', padding: '8px 12px', fontSize: 12,
+          background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+          color: 'var(--text-primary)', fontFamily: 'var(--font-display)', outline: 'none',
+          marginBottom: 14,
+        }}
+      />
+
+      <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {filtered.length === 0 && (
+          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 12, color: 'var(--text-dim)' }}>
+            {search ? `No assets match "${search}"` : 'No assets listed in the public directory.'}
+          </div>
+        )}
+        {filtered.map(asset => {
+          const isSelected = selectedAsset?.id === asset.id
+          return (
+            <div
+              key={asset.id}
+              onClick={() => onSelect(asset)}
+              style={{
+                padding: '14px 16px', borderRadius: 8,
+                border: `1px solid ${isSelected ? '#38bdf8' : 'var(--border)'}`,
+                background: isSelected ? 'color-mix(in srgb, #38bdf8 5%, transparent)' : 'var(--bg-card)',
+                cursor: 'pointer', transition: 'all 150ms',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                  border: `2px solid ${isSelected ? '#38bdf8' : 'var(--border)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 150ms',
+                }}>
+                  {isSelected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#38bdf8' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{asset.name}</span>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: DIR_CAT_COLORS[asset.category] || 'var(--text-dim)' }}>
+                      {DIR_CAT_ICONS[asset.category] || '■'} {asset.category?.toUpperCase()}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 2 }}>
+                    Owner: {asset.owner}
+                    {asset.disclosureType && (
+                      <span style={{ marginLeft: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>
+                        {asset.disclosureType.toUpperCase()} ACCESS
+                      </span>
+                    )}
+                  </div>
+                  {asset.description && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {asset.description}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                    {asset.hasEvidence && <span>◧ Evidence</span>}
+                    {asset.hasParsedData && <span>⊞ Parsed</span>}
+                    {asset.hasEvaluations && <span>◆ Evaluated</span>}
+                    <span>{asset.childCount} children</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function truncatePin(pin) {
   return pin && pin.length > 24 ? pin.slice(0, 10) + '...' + pin.slice(-4) : pin
 }
@@ -222,12 +334,14 @@ function truncatePin(pin) {
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequestDisclosureModal({ contextNode, requirementSets, onClose, onRegisterAsset, onSubmitRequest, onValidatePins, _noBackdrop }) {
+export default function RequestDisclosureModal({ contextNode, requirementSets, publicListings, onClose, onRegisterAsset, onSubmitRequest, onValidatePins, _noBackdrop }) {
   const [pinRows, setPinRows] = useState([''])
   const [message, setMessage] = useState('')
   const [selectedReqSets, setSelectedReqSets] = useState([])
   const [step, setStep] = useState(0)
   const [submitted, setSubmitted] = useState(false)
+  const [path, setPath] = useState(null) // null, 'pins', 'directory'
+  const [selectedDirAsset, setSelectedDirAsset] = useState(null) // single asset
   const inputRefs = useRef([])
 
   // Inline validation state: { [pin]: { status: 'pending'|'validating'|'valid'|'error', error, resolved } }
@@ -391,8 +505,14 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
             Your disclosure request has been recorded on-chain. The asset owner will be notified and can accept or decline. If accepted, they will determine the disclosure type and terms.
           </div>
           <div style={{ padding: '18px 22px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
-            <InfoRow label="Assets" value={
-              validEntries.length > 0 ? (
+            <InfoRow label="Asset" value={
+              path === 'directory' && selectedDirAsset ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedDirAsset.name}</span>
+                  <CopyBadge value={selectedDirAsset.pin} truncated />
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{selectedDirAsset.owner}</span>
+                </div>
+              ) : validEntries.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {validEntries.map(([pin, r], i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
@@ -424,11 +544,11 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
   }
 
   const formContent = (
-    <Modal>
+    <Modal width={680}>
       <ModalHeader title="Connect Asset" subtitle="Find and request disclosure of an asset to connect it to your network." step={step + 1} totalSteps={3} onClose={onClose} />
       <ModalBody>
-        {step === 0 && <StepPath onSelectPath={() => setStep(1)} onRegisterAsset={onRegisterAsset} />}
-        {step === 1 && (
+        {step === 0 && <StepPath onSelectPath={() => { setPath('pins'); setStep(1) }} onRegisterAsset={onRegisterAsset} onSelectDirectory={() => { setPath('directory'); setStep(1) }} />}
+        {step === 1 && path === 'pins' && (
           <div>
             <FieldLabel label="Asset PIN(s)" required />
             <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10 }}>Enter one PIN per line. Press Enter to add a row. You can paste multiple PINs.</div>
@@ -584,8 +704,30 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
             </div>
           </div>
         )}
+        {step === 1 && path === 'directory' && (
+          <DirectoryBrowser
+            listings={publicListings || []}
+            selectedAsset={selectedDirAsset}
+            contextNodeName={contextNode?.name}
+            onSelect={(asset) => setSelectedDirAsset(prev => prev?.id === asset.id ? null : asset)}
+          />
+        )}
         {step === 2 && (
           <div>
+            {path === 'directory' && selectedDirAsset && (
+              <div style={{ padding: '14px 16px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: DIR_CAT_COLORS[selectedDirAsset.category] || 'var(--text-dim)' }}>
+                  {DIR_CAT_ICONS[selectedDirAsset.category] || '■'}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{selectedDirAsset.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CopyBadge value={selectedDirAsset.pin} truncated />
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{selectedDirAsset.owner}</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <FieldLabel label="Requirements you plan to evaluate" />
             <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.7 }}>
               Select requirement sets to include with your request. This helps the owner understand your evaluation scope and prepare appropriate evidence.
@@ -636,8 +778,14 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
             {/* Review summary */}
             <div style={{ marginTop: 22, padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.04em', marginBottom: 12 }}>REVIEW</div>
-              <InfoRow label="Assets" value={
-                validEntries.length > 0 ? (
+              <InfoRow label="Asset" value={
+                path === 'directory' && selectedDirAsset ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedDirAsset.name}</span>
+                    <CopyBadge value={selectedDirAsset.pin} truncated />
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>{selectedDirAsset.owner}</span>
+                  </div>
+                ) : validEntries.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {validEntries.map(([pin, r], i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
@@ -673,11 +821,14 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
       </ModalBody>
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step > 0 && <Btn label="← Back" onClick={() => setStep(s => s - 1)} />}
+          {step > 0 && <Btn label="← Back" onClick={() => {
+            if (step === 1) { setPath(null); setStep(0); setSelectedDirAsset(null) }
+            else setStep(s => s - 1)
+          }} />}
           <StepDots current={step} total={3} />
         </div>
         {step === 0 && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a path above</div>}
-        {step === 1 && (
+        {step === 1 && path === 'pins' && (
           <Btn
             label={
               !allResolved ? 'Validating...'
@@ -689,18 +840,40 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, o
             onClick={() => setStep(2)}
           />
         )}
+        {step === 1 && path === 'directory' && (
+          <Btn
+            label={selectedDirAsset ? 'Request Disclosure →' : 'Select an asset above'}
+            accent
+            disabled={!selectedDirAsset}
+            onClick={() => setStep(2)}
+          />
+        )}
         {step === 2 && <Btn label="Send Request" accent onClick={() => {
-          const validPinValues = validEntries.map(([pin]) => pin)
-          const fullSets = selectedReqSets
-            .map(id => requirementSets?.find(s => s.id === id))
-            .filter(Boolean)
-          if (onSubmitRequest) {
-            onSubmitRequest({
-              pins: validPinValues.length > 0 ? validPinValues : pins,
-              requirements: fullSets,
-              message,
-              contextNode,
-            })
+          if (path === 'directory' && selectedDirAsset) {
+            const fullSets = selectedReqSets
+              .map(id => requirementSets?.find(s => s.id === id))
+              .filter(Boolean)
+            if (onSubmitRequest) {
+              onSubmitRequest({
+                pins: [selectedDirAsset.pin],
+                requirements: fullSets,
+                message,
+                contextNode,
+              })
+            }
+          } else {
+            const validPinValues = validEntries.map(([pin]) => pin)
+            const fullSets = selectedReqSets
+              .map(id => requirementSets?.find(s => s.id === id))
+              .filter(Boolean)
+            if (onSubmitRequest) {
+              onSubmitRequest({
+                pins: validPinValues.length > 0 ? validPinValues : pins,
+                requirements: fullSets,
+                message,
+                contextNode,
+              })
+            }
           }
           setSubmitted(true)
         }} />}
