@@ -152,17 +152,46 @@ function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, p
 
       <FieldLabel label="CSV format" />
       <div style={{
-        padding: '12px 16px', borderRadius: 8,
+        padding: '14px 16px', borderRadius: 8,
         background: 'var(--bg-card)', border: '1px solid var(--border)',
-        fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)',
-        lineHeight: 1.8, marginBottom: 8, overflowX: 'auto',
+        marginBottom: 8, overflowX: 'auto',
       }}>
-        <div style={{ color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 4 }}>
-          parent_pin, name, category, evidence_uri
+        {/* Header row */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 80px 1fr',
+          gap: 8, fontFamily: 'var(--font-mono)', fontSize: 10,
+          color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 8,
+          paddingBottom: 8, borderBottom: '1px solid var(--border)',
+        }}>
+          <span>parent_pin</span>
+          <span>name</span>
+          <span>category</span>
+          <span>evidence_uri</span>
         </div>
-        <div>{parentNode.pin}, Thermal Sensor Array, product,</div>
-        <div>{parentNode.pin}, Assembly Test Report, product, provenance://evidence/atr-001.pdf</div>
-        <div>{parentNode.pin}, Quality Inspection Log, process,</div>
+        {/* Example rows */}
+        {[
+          { name: 'Thermal Sensor Array', cat: 'product', uri: '' },
+          { name: 'Assembly Test Report', cat: 'product', uri: 'provenance://evidence/atr-001.pdf' },
+          { name: 'Quality Inspection Log', cat: 'process', uri: '' },
+        ].map((row, i) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 80px 1fr',
+            gap: 8, fontFamily: 'var(--font-mono)', fontSize: 10,
+            color: 'var(--text-dim)', lineHeight: 1.8,
+          }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {parentNode.pin.slice(0, 10)}...{parentNode.pin.slice(-4)}
+            </span>
+            <span>{row.name}</span>
+            <span>{row.cat}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row.uri || '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, fontStyle: 'italic' }}>
+        Use full PINs in the actual CSV file — truncated here for readability.
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 20, lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--text-tertiary)' }}>Columns:</strong> parent_pin (required) · name (required) · category (required: product, process, place, person) · evidence_uri (optional)
@@ -202,7 +231,31 @@ function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, p
         onChange={onSelectFile}
       />
 
-      <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 10, marginTop: 10, marginBottom: 14 }}>
+        <div
+          onClick={() => bulkFileRef.current?.click()}
+          style={{
+            flex: 1, padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
+            border: '1px solid var(--border)', background: 'var(--bg-card)',
+            fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+            textAlign: 'center', transition: 'background 100ms',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card)'}
+        >
+          ↑ Upload from local
+        </div>
+        <div style={{
+          flex: 1, padding: '10px 14px', borderRadius: 8,
+          border: '1px dashed var(--border)', background: 'transparent',
+          fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+          textAlign: 'center', opacity: 0.4, cursor: 'default',
+        }}>
+          ☁ Import from Qualified Storage
+        </div>
+      </div>
+
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
         <div
           onClick={() => setDebugErrors(prev => !prev)}
           style={{
