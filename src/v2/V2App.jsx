@@ -50,7 +50,7 @@ export default function V2App() {
   const [sel, setSel] = useState(null)
   const [modalNode, setModalNode] = useState(null)
   const [subchainFocusId, setSubchainFocusId] = useState(null)
-  const exitFocusIdRef = useRef(null)
+  const transitioningSubchain = useRef(false)
   const prevSelRef = useRef(null)
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
@@ -532,10 +532,28 @@ export default function V2App() {
     setSel(null)
   }, [])
 
+  const enterSubchain = useCallback((nodeId) => {
+    if (!nodeId || !nodeMap[nodeId] || nodeMap[nodeId].category === 'party') return
+    if (transitioningSubchain.current) return
+    transitioningSubchain.current = true
+
+    canvasRef.current?.playWarpStreaks?.(false)
+    canvasRef.current?.fadeOutCards?.()
+
+    setTimeout(() => {
+      setSubchainFocusId(nodeId)
+      setTimeout(() => {
+        canvasRef.current?.fadeInCards?.()
+        canvasRef.current?.fitAll?.()
+        transitioningSubchain.current = false
+      }, 50)
+    }, 250)
+  }, [nodeMap])
+
   const handleOpenSubgraph = useCallback((node) => {
     if (!node || node.category === 'party') return
-    setSubchainFocusId(node.id)
-  }, [])
+    enterSubchain(node.id)
+  }, [enterSubchain])
 
   const handleCloseModal = useCallback(() => {
     setModalNode(null)
@@ -557,39 +575,46 @@ export default function V2App() {
     if (!sel || !nodeMap[sel]) return
     const node = nodeMap[sel]
     if (node.category === 'party') return
-    setSubchainFocusId(node.id)
-  }, [sel, nodeMap])
+    enterSubchain(node.id)
+  }, [sel, nodeMap, enterSubchain])
 
   const handlePanelExpandStack = useCallback(() => {
     if (sel && nodeMap[sel]) canvasRef.current?.dive(nodeMap[sel])
   }, [sel, nodeMap])
 
   const exitSubchain = useCallback(() => {
-    exitFocusIdRef.current = subchainFocusId
-    canvasRef.current?.playLateralStreaks?.('exit')
-    setTimeout(() => setSubchainFocusId(null), 400)
-  }, [subchainFocusId])
+    if (transitioningSubchain.current) return
+    transitioningSubchain.current = true
+    const lastSel = sel
+
+    canvasRef.current?.playWarpStreaks?.(true)
+    canvasRef.current?.fadeOutCards?.()
+
+    setTimeout(() => {
+      setSubchainFocusId(null)
+      setTimeout(() => {
+        canvasRef.current?.fadeInCards?.()
+        if (lastSel && nodeMap[lastSel]) {
+          canvasRef.current?.panTo?.(nodeMap[lastSel].x, nodeMap[lastSel].y)
+        } else {
+          canvasRef.current?.fitAll?.()
+        }
+        transitioningSubchain.current = false
+      }, 50)
+    }, 250)
+  }, [sel, nodeMap])
 
   const handlePanelSurface = useCallback(() => {
-    // If in child layer, surface to parent layer first
     if (layerInfo.depth > 0) {
       canvasRef.current?.surface()
       return
     }
-    // If in subchain (but not child layer), exit subchain
     if (subchainFocusId) {
       exitSubchain()
       return
     }
     canvasRef.current?.surface()
   }, [subchainFocusId, layerInfo.depth, exitSubchain])
-
-  // Clear exit focus ref after V2Canvas has consumed it
-  useEffect(() => {
-    if (!subchainFocusId && exitFocusIdRef.current) {
-      requestAnimationFrame(() => { exitFocusIdRef.current = null })
-    }
-  }, [subchainFocusId])
 
   const handleViewChild = useCallback((childNode) => {
     if (layerInfo.depth > 0) {
@@ -1234,7 +1259,7 @@ export default function V2App() {
       <div style={{ flex: 1, position: 'relative' }}>
         <V2Canvas
           ref={canvasRef}
-          key={subchainFocusId ? `subchain-${subchainFocusId}` : roleId}
+          key={roleId}
           nodes={subchainData ? subchainData.nodes : nodes}
           edges={subchainData ? subchainData.edges : edges}
           nodeMap={subchainData ? subchainData.nodeMap : nodeMap}
@@ -1245,7 +1270,6 @@ export default function V2App() {
           isSubchain={!!subchainFocusId}
           subchainFocusId={subchainFocusId}
           onExitSubchain={exitSubchain}
-          initialFocusId={exitFocusIdRef.current}
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].category !== 'party' ? 480 : 0}
           onLayerChange={setLayerInfo}
