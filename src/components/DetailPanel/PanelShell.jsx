@@ -192,7 +192,7 @@ export default function PanelShell({
         if (isOwner && !isEvidence && !isParse && !isEvaluation) btnCount += 3
         if (isOwner && isEvidence && !isEvaluation) btnCount += 1
         if (canEvaluate && !isEvaluation) btnCount += 1
-        const showLabels = btnCount <= 4
+        const showLabels = btnCount <= 3
         return (
           <div style={{
             borderTop: '1px solid var(--border)',

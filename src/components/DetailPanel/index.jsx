@@ -417,9 +417,24 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
         isEvaluation={false}
         isOwner={isOwner}
         onParseEvidence={onParseEvidence}
+        canEvaluate={canEvaluate}
+        onRunEvaluation={onRunEvaluation}
       >
         {ev ? (
           <div>
+            {/* PDF preview — owner only */}
+            {isOwner && ev.localPath && ev.filename?.toLowerCase().endsWith('.pdf') && (
+              <div style={{
+                marginBottom: 14, borderRadius: 6, overflow: 'hidden',
+                border: '1px solid var(--border)', height: 280,
+              }}>
+                <iframe
+                  src={ev.localPath}
+                  style={{ width: '100%', height: '100%', border: 'none', background: 'var(--bg-deep)' }}
+                  title={ev.filename}
+                />
+              </div>
+            )}
             <DataTable
               columns={[
                 { key: 'label', width: 120, color: 'var(--text-dim)' },

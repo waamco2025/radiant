@@ -309,8 +309,8 @@ function StepConfirmation({ assetNode, selectedSet, claims, creditCost }) {
 }
 
 export default function RunEvaluationModal({
-  assetNode, disclosureType, requirementSets, activeParty, activeUser,
-  credits, onClose, onComplete, _noBackdrop,
+  assetNode, evidenceNode, disclosureType, requirementSets, activeParty, activeUser,
+  credits, onClose, onComplete, parsedFields: passedParsedFields, _noBackdrop,
 }) {
   const [step, setStep] = useState(0) // 0=setup, 1=processing, 2=review, 3=confirmation
   const [selectedSetId, setSelectedSetId] = useState(null)
@@ -321,31 +321,33 @@ export default function RunEvaluationModal({
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
   const canAfford = credits >= cost
 
-  // Collect parsed fields from the asset's PEP children
+  // Use directly passed fields (resolved by V2App), fallback to extracting from children
   const parsedFields = useMemo(() => {
+    if (passedParsedFields && passedParsedFields.length > 0) return passedParsedFields
     if (!assetNode?.children) return []
     return assetNode.children
       .filter(c => c.isParse || c.category === 'parse')
       .flatMap(pn => pn.parsedFields || [])
-  }, [assetNode])
+  }, [passedParsedFields, assetNode])
 
   const isFullDisclosure = disclosureType === 'full'
 
+  // Evidence data from the specific evidence node being evaluated
   const evidenceData = useMemo(() => {
-    if (!assetNode?.children) return []
-    return assetNode.children
-      .filter(c => c.isEvidence)
-      .map(ev => ({
-        id: ev.id,
-        filename: ev.evidence?.filename || ev.name,
-        hash: ev.evidence?.hash,
-        block: ev.evidence?.block,
-        provider: ev.evidence?.provider,
-        retention: ev.evidence?.retention,
-      }))
-  }, [assetNode])
+    if (!evidenceNode?.evidence) return []
+    return [{
+      id: evidenceNode.id,
+      filename: evidenceNode.evidence.filename || evidenceNode.name,
+      hash: evidenceNode.evidence.hash,
+      block: evidenceNode.evidence.block,
+      provider: evidenceNode.evidence.provider,
+      retention: evidenceNode.evidence.retention,
+      localPath: evidenceNode.evidence.localPath || null,
+      uri: evidenceNode.evidence.uri || null,
+    }]
+  }, [evidenceNode])
 
-  const showSplitView = isFullDisclosure && evidenceData.length > 0
+  const showSplitView = parsedFields.length > 0 || (isFullDisclosure && evidenceData.length > 0)
 
   // Processing step — cycle messages + auto-advance
   useEffect(() => {
@@ -395,7 +397,7 @@ export default function RunEvaluationModal({
       <ModalHeader
         title="Run Evaluation"
         subtitle={step === 0 ? 'Select a requirement set to evaluate this asset against.'
-          : step === 2 ? 'Review AI findings — confirm or override each claim.'
+          : step === 2 ? `${assetNode.name} — Review AI findings`
           : undefined}
         step={step < 3 ? step + 1 : undefined}
         totalSteps={step < 3 ? 3 : undefined}
@@ -424,131 +426,213 @@ export default function RunEvaluationModal({
         </div>
       )}
 
-      {/* Split view for full disclosure Step 2 */}
+      {/* Split view for Step 2 review */}
       {step === 2 && showSplitView ? (
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {/* Left panel — Evidence reference */}
+          {/* Left panel — Evidence / Disclosed Fields */}
           <div style={{
-            width: 360, flexShrink: 0,
+            flex: 1,
             borderRight: '1px solid var(--border)',
             display: 'flex', flexDirection: 'column',
             overflow: 'hidden',
           }}>
-            <div style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              flexShrink: 0,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <svg width={16} height={16} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                  <path d="M4 1h5.5L13 4.5V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="var(--accent-orange)" strokeWidth="1.2" fill="none" />
-                  <path d="M9 1v4h4" stroke="var(--accent-orange)" strokeWidth="1" fill="none" strokeLinejoin="round" />
-                </svg>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Evidence Reference</span>
+            {/* Left header */}
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--accent-orange)' }}>◧</span>
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  color: 'var(--accent-orange)', letterSpacing: '0.06em',
+                }}>EVIDENCE</span>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                {evidenceData.length} document{evidenceData.length !== 1 ? 's' : ''} · Full access
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                {isFullDisclosure && evidenceData.length > 0 ? (
+                  <>
+                    <span style={{ color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {evidenceData[0]?.uri?.replace(/[^/]+$/, '') || 'provenance://evidence/'}
+                    </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, flexShrink: 0 }}>
+                      {evidenceData[0]?.filename}
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--text-dim)' }}>
+                    {parsedFields.length} field{parsedFields.length !== 1 ? 's' : ''} · {isFullDisclosure ? 'Full' : 'Selective'} access
+                  </span>
+                )}
               </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-              {evidenceData.map(ev => (
-                <div key={ev.id} style={{
-                  marginBottom: 16,
-                  padding: '12px 14px', borderRadius: 8,
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
-                      <path d="M4 1h5.5L13 4.5V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="var(--text-secondary)" strokeWidth="1" fill="none" />
-                      <path d="M9 1v4h4" stroke="var(--text-secondary)" strokeWidth="1" fill="none" />
-                    </svg>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{ev.filename}</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {ev.hash && (
-                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>SHA-256</span>
-                        <span style={{ color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.hash}</span>
-                      </div>
-                    )}
-                    {ev.block && (
-                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>On-chain</span>
-                        <span style={{ color: 'var(--text-tertiary)' }}>{ev.block}</span>
-                      </div>
-                    )}
-                    {ev.provider && (
-                      <div style={{ display: 'flex', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ width: 70, color: 'var(--text-dim)', flexShrink: 0 }}>Provider</span>
-                        <span style={{ color: 'var(--text-tertiary)' }}>{ev.provider}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {parsedFields.length > 0 && (
-                <div>
-                  <div style={{
-                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                    color: 'var(--accent-purple)', letterSpacing: '0.06em',
-                    marginBottom: 8,
-                  }}>
-                    PARSED DATA ({parsedFields.length} fields)
-                  </div>
-                  <div style={{
-                    borderRadius: 6, overflow: 'hidden',
-                    border: '1px solid var(--border)', background: 'var(--bg-deep)',
-                  }}>
-                    {parsedFields.map((f, i) => (
-                      <div key={f.id || i} style={{
-                        display: 'flex', alignItems: 'center',
-                        padding: '6px 10px',
-                        borderBottom: i < parsedFields.length - 1 ? '1px solid var(--border)' : 'none',
+            {/* Left content */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {isFullDisclosure && evidenceData.length > 0 && evidenceData[0]?.localPath ? (
+                <iframe
+                  src={evidenceData[0].localPath}
+                  style={{ flex: 1, width: '100%', border: 'none', background: 'var(--bg-deep)', minHeight: 400 }}
+                  title="Evidence document"
+                />
+              ) : (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+                  {parsedFields.length > 0 && (
+                    <div>
+                      <div style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        color: 'var(--accent-purple)', letterSpacing: '0.06em', marginBottom: 8,
                       }}>
-                        <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
-                        <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+                        {isFullDisclosure ? 'PARSED DATA' : 'DISCLOSED FIELDS'} ({parsedFields.length})
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {parsedFields.length === 0 && (
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 8 }}>
-                  No parsed data available. Claims will be evaluated against raw evidence.
+                      <div style={{
+                        borderRadius: 6, overflow: 'hidden',
+                        border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                      }}>
+                        {parsedFields.map((f, i) => (
+                          <div key={f.id || i} style={{
+                            display: 'flex', alignItems: 'center', padding: '6px 10px',
+                            borderBottom: i < parsedFields.length - 1 ? '1px solid var(--border)' : 'none',
+                          }}>
+                            <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
+                            <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {parsedFields.length === 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 8 }}>
+                      No parsed data available.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right panel — Claim review */}
+          {/* Right panel — Evaluation */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-            <div style={{
-              padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0,
-              display: 'flex', alignItems: 'center', gap: 14,
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                padding: '8px 14px', borderRadius: 8,
-                border: '1px solid var(--border)', background: 'var(--bg-card)',
-                fontSize: 11, fontFamily: 'var(--font-mono)', flex: 1,
-              }}>
-                <span style={{ color: 'var(--text-dim)' }}>{claims.length} claims</span>
-                <span style={{ color: 'var(--accent-green)' }}>{reviewSummary.sat} satisfactory</span>
-                <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
-                <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
-                {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
+            {/* Right header */}
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--accent-indigo)' }}>◆</span>
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  color: 'var(--accent-indigo)', letterSpacing: '0.06em',
+                }}>EVALUATION</span>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {selectedSet?.name || 'Evaluation'}
               </div>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {claims.map(claim => (
-                  <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
-                    setClaims(prev => prev.map(c => c.requirementId === updated.requirementId ? updated : c))
-                  }} />
+
+            {/* Tally bar */}
+            <div style={{
+              padding: '8px 16px', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', gap: 14,
+              fontSize: 11, fontFamily: 'var(--font-mono)', flexShrink: 0,
+            }}>
+              <span style={{ color: 'var(--text-dim)' }}>{claims.length} claims</span>
+              <span style={{ color: 'var(--accent-green)' }}>{reviewSummary.sat} satisfactory</span>
+              <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
+              <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
+              {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
+            </div>
+
+            {/* Scrollable claims in page container */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              <div style={{
+                background: 'var(--bg-card)', borderRadius: 8,
+                border: '1px solid var(--border)', padding: '20px',
+              }}>
+                {claims.map((claim, i) => (
+                  <div key={claim.requirementId}>
+                    {i > 0 && <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{
+                          fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          padding: '2px 6px', borderRadius: 3,
+                          color: claim.type === 'extraction' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                          background: claim.type === 'extraction'
+                            ? 'color-mix(in srgb, var(--accent-cyan) 12%, transparent)'
+                            : 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                        }}>
+                          {claim.type === 'extraction' ? 'EXT' : 'INF'}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{claim.label}</span>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                          {Math.round(claim.aiConfidence * 100)}% conf.
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: 12, opacity: 0.85 }}>
+                        {claim.description}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)', width: 60, flexShrink: 0 }}>AI value</span>
+                        <span style={{
+                          fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+                          padding: '4px 8px', borderRadius: 4,
+                          background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                        }}>{claim.aiValue}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)', width: 60, flexShrink: 0 }}>Your value</span>
+                        {claim.type === 'extraction' ? (
+                          <input
+                            value={claim.humanValue === null ? '' : claim.humanValue}
+                            onChange={e => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: e.target.value } : c))}
+                            onFocus={() => {
+                              if (claim.humanValue === null && claim.aiValue) {
+                                setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: claim.aiValue } : c))
+                              }
+                            }}
+                            placeholder={claim.aiValue}
+                            style={{
+                              flex: 1, height: 32, padding: '0 10px', borderRadius: 5,
+                              border: '1px solid var(--border)', background: 'var(--bg-surface)',
+                              color: claim.humanValue === null ? 'var(--text-dim)' : 'var(--text-primary)',
+                              fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none',
+                            }}
+                          />
+                        ) : (
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {['Yes', 'No'].map(v => {
+                              const active = claim.humanValue === v
+                              return (
+                                <button key={v} onClick={() => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: v } : c))}
+                                  style={{
+                                    padding: '5px 14px', borderRadius: 5, fontSize: 12,
+                                    fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                    border: `1px solid ${active ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                                    background: active ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)' : 'transparent',
+                                    color: active ? 'var(--accent-indigo)' : 'var(--text-tertiary)',
+                                    cursor: 'pointer', transition: 'all 150ms',
+                                  }}
+                                >{v}</button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {Object.entries(CLAIM_STATUS).map(([key, cfg]) => {
+                          const active = claim.status === key
+                          return (
+                            <button key={key} onClick={() => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, status: key } : c))}
+                              style={{
+                                flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11,
+                                fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                border: `1px solid ${active ? cfg.color : 'var(--border)'}`,
+                                background: active ? `color-mix(in srgb, ${cfg.color} 8%, transparent)` : 'transparent',
+                                color: active ? cfg.color : 'var(--text-dim)',
+                                cursor: 'pointer', transition: 'all 150ms',
+                              }}
+                            >
+                              {cfg.icon} {cfg.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>

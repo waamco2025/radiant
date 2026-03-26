@@ -247,10 +247,10 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor }) {
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
-  if (onCreateSDA) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
+  if (onCreateSDA && !isParty) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })
@@ -262,7 +262,7 @@ function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence,
   if (isChild && !isAnchor && onSurface) {
     buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   }
-  buttons.push({ icon: '⛓', tooltip: 'View chain', onClick: onOpenSubgraph })
+  if (!isParty) buttons.push({ icon: '⛓', tooltip: 'View chain', onClick: onOpenSubgraph })
 
   return (
     <div style={{
@@ -393,7 +393,7 @@ export default function AssetNode({
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
-  const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && hasPepChildren && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
+  const handleRunEvaluation = (node.isEvidence && node._isParsed && !isProvisional && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
   const borderColor = isDeclined
@@ -594,7 +594,7 @@ export default function AssetNode({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             lineHeight: 1.2,
-            marginBottom: 4,
+            marginBottom: 0,
           }}>
             {node.isEvaluation ? node.evaluatorParty : node.owner}
           </div>
@@ -656,6 +656,7 @@ export default function AssetNode({
           isAnchor={isAnchor}
           isChild={isChild}
           categoryColor={cat.color}
+          isParty={node.category === 'party'}
         />
       )}
     </div>

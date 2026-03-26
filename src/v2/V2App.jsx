@@ -49,6 +49,8 @@ export default function V2App() {
   const [roleId, setRoleId] = useState('bob-govco')
   const [sel, setSel] = useState(null)
   const [modalNode, setModalNode] = useState(null)
+  const [subchainFocusId, setSubchainFocusId] = useState(null)
+  const exitFocusIdRef = useRef(null)
   const prevSelRef = useRef(null)
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
@@ -361,6 +363,87 @@ export default function V2App() {
     return listings
   }, [roleId, perRoleState, nodeMap])
 
+  // Subchain computation — filters nodes/edges to connected chain and lays out horizontally
+  const subchainData = useMemo(() => {
+    if (!subchainFocusId || !nodeMap[subchainFocusId]) return null
+
+    const chainNodeIds = new Set([subchainFocusId])
+
+    // Walk UPSTREAM: follow edges where node is "to", trace back via "from"
+    function walkUpstream(nodeId) {
+      edges.forEach(e => {
+        if (e.to === nodeId && !chainNodeIds.has(e.from)) {
+          chainNodeIds.add(e.from)
+          walkUpstream(e.from)
+        }
+      })
+    }
+    // Walk DOWNSTREAM: follow edges where node is "from", trace forward via "to"
+    function walkDownstream(nodeId) {
+      edges.forEach(e => {
+        if (e.from === nodeId && !chainNodeIds.has(e.to)) {
+          chainNodeIds.add(e.to)
+          walkDownstream(e.to)
+        }
+      })
+    }
+
+    walkUpstream(subchainFocusId)
+    walkDownstream(subchainFocusId)
+
+    const chainNodes = nodes.filter(n => chainNodeIds.has(n.id))
+    const chainEdges = edges.filter(e => chainNodeIds.has(e.from) && chainNodeIds.has(e.to))
+
+    // BFS from roots (no incoming chain edges) to compute depth
+    const inDegree = {}
+    chainNodes.forEach(n => { inDegree[n.id] = 0 })
+    chainEdges.forEach(e => { if (inDegree[e.to] !== undefined) inDegree[e.to]++ })
+
+    const depths = {}
+    const queue = []
+    chainNodes.forEach(n => {
+      if (inDegree[n.id] === 0) { depths[n.id] = 0; queue.push(n.id) }
+    })
+    while (queue.length > 0) {
+      const current = queue.shift()
+      chainEdges.forEach(e => {
+        if (e.from === current) {
+          const newDepth = (depths[current] || 0) + 1
+          if (depths[e.to] === undefined || newDepth > depths[e.to]) {
+            depths[e.to] = newDepth
+          }
+          if (!queue.includes(e.to)) queue.push(e.to)
+        }
+      })
+    }
+    chainNodes.forEach(n => { if (depths[n.id] === undefined) depths[n.id] = 0 })
+
+    const byDepth = {}
+    chainNodes.forEach(n => {
+      const d = depths[n.id] || 0
+      if (!byDepth[d]) byDepth[d] = []
+      byDepth[d].push(n)
+    })
+
+    const COL_SPACING = 500
+    const ROW_SPACING = 200
+    const focusDepth = depths[subchainFocusId] || 0
+
+    const repositioned = chainNodes.map(n => {
+      const d = depths[n.id] || 0
+      const group = byDepth[d]
+      const idx = group.indexOf(n)
+      const x = (d - focusDepth) * COL_SPACING
+      const y = (idx - (group.length - 1) / 2) * ROW_SPACING
+      return { ...n, x, y, _subchainDepth: d }
+    })
+
+    const chainNodeMap = {}
+    repositioned.forEach(n => { chainNodeMap[n.id] = n })
+
+    return { nodes: repositioned, edges: chainEdges, nodeMap: chainNodeMap, focusId: subchainFocusId }
+  }, [subchainFocusId, nodes, edges, nodeMap])
+
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
@@ -450,7 +533,8 @@ export default function V2App() {
   }, [])
 
   const handleOpenSubgraph = useCallback((node) => {
-    setModalNode(node)
+    if (!node || node.category === 'party') return
+    setSubchainFocusId(node.id)
   }, [])
 
   const handleCloseModal = useCallback(() => {
@@ -462,6 +546,7 @@ export default function V2App() {
     setRoleId(newRoleId)
     setSel(null)
     setModalNode(null)
+    setSubchainFocusId(null)
     const role = ROLES.find(r => r.id === newRoleId)
     if (role) setCredits(role.credits)
     setShowAcct(false)
@@ -469,16 +554,42 @@ export default function V2App() {
 
   // Detail Panel footer actions
   const handlePanelViewChain = useCallback(() => {
-    if (sel && nodeMap[sel]) handleOpenSubgraph(nodeMap[sel])
-  }, [sel, nodeMap, handleOpenSubgraph])
+    if (!sel || !nodeMap[sel]) return
+    const node = nodeMap[sel]
+    if (node.category === 'party') return
+    setSubchainFocusId(node.id)
+  }, [sel, nodeMap])
 
   const handlePanelExpandStack = useCallback(() => {
     if (sel && nodeMap[sel]) canvasRef.current?.dive(nodeMap[sel])
   }, [sel, nodeMap])
 
+  const exitSubchain = useCallback(() => {
+    exitFocusIdRef.current = subchainFocusId
+    canvasRef.current?.playLateralStreaks?.('exit')
+    setTimeout(() => setSubchainFocusId(null), 400)
+  }, [subchainFocusId])
+
   const handlePanelSurface = useCallback(() => {
+    // If in child layer, surface to parent layer first
+    if (layerInfo.depth > 0) {
+      canvasRef.current?.surface()
+      return
+    }
+    // If in subchain (but not child layer), exit subchain
+    if (subchainFocusId) {
+      exitSubchain()
+      return
+    }
     canvasRef.current?.surface()
-  }, [])
+  }, [subchainFocusId, layerInfo.depth, exitSubchain])
+
+  // Clear exit focus ref after V2Canvas has consumed it
+  useEffect(() => {
+    if (!subchainFocusId && exitFocusIdRef.current) {
+      requestAnimationFrame(() => { exitFocusIdRef.current = null })
+    }
+  }, [subchainFocusId])
 
   const handleViewChild = useCallback((childNode) => {
     if (layerInfo.depth > 0) {
@@ -1123,14 +1234,18 @@ export default function V2App() {
       <div style={{ flex: 1, position: 'relative' }}>
         <V2Canvas
           ref={canvasRef}
-          key={roleId}
-          nodes={nodes}
-          edges={edges}
-          nodeMap={nodeMap}
+          key={subchainFocusId ? `subchain-${subchainFocusId}` : roleId}
+          nodes={subchainData ? subchainData.nodes : nodes}
+          edges={subchainData ? subchainData.edges : edges}
+          nodeMap={subchainData ? subchainData.nodeMap : nodeMap}
           selectedId={sel}
           onSelect={handleSelect}
           onCloseSel={handleCloseSel}
           onOpenSubgraph={handleOpenSubgraph}
+          isSubchain={!!subchainFocusId}
+          subchainFocusId={subchainFocusId}
+          onExitSubchain={exitSubchain}
+          initialFocusId={exitFocusIdRef.current}
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].category !== 'party' ? 480 : 0}
           onLayerChange={setLayerInfo}
@@ -1146,12 +1261,65 @@ export default function V2App() {
             })
           }}
           onRunEvaluation={(node) => {
-            const sda = (node.sdas || []).find(s => s.party === activeRole.party || s.party !== node.owner)
-            const disclosureType = sda?.type || 'full'
-            setEvalContext({ assetNode: node, disclosureType })
+            if (!node) return
+            if (node.isEvidence) {
+              const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
+              if (!parentAsset) return
+              const resolvedParsedFields = (parentAsset.children || [])
+                .filter(c => c.isParse || c.category === 'parse')
+                .flatMap(pn => pn.parsedFields || [])
+              let discType = 'full'
+              if (parentAsset.owner !== activeRole.party) {
+                const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party)
+                discType = sda?.type || 'full'
+              }
+              setEvalContext({ assetNode: parentAsset, evidenceNode: node, disclosureType: discType, parsedFields: resolvedParsedFields })
+            } else {
+              const sda = (node.sdas || []).find(s => s.party === activeRole.party || s.party !== node.owner)
+              const disclosureType = sda?.type || 'full'
+              setEvalContext({ assetNode: node, disclosureType })
+            }
           }}
           activeParty={activeRole.party}
         />
+
+        {/* Subchain pill */}
+        {subchainFocusId && (
+          <div style={{
+            position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 55,
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '6px 16px', borderRadius: 20,
+            background: 'color-mix(in srgb, var(--accent-indigo) 10%, var(--bg-deep))',
+            border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
+            backdropFilter: 'blur(8px)',
+          }}>
+            <span style={{ fontSize: 12, color: 'var(--accent-indigo)' }}>⛓</span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', fontWeight: 600 }}>
+              {nodeMap[subchainFocusId]?.name || subchainFocusId}
+            </span>
+            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+              {subchainData?.nodes.length || 0} nodes
+            </span>
+            <span
+              onClick={() => {
+                if (layerInfo.depth > 0) {
+                  canvasRef.current?.surface()
+                } else {
+                  exitSubchain()
+                }
+              }}
+              style={{
+                padding: '2px 10px', borderRadius: 10,
+                background: 'var(--bg-raised)', border: '1px solid var(--border)',
+                fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Exit
+            </span>
+          </div>
+        )}
 
         {/* Detail Panel overlay */}
         {sel && nodeMap[sel] && nodeMap[sel].category !== 'party' && (
@@ -1188,22 +1356,36 @@ export default function V2App() {
               }}
               onRunEvaluation={() => {
                 if (!sel || !nodeMap[sel]) return
-                const n = nodeMap[sel]
-                // Detect disclosure type from SDAs
-                const sda = (n.sdas || []).find(s => s.party === activeRole.party || s.party !== n.owner)
-                const disclosureType = sda?.type || 'full'
-                setEvalContext({ assetNode: n, disclosureType })
+                const evidenceNode = nodeMap[sel]
+                if (!evidenceNode.isEvidence) return
+                // Find parent asset
+                const parentAsset = nodes.find(n => n.children?.some(c => c.id === evidenceNode.id))
+                if (!parentAsset) return
+                // Resolve parsed fields from sibling parse nodes
+                const resolvedParsedFields = (parentAsset.children || [])
+                  .filter(c => c.isParse || c.category === 'parse')
+                  .flatMap(pn => pn.parsedFields || [])
+                // Determine disclosure type
+                let discType = 'full'
+                if (parentAsset.owner !== activeRole.party) {
+                  const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party)
+                  discType = sda?.type || 'full'
+                }
+                setEvalContext({ assetNode: parentAsset, evidenceNode, disclosureType: discType, parsedFields: resolvedParsedFields })
               }}
               canEvaluate={(() => {
                 const n = nodeMap[sel]
                 if (!n) return false
-                if (n.isEvidence || n.isParse || n.category === 'parse' || n.isEvaluation || n.provisional) return false
-                // Must have PEP children (parsed data)
-                const hasPep = n.children?.some(c => c.isParse || c.category === 'parse')
-                if (!hasPep) return false
-                // Must own or have disclosure access
-                const isNodeOwner = n.owner === activeRole.party
-                const hasAccess = (n.sdas || []).some(s => s.type === 'full' || s.type === 'selective')
+                if (!n.isEvidence) return false
+                // Find parent asset and check for sibling parse nodes
+                const parentAsset = nodes.find(p => p.children?.some(c => c.id === n.id))
+                if (!parentAsset) return false
+                const hasSiblingParse = parentAsset.children?.some(c => c.isParse || c.category === 'parse')
+                if (!hasSiblingParse) return false
+                const isNodeOwner = parentAsset.owner === activeRole.party
+                const hasAccess = (parentAsset.sdas || []).some(s =>
+                  s.party === activeRole.party && (s.type === 'full' || s.type === 'selective')
+                )
                 return isNodeOwner || hasAccess
               })()}
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
@@ -1533,10 +1715,10 @@ export default function V2App() {
         </div>
       </div>
 
-      {/* SubgraphModal */}
-      {modalNode && (
+      {/* SubgraphModal — disabled, replaced by subchain canvas view */}
+      {/* {modalNode && (
         <V2SubgraphModal node={modalNode} onClose={handleCloseModal} />
-      )}
+      )} */}
 
       {/* Disclosure modals — shared persistent backdrop */}
       {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || evalContext) && (
@@ -2341,10 +2523,19 @@ export default function V2App() {
           _noBackdrop
         />
       )}
+      {evalContext && console.log('EVAL CONTEXT:', {
+        assetNode: evalContext.assetNode?.name,
+        evidenceNode: evalContext.evidenceNode?.name,
+        disclosureType: evalContext.disclosureType,
+        parsedFieldsCount: evalContext.parsedFields?.length,
+        evidenceLocalPath: evalContext.evidenceNode?.evidence?.localPath,
+      })}
       {evalContext && (
         <RunEvaluationModal
           assetNode={evalContext.assetNode}
+          evidenceNode={evalContext.evidenceNode}
           disclosureType={evalContext.disclosureType}
+          parsedFields={evalContext.parsedFields}
           requirementSets={requirementSets}
           activeParty={activeRole.party}
           activeUser={activeRole.user || activeRole.party}

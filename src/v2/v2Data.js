@@ -387,6 +387,9 @@ function buildBobData() {
   const powerRegEv = makeEvidenceNode('power-reg',
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
     'MicroCo', [])
+  powerRegEv.evidence.filename = 'powerregulationmodule-datasheet.pdf'
+  powerRegEv.evidence.localPath = '/powerregulationmodule-datasheet.pdf'
+  powerRegEv.name = 'powerregulationmodule-datasheet.pdf'
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -458,6 +461,9 @@ function buildBobData() {
   const vregEv = makeEvidenceNode('vreg-ic',
     makeEvidence('vreg-ic', 'SPEC-VR', 'MicroCo Component Lab', '10 years per ITAR'),
     'MicroCo', [])  // no claims — Bob hasn't evaluated yet
+  vregEv.evidence.filename = 'voltageregulator-datasheet.pdf'
+  vregEv.evidence.localPath = '/voltageregulator-datasheet.pdf'
+  vregEv.name = 'voltageregulator-datasheet.pdf'
 
   const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
     { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
@@ -537,6 +543,9 @@ function buildAliceData() {
   const powerRegEv = makeEvidenceNode('power-reg',
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
     'MicroCo', [])
+  powerRegEv.evidence.filename = 'powerregulationmodule-datasheet.pdf'
+  powerRegEv.evidence.localPath = '/powerregulationmodule-datasheet.pdf'
+  powerRegEv.name = 'powerregulationmodule-datasheet.pdf'
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -634,6 +643,9 @@ function buildAliceData() {
   const vregEv = makeEvidenceNode('vreg-ic',
     makeEvidence('vreg-ic', 'SPEC-VR', 'MicroCo Component Lab', '10 years per ITAR'),
     'MicroCo', [])  // no claims yet — no evaluations run
+  vregEv.evidence.filename = 'voltageregulator-datasheet.pdf'
+  vregEv.evidence.localPath = '/voltageregulator-datasheet.pdf'
+  vregEv.name = 'voltageregulator-datasheet.pdf'
 
   const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
     { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
@@ -666,6 +678,9 @@ function buildAliceData() {
   const emiShieldEv = makeEvidenceNode('emi-shield',
     makeEvidence('emi-shield', 'EMI-TST', 'MicroCo EMC Lab', '7 years per MIL-STD-461'),
     'MicroCo', [])
+  emiShieldEv.evidence.filename = 'emishielding-datasheet.pdf'
+  emiShieldEv.evidence.localPath = '/emishielding-datasheet.pdf'
+  emiShieldEv.name = 'emishielding-datasheet.pdf'
 
   const emiShieldPep = makePepNode('emi-shield', emiShieldEv.id, 'Mechanical Assembly Profile', [
     { id: 'f-material', name: 'Shield material', category: 'mechanical', type: 'text', value: 'Nickel silver alloy', confidence: 'high' },
@@ -695,20 +710,52 @@ function buildAliceData() {
     description: 'Board-level EMI shielding assembly for high-frequency noise suppression.',
   })
 
-  // Thermal Interface Pad: shell, no evidence — Register Asset demo
+  // Thermal Interface Pad: has evidence + parse
+  const thermalPadEv = makeEvidenceNode('thermal-pad',
+    makeEvidence('thermal-pad', 'TIP-SPEC', 'MicroCo Materials Lab', '5 years'),
+    'MicroCo', [])
+  thermalPadEv.evidence.filename = 'thermalinterfacepad-datasheet.pdf'
+  thermalPadEv.evidence.localPath = '/thermalinterfacepad-datasheet.pdf'
+  thermalPadEv.name = 'thermalinterfacepad-datasheet.pdf'
+
+  const thermalPadPep = makePepNode('thermal-pad', thermalPadEv.id, 'Mechanical Assembly Profile', [
+    { id: 'f-conductivity', name: 'Thermal conductivity', category: 'thermal', type: 'value', value: '6.0 W/mK', confidence: 'high' },
+    { id: 'f-thickness', name: 'Thickness', category: 'mechanical', type: 'value', value: '1.0mm ±0.1', confidence: 'high' },
+    { id: 'f-hardness', name: 'Shore hardness', category: 'mechanical', type: 'value', value: 'Shore 00-45', confidence: 'medium' },
+    { id: 'f-temp-range', name: 'Operating temperature', category: 'thermal', type: 'range', value: '-40°C to +200°C', confidence: 'high' },
+    { id: 'f-dielectric', name: 'Dielectric strength', category: 'electrical', type: 'value', value: '> 10 kV/mm', confidence: 'high' },
+  ], 'MicroCo')
+
   const thermalPad = makeNode('thermal-pad', 'Thermal Interface Pad', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [{ ...SDA_INTERNAL_MICROCO, pins: [] }],
-    children: [],
+    children: [thermalPadEv, thermalPadPep],
     x: 500, y: 900,
+    description: 'Thermally conductive gap filler pad for heat dissipation between components and heatsinks.',
   })
 
-  // Connector Assembly: shell, no evidence — already in public directory demo
+  // Connector Assembly: has evidence + parse
+  const connectorAssyEv = makeEvidenceNode('connector-assy',
+    makeEvidence('connector-assy', 'CONN-SPEC', 'MicroCo Assembly Lab', '7 years'),
+    'MicroCo', [])
+  connectorAssyEv.evidence.filename = 'connectorassembly-datasheet.pdf'
+  connectorAssyEv.evidence.localPath = '/connectorassembly-datasheet.pdf'
+  connectorAssyEv.name = 'connectorassembly-datasheet.pdf'
+
+  const connectorAssyPep = makePepNode('connector-assy', connectorAssyEv.id, 'Mechanical Assembly Profile', [
+    { id: 'f-contacts', name: 'Contact count', category: 'mechanical', type: 'value', value: '24 positions', confidence: 'high' },
+    { id: 'f-pitch', name: 'Contact pitch', category: 'mechanical', type: 'value', value: '1.25mm', confidence: 'high' },
+    { id: 'f-current', name: 'Current rating', category: 'electrical', type: 'value', value: '1.0A per contact', confidence: 'high' },
+    { id: 'f-mating', name: 'Mating cycles', category: 'mechanical', type: 'value', value: '> 500 cycles', confidence: 'medium' },
+    { id: 'f-plating', name: 'Contact plating', category: 'mechanical', type: 'text', value: 'Gold over nickel', confidence: 'high' },
+  ], 'MicroCo')
+
   const connectorAssy = makeNode('connector-assy', 'Connector Assembly', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [{ ...SDA_INTERNAL_MICROCO, pins: [] }],
-    children: [],
+    children: [connectorAssyEv, connectorAssyPep],
     x: 500, y: 1200,
+    description: 'Board-to-board connector assembly for inter-module signal and power routing.',
   })
 
   const radiantNetwork = {

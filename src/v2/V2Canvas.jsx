@@ -265,6 +265,9 @@ const V2Canvas = forwardRef(function V2Canvas({
   onSelect,
   onCloseSel,
   onOpenSubgraph,
+  isSubchain,
+  subchainFocusId,
+  onExitSubchain,
   modalOpen,
   panelWidth = 0,
   onLayerChange,
@@ -274,6 +277,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onParseEvidence,
   onRunEvaluation,
   activeParty,
+  initialFocusId,
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -473,6 +477,11 @@ const V2Canvas = forwardRef(function V2Canvas({
 
   // Persistent layer tint background color — resolved to hex in JS
   const layerBgColor = useMemo(() => {
+    // Subchain mode — subtle warm-grey tint
+    if (isSubchain) {
+      const isDark = document.documentElement.dataset.theme !== 'light'
+      return isDark ? '#10131a' : '#dbd7d0'
+    }
     if (depth === 0 || !currentLayer.color) return null
     const resolved = parseCSSColor(currentLayer.color)
     if (!resolved) return null
@@ -485,7 +494,7 @@ const V2Canvas = forwardRef(function V2Canvas({
       bg.b * (1 - mix) + resolved.b * mix,
     )
     return '#' + tinted.getHexString()
-  }, [depth, currentLayer.color])
+  }, [depth, currentLayer.color, isSubchain])
 
   // Clamp pan
   const clampPan = useCallback((x, y) => {
@@ -986,11 +995,14 @@ const V2Canvas = forwardRef(function V2Canvas({
     const gridGroup = gridGroupRef.current
     if (!scene || !camera || !gridGroup || gridGroup.children.length === 0) return
 
-    // Cancel any previous streak animation
+    // Cancel any previous streak animation + clean up leftover geometry
     if (streakAnimRef.current) {
       cancelAnimationFrame(streakAnimRef.current)
       streakAnimRef.current = null
     }
+    const leftover = []
+    scene.traverse(obj => { if (obj.isLineSegments) leftover.push(obj) })
+    leftover.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose() })
 
     // Get current dot positions from the grid Points object
     const dotPoints = gridGroup.children[0]
@@ -1098,6 +1110,99 @@ const V2Canvas = forwardRef(function V2Canvas({
         streakMat.dispose()
         dotPoints.material.opacity = savedDotOpacity
         dotPoints.visible = true
+        dirtyRef.current = true
+        streakAnimRef.current = null
+      }
+    }
+    streakAnimRef.current = requestAnimationFrame(tick)
+  }, [])
+
+  // Animate dot grid into horizontal line streaks (lateral slide for subchain transitions)
+  const animateLateralStreaks = useCallback((duration, direction = 'enter') => {
+    const scene = sceneRef.current
+    const camera = cameraRef.current
+    const gridGroup = gridGroupRef.current
+    if (!scene || !camera || !gridGroup || gridGroup.children.length === 0) return
+
+    if (streakAnimRef.current) {
+      cancelAnimationFrame(streakAnimRef.current)
+      streakAnimRef.current = null
+    }
+    const leftover = []
+    scene.traverse(obj => { if (obj.isLineSegments) leftover.push(obj) })
+    leftover.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose() })
+
+    const dotPoints = gridGroup.children[0]
+    if (!dotPoints || !dotPoints.geometry) return
+
+    const dotPositions = dotPoints.geometry.attributes.position.array.slice()
+    const dotCount = dotPositions.length / 3
+    const savedDotOpacity = dotPoints.material.opacity
+
+    const streakArray = new Float32Array(dotCount * 6)
+    const streakGeo = new THREE.BufferGeometry()
+    streakGeo.setAttribute('position', new THREE.Float32BufferAttribute(streakArray, 3))
+
+    const isDark = document.documentElement.dataset.theme !== 'light'
+    const streakColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
+    const maxOpacity = isDark ? 0.5 : 0.35
+
+    const streakMat = new THREE.LineBasicMaterial({
+      color: streakColor, transparent: true, opacity: 0, depthWrite: false,
+    })
+
+    const streakLines = new THREE.LineSegments(streakGeo, streakMat)
+    streakLines.position.z = -0.5
+    scene.add(streakLines)
+
+    dotPoints.material.opacity = savedDotOpacity * 0.3
+
+    const frustumW = camera.right - camera.left
+    const maxLength = frustumW * 0.12
+    const sign = direction === 'enter' ? 1 : -1
+
+    const start = performance.now()
+    const tick = () => {
+      const elapsed = performance.now() - start
+      const t = Math.min(1, elapsed / duration)
+      const ease = 1 - Math.pow(1 - t, 3)
+      const currentLength = maxLength * ease
+
+      let opacity
+      if (t < 0.2) opacity = (t / 0.2) * maxOpacity
+      else if (t < 0.6) opacity = maxOpacity
+      else opacity = maxOpacity * (1 - (t - 0.6) / 0.4)
+      streakMat.opacity = Math.max(0, opacity)
+
+      if (t > 0.6) {
+        const restore = (t - 0.6) / 0.4
+        dotPoints.material.opacity = savedDotOpacity * (0.3 + 0.7 * restore)
+      }
+
+      for (let i = 0; i < dotCount; i++) {
+        const bx = dotPositions[i * 3]
+        const by = dotPositions[i * 3 + 1]
+        const bz = dotPositions[i * 3 + 2]
+        const i6 = i * 6
+        const phase = ((bx * 0.01 + by * 0.017) % 1)
+        const staggeredLength = currentLength * (0.7 + 0.3 * Math.abs(phase))
+        streakArray[i6] = bx
+        streakArray[i6 + 1] = by
+        streakArray[i6 + 2] = bz
+        streakArray[i6 + 3] = bx + staggeredLength * sign
+        streakArray[i6 + 4] = by
+        streakArray[i6 + 5] = bz
+      }
+      streakGeo.attributes.position.needsUpdate = true
+      dirtyRef.current = true
+
+      if (t < 1) {
+        streakAnimRef.current = requestAnimationFrame(tick)
+      } else {
+        scene.remove(streakLines)
+        streakGeo.dispose()
+        streakMat.dispose()
+        dotPoints.material.opacity = savedDotOpacity
         dirtyRef.current = true
         streakAnimRef.current = null
       }
@@ -1489,7 +1594,8 @@ const V2Canvas = forwardRef(function V2Canvas({
   useImperativeHandle(ref, () => ({
     dive: (node) => handleDive(node),
     surface: () => handleSurface(),
-  }), [handleDive, handleSurface])
+    playLateralStreaks: (direction) => animateLateralStreaks(800, direction),
+  }), [handleDive, handleSurface, animateLateralStreaks])
 
   // Report layer changes to parent
   useEffect(() => {
@@ -1636,6 +1742,15 @@ const V2Canvas = forwardRef(function V2Canvas({
     camera.lookAt(0, 0, 0)
     cameraRef.current = camera
 
+    // Center camera on initial focus node if provided
+    if (initialFocusId) {
+      const focusNode = rootNodes.find(n => n.id === initialFocusId)
+      if (focusNode) {
+        camPosRef.current = { x: focusNode.x, y: focusNode.y }
+        zoomRef.current = 0.7
+      }
+    }
+
     updateCamera()
     buildGrid(0)
 
@@ -1666,6 +1781,11 @@ const V2Canvas = forwardRef(function V2Canvas({
     })
     ro.observe(container)
 
+    // Trigger lateral streaks on subchain enter (after scene is ready)
+    if (isSubchain) {
+      setTimeout(() => animateLateralStreaks(800, 'enter'), 100)
+    }
+
     return () => {
       cancelAnimationFrame(animId)
       if (gridAnimRef.current) cancelAnimationFrame(gridAnimRef.current)
@@ -1675,6 +1795,22 @@ const V2Canvas = forwardRef(function V2Canvas({
       renderer.dispose()
     }
   }, [updateCamera, updateOverlay, buildGrid])
+
+  // Cleanup streak artifacts on unmount (handles key-change remounts mid-animation)
+  useEffect(() => {
+    return () => {
+      if (streakAnimRef.current) {
+        cancelAnimationFrame(streakAnimRef.current)
+        streakAnimRef.current = null
+      }
+      const scene = sceneRef.current
+      if (scene) {
+        const toRemove = []
+        scene.traverse(obj => { if (obj.isLineSegments) toRemove.push(obj) })
+        toRemove.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose() })
+      }
+    }
+  }, [])
 
   // Theme change rebuilds grid + edges + clear color
   useEffect(() => {
@@ -1812,6 +1948,11 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (wasDragRef.current) return
     if (e.target !== overlayRef.current && e.target !== canvasRef.current && e.target !== containerRef.current) return
 
+    if (isSubchain && onExitSubchain) {
+      onExitSubchain()
+      return
+    }
+
     if (layerStack.length > 1) {
       handleSurface()
       return
@@ -1835,7 +1976,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     zoomRef.current = newZoom
     setZoom(newZoom)
     updateCamera()
-  }, [layerStack.length, handleSurface, clampPan, updateCamera])
+  }, [layerStack.length, handleSurface, clampPan, updateCamera, isSubchain, onExitSubchain])
 
   // Edge hover state for tooltip (raycaster-based)
   const [hoveredEdge, setHoveredEdge] = useState(null)
@@ -2126,6 +2267,12 @@ const V2Canvas = forwardRef(function V2Canvas({
       <LayerBorder
         color={currentLayer.color || 'var(--text-secondary)'}
         visible={depth > 0 && !transitioning}
+        rightInset={panelWidth}
+      />
+      {/* Subchain border */}
+      <LayerBorder
+        color="rgba(255, 255, 255, 0.4)"
+        visible={isSubchain && !transitioning}
         rightInset={panelWidth}
       />
 
