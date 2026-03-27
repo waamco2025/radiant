@@ -391,32 +391,66 @@ export default function V2App() {
     walkUpstream(subchainFocusId)
     walkDownstream(subchainFocusId)
 
+    // Ensure own party is included if it has a direct edge to any chain node
+    const activeParty = activeRole?.party
+    const ownPartyNode = nodes.find(n => n.category === 'party' && (n.owner === activeParty || n.name === activeParty))
+    if (ownPartyNode && !chainNodeIds.has(ownPartyNode.id)) {
+      const connectsToChain = edges.some(e =>
+        e.from === ownPartyNode.id && chainNodeIds.has(e.to)
+      )
+      if (connectsToChain) chainNodeIds.add(ownPartyNode.id)
+    }
+
     const chainNodes = nodes.filter(n => chainNodeIds.has(n.id))
     const chainEdges = edges.filter(e => chainNodeIds.has(e.from) && chainNodeIds.has(e.to))
 
-    // BFS from roots (no incoming chain edges) to compute depth
-    const inDegree = {}
-    chainNodes.forEach(n => { inDegree[n.id] = 0 })
-    chainEdges.forEach(e => { if (inDegree[e.to] !== undefined) inDegree[e.to]++ })
-
+    // ===== DEPTH COMPUTATION: forward BFS from own party =====
     const depths = {}
     const queue = []
-    chainNodes.forEach(n => {
-      if (inDegree[n.id] === 0) { depths[n.id] = 0; queue.push(n.id) }
-    })
+
+    // Find own party node in the chain (may have been added above)
+    const ownPartyInChain = chainNodes.find(n =>
+      n.category === 'party' && (n.owner === activeParty || n.name === activeParty)
+    )
+
+    if (ownPartyInChain) {
+      depths[ownPartyInChain.id] = 0
+      queue.push(ownPartyInChain.id)
+    } else {
+      // No own party in chain — use node with no incoming chain edges
+      const inDegree = {}
+      chainNodes.forEach(n => { inDegree[n.id] = 0 })
+      chainEdges.forEach(e => { if (inDegree[e.to] !== undefined) inDegree[e.to]++ })
+      const root = chainNodes.find(n => inDegree[n.id] === 0)
+      if (root) { depths[root.id] = 0; queue.push(root.id) }
+    }
+
+    // Forward BFS: follow from → to only
     while (queue.length > 0) {
       const current = queue.shift()
+      const currentDepth = depths[current]
       chainEdges.forEach(e => {
-        if (e.from === current) {
-          const newDepth = (depths[current] || 0) + 1
-          if (depths[e.to] === undefined || newDepth > depths[e.to]) {
-            depths[e.to] = newDepth
-          }
-          if (!queue.includes(e.to)) queue.push(e.to)
+        if (e.from === current && depths[e.to] === undefined) {
+          depths[e.to] = currentDepth + 1
+          queue.push(e.to)
         }
       })
     }
-    chainNodes.forEach(n => { if (depths[n.id] === undefined) depths[n.id] = 0 })
+
+    // Unreached nodes: place 1 depth after closest reached neighbor
+    const reachedDepths = Object.values(depths)
+    const maxReached = reachedDepths.length > 0 ? Math.max(...reachedDepths) : 0
+    chainNodes.forEach(n => {
+      if (depths[n.id] !== undefined) return
+      let bestNeighborDepth = -1
+      chainEdges.forEach(e => {
+        if (e.from === n.id && depths[e.to] !== undefined)
+          bestNeighborDepth = Math.max(bestNeighborDepth, depths[e.to])
+        if (e.to === n.id && depths[e.from] !== undefined)
+          bestNeighborDepth = Math.max(bestNeighborDepth, depths[e.from])
+      })
+      depths[n.id] = bestNeighborDepth >= 0 ? bestNeighborDepth + 1 : (maxReached || 0) + 1
+    })
 
     const byDepth = {}
     chainNodes.forEach(n => {
@@ -442,7 +476,7 @@ export default function V2App() {
     repositioned.forEach(n => { chainNodeMap[n.id] = n })
 
     return { nodes: repositioned, edges: chainEdges, nodeMap: chainNodeMap, focusId: subchainFocusId }
-  }, [subchainFocusId, nodes, edges, nodeMap])
+  }, [subchainFocusId, nodes, edges, nodeMap, activeRole])
 
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
@@ -537,11 +571,12 @@ export default function V2App() {
     if (transitioningSubchain.current) return
     transitioningSubchain.current = true
 
-    canvasRef.current?.playWarpStreaks?.(false)
+    canvasRef.current?.playLateralStreaks?.('enter')
     canvasRef.current?.fadeOutCards?.()
 
     setTimeout(() => {
       setSubchainFocusId(nodeId)
+      setSel(nodeId)
       setTimeout(() => {
         canvasRef.current?.fadeInCards?.()
         canvasRef.current?.fitAll?.()
@@ -552,8 +587,28 @@ export default function V2App() {
 
   const handleOpenSubgraph = useCallback((node) => {
     if (!node || node.category === 'party') return
-    enterSubchain(node.id)
-  }, [enterSubchain])
+
+    if (subchainFocusId) {
+      if (node.id === subchainFocusId) return
+      if (transitioningSubchain.current) return
+      transitioningSubchain.current = true
+
+      canvasRef.current?.playLateralStreaks?.('enter')
+      canvasRef.current?.fadeOutCards?.()
+
+      setTimeout(() => {
+        setSubchainFocusId(node.id)
+        setSel(node.id)
+        setTimeout(() => {
+          canvasRef.current?.fadeInCards?.()
+          canvasRef.current?.fitAll?.()
+          transitioningSubchain.current = false
+        }, 50)
+      }, 250)
+    } else {
+      enterSubchain(node.id)
+    }
+  }, [subchainFocusId, enterSubchain])
 
   const handleCloseModal = useCallback(() => {
     setModalNode(null)
@@ -575,8 +630,8 @@ export default function V2App() {
     if (!sel || !nodeMap[sel]) return
     const node = nodeMap[sel]
     if (node.category === 'party') return
-    enterSubchain(node.id)
-  }, [sel, nodeMap, enterSubchain])
+    handleOpenSubgraph(node)
+  }, [sel, nodeMap, handleOpenSubgraph])
 
   const handlePanelExpandStack = useCallback(() => {
     if (sel && nodeMap[sel]) canvasRef.current?.dive(nodeMap[sel])
@@ -587,7 +642,7 @@ export default function V2App() {
     transitioningSubchain.current = true
     const lastSel = sel
 
-    canvasRef.current?.playWarpStreaks?.(true)
+    canvasRef.current?.playLateralStreaks?.('exit')
     canvasRef.current?.fadeOutCards?.()
 
     setTimeout(() => {
@@ -595,9 +650,9 @@ export default function V2App() {
       setTimeout(() => {
         canvasRef.current?.fadeInCards?.()
         if (lastSel && nodeMap[lastSel]) {
-          canvasRef.current?.panTo?.(nodeMap[lastSel].x, nodeMap[lastSel].y)
+          canvasRef.current?.panToWithZoom?.(nodeMap[lastSel].x, nodeMap[lastSel].y, 0.7)
         } else {
-          canvasRef.current?.fitAll?.()
+          canvasRef.current?.panToWithZoom?.(0, 0, 0.7)
         }
         transitioningSubchain.current = false
       }, 50)
@@ -2547,13 +2602,6 @@ export default function V2App() {
           _noBackdrop
         />
       )}
-      {evalContext && console.log('EVAL CONTEXT:', {
-        assetNode: evalContext.assetNode?.name,
-        evidenceNode: evalContext.evidenceNode?.name,
-        disclosureType: evalContext.disclosureType,
-        parsedFieldsCount: evalContext.parsedFields?.length,
-        evidenceLocalPath: evalContext.evidenceNode?.evidence?.localPath,
-      })}
       {evalContext && (
         <RunEvaluationModal
           assetNode={evalContext.assetNode}

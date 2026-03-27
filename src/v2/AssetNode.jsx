@@ -262,7 +262,7 @@ function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence,
   if (isChild && !isAnchor && onSurface) {
     buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   }
-  if (!isParty) buttons.push({ icon: '⛓', tooltip: 'View chain', onClick: onOpenSubgraph })
+  if (!isParty && onOpenSubgraph) buttons.push({ icon: '⛓', tooltip: 'View chain', onClick: onOpenSubgraph })
 
   return (
     <div style={{
@@ -650,7 +650,7 @@ export default function AssetNode({
           onParseEvidence={handleParseEvidence}
           onRunEvaluation={handleRunEvaluation}
           onDive={handleDive}
-          onOpenSubgraph={() => onOpenSubgraph?.(node)}
+          onOpenSubgraph={onOpenSubgraph ? () => onOpenSubgraph(node) : undefined}
           onSurface={onSurface}
           hasChildren={hasChildren}
           isAnchor={isAnchor}

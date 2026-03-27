@@ -1139,6 +1139,99 @@ const V2Canvas = forwardRef(function V2Canvas({
     streakAnimRef.current = requestAnimationFrame(tick)
   }, [])
 
+  // Animate dot grid into horizontal line streaks (lateral slide for subchain transitions)
+  const animateLateralStreaks = useCallback((duration, direction = 'enter') => {
+    const scene = sceneRef.current
+    const camera = cameraRef.current
+    const gridGroup = gridGroupRef.current
+    if (!scene || !camera || !gridGroup || gridGroup.children.length === 0) return
+
+    if (streakAnimRef.current) {
+      cancelAnimationFrame(streakAnimRef.current)
+      streakAnimRef.current = null
+    }
+    const leftover = []
+    scene.traverse(obj => { if (obj.userData?._isStreak) leftover.push(obj) })
+    leftover.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose() })
+
+    const dotPoints = gridGroup.children[0]
+    if (!dotPoints || !dotPoints.geometry) return
+
+    const dotPositions = dotPoints.geometry.attributes.position.array.slice()
+    const dotCount = dotPositions.length / 3
+    const savedDotOpacity = dotPoints.material.opacity
+
+    const streakArray = new Float32Array(dotCount * 6)
+    const streakGeo = new THREE.BufferGeometry()
+    streakGeo.setAttribute('position', new THREE.Float32BufferAttribute(streakArray, 3))
+
+    const isDark = document.documentElement.dataset.theme !== 'light'
+    const streakColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
+    const maxOpacity = isDark ? 0.35 : 0.25
+
+    const streakMat = new THREE.LineBasicMaterial({
+      color: streakColor, transparent: true, opacity: 0, depthWrite: false,
+    })
+
+    const streakLines = new THREE.LineSegments(streakGeo, streakMat)
+    streakLines.position.z = -0.5
+    streakLines.userData._isStreak = true
+    scene.add(streakLines)
+
+    dotPoints.material.opacity = savedDotOpacity * 0.3
+
+    const frustumW = camera.right - camera.left
+    const maxLength = frustumW * 0.10
+    const sign = direction === 'enter' ? 1 : -1
+
+    const start = performance.now()
+    const tick = () => {
+      const elapsed = performance.now() - start
+      const t = Math.min(1, elapsed / duration)
+      const ease = 1 - Math.pow(1 - t, 3)
+      const currentLength = maxLength * ease
+
+      let opacity
+      if (t < 0.25) opacity = (t / 0.25) * maxOpacity
+      else if (t < 0.55) opacity = maxOpacity
+      else opacity = maxOpacity * (1 - (t - 0.55) / 0.45)
+      streakMat.opacity = opacity
+
+      if (t > 0.6) {
+        const restore = (t - 0.6) / 0.4
+        dotPoints.material.opacity = savedDotOpacity * (0.3 + 0.7 * restore)
+      }
+
+      const positions = streakGeo.attributes.position.array
+      for (let i = 0; i < dotCount; i++) {
+        const x = dotPositions[i * 3]
+        const y = dotPositions[i * 3 + 1]
+        const z = dotPositions[i * 3 + 2]
+        positions[i * 6 + 0] = x
+        positions[i * 6 + 1] = y
+        positions[i * 6 + 2] = z
+        positions[i * 6 + 3] = x + currentLength * sign
+        positions[i * 6 + 4] = y
+        positions[i * 6 + 5] = z
+      }
+      streakGeo.attributes.position.needsUpdate = true
+      dirtyRef.current = true
+
+      if (t < 1) {
+        streakAnimRef.current = requestAnimationFrame(tick)
+      } else {
+        scene.remove(streakLines)
+        streakGeo.dispose()
+        streakMat.dispose()
+        dotPoints.material.opacity = savedDotOpacity
+        dotPoints.visible = true
+        dirtyRef.current = true
+        streakAnimRef.current = null
+      }
+    }
+    streakAnimRef.current = requestAnimationFrame(tick)
+  }, [])
+
   // Fit camera to a node list
   // Pure computation: returns { centerX, centerY, zoom } for framing a set of nodes
   const computeFitCamera = useCallback((nodeList) => {
@@ -1537,11 +1630,19 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     // 5. Finish
     setTimeout(() => {
+      delete document.documentElement.dataset.vtDirection
       buildGrid(targetDepth)
       transitioningRef.current = false
       setTransitioning(false)
       setDiveTargetId(null)
       setUnfurlSettle(false)
+      requestAnimationFrame(() => {
+        const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
+        if (cards) cards.forEach(card => {
+          card.style.viewTransitionName = ''
+          card.style.transform = ''
+        })
+      })
     }, 600)
   }, [layerStack, currentLayer.parentNode, updateCamera, clearGroup, buildEdges, fadeEdgesIn, updateClearColor, worldToScreen, onSelect, animateDotStreaks, buildGrid])
 
@@ -1550,12 +1651,27 @@ const V2Canvas = forwardRef(function V2Canvas({
     dive: (node) => handleDive(node),
     surface: () => handleSurface(),
     playWarpStreaks: (inward) => animateDotStreaks(600, inward),
+    playLateralStreaks: (direction) => animateLateralStreaks(800, direction),
     fitAll: () => {
       const layer = layerStackRef.current[layerStackRef.current.length - 1]
-      if (layer?.nodes) fitToNodes(layer.nodes)
+      if (layer?.nodes) {
+        fitToNodes(layer.nodes)
+        if (zoomRef.current < 0.68) {
+          zoomRef.current = 0.68
+          setZoom(0.68)
+          updateCamera()
+        }
+      }
     },
     panTo: (x, y) => {
       camPosRef.current = { x, y }
+      updateCamera()
+      dirtyRef.current = true
+    },
+    panToWithZoom: (x, y, z) => {
+      camPosRef.current = { x, y }
+      zoomRef.current = z
+      setZoom(z)
       updateCamera()
       dirtyRef.current = true
     },
@@ -1583,7 +1699,7 @@ const V2Canvas = forwardRef(function V2Canvas({
         }, duration + 50)
       })
     },
-  }), [handleDive, handleSurface, animateDotStreaks, fitToNodes, updateCamera])
+  }), [handleDive, handleSurface, animateDotStreaks, animateLateralStreaks, fitToNodes, updateCamera])
 
   // Report layer changes to parent
   useEffect(() => {
@@ -1922,13 +2038,13 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (wasDragRef.current) return
     if (e.target !== overlayRef.current && e.target !== canvasRef.current && e.target !== containerRef.current) return
 
-    if (isSubchain && onExitSubchain) {
-      onExitSubchain()
+    if (layerStack.length > 1) {
+      handleSurface()
       return
     }
 
-    if (layerStack.length > 1) {
-      handleSurface()
+    if (isSubchain && onExitSubchain) {
+      onExitSubchain()
       return
     }
 
@@ -2110,7 +2226,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 pointerEvents: transitioning ? 'none' : 'auto',
                 opacity: chainNodeIds && !chainNodeIds.has(node.id) ? 0.18 : 1,
                 transition: 'opacity 200ms ease',
-                ...(isDiveTarget || isAnchor ? { viewTransitionName: 'dive-target' } : {}),
+                ...((isDiveTarget || isAnchor) && transitioning ? { viewTransitionName: 'dive-target' } : {}),
               }}>
                 {childRings}
                 <AssetNodeDot
@@ -2118,7 +2234,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   isSelected={selectedId === node.id}
                   onSelect={onSelect}
                   onDive={isAnchor ? undefined : handleDive}
-                  onOpenSubgraph={onOpenSubgraph}
+                  onOpenSubgraph={(node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
                   onConnect={transitioning ? undefined : onConnect}
                   onDisclose={transitioning ? undefined : onDisclose}
                   onAddEvidence={transitioning ? undefined : onAddEvidence}
@@ -2134,11 +2250,11 @@ const V2Canvas = forwardRef(function V2Canvas({
           const cardStyle = isAnchor ? {
             ...getCardStyle(sp),
             opacity: 1.0,
-            viewTransitionName: 'dive-target',
+            ...(transitioning ? { viewTransitionName: 'dive-target' } : {}),
             pointerEvents: transitioning ? 'none' : 'auto',
           } : {
             ...getCardStyle(sp),
-            ...(isDiveTarget ? { viewTransitionName: 'dive-target' } : {}),
+            ...(isDiveTarget && transitioning ? { viewTransitionName: 'dive-target' } : {}),
           }
 
           // Child cards: hidden until edges draw, then fade in with stagger
@@ -2160,7 +2276,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 node={node}
                 isSelected={selectedId === node.id}
                 onSelect={transitioning ? undefined : onSelect}
-                onOpenSubgraph={(transitioning || node.id === subchainFocusId) ? undefined : onOpenSubgraph}
+                onOpenSubgraph={(transitioning || node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
                 onDive={(transitioning || isAnchor) ? undefined : handleDive}
                 onSurface={depth > 0 ? handleSurface : undefined}
                 isAnchor={isAnchor}
