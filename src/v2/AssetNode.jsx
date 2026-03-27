@@ -250,7 +250,11 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
 function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
-  if (onCreateSDA && !isParty) buttons.push({ icon: '🌐', tooltip: 'Publish', onClick: onCreateSDA })
+  if (onCreateSDA && !isParty) buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}>
+    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+    <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+    <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+  </svg>, tooltip: 'Publish this Asset', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })

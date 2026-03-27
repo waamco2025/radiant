@@ -321,14 +321,11 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{
               width: 56, height: 56, borderRadius: '50%',
-              background: 'color-mix(in srgb, var(--accent-sky) 12%, transparent)',
+              background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 20px', border: '2px solid var(--accent-sky)',
+              margin: '0 auto 20px', border: '2px solid var(--accent-green)',
             }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-sky)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-              </svg>
+              <span style={{ fontSize: 26, color: 'var(--accent-green)' }}>✓</span>
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{node.name}</div>
             <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 24 }}>

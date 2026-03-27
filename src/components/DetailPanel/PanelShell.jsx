@@ -202,7 +202,7 @@ export default function PanelShell({
             flexShrink: 0,
             background: 'var(--bg-card)',
           }}>
-            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="🌐" label="Publish" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon={<svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>} label="Publish" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}

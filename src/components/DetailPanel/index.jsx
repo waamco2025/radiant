@@ -101,8 +101,14 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
                   background: 'color-mix(in srgb, var(--text-dim) 8%, transparent)',
                   border: '2px dashed var(--text-dim)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  margin: '0 auto 14px', fontSize: 20, color: 'var(--text-dim)',
-                }}>⏳</div>
+                  margin: '0 auto 14px', color: 'var(--text-dim)',
+                }}>
+                  <svg width={24} height={24} viewBox="0 0 16 16" fill="none">
+                    <rect x="3" y="1" width="10" height="2" rx="0.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                    <rect x="3" y="13" width="10" height="2" rx="0.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                    <path d="M4 3v2.5L7.5 8 4 10.5V13h8v-2.5L8.5 8 12 5.5V3" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinejoin="round" />
+                  </svg>
+                </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   Awaiting Disclosure
                 </div>
