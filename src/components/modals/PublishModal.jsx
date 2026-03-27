@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
   SDATypeCard, ExpiryPicker, expiryLabel, SDA_TYPES,
 } from './ModalShared'
+import { StepFieldSelection } from './DisclosureResponseModal'
 
 const CATEGORY_ICONS = { person: '●', place: '◆', process: '◎', product: '■', party: '⬡' }
 const CATEGORY_COLORS = { person: 'var(--accent-cyan)', place: 'var(--accent-green)', process: 'var(--accent-amber)', product: 'var(--accent-blue)', party: 'var(--accent-indigo)' }
@@ -152,7 +153,7 @@ function StepEvalSelect({ evals, selected, setSelected }) {
 }
 
 /* ─── Step 4: Expiry + review ─── */
-function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset, selectedEvals }) {
+function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset, selectedEvals, pepFields, selectedFields }) {
   return (
     <div>
       <FieldLabel label="Set expiration" />
@@ -165,6 +166,13 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
         <InfoRow label="Asset" value={<span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{asset.name}</span>} />
         <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
         <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
+        {level === 'selective' && pepFields && pepFields.length > 0 && (
+          <InfoRow label="Disclosed fields" value={
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
+              {selectedFields?.size || 0} of {pepFields.length}
+            </span>
+          } />
+        )}
         {level === 'proofonly' && selectedEvals.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
             <div style={{ width: 140, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)', paddingLeft: 4, paddingTop: 8 }}>Evaluation(s)</div>
@@ -187,7 +195,11 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
    MAIN MODAL
    ═══════════════════════════════════════════════════════════════════════ */
 export default function PublishModal({ node, onClose, onComplete, _noBackdrop }) {
-  const isAlreadyPublished = (node.sdas || []).some(s => s.party === 'Radiant Network')
+  // Capture on mount — won't change when SDA is added mid-flow
+  const wasAlreadyPublished = useRef(
+    (node?.sdas || []).some(s => s.party === 'Radiant Network')
+  )
+  const isAlreadyPublished = wasAlreadyPublished.current
 
   const [step, setStep] = useState(0)
   const [level, setLevel] = useState(null)
@@ -210,9 +222,30 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
       }))
   }, [node])
 
+  const pepFields = useMemo(() => {
+    if (!node?.children) return []
+    return node.children
+      .filter(c => c.isParse || c.category === 'parse')
+      .flatMap(pn => (pn.parsedFields || []).map(f => ({
+        ...f, templateName: pn.name, parseNodeId: pn.id,
+        fieldKey: `${pn.id}::${f.id}`,
+      })))
+  }, [node])
+
+  const [selectedFields, setSelectedFields] = useState(new Set())
+  const [allFieldsSelected, setAllFieldsSelected] = useState(true)
+
+  useEffect(() => {
+    if (pepFields.length > 0) {
+      setSelectedFields(new Set(pepFields.map(f => f.fieldKey)))
+      setAllFieldsSelected(true)
+    }
+  }, [pepFields])
+
   const hasProofEval = completedEvals.length > 0
+  const needsFieldStep = level === 'selective' && pepFields.length > 0
   const needsEvalStep = level === 'proofonly'
-  const totalSteps = needsEvalStep ? 4 : 3
+  const totalSteps = 3 + (needsFieldStep ? 1 : 0) + (needsEvalStep ? 1 : 0)
 
   const hasChildren = node.children && node.children.length > 0
   const hasParsedData = node.children?.some(c => c.isParse || c.category === 'parse')
@@ -231,15 +264,37 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
   }
 
   const nextStep = () => {
-    if (step === 1 && !needsEvalStep) setStep(step + 2)
-    else setStep(step + 1)
+    if (step === 1) {
+      if (needsFieldStep) setStep(2)
+      else if (needsEvalStep) setStep(3)
+      else setStep(4)
+    } else if (step === 2 && needsFieldStep) {
+      setStep(4)
+    } else if (step === 3 && needsEvalStep) {
+      setStep(4)
+    } else {
+      setStep(step + 1)
+    }
   }
   const prevStep = () => {
-    if (step === 3 && !needsEvalStep) setStep(1)
-    else setStep(step - 1)
+    if (step === 4) {
+      if (needsFieldStep) setStep(2)
+      else if (needsEvalStep) setStep(3)
+      else setStep(1)
+    } else if (step === 3 && needsEvalStep) {
+      setStep(1)
+    } else if (step === 2 && needsFieldStep) {
+      setStep(1)
+    } else {
+      setStep(step - 1)
+    }
   }
   const currentStepNum = () => {
-    if (!needsEvalStep && step === 3) return 3
+    if (step === 0) return 1
+    if (step === 1) return 2
+    if (step === 2 && needsFieldStep) return 3
+    if (step === 3 && needsEvalStep) return 3
+    if (step === 4) return needsFieldStep || needsEvalStep ? 4 : 3
     return step + 1
   }
 
@@ -250,6 +305,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
       assetPin: node.pin,
       disclosureType: level,
       selectedEvals: level === 'proofonly' ? selectedEvals : null,
+      selectedFields: level === 'selective' ? [...selectedFields] : null,
       expiry,
       customDate,
     })
@@ -262,7 +318,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
       <Modal width={540}>
         <ModalHeader title="Already Published" onClose={onClose} />
         <ModalBody>
-          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{
               width: 56, height: 56, borderRadius: '50%',
               background: 'color-mix(in srgb, var(--accent-sky) 12%, transparent)',
@@ -325,6 +381,13 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
             <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
             <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
+            {level === 'selective' && pepFields.length > 0 && (
+              <InfoRow label="Disclosed fields" value={
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
+                  {selectedFields.size} of {pepFields.length}
+                </span>
+              } />
+            )}
             {level === 'proofonly' && selectedEvals.length > 0 && (
               <InfoRow label="Evaluation(s)" value={
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -348,18 +411,30 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
       <ModalBody>
         {step === 0 && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
         {step === 1 && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}
-        {step === 2 && <StepEvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals} />}
-        {step === 3 && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} />}
+        {step === 2 && needsFieldStep && (
+          <StepFieldSelection
+            pepFields={pepFields}
+            selectedFields={selectedFields}
+            setSelectedFields={setSelectedFields}
+            allFieldsSelected={allFieldsSelected}
+            setAllFieldsSelected={setAllFieldsSelected}
+          />
+        )}
+        {step === 3 && needsEvalStep && <StepEvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals} />}
+        {step === 4 && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} pepFields={pepFields} selectedFields={selectedFields} />}
       </ModalBody>
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step > 0 && <Btn label="← Back" onClick={prevStep} />}
-          <StepDots current={step === 3 ? (needsEvalStep ? 3 : 2) : step} total={totalSteps} />
+          <StepDots current={currentStepNum() - 1} total={totalSteps} />
         </div>
         {step === 0 && <Btn label="Next →" accent disabled={!isPublishReady} onClick={() => setStep(1)} />}
         {step === 1 && <Btn label="Next →" accent disabled={!level || (level === 'proofonly' && !hasProofEval)} onClick={nextStep} />}
-        {step === 2 && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={() => setStep(3)} />}
-        {step === 3 && <Btn label="Disclose to Directory" accent onClick={handlePublish} />}
+        {step === 2 && needsFieldStep && (
+          <Btn label={`Disclose ${selectedFields.size} Fields →`} accent disabled={selectedFields.size === 0} onClick={nextStep} />
+        )}
+        {step === 3 && needsEvalStep && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={nextStep} />}
+        {step === 4 && <Btn label="Disclose to Directory" accent onClick={handlePublish} />}
       </ModalFooter>
     </Modal>
   )

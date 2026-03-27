@@ -55,19 +55,19 @@ export const CATEGORY_CONFIG = {
 
 export const REVOKE_WARNINGS = {
   full: {
-    title: '⚠ Ownership disclosure',
-    message: 'You are the sole owner. Revoking will archive this asset, terminate downstream disclosures, and remove it from your network.',
+    title: '⚠ Full disclosure',
+    message: "Revoking removes the recipient's ability to extract data fields and run evaluations. The disclosed node and its children will be removed from their network.",
   },
   selective: {
     title: '⚠ Selective disclosure',
-    message: "Revoking removes the recipient's ability to run inference requirements. Existing results on their network will be marked as revoked.",
+    message: "Revoking removes the recipient's access to the disclosed fields. Existing evaluation results on their network will be marked as revoked.",
   },
   proofonly: {
     title: '⚠ Proof-only disclosure',
-    message: 'Revoking invalidates the POE shared with this party. Their badge will be marked as revoked.',
+    message: "Revoking invalidates the proof-of-evaluation shared with this party. Their pass/fail badge will be marked as revoked.",
   },
   cascade: {
     title: '⚠ Cascade disclosure',
-    message: 'Revoking removes your cascaded access to this asset. If the upstream SDA between the intermediary and the owner is also revoked, this cascade is automatically invalidated — two points of failure.',
+    message: 'Revoking removes your cascaded access to this asset. If the upstream disclosure is also revoked, this cascade is automatically invalidated.',
   },
 }

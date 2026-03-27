@@ -329,7 +329,7 @@ function StepCascade({ request, node, level, selected, setSelected, upstreamAsse
 }
 
 /* ─── Step: Field Selection (Selective Disclosure) ─── */
-function StepFieldSelection({ pepFields, selectedFields, setSelectedFields, allFieldsSelected, setAllFieldsSelected }) {
+export function StepFieldSelection({ pepFields, selectedFields, setSelectedFields, allFieldsSelected, setAllFieldsSelected }) {
   const totalCount = pepFields.length
   const selectedCount = selectedFields.size
 

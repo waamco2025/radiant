@@ -859,6 +859,7 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
                 requirements: fullSets,
                 message,
                 contextNode,
+                fromDirectory: true,
               })
             }
           } else {

@@ -198,30 +198,49 @@ function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, p
       </div>
 
       <FieldLabel label="Select CSV file" required />
-      <div
-        onClick={() => bulkFileRef.current?.click()}
-        style={{
-          padding: '20px',
-          border: `1.5px dashed ${bulkFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
-          borderRadius: 8,
-          background: bulkFile
-            ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
-            : 'var(--bg-card)',
-          cursor: 'pointer', transition: 'all 150ms',
-          textAlign: 'center',
-        }}
-      >
-        {bulkFile ? (
-          <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{bulkFile}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Click to change file</div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>↑</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a CSV file...</div>
-          </>
-        )}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        <div
+          onClick={() => bulkFileRef.current?.click()}
+          style={{
+            flex: 1, padding: '20px',
+            border: `1.5px dashed ${bulkFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
+            borderRadius: 8,
+            background: bulkFile
+              ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
+              : 'var(--bg-card)',
+            cursor: 'pointer', transition: 'all 150ms',
+            textAlign: 'center',
+          }}
+        >
+          {bulkFile ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{bulkFile}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Click to change file</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>↑</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a CSV file...</div>
+            </>
+          )}
+        </div>
+        <div style={{
+          flex: 1, padding: '20px',
+          border: '1.5px dashed var(--border)',
+          borderRadius: 8, background: 'var(--bg-card)',
+          textAlign: 'center', opacity: 0.35, cursor: 'default',
+          position: 'relative',
+        }}>
+          <div style={{
+            position: 'absolute', top: 6, right: 6,
+            fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+            padding: '3px 8px', background: 'var(--bg-raised)', borderRadius: 6,
+          }}>
+            COMING SOON
+          </div>
+          <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>☁</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose from Qualified Storage...</div>
+        </div>
       </div>
       <input
         ref={bulkFileRef}
@@ -230,30 +249,6 @@ function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, p
         style={{ display: 'none' }}
         onChange={onSelectFile}
       />
-
-      <div style={{ display: 'flex', gap: 10, marginTop: 10, marginBottom: 14 }}>
-        <div
-          onClick={() => bulkFileRef.current?.click()}
-          style={{
-            flex: 1, padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-            border: '1px solid var(--border)', background: 'var(--bg-card)',
-            fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
-            textAlign: 'center', transition: 'background 100ms',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card)'}
-        >
-          ↑ Upload from local
-        </div>
-        <div style={{
-          flex: 1, padding: '10px 14px', borderRadius: 8,
-          border: '1px dashed var(--border)', background: 'transparent',
-          fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-          textAlign: 'center', opacity: 0.4, cursor: 'default',
-        }}>
-          ☁ Import from Qualified Storage
-        </div>
-      </div>
 
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
         <div
@@ -337,24 +332,20 @@ function BulkReviewStep({ results }) {
             fontSize: 12,
           }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>{r.row}</span>
-            <span style={{
-              color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-secondary)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              paddingRight: 8,
-              display: 'flex', flexDirection: 'column', gap: 2,
-            }}>
-              <span style={{
-                fontFamily: 'var(--font-mono)', fontSize: 10,
-                color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-tertiary)',
+            <div style={{ paddingRight: 8 }}>
+              <div style={{
+                fontSize: 12, fontWeight: 600,
+                color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-primary)',
               }}>
-                {r.parentPin}
-              </span>
-              {r.status === 'valid' && r.parentName && (
-                <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                  {r.parentName}
-                </span>
-              )}
-            </span>
+                {r.parentName || 'Unknown'}
+              </div>
+              <div style={{
+                fontSize: 9, fontFamily: 'var(--font-mono)',
+                color: 'var(--text-dim)', marginTop: 2,
+              }}>
+                {r.parentPin?.slice(0, 10)}...{r.parentPin?.slice(-4)}
+              </div>
+            </div>
             <span style={{
               color: r.status === 'error' ? 'var(--text-dim)' : 'var(--text-primary)',
               fontWeight: r.status === 'valid' ? 600 : 400,
@@ -373,7 +364,7 @@ function BulkReviewStep({ results }) {
             <span>
               {r.status === 'valid' ? (
                 <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-green)' }}>
-                  ✓ Verified
+                  ✓ Valid
                 </span>
               ) : (
                 <span style={{ fontSize: 11, color: 'var(--accent-red)', lineHeight: 1.4 }}>

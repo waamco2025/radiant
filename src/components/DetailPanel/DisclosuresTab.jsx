@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { BTN_H, SDA_CONFIG, REVOKE_WARNINGS } from './constants'
 import GridRow from './shared/GridRow'
 import CopyBadge from './shared/CopyBadge'
@@ -74,6 +74,14 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
   const [revokeMessage, setRevokeMessage] = useState('')
+
+  // Reset expand/revoke state when switching nodes
+  useEffect(() => {
+    setExp(null)
+    setRev(null)
+    setRevokeMessage('')
+    setAllOpen(false)
+  }, [node?.id])
 
   const toggleAll = useCallback((open) => {
     setAllOpen(open)
@@ -245,12 +253,33 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 {/* Revoke flow */}
                 {(() => {
                   const isSelfSda = sda.partyLabel === 'internal' || sda.party === node?.owner
+                  const warning = isSelfSda
+                    ? { title: '⚠ Remove from network', message: `This will remove ${node?.name || 'this asset'} from your network. This action is recorded on-chain and cannot be undone.` }
+                    : w
+
                   return (
                     <div style={{ marginTop: 14 }}>
                       {!isRevoking ? (
                         <Btn label={isSelfSda ? 'Remove from Network' : 'Revoke SDA'} onClick={() => setRev(i)} />
                       ) : (
                         <div>
+                          {/* Warning box — always shown, above actions */}
+                          {warning && (
+                            <div style={{
+                              marginBottom: 12, padding: '12px 14px',
+                              background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
+                              borderRadius: 6,
+                              border: '1px solid color-mix(in srgb, var(--accent-red) 12%, transparent)',
+                            }}>
+                              <div style={{
+                                fontSize: 12, color: 'var(--accent-amber)',
+                                fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 5,
+                              }}>{warning.title}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{warning.message}</div>
+                            </div>
+                          )}
+
+                          {/* Optional message for external SDAs */}
                           {!isSelfSda && (
                             <div style={{ marginBottom: 10 }}>
                               <textarea
@@ -269,20 +298,12 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                             </div>
                           )}
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: BTN_H }}>
-                            <span style={{ fontSize: 11, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                              {isSelfSda
-                                ? `This will remove ${node?.name || 'this asset'} from your network. This action is recorded on-chain.`
-                                : 'Revoke this SDA?'}
-                            </span>
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <button
                               onClick={() => {
                                 if (onRevokeSda) {
-                                  onRevokeSda({
-                                    sda,
-                                    nodeId: node?.id,
-                                    message: revokeMessage,
-                                  })
+                                  onRevokeSda({ sda, nodeId: node?.id, message: revokeMessage })
                                 }
                                 setRev(null)
                                 setRevokeMessage('')
@@ -298,7 +319,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              Confirm
+                              {isSelfSda ? 'Confirm Removal' : 'Confirm Revocation'}
                             </button>
                             <button
                               onClick={() => { setRev(null); setRevokeMessage('') }}
@@ -315,20 +336,6 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                               Cancel
                             </button>
                           </div>
-                          {!isSelfSda && w && (
-                            <div style={{
-                              marginTop: 10, padding: '12px 14px',
-                              background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
-                              borderRadius: 6,
-                              border: '1px solid color-mix(in srgb, var(--accent-red) 12%, transparent)',
-                            }}>
-                              <div style={{
-                                fontSize: 12, color: 'var(--accent-amber)',
-                                fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 5,
-                              }}>{w.title}</div>
-                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{w.message}</div>
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -342,7 +349,14 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
 
       {!node?.isEvidence && isOwner && (
         <div style={{ marginTop: 12 }}>
-          <Btn label="⇋ Disclose this Asset" accent onClick={onDisclose} />
+          <Btn label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg width={12} height={12} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+            </svg>
+            Publish this Asset
+          </span>} accent onClick={onDisclose} />
         </div>
       )}
     </div>

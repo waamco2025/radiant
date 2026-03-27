@@ -1485,6 +1485,7 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     transitioningRef.current = true
     setTransitioning(true)
+    setDiveTargetId(null)  // Clear immediately — only needed during dive, not surface
 
     // Clear any stale selection from the child layer — prevents ghost tooltips
     onCloseSel?.()

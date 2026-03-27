@@ -712,7 +712,7 @@ export default function V2App() {
   }, [nodeMap, addedNodes, pendingRequests, activeRole])
 
   // Handle PIN-based disclosure request submission
-  const handleSubmitRequest = useCallback(({ pins, requirements, message, contextNode: ctxNode }) => {
+  const handleSubmitRequest = useCallback(({ pins, requirements, message, contextNode: ctxNode, fromDirectory }) => {
     const today = new Date().toISOString().slice(0, 10)
     const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
 
@@ -825,6 +825,7 @@ export default function V2App() {
           message: message || '',
           requirements: requirements,
           date: today,
+          fromDirectory: fromDirectory || false,
         })
       })
 
@@ -1085,6 +1086,17 @@ export default function V2App() {
                           background: `color-mix(in srgb, ${badgeColor} 10%, transparent)`,
                           borderRadius: 4,
                         }}>{badgeLabel}</span>
+                        {req.fromDirectory && (
+                          <span title="Discovered via Public Directory" style={{
+                            display: 'inline-flex', alignItems: 'center', marginLeft: 4,
+                          }}>
+                            <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+                              <circle cx="8" cy="8" r="6" stroke="#38bdf8" strokeWidth="1.2" />
+                              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="#38bdf8" strokeWidth="0.9" />
+                              <line x1="2" y1="8" x2="14" y2="8" stroke="#38bdf8" strokeWidth="0.9" />
+                            </svg>
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 30 }}>
                         {isRevocation
@@ -1817,7 +1829,7 @@ export default function V2App() {
         <PublishModal
           node={nodeMap[publishNode.id] || publishNode}
           onClose={() => setPublishNode(null)}
-          onComplete={({ assetId, disclosureType, expiry, customDate }) => {
+          onComplete={({ assetId, disclosureType, selectedFields, expiry, customDate }) => {
             const today = new Date().toISOString().slice(0, 10)
             const radiantDot = makeDot('Radiant Network')
             const publicSda = {
@@ -1834,6 +1846,7 @@ export default function V2App() {
               pins: [],
               assetName: null,
               assetPin: null,
+              disclosedFields: selectedFields || null,
             }
 
             updateRoleState(roleId, prev => {

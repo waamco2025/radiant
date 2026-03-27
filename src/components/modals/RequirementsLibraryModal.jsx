@@ -1,6 +1,26 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 
+function HighlightMatch({ text, query }) {
+  if (!query || !text) return text
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return text
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span style={{
+        background: 'color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+        color: 'var(--text-primary)',
+        borderRadius: 2,
+        padding: '0 1px',
+      }}>
+        {text.slice(idx, idx + query.length)}
+      </span>
+      {text.slice(idx + query.length)}
+    </>
+  )
+}
+
 /* ─── Version Item (inner selectable card) ─── */
 function VersionItem({ v, isSelected, onSelect }) {
   return (
@@ -157,7 +177,7 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
               {/* Header row (not clickable) */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {latest.name}
+                  <HighlightMatch text={latest.name} query={search} />
                 </div>
                 <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
                   {latest.requirements.length} req{latest.requirements.length !== 1 ? 's' : ''}
@@ -215,7 +235,7 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
 }
 
 /* ─── Right Panel: View Details ─── */
-function ViewDetails({ rs, onNewVersion, allSets }) {
+function ViewDetails({ rs, onNewVersion, allSets, searchQuery }) {
   const newerExists = useMemo(() => {
     if (!rs.lineageId) return false
     return allSets.some(s => s.lineageId === rs.lineageId && (s.version || 1) > (rs.version || 1))
@@ -286,7 +306,7 @@ function ViewDetails({ rs, onNewVersion, allSets }) {
             {req.type === 'extraction' ? 'EXTRACT' : 'INFER'}
           </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{req.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}><HighlightMatch text={req.label} query={searchQuery} /></div>
             {req.description && (
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 2 }}>{req.description}</div>
             )}
@@ -686,21 +706,18 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     setExpandedLineages(prev => ({ ...prev, [lid]: !prev[lid] }))
   }, [])
 
-  // Escape handler — capture phase with stopImmediatePropagation to block Backdrop
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key !== 'Escape') return
-      if (mode === 'create' || mode === 'newversion') {
-        e.stopPropagation()
-        e.preventDefault()
-        e.stopImmediatePropagation()
-        setMode('view')
-        return
-      }
+  // Wrap onClose so Escape / backdrop-click exits sub-mode before closing modal
+  const handleModalClose = useCallback(() => {
+    if (mode !== 'view') {
+      setMode('view')
+      setEditRequirements([])
+      setSourceLineageId(null)
+      setSourceName('')
+      setDraftVersion(null)
+      return
     }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
-  }, [mode])
+    onClose()
+  }, [mode, onClose])
 
   const handleSelect = (id) => {
     setSelectedId(id)
@@ -785,6 +802,7 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
         rs={selectedSet}
         onNewVersion={handleNewVersion}
         allSets={requirementSets}
+        searchQuery={search}
       />
     )
   } else {
@@ -872,5 +890,5 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     </div>
   )
 
-  return _noBackdrop ? content : <Backdrop onClose={onClose}>{content}</Backdrop>
+  return _noBackdrop ? content : <Backdrop onClose={handleModalClose}>{content}</Backdrop>
 }
