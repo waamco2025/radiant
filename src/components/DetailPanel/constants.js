@@ -55,19 +55,19 @@ export const CATEGORY_CONFIG = {
 
 export const REVOKE_WARNINGS = {
   full: {
-    title: '⚠ Full disclosure',
-    message: "Revoking removes the recipient's ability to extract data fields and run evaluations. The disclosed node and its children will be removed from their network.",
+    title: '⚠ Revoke full disclosure?',
+    message: "Revoking removes the recipient's ability to extract data fields and run evaluations. The disclosed node and its children will be removed from their network. All disclosure parties will be notified. This action is recorded on-chain and cannot be undone.",
   },
   selective: {
-    title: '⚠ Selective disclosure',
-    message: "Revoking removes the recipient's access to the disclosed fields. Existing evaluation results on their network will be marked as revoked.",
+    title: '⚠ Revoke selective disclosure?',
+    message: "Revoking removes the recipient's access to the disclosed fields. Existing evaluation results on their network will be marked as revoked. All disclosure parties will be notified. This action is recorded on-chain and cannot be undone.",
   },
   proofonly: {
-    title: '⚠ Proof-only disclosure',
-    message: "Revoking invalidates the proof-of-evaluation shared with this party. Their pass/fail badge will be marked as revoked.",
+    title: '⚠ Revoke proof-only disclosure?',
+    message: "Revoking invalidates the proof-of-evaluation shared with this party. Their pass/fail badge will be marked as revoked. This action is recorded on-chain and cannot be undone.",
   },
   cascade: {
-    title: '⚠ Cascade disclosure',
-    message: 'Revoking removes your cascaded access to this asset. If the upstream disclosure is also revoked, this cascade is automatically invalidated.',
+    title: '⚠ Revoke cascade disclosure?',
+    message: 'Revoking removes your cascaded access to this asset. If the upstream disclosure is also revoked, this cascade is automatically invalidated. This action is recorded on-chain and cannot be undone.',
   },
 }

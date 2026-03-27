@@ -173,7 +173,7 @@ function ReqSetPicker({ latestSets, selectedReqSets, setSelectedReqSets }) {
                 onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
                 onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
               >
-                {isExpanded ? '▾ Hide requirements' : '▸ View requirements'}
+                {isExpanded ? <><span style={{ fontSize: 20, verticalAlign: 'middle' }}>▾</span> Hide requirements</> : <><span style={{ fontSize: 20, verticalAlign: 'middle' }}>▸</span> View requirements</>}
               </div>
               {/* Expanded requirement list */}
               {isExpanded && (

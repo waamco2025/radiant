@@ -250,7 +250,7 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
 function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
-  if (onCreateSDA && !isParty) buttons.push({ icon: '⇋', tooltip: 'Disclose this Asset', onClick: onCreateSDA })
+  if (onCreateSDA && !isParty) buttons.push({ icon: '🌐', tooltip: 'Publish', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })

@@ -8,7 +8,7 @@ import { Tip } from './shared/Tooltip'
 function Chev({ open }) {
   return (
     <span style={{
-      fontSize: 11, color: 'var(--text-tertiary)',
+      fontSize: 20, color: 'var(--text-tertiary)',
       transition: 'transform 180ms ease',
       transform: open ? 'rotate(90deg)' : 'rotate(0)',
       display: 'inline-block', marginLeft: 2,
@@ -254,7 +254,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 {(() => {
                   const isSelfSda = sda.partyLabel === 'internal' || sda.party === node?.owner
                   const warning = isSelfSda
-                    ? { title: '⚠ Remove from network', message: `This will remove ${node?.name || 'this asset'} from your network. This action is recorded on-chain and cannot be undone.` }
+                    ? { title: '⚠ Remove from network?', message: `This will revoke all disclosures to ${node?.name || 'this asset'} and remove it from your network. All disclosure parties will be notified. This action is recorded on-chain and cannot be undone.` }
                     : w
 
                   return (

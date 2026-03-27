@@ -127,7 +127,7 @@ export default function PanelShell({
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: descExpanded ? 'unset' : 1, WebkitBoxOrient: 'vertical' }}>
               {node.description}
             </span>
-            <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0, marginTop: 2, transition: 'transform 150ms', transform: descExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
+            <span style={{ fontSize: 20, color: 'var(--text-dim)', flexShrink: 0, marginTop: 2, transition: 'transform 150ms', transform: descExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
           </div>
         )}
 
@@ -202,7 +202,7 @@ export default function PanelShell({
             flexShrink: 0,
             background: 'var(--bg-card)',
           }}>
-            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="⇋" label="Disclose" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
+            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="🌐" label="Publish" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
             {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}

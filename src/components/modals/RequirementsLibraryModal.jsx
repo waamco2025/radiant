@@ -207,14 +207,14 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
                   <div
                     onClick={() => toggleLineage(g.lineageId)}
                     style={{
-                      fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                      fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
                       cursor: 'pointer', padding: '4px 0', marginTop: 4,
                       transition: 'color 100ms',
                     }}
                     onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
                     onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
                   >
-                    {isExpanded ? '▾' : '▸'} {olderCount} older version{olderCount !== 1 ? 's' : ''}
+                    <span style={{ fontSize: 20, verticalAlign: 'middle' }}>{isExpanded ? '▾' : '▸'}</span> {olderCount} older version{olderCount !== 1 ? 's' : ''}
                   </div>
 
                   {isExpanded && (

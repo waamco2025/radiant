@@ -6,7 +6,7 @@ import { Tip } from './shared/Tooltip'
 function Chev({ open }) {
   return (
     <span style={{
-      fontSize: 11, color: 'var(--text-tertiary)',
+      fontSize: 20, color: 'var(--text-tertiary)',
       transition: 'transform 180ms ease',
       transform: open ? 'rotate(90deg)' : 'rotate(0)',
       display: 'inline-block', marginLeft: 2,

@@ -1206,7 +1206,7 @@ export default function V2App() {
                 color: 'var(--text-bright)',
               }}>{activeRole.user[0]}</div>
               <span style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeRole.user}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>▾</span>
+              <span style={{ fontSize: 20, color: 'var(--text-muted)' }}>▾</span>
             </button>
 
             {/* Account dropdown */}

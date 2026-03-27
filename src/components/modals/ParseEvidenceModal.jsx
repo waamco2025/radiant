@@ -94,7 +94,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
                 {/* Chevron */}
                 <span style={{
                   position: 'absolute', right: 14, top: '50%', transform: `translateY(-50%) rotate(${dropdownOpen ? '180deg' : '0deg'})`,
-                  fontSize: 10, color: 'var(--text-dim)', transition: 'transform 150ms',
+                  fontSize: 20, color: 'var(--text-dim)', transition: 'transform 150ms',
                 }}>▾</span>
               </div>
 

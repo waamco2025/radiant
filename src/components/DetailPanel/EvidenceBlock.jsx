@@ -99,7 +99,7 @@ export default function EvidenceBlock({ evidence, open, onToggle, isOwner = true
 function Chev({ open }) {
   return (
     <span style={{
-      fontSize: 11,
+      fontSize: 20,
       color: 'var(--text-tertiary)',
       transition: 'transform 180ms ease',
       transform: open ? 'rotate(90deg)' : 'rotate(0)',

@@ -407,7 +407,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
 
   const formContent = (
     <Modal>
-      <ModalHeader title="Disclose to Directory" subtitle="Make this asset discoverable on the Radiant Network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
+      <ModalHeader title="Publish to Directory" subtitle="Make this asset discoverable on the Radiant Network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
       <ModalBody>
         {step === 0 && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
         {step === 1 && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}
@@ -431,10 +431,10 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
         {step === 0 && <Btn label="Next →" accent disabled={!isPublishReady} onClick={() => setStep(1)} />}
         {step === 1 && <Btn label="Next →" accent disabled={!level || (level === 'proofonly' && !hasProofEval)} onClick={nextStep} />}
         {step === 2 && needsFieldStep && (
-          <Btn label={`Disclose ${selectedFields.size} Fields →`} accent disabled={selectedFields.size === 0} onClick={nextStep} />
+          <Btn label={`Publish ${selectedFields.size} Fields →`} accent disabled={selectedFields.size === 0} onClick={nextStep} />
         )}
         {step === 3 && needsEvalStep && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={nextStep} />}
-        {step === 4 && <Btn label="Disclose to Directory" accent onClick={handlePublish} />}
+        {step === 4 && <Btn label="Publish to Directory" accent onClick={handlePublish} />}
       </ModalFooter>
     </Modal>
   )

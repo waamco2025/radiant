@@ -55,7 +55,7 @@ function ReqSetCard({ rs }) {
             onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
           >
-            {expanded ? `▾ Hide ${rs.requirements.length} requirements` : `▸ View ${rs.requirements.length} requirements`}
+            {expanded ? <><span style={{ fontSize: 20, verticalAlign: 'middle' }}>▾</span> Hide {rs.requirements.length} requirements</> : <><span style={{ fontSize: 20, verticalAlign: 'middle' }}>▸</span> View {rs.requirements.length} requirements</>}
           </div>
           {expanded && (
             <div style={{
