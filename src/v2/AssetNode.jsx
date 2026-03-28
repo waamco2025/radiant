@@ -1,6 +1,27 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
+// Inject reveal animation keyframes once
+if (typeof document !== 'undefined' && !document.getElementById('reveal-keyframes')) {
+  const style = document.createElement('style')
+  style.id = 'reveal-keyframes'
+  style.textContent = `
+    @keyframes revealFlip {
+      0% { transform: scaleY(1); }
+      45% { transform: scaleY(0); }
+      55% { transform: scaleY(0); }
+      100% { transform: scaleY(1); }
+    }
+    @keyframes revealContentFade {
+      0% { opacity: 1; }
+      40% { opacity: 0; }
+      60% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+  `
+  document.head.appendChild(style)
+}
+
 const CATEGORY_CONFIG = {
   person:     { icon: '●', color: 'var(--accent-cyan)',   label: 'PERSON' },
   place:      { icon: '◆', color: 'var(--accent-green)',  label: 'PLACE' },
@@ -356,8 +377,10 @@ export default function AssetNode({
   onParseEvidence,
   onRunEvaluation,
   activeParty,
+  revealPhase,
 }) {
   const [hovered, setHovered] = useState(false)
+  const [flipMidpoint, setFlipMidpoint] = useState(false)
   const clickTimerRef = useRef(null)
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const hasChildren = node.children && node.children.length > 0
@@ -389,9 +412,22 @@ export default function AssetNode({
 
   const isOwnedByUser = !node.owner || node.owner === activeParty
   const isTerminalNode = node.isParse || node.category === 'parse' || node.isEvaluation || node.category === 'evaluation'
-  const isProvisional = !!node.provisional
+  const isProvisional = !!node.provisional || !!node._showAsProvisional
   const isDeclined = !!node._isDeclined
   const isNew = !!node._isNew
+
+  // Reveal animation: swap provisional appearance at flip midpoint
+  const isPostFlip = ['badge', 'panel', 'done'].includes(revealPhase)
+  const isFlipping = revealPhase === 'flip'
+  const showAsProvisional = isProvisional && !isPostFlip && !flipMidpoint
+
+  useEffect(() => {
+    if (revealPhase === 'flip') {
+      const t = setTimeout(() => setFlipMidpoint(true), 315)
+      return () => clearTimeout(t)
+    }
+    if (!revealPhase) setFlipMidpoint(false)
+  }, [revealPhase])
   const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
   const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
@@ -437,11 +473,12 @@ export default function AssetNode({
           fontWeight: 700,
           letterSpacing: '0.04em',
           color: '#fff',
-          background: isProvisional ? 'var(--text-dim)' : 'var(--accent-green)',
+          background: showAsProvisional ? 'var(--text-dim)' : 'var(--accent-green)',
           padding: '2px 7px',
           borderRadius: 4,
           boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
           pointerEvents: 'none',
+          transition: 'background 300ms ease',
         }}>
           NEW
         </div>
@@ -474,29 +511,42 @@ export default function AssetNode({
         </div>
       )}
 
+      {/* Selection border — sibling so it's unaffected by card flip animation */}
+      {isSelected && (
+        <div style={{
+          position: 'absolute',
+          top: -3, left: -3,
+          width: CARD_W * scale + 6,
+          height: CARD_H * scale + 6,
+          borderRadius: (8 * scale) + 3,
+          border: `2px solid ${showAsProvisional ? 'var(--text-dim)' : cat.color}`,
+          transition: 'border-color 600ms ease',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }} />
+      )}
+
       <div
         onClick={handleClick}
         style={{
           width: CARD_W * scale,
           height: CARD_H * scale,
-          background: isProvisional
+          background: showAsProvisional
             ? 'var(--bg-deep)'
             : isNew
               ? `color-mix(in srgb, var(--bg-card) 85%, ${cat.color})`
               : hovered
                 ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
                 : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
-          border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
-          opacity: isProvisional ? 0.6 : 1,
+          border: `1px ${showAsProvisional ? 'dashed' : 'solid'} ${borderColor}`,
+          opacity: showAsProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,
           padding: `${9 * scale}px ${12 * scale}px`,
           cursor: 'pointer',
           position: 'relative',
           zIndex: 1,
           boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
-          outline: isSelected ? `2px solid ${cat.color}` : 'none',
-          outlineOffset: 1,
-          transition: 'border-color 120ms, box-shadow 120ms',
+          transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           display: 'flex',
@@ -505,8 +555,13 @@ export default function AssetNode({
           willChange: 'transform',
           transform: scale !== 1 ? `scale(${scale})` : undefined,
           transformOrigin: 'top left',
+          ...(isFlipping ? {
+            animation: 'revealFlip 700ms ease-in-out forwards',
+            transformOrigin: 'center center',
+          } : {}),
         }}
       >
+        <div style={isFlipping ? { animation: 'revealContentFade 700ms ease-in-out forwards' } : undefined}>
         {/* Row 1: category + stack badge */}
         <div style={{
           display: 'flex',
@@ -529,7 +584,7 @@ export default function AssetNode({
               fontSize: 8,
             }}>{cat.icon}</span>
             {cat.label}
-            {isProvisional && !isDeclined && (
+            {showAsProvisional && !isDeclined && (
               <span style={{
                 fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 padding: '2px 6px', borderRadius: 4,
@@ -605,7 +660,7 @@ export default function AssetNode({
         )}
 
         {/* Row 4: health bar + claim count (or provisional message) */}
-        {isProvisional ? (
+        {showAsProvisional ? (
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
@@ -644,6 +699,7 @@ export default function AssetNode({
             </span>
           </div>
         )}
+        </div>
       </div>
 
       {showActionBar && (

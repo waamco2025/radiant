@@ -3,6 +3,7 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
 } from './ModalShared'
+import QualifiedStoragePicker from './QualifiedStoragePicker'
 import { makePin } from '../../v2/v2Data.js'
 
 const ASSET_CATEGORIES = [
@@ -136,7 +137,7 @@ function generateMockResults(parentNode, activeParty, debugErrors, nodeMap) {
 
 // ── Bulk sub-steps ──
 
-function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, parentNode, bulkFileRef }) {
+function BulkUploadStep({ bulkFile, bulkSource, onSelectFile, onQSSelect, onSourceChange, debugErrors, setDebugErrors, parentNode, bulkFileRef }) {
   return (
     <div>
       <div style={{
@@ -198,50 +199,99 @@ function BulkUploadStep({ bulkFile, onSelectFile, debugErrors, setDebugErrors, p
       </div>
 
       <FieldLabel label="Select CSV file" required />
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+
+      {/* Source tabs */}
+      <div style={{ display: 'flex', marginBottom: 14, borderBottom: '2px solid var(--border)' }}>
+        <div
+          onClick={() => onSourceChange?.('local')}
+          style={{
+            padding: '8px 16px', fontSize: 12, fontFamily: 'var(--font-mono)',
+            cursor: 'pointer', fontWeight: 600,
+            color: bulkSource === 'local' ? 'var(--accent-blue)' : 'var(--text-dim)',
+            borderBottom: bulkSource === 'local' ? '2px solid var(--accent-blue)' : '2px solid transparent',
+            marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M8 2v8M4 6l4-4 4 4" />
+            <path d="M2 12v2h12v-2" />
+          </svg>
+          Local file
+        </div>
+        <div
+          onClick={() => onSourceChange?.('qs')}
+          style={{
+            padding: '8px 16px', fontSize: 12, fontFamily: 'var(--font-mono)',
+            cursor: 'pointer', fontWeight: 600,
+            color: bulkSource === 'qs' ? 'var(--accent-green)' : 'var(--text-dim)',
+            borderBottom: bulkSource === 'qs' ? '2px solid var(--accent-green)' : '2px solid transparent',
+            marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M4 11.5a3.5 3.5 0 01-.5-6.96A5 5 0 0113 6a4 4 0 01-1 7.9H4z" />
+          </svg>
+          Qualified Storage
+        </div>
+      </div>
+
+      {bulkSource === 'local' ? (
         <div
           onClick={() => bulkFileRef.current?.click()}
           style={{
-            flex: 1, padding: '20px',
-            border: `1.5px dashed ${bulkFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
+            padding: '20px', minHeight: 80,
+            border: `1.5px dashed ${bulkFile && bulkSource === 'local' ? 'var(--accent-green)' : 'var(--border)'}`,
             borderRadius: 8,
-            background: bulkFile
-              ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
+            background: bulkFile && bulkSource === 'local'
+              ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
               : 'var(--bg-card)',
             cursor: 'pointer', transition: 'all 150ms',
             textAlign: 'center',
           }}
         >
-          {bulkFile ? (
+          {bulkFile && bulkSource === 'local' ? (
             <>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{bulkFile}</div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Click to change file</div>
             </>
           ) : (
             <>
-              <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>↑</div>
+              <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>&uarr;</div>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a CSV file...</div>
             </>
           )}
         </div>
-        <div style={{
-          flex: 1, padding: '20px',
-          border: '1.5px dashed var(--border)',
-          borderRadius: 8, background: 'var(--bg-card)',
-          textAlign: 'center', opacity: 0.35, cursor: 'default',
-          position: 'relative',
-        }}>
-          <div style={{
-            position: 'absolute', top: 6, right: 6,
-            fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-            padding: '3px 8px', background: 'var(--bg-raised)', borderRadius: 6,
-          }}>
-            COMING SOON
-          </div>
-          <div style={{ fontSize: 24, color: 'var(--text-dim)', marginBottom: 6 }}>☁</div>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose from Qualified Storage...</div>
+      ) : (
+        <div
+          onClick={() => onQSSelect?.()}
+          style={{
+            padding: '20px', minHeight: 80,
+            border: `1.5px dashed ${bulkFile && bulkSource === 'qs' ? 'var(--accent-green)' : 'var(--border)'}`,
+            borderRadius: 8,
+            background: bulkFile && bulkSource === 'qs'
+              ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
+              : 'var(--bg-card)',
+            cursor: 'pointer', transition: 'all 150ms',
+            textAlign: 'center',
+          }}
+          onMouseEnter={e => { if (!(bulkFile && bulkSource === 'qs')) e.currentTarget.style.borderColor = 'var(--border-hover)' }}
+          onMouseLeave={e => { if (!(bulkFile && bulkSource === 'qs')) e.currentTarget.style.borderColor = 'var(--border)' }}
+        >
+          {bulkFile && bulkSource === 'qs' ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{bulkFile}</div>
+              <div style={{ fontSize: 11, color: 'var(--accent-green)', marginTop: 4 }}>Click to change</div>
+            </>
+          ) : (
+            <>
+              <svg width={24} height={24} viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.0" style={{ display: 'block', margin: '0 auto 6px' }}>
+                <path d="M4 11.5a3.5 3.5 0 01-.5-6.96A5 5 0 0113 6a4 4 0 01-1 7.9H4z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Browse Qualified Storage...</div>
+            </>
+          )}
         </div>
-      </div>
+      )}
       <input
         ref={bulkFileRef}
         type="file"
@@ -433,8 +483,10 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
   // Bulk state
   const [bulkStep, setBulkStep] = useState(0)
   const [bulkFile, setBulkFile] = useState(null)
+  const [bulkSource, setBulkSource] = useState('local')
   const [bulkResults, setBulkResults] = useState([])
   const [debugErrors, setDebugErrors] = useState(false)
+  const [showQSPicker, setShowQSPicker] = useState(false)
   const bulkFileRef = useRef(null)
 
   const cat = ASSET_CATEGORIES.find(c => c.id === category)
@@ -448,7 +500,7 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
 
   const handleBulkFileSelect = (e) => {
     const file = e.target.files?.[0]
-    if (file) setBulkFile(file.name)
+    if (file) { setBulkFile(file.name); setBulkSource('local') }
   }
 
   const handleBulkValidate = () => {
@@ -566,7 +618,10 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
             {mode === 'bulk' && (
               <BulkUploadStep
                 bulkFile={bulkFile}
+                bulkSource={bulkSource}
                 onSelectFile={handleBulkFileSelect}
+                onQSSelect={() => setShowQSPicker(true)}
+                onSourceChange={setBulkSource}
                 debugErrors={debugErrors}
                 setDebugErrors={setDebugErrors}
                 parentNode={parentNode}
@@ -654,5 +709,24 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
       </ModalFooter>
     </Modal>
   )
-  return _noBackdrop ? formContent : <Backdrop onClose={onClose}>{formContent}</Backdrop>
+  return (
+    <>
+      {_noBackdrop ? formContent : <Backdrop onClose={onClose}>{formContent}</Backdrop>}
+      {showQSPicker && (
+        <QualifiedStoragePicker
+          activeParty={activeParty}
+          mode="single"
+          accept=".csv"
+          onSelect={(files) => {
+            if (files.length > 0) {
+              setBulkFile(files[0].name)
+              setBulkSource('qs')
+            }
+            setShowQSPicker(false)
+          }}
+          onCancel={() => setShowQSPicker(false)}
+        />
+      )}
+    </>
+  )
 }

@@ -11,7 +11,20 @@ import TableModal from './shared/TableModal'
 import CopyBadge from './shared/CopyBadge'
 import { Tip } from './shared/Tooltip'
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary }) {
+// Inject panel reveal keyframes once
+if (typeof document !== 'undefined' && !document.getElementById('panel-reveal-keyframes')) {
+  const style = document.createElement('style')
+  style.id = 'panel-reveal-keyframes'
+  style.textContent = `
+    @keyframes panelRowFade {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `
+  document.head.appendChild(style)
+}
+
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary, revealPhase }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -471,6 +484,13 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
   const [tab, setTab] = useState(() => tabs[0]?.id || 'evaluations')
   const [expandedTable, setExpandedTable] = useState(null)
 
+  // Switch to disclosures tab when reveal animation reaches panel phase
+  useEffect(() => {
+    if (revealPhase === 'panel' && tabs.some(t => t.id === 'disclosures')) {
+      setTab('disclosures')
+    }
+  }, [revealPhase])
+
   // Always reset to first tab and clear eval state on node change
   useEffect(() => {
     if (tabs.length > 0) {
@@ -559,6 +579,13 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       isOwner={isOwner}
     >
       {/* Conditionally mounted tabs — only render if tab exists in tabs array */}
+      <div style={
+        revealPhase === 'panel'
+          ? { animation: 'panelRowFade 500ms ease-out forwards' }
+          : revealPhase && revealPhase !== 'done' && revealPhase !== 'panel'
+            ? { opacity: 0 }
+            : undefined
+      }>
       {tabs.some(t => t.id === 'evaluations') && (
         <div style={{ display: tab === 'evaluations' ? 'block' : 'none' }}>
           <EvaluationsTab
@@ -595,6 +622,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
           <ParsedFieldsTab fields={node.parsedFields || []} isSelective={!!node._isSelective} nodeName={node.name} />
         </div>
       )}
+      </div>
       {expandedTable?.type === 'claims' && (
         <TableModal title={expandedTable.title} onClose={() => setExpandedTable(null)}>
           <ClaimsTable claims={expandedTable.claims} maxHeight={9999} />

@@ -51,7 +51,7 @@ function StepConfirm({ asset, isPublishReady }) {
         border: '1px solid color-mix(in srgb, var(--accent-amber) 20%, transparent)',
         borderRadius: 8, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
       }}>
-        <strong style={{ color: 'var(--accent-amber)' }}>Publishing this asset</strong> will make it visible in the public asset directory. Other parties can see the asset name, type, owner, and registration date — but not your evidence or evaluation results. They must request disclosure to access anything further.
+        <strong style={{ color: 'var(--accent-amber)' }}>Publishing this asset</strong> will make it visible on the Radiant Network Public Directory. Other parties can see the asset name, type, owner, and registration date — but not your evidence or evaluation results. They must request disclosure to access anything further.
       </div>
     </div>
   )
@@ -84,9 +84,9 @@ function StepPermission({ level, setLevel, hasProofEval }) {
       {level && (
         <div style={{ marginTop: 18, padding: '14px 16px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7 }}>
-            {level === 'full' && <>Requestors will be able to <strong style={{ color: 'var(--text-primary)' }}>extract data fields</strong> and <strong style={{ color: 'var(--text-primary)' }}>run inference requirements</strong> against your evidence. This is the highest access level.</>}
-            {level === 'selective' && <>Requestors will be able to <strong style={{ color: 'var(--text-primary)' }}>run inference requirements</strong> against your evidence but <strong style={{ color: 'var(--text-primary)' }}>cannot extract raw data</strong>. This protects sensitive specifics while allowing compliance verification.</>}
-            {level === 'proofonly' && <>Requestors will only see the <strong style={{ color: 'var(--text-primary)' }}>pass/fail result</strong> of a completed evaluation. No access to the evidence is granted, and <strong style={{ color: 'var(--text-primary)' }}>no further evaluations can be run</strong> by other parties on this asset.</>}
+            {level === 'full' && <><strong style={{ color: 'var(--accent-red)' }}>Full disclosure</strong> exposes all of your asset's evidence to the Radiant Network Public Directory. Any party can <strong style={{ color: 'var(--text-primary)' }}>extract data fields</strong>, <strong style={{ color: 'var(--text-primary)' }}>run evaluations</strong>, and view all parsed data without restriction. Only choose this if the asset contains no proprietary or sensitive information.</>}
+            {level === 'selective' && <><strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> lets you choose which parsed fields to share. Requestors can <strong style={{ color: 'var(--text-primary)' }}>run evaluations</strong> against disclosed fields but <strong style={{ color: 'var(--text-primary)' }}>cannot access withheld data</strong>. This protects sensitive specifics while allowing compliance verification.</>}
+            {level === 'proofonly' && <><strong style={{ color: 'var(--accent-green)' }}>Proof-only disclosure</strong> shares only the <strong style={{ color: 'var(--text-primary)' }}>pass/fail result</strong> of completed evaluations. No evidence, parsed data, or evaluation details are accessible. This is the most restrictive access level.</>}
           </div>
         </div>
       )}
@@ -166,12 +166,33 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
         <InfoRow label="Asset" value={<span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{asset.name}</span>} />
         <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
         <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
-        {level === 'selective' && pepFields && pepFields.length > 0 && (
-          <InfoRow label="Disclosed fields" value={
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
-              {selectedFields?.size || 0} of {pepFields.length}
-            </span>
-          } />
+        {level === 'selective' && selectedFields && selectedFields.size > 0 && (
+          <>
+            <InfoRow label="Disclosed fields" value={
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
+                {selectedFields.size} of {pepFields.length}
+              </span>
+            } />
+            <div style={{
+              maxHeight: 140, overflowY: 'auto', marginTop: 4, marginBottom: 8,
+              padding: '8px 12px', borderRadius: 6,
+              background: 'var(--bg-deep)', border: '1px solid var(--border)',
+            }}>
+              {[...selectedFields].map(fieldKey => {
+                const field = pepFields.find(f => f.fieldKey === fieldKey)
+                return field ? (
+                  <div key={fieldKey} style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+                    padding: '3px 0', borderBottom: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <span style={{ color: 'var(--text-dim)', width: 90, flexShrink: 0 }}>{field.category || '—'}</span>
+                    <span>{field.label || field.id}</span>
+                  </div>
+                ) : null
+              })}
+            </div>
+          </>
         )}
         {level === 'proofonly' && selectedEvals.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 34, borderBottom: '1px solid var(--border)' }}>
@@ -182,7 +203,7 @@ function StepExpiry({ expiry, setExpiry, customDate, setCustomDate, level, asset
           </div>
         )}
         <InfoRow label="Expiration" value={expiryLabel(expiry, customDate)} />
-        <InfoRow label="Visibility" value="Public asset directory" />
+        <InfoRow label="Visibility" value="Radiant Network Public Directory" />
         <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7 }}>
           Publishing is recorded on-chain and cannot be undone, but the listing can be revoked at any time. Revocation removes the asset from the directory and prevents new disclosure requests.
         </div>
@@ -316,7 +337,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
     const existingSda = (node.sdas || []).find(s => s.party === 'Radiant Network')
     const alreadyContent = (
       <Modal width={540}>
-        <ModalHeader title="Already Published" onClose={onClose} />
+        <ModalHeader title="Already Published" subtitle="Radiant Network Public Directory" onClose={onClose} />
         <ModalBody>
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{
@@ -373,17 +394,36 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Asset Published</div>
           <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginBottom: 28 }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{asset.name}</strong> is now discoverable in the public asset directory with <strong style={{ color: SDA_TYPES[level]?.c || 'var(--accent-indigo)' }}>{SDA_TYPES[level]?.label || '—'}</strong> access.
+            <strong style={{ color: 'var(--text-primary)' }}>{asset.name}</strong> is now listed on the <strong>Radiant Network Public Directory</strong> with <strong style={{ color: SDA_TYPES[level]?.c || 'var(--accent-indigo)' }}>{SDA_TYPES[level]?.label || '—'}</strong> access.
           </div>
           <div style={{ padding: '14px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 28, textAlign: 'left' }}>
             <InfoRow label="PIN" value={<CopyBadge value={asset.pin} truncated />} />
             <InfoRow label="Permission" value={<span style={{ color: SDA_TYPES[level]?.c, fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{SDA_TYPES[level]?.short}</span>} />
-            {level === 'selective' && pepFields.length > 0 && (
-              <InfoRow label="Disclosed fields" value={
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
-                  {selectedFields.size} of {pepFields.length}
-                </span>
-              } />
+            {level === 'selective' && selectedFields.size > 0 && (
+              <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+                <InfoRow label="Disclosed fields" value={
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
+                    {selectedFields.size} of {pepFields.length}
+                  </span>
+                } />
+                <div style={{
+                  maxHeight: 120, overflowY: 'auto', marginTop: 4,
+                  padding: '6px 10px', borderRadius: 6,
+                  background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                }}>
+                  {[...selectedFields].map(fieldKey => {
+                    const field = pepFields.find(f => f.fieldKey === fieldKey)
+                    return field ? (
+                      <div key={fieldKey} style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+                        padding: '2px 0',
+                      }}>
+                        {field.label || field.id}
+                      </div>
+                    ) : null
+                  })}
+                </div>
+              </div>
             )}
             {level === 'proofonly' && selectedEvals.length > 0 && (
               <InfoRow label="Evaluation(s)" value={
@@ -404,7 +444,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
 
   const formContent = (
     <Modal>
-      <ModalHeader title="Publish to Directory" subtitle="Make this asset discoverable on the Radiant Network." step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
+      <ModalHeader title="Publish to Directory" subtitle="Radiant Network Public Directory" step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
       <ModalBody>
         {step === 0 && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
         {step === 1 && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}

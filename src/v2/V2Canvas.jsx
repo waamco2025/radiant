@@ -306,6 +306,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onParseEvidence,
   onRunEvaluation,
   activeParty,
+  revealAnim,
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -687,9 +688,10 @@ const V2Canvas = forwardRef(function V2Canvas({
       const curvePoints = curve.getPoints(pointCount)
 
       // Per-edge SDA type styling
-      const sdaCfg = SDA_EDGE_CONFIG[edge.sdaType] || SDA_EDGE_CONFIG.full
+      const effectiveSdaType = edge._showAsProvisional ? 'provisional' : edge.sdaType
+      const sdaCfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const edgeColor = new THREE.Color(sdaCfg.color)
-      const lineWidth = SDA_EDGE_WIDTH[edge.sdaType] || 2.0
+      const lineWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -2296,6 +2298,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onParseEvidence={transitioning ? undefined : onParseEvidence}
                 onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                 activeParty={activeParty}
+                revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}
               />
             </div>
           )

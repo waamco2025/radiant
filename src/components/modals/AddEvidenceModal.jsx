@@ -3,6 +3,7 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, FieldLabel,
 } from './ModalShared'
+import QualifiedStoragePicker, { CloudIcon } from './QualifiedStoragePicker'
 
 const inputStyle = {
   width: '100%', height: 38, padding: '0 14px', borderRadius: 6,
@@ -14,6 +15,9 @@ const inputStyle = {
 export default function AddEvidenceModal({ parentNode, activeParty, onClose, onComplete, _noBackdrop }) {
   const [name, setName] = useState('')
   const [filename, setFilename] = useState('')
+  const [source, setSource] = useState('local')
+  const [showQSPicker, setShowQSPicker] = useState(false)
+  const [qsFile, setQSFile] = useState(null)
   const fileInputRef = useRef(null)
 
   const handleFileSelect = (e) => {
@@ -64,49 +68,109 @@ export default function AddEvidenceModal({ parentNode, activeParty, onClose, onC
         />
 
         <FieldLabel label="Select file" required />
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            padding: '16px 20px',
-            border: `1.5px dashed ${filename ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
-            borderRadius: 8,
-            background: filename
-              ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
-              : 'var(--bg-card)',
-            cursor: 'pointer',
-            transition: 'all 150ms',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}
-          onMouseEnter={e => {
-            if (!filename) e.currentTarget.style.borderColor = 'var(--border-hover)'
-          }}
-          onMouseLeave={e => {
-            if (!filename) e.currentTarget.style.borderColor = 'var(--border)'
-          }}
-        >
-          <svg width={20} height={20} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-            <path
-              d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5"
-              stroke={filename ? 'var(--accent-green, #22c55e)' : 'var(--text-dim)'}
-              strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
-            />
-          </svg>
-          <div>
-            {filename ? (
+
+        {/* Source tabs */}
+        <div style={{ display: 'flex', marginBottom: 14, borderBottom: '2px solid var(--border)' }}>
+          <div
+            onClick={() => setSource('local')}
+            style={{
+              padding: '8px 16px', fontSize: 12, fontFamily: 'var(--font-mono)',
+              cursor: 'pointer', fontWeight: 600,
+              color: source === 'local' ? 'var(--accent-blue)' : 'var(--text-dim)',
+              borderBottom: source === 'local' ? '2px solid var(--accent-blue)' : '2px solid transparent',
+              marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>&uarr;</span> Local file
+          </div>
+          <div
+            onClick={() => setSource('qs')}
+            style={{
+              padding: '8px 16px', fontSize: 12, fontFamily: 'var(--font-mono)',
+              cursor: 'pointer', fontWeight: 600,
+              color: source === 'qs' ? 'var(--accent-green)' : 'var(--text-dim)',
+              borderBottom: source === 'qs' ? '2px solid var(--accent-green)' : '2px solid transparent',
+              marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <CloudIcon size={12} /> Qualified Storage
+          </div>
+        </div>
+
+        {source === 'local' ? (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: '16px 20px',
+              border: `1.5px dashed ${filename && !qsFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
+              borderRadius: 8,
+              background: filename && !qsFile
+                ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
+                : 'var(--bg-card)',
+              cursor: 'pointer',
+              transition: 'all 150ms',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+            onMouseEnter={e => {
+              if (!filename || qsFile) e.currentTarget.style.borderColor = 'var(--border-hover)'
+            }}
+            onMouseLeave={e => {
+              if (!filename || qsFile) e.currentTarget.style.borderColor = 'var(--border)'
+            }}
+          >
+            <svg width={20} height={20} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+              <path
+                d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5"
+                stroke={filename && !qsFile ? 'var(--accent-green, #22c55e)' : 'var(--text-dim)'}
+                strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
+              />
+            </svg>
+            <div>
+              {filename && !qsFile ? (
+                <>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{filename}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Click to change file</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a file...</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>PDF, image, or any document. File content is not uploaded in this demo.</div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            onClick={() => setShowQSPicker(true)}
+            style={{
+              padding: '20px',
+              border: `1.5px dashed ${qsFile ? 'var(--accent-green)' : 'var(--border)'}`,
+              borderRadius: 8,
+              background: qsFile
+                ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
+                : 'var(--bg-card)',
+              cursor: 'pointer', transition: 'all 150ms',
+              textAlign: 'center',
+            }}
+            onMouseEnter={e => { if (!qsFile) e.currentTarget.style.borderColor = 'var(--border-hover)' }}
+            onMouseLeave={e => { if (!qsFile) e.currentTarget.style.borderColor = 'var(--border)' }}
+          >
+            {qsFile ? (
               <>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{filename}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Click to change file</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{qsFile.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>{qsFile.path} &middot; {qsFile.size}</div>
+                <div style={{ fontSize: 11, color: 'var(--accent-green)', marginTop: 4 }}>Click to change</div>
               </>
             ) : (
               <>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a file...</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>PDF, image, or any document. File content is not uploaded in this demo.</div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Browse Qualified Storage...</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Select a file from your connected AWS S3 bucket</div>
               </>
             )}
           </div>
-        </div>
+        )}
 
         <input
           ref={fileInputRef}
@@ -126,5 +190,25 @@ export default function AddEvidenceModal({ parentNode, activeParty, onClose, onC
       </ModalFooter>
     </Modal>
   )
-  return _noBackdrop ? content : <Backdrop onClose={onClose}>{content}</Backdrop>
+
+  return (
+    <>
+      {_noBackdrop ? content : <Backdrop onClose={onClose}>{content}</Backdrop>}
+      {showQSPicker && (
+        <QualifiedStoragePicker
+          activeParty={activeParty}
+          mode="single"
+          onSelect={(files) => {
+            if (files.length > 0) {
+              setQSFile(files[0])
+              setFilename(files[0].name)
+              if (!name) setName(files[0].name)
+            }
+            setShowQSPicker(false)
+          }}
+          onCancel={() => setShowQSPicker(false)}
+        />
+      )}
+    </>
+  )
 }

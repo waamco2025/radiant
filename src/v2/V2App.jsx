@@ -17,6 +17,7 @@ import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.js
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
 import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
+import { Tip } from '../components/DetailPanel/shared/Tooltip'
 import { getRequirementSetsForRole } from './requirementSets.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -86,6 +87,8 @@ export default function V2App() {
     const prevSel = prevSelRef.current
     prevSelRef.current = sel
     if (prevSel && prevSel !== sel) {
+      // Clear reveal animation when deselecting
+      if (revealAnim?.nodeId === prevSel) setRevealAnim(null)
       updateRoleState(roleId, prev => {
         let changed = false
         let newState = { ...prev }
@@ -94,7 +97,7 @@ export default function V2App() {
         const idx = prev.addedNodes.findIndex(n => n.id === prevSel && n._isNew)
         if (idx >= 0) {
           const updated = [...prev.addedNodes]
-          updated[idx] = { ...updated[idx], _isNew: false }
+          updated[idx] = { ...updated[idx], _isNew: false, _showAsProvisional: false }
           newState.addedNodes = updated
           changed = true
         }
@@ -110,6 +113,15 @@ export default function V2App() {
       })
     }
   }, [sel, roleId])
+
+  // Trigger reveal animation when directly selecting a newly upgraded provisional card
+  useEffect(() => {
+    if (sel && nodeMap[sel]?._isNew && nodeMap[sel]?._wasProvisional && !revealAnim) {
+      canvasRef.current?.panToWithZoom?.(nodeMap[sel].x, nodeMap[sel].y, 1.28)
+      startReveal(sel)
+    }
+  }, [sel])
+
   const { addedNodes, addedSDAs, addedEdges, dismissedReqs, addedRequests } = currentRoleState
   const addedChildren = currentRoleState.addedChildren || {}
   const removedSDAs = currentRoleState.removedSDAs || []
@@ -483,6 +495,7 @@ export default function V2App() {
   const [showAcct, setShowAcct] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
+  const [revealAnim, setRevealAnim] = useState(null)
   const [publishNode, setPublishNode] = useState(null)
   const [connectNode, setConnectNode] = useState(null)
   const [registerNode, setRegisterNode] = useState(null)
@@ -495,6 +508,47 @@ export default function V2App() {
   const [showLibrary, setShowLibrary] = useState(false)
   const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
   const [evalContext, setEvalContext] = useState(null)
+
+  // Reveal animation state machine for provisional→real card transitions
+  const startReveal = useCallback((nodeId) => {
+    setRevealAnim({ nodeId, phase: 'zoom' })
+    // Delay pan to ensure node is rendered
+    setTimeout(() => {
+      const target = nodeMap[nodeId]
+      if (target) canvasRef.current?.panToWithZoom?.(target.x, target.y, 1.28)
+    }, 50)
+    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'border' } : prev), 500)
+    setTimeout(() => {
+      setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'flip' } : prev)
+      // Clear provisional appearance on connected edges
+      updateRoleState(roleId, prev => {
+        const updatedEdges = prev.addedEdges.map(e => {
+          if ((e.from === nodeId || e.to === nodeId) && e._showAsProvisional) {
+            return { ...e, _showAsProvisional: false }
+          }
+          return e
+        })
+        const edgesChanged = updatedEdges.some((e, i) => e !== prev.addedEdges[i])
+        return edgesChanged ? { ...prev, addedEdges: updatedEdges } : prev
+      })
+    }, 1100)
+    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'badge' } : prev), 1800)
+    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'panel' } : prev), 2000)
+    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'done' } : prev), 2500)
+    // Dismiss matching acceptance notification
+    const targetPin = nodeMap[nodeId]?.pin
+    if (targetPin) {
+      updateRoleState(roleId, prev => {
+        const matchReq = (prev.addedRequests || []).find(r =>
+          r.type === 'acceptance' && r.asset?.pin === targetPin
+        )
+        if (matchReq && !(prev.dismissedReqs || []).includes(matchReq.id)) {
+          return { ...prev, dismissedReqs: [...prev.dismissedReqs, matchReq.id] }
+        }
+        return prev
+      })
+    }
+  }, [nodeMap, roleId])
 
   // Requirement sets — per-role, defaults from demo data
   const requirementSets = useMemo(() => {
@@ -1041,7 +1095,11 @@ export default function V2App() {
                           if (isAcceptance) {
                             const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
                             if (targetNode) {
-                              setTimeout(() => setSel(targetNode.id), 100)
+                              setSel(targetNode.id)
+                              if (targetNode._isNew && targetNode._wasProvisional) {
+                                canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 1.28)
+                                startReveal(targetNode.id)
+                              }
                             }
                           }
                           if (isDecline) {
@@ -1372,6 +1430,7 @@ export default function V2App() {
             }
           }}
           activeParty={activeRole.party}
+          revealAnim={revealAnim}
         />
 
         {/* Subchain pill */}
@@ -1481,6 +1540,7 @@ export default function V2App() {
               })()}
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
+              revealPhase={revealAnim?.nodeId === sel ? revealAnim.phase : null}
               onViewChild={handleViewChild}
               onCancelRequest={(provNode) => {
                 updateRoleState(roleId, prev => ({
@@ -1775,10 +1835,12 @@ export default function V2App() {
         flexShrink: 0,
         background: 'var(--bg-deep)',
       }}>
+        <Tip text={`Qualified Storage: s3://${activeRole.party.toLowerCase()}-qualified-storage · Connected · All evidence files are hashed and endorsed on the ledger`} w={340}>
         <div style={{
           display: 'flex',
           alignItems: 'center',
           gap: 6,
+          cursor: 'default',
         }}>
           <div style={{
             width: 6,
@@ -1787,12 +1849,14 @@ export default function V2App() {
             background: 'var(--accent-green, #22c55e)',
             flexShrink: 0,
           }} />
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            color: 'var(--accent-green, #22c55e)',
-            letterSpacing: '0.04em',
-          }}>
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--accent-green, #22c55e)',
+              letterSpacing: '0.04em',
+            }}
+          >
             Connected to AWS S3
           </span>
           <span style={{ margin: '0 8px', color: 'var(--border)' }}>·</span>
@@ -1804,6 +1868,7 @@ export default function V2App() {
             {activeRole.vertical}
           </span>
         </div>
+        </Tip>
       </div>
 
       {/* SubgraphModal — disabled, replaced by subchain canvas view */}
@@ -2403,7 +2468,7 @@ export default function V2App() {
                     // Replace provisional node with real disclosed node, keeping position
                     newState.addedNodes = prev.addedNodes
                       .filter(n => n.id !== provId)
-                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y, _isNew: true })
+                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y, _isNew: true, _wasProvisional: true, _showAsProvisional: true })
                     // Replace provisional edges with real disclosure edges
                     newState.addedEdges = prev.addedEdges
                       .filter(e => !((e.to === provId || e.from === provId) && e.sdaType === 'provisional'))
@@ -2412,6 +2477,7 @@ export default function V2App() {
                         from: req.connectTo.id,
                         to: reqNodeId,
                         sdaType: disclosureType,
+                        _showAsProvisional: true,
                       })
                   } else if (!existsInStatic && !existsInDynamic) {
                     newState.addedNodes = [...prev.addedNodes, disclosedNodeForOther]
