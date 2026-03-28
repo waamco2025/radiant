@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { BTN_H } from './constants'
 import DataTable from './shared/DataTable'
+import ClaimsTable from './shared/ClaimsTable'
+import { TableActions, claimsToCSV } from './shared/TableActions'
+import TableModal from './shared/TableModal'
 import { Tip } from './shared/Tooltip'
 
 function Chev({ open }) {
@@ -48,6 +51,7 @@ function Badge({ text, color, tooltip }) {
 }
 
 export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClaims }) {
+  const [showModal, setShowModal] = useState(false)
   const sup = ev.status === 'superseded'
   const satCount = ev.claims.filter(c => c.status === 'satisfactory' || c.status === 'verified').length
   const unsatCount = ev.claims.filter(c => c.status === 'unsatisfactory' || c.status === 'contested' || c.status === 'failed').length
@@ -137,51 +141,27 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
                   color: 'var(--text-secondary)', letterSpacing: '0.05em',
                 }}>RESULTS</span>
                 <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{ev.claims.length}</span>
+                <TableActions
+                  onExpand={() => setShowModal(true)}
+                  onDownload={() => claimsToCSV(ev.claims, `${ev.requirements || ev.id}-results.csv`)}
+                />
                 <Chev open={claimsOpen} />
               </div>
               {claimsOpen && (
-                <DataTable
-                  columns={[
-                    { key: 'requirement', header: 'Requirement', width: 160, bold: true, color: 'var(--text-primary)' },
-                    {
-                      key: 'output', header: 'Claim', width: 'flex', mono: true,
-                      render: (value, row) => (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>
-                            {row.type === 'inference' ? 'inference' : 'extraction'}
-                          </span>
-                        </span>
-                      ),
-                    },
-                    {
-                      key: 'status', header: 'Result', width: 100,
-                      render: (value) => {
-                        const isGood = value === 'verified' || value === 'satisfactory'
-                        const isBad = value === 'contested' || value === 'failed' || value === 'unsatisfactory'
-                        const isMissing = value === 'missing'
-                        const color = isGood ? 'var(--accent-green)' : isBad ? 'var(--accent-red)' : 'var(--text-dim)'
-                        const label = isGood ? 'Satisfactory' : isBad ? 'Unsatisfactory' : isMissing ? 'Missing' : '—'
-                        const short = isGood ? 'SAT' : isBad ? 'UNSAT' : isMissing ? 'MISS' : '—'
-                        return (
-                          <Tip text={label}>
-                            <span style={{
-                              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                              padding: '2px 7px', borderRadius: 4,
-                              color, background: `color-mix(in srgb, ${color} 12%, transparent)`,
-                              cursor: 'default',
-                            }}>
-                              {short}
-                            </span>
-                          </Tip>
-                        )
-                      },
-                    },
-                  ]}
-                  rows={ev.claims}
-                  maxRows={8}
-                  compact
-                />
+                <>
+                  <div style={{
+                    padding: '10px 14px', borderRadius: 8, marginBottom: 10,
+                    background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    fontSize: 11, fontFamily: 'var(--font-mono)',
+                  }}>
+                    <span style={{ color: 'var(--text-dim)' }}>{ev.claims.length} claims</span>
+                    <span style={{ color: 'var(--accent-green)' }}>{satCount} satisfactory</span>
+                    {unsatCount > 0 && <span style={{ color: 'var(--accent-red)' }}>{unsatCount} unsatisfactory</span>}
+                    {missCount > 0 && <span style={{ color: 'var(--text-dim)' }}>{missCount} missing</span>}
+                  </div>
+                  <ClaimsTable claims={ev.claims} />
+                </>
               )}
             </div>
           )}
@@ -191,6 +171,11 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
             </div>
           )}
         </div>
+      )}
+      {showModal && (
+        <TableModal title={`${ev.requirements || ev.id} — Results`} onClose={() => setShowModal(false)}>
+          <ClaimsTable claims={ev.claims} maxHeight={9999} />
+        </TableModal>
       )}
     </div>
   )

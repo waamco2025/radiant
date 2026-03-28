@@ -1829,7 +1829,7 @@ export default function V2App() {
         <PublishModal
           node={nodeMap[publishNode.id] || publishNode}
           onClose={() => setPublishNode(null)}
-          onComplete={({ assetId, disclosureType, selectedFields, expiry, customDate }) => {
+          onComplete={({ assetId, disclosureType, selectedFields, selectedEvals, expiry, customDate }) => {
             const today = new Date().toISOString().slice(0, 10)
             const radiantDot = makeDot('Radiant Network')
             const publicSda = {
@@ -1847,6 +1847,17 @@ export default function V2App() {
               assetName: null,
               assetPin: null,
               disclosedFields: selectedFields || null,
+              selectedEvals: disclosureType === 'proofonly' && selectedEvals ? selectedEvals.map(ev => ({
+                id: ev.id,
+                name: ev.requirements,
+                org: ev.org,
+                date: ev.date,
+                claimCount: ev.claims?.length || 0,
+                satisfied: ev.claims?.filter(c => c.status === 'satisfactory' || c.status === 'verified').length || 0,
+                unsatisfied: ev.claims?.filter(c => c.status === 'unsatisfactory' || c.status === 'failed' || c.status === 'contested').length || 0,
+                missing: ev.claims?.filter(c => c.status === 'missing').length || 0,
+                claims: ev.claims || [],
+              })) : null,
             }
 
             updateRoleState(roleId, prev => {

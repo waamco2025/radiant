@@ -1,6 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import { BTN_H, SDA_CONFIG, REVOKE_WARNINGS } from './constants'
 import GridRow from './shared/GridRow'
+import ClaimsTable from './shared/ClaimsTable'
+import { TableActions, claimsToCSV } from './shared/TableActions'
+import TableModal from './shared/TableModal'
 import CopyBadge from './shared/CopyBadge'
 import SDABadge from './shared/SDABadge'
 import { Tip } from './shared/Tooltip'
@@ -66,6 +69,97 @@ function ChainIcon({ s = 13, c = 'var(--accent-purple)' }) {
       <path d="M9 7l2.5-2.5a1.5 1.5 0 00-2.12-2.12L7 4.75" stroke={c} strokeWidth="1.2" strokeLinecap="round" />
       <path d="M7 9l-2.5 2.5a1.5 1.5 0 002.12 2.12L9 11.25" stroke={c} strokeWidth="1.2" strokeLinecap="round" />
     </svg>
+  )
+}
+
+function ProofOnlyEvalDisplay({ evals }) {
+  const [expandedEval, setExpandedEval] = useState(null)
+  const [modalEval, setModalEval] = useState(null)
+
+  if (!evals || evals.length === 0) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <GridRow label="POE" value={
+          <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: 11 }}>No evaluations attached</span>
+        } />
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{
+        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        color: 'var(--accent-green)', letterSpacing: '0.05em', marginBottom: 8,
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        <span style={{ fontSize: 13 }}>✓</span>
+        PROOF OF EVALUATION · {evals.length} {evals.length === 1 ? 'evaluation' : 'evaluations'}
+      </div>
+
+      {evals.map((ev, ei) => {
+        const isExpanded = expandedEval === ei
+        const ok = ev.satisfied || 0
+        const bad = ev.unsatisfied || 0
+        const miss = ev.missing || 0
+
+        return (
+          <div key={ev.id || ei} style={{
+            background: 'var(--bg-deep)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            marginBottom: 6,
+            overflow: 'hidden',
+          }}>
+            <div
+              onClick={() => setExpandedEval(isExpanded ? null : ei)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', cursor: 'pointer',
+                background: isExpanded ? 'var(--bg-raised)' : 'transparent',
+                transition: 'background 150ms',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{ev.name}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{ev.org}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>
+                  <span style={{ color: 'var(--accent-green)' }}>{ok}</span>
+                  {bad > 0 && <span style={{ color: 'var(--accent-red)' }}> · {bad}</span>}
+                  {miss > 0 && <span style={{ color: 'var(--text-dim)' }}> · {miss}</span>}
+                </span>
+                <TableActions
+                  onExpand={() => setModalEval(ev)}
+                  onDownload={() => claimsToCSV(ev.claims, `${ev.name}-poe.csv`)}
+                />
+                <Chev open={isExpanded} />
+              </div>
+            </div>
+
+            {isExpanded && ev.claims && ev.claims.length > 0 && (
+              <div style={{ padding: '4px 12px 10px' }}>
+                {ev.date && (
+                  <div style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                    marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--border)',
+                  }}>
+                    Evaluated {ev.date}
+                  </div>
+                )}
+                <ClaimsTable claims={ev.claims} proofOnly />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      {modalEval && (
+        <TableModal title={`${modalEval.name} — Proof of Evaluation`} onClose={() => setModalEval(null)}>
+          <ClaimsTable claims={modalEval.claims} maxHeight={9999} proofOnly />
+        </TableModal>
+      )}
+    </div>
   )
 }
 
@@ -194,10 +288,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 )}
                 {sda.pins && <GridRow label="PINs" value={`${sda.pins.length} asset${sda.pins.length > 1 ? 's' : ''}`} />}
                 {sda.type === 'proofonly' && (
-                  <>
-                    <GridRow label="POE" value={'✓ ' + sda.poeResult} vc="var(--accent-green)" />
-                    <GridRow label="Source eval" value={sda.evalRef} />
-                  </>
+                  <ProofOnlyEvalDisplay evals={sda.selectedEvals} />
                 )}
 
                 {/* Cascade chain */}
@@ -347,18 +438,6 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
         )
       })}
 
-      {!node?.isEvidence && isOwner && (
-        <div style={{ marginTop: 12 }}>
-          <Btn label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <svg width={12} height={12} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
-              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
-              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
-            </svg>
-            Publish this Asset
-          </span>} accent onClick={onDisclose} />
-        </div>
-      )}
     </div>
   )
 }

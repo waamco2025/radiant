@@ -5,9 +5,11 @@ import ChildrenTab from './ChildrenTab'
 import DisclosuresTab from './DisclosuresTab'
 import ParsedFieldsTab from './ParsedFieldsTab'
 import DataTable from './shared/DataTable'
+import ClaimsTable from './shared/ClaimsTable'
+import { TableActions, claimsToCSV } from './shared/TableActions'
+import TableModal from './shared/TableModal'
 import CopyBadge from './shared/CopyBadge'
 import { Tip } from './shared/Tooltip'
-import { CLAIM_STATUS } from '../../v2/evaluationHelpers.js'
 
 export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary }) {
   if (!node) return null
@@ -284,73 +286,17 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
           {claims.length > 0 && (
             <div>
               <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
                 fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 color: 'var(--text-dim)', letterSpacing: '0.06em', marginBottom: 8,
               }}>
                 CLAIMS ({claims.length})
+                <TableActions
+                  onExpand={() => setExpandedTable({ type: 'claims', title: `${node.name} — Claims`, claims })}
+                  onDownload={() => claimsToCSV(claims, `${node.name}-claims.csv`)}
+                />
               </div>
-              <DataTable
-                columns={[
-                  {
-                    key: 'type', header: null, width: 60,
-                    render: (value) => (
-                      <Tip text={value === 'extraction' ? 'Extraction — AI finds a specific value' : 'Inference — AI determines if a condition holds'}>
-                        <span style={{
-                          fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                          padding: '2px 6px', borderRadius: 3,
-                          color: value === 'extraction' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
-                          background: value === 'extraction'
-                            ? 'color-mix(in srgb, var(--accent-cyan) 12%, transparent)'
-                            : 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
-                          cursor: 'default',
-                        }}>
-                          {value === 'extraction' ? 'EXT' : 'INF'}
-                        </span>
-                      </Tip>
-                    ),
-                  },
-                  { key: 'label', header: 'Requirement', width: 'flex', bold: true, color: 'var(--text-primary)' },
-                  {
-                    key: 'humanValue', header: 'Value', width: 120, mono: true,
-                    render: (value, row) => (
-                      <span style={{ color: 'var(--text-primary)' }}>
-                        {value || row.aiValue || '—'}
-                      </span>
-                    ),
-                  },
-                  {
-                    key: 'aiConfidence', header: 'Conf.', width: 60, mono: true,
-                    render: (value) => {
-                      const pct = Math.round((value || 0) * 100)
-                      const color = pct >= 90 ? 'var(--accent-green)' : pct >= 80 ? 'var(--accent-amber)' : 'var(--accent-red)'
-                      return <span style={{ fontSize: 10, color }}>{pct}%</span>
-                    },
-                  },
-                  {
-                    key: 'status', header: 'Result', width: 100,
-                    render: (value) => {
-                      const cfg = CLAIM_STATUS[value]
-                      if (!cfg) return <span style={{ color: 'var(--text-dim)' }}>—</span>
-                      return (
-                        <Tip text={cfg.label}>
-                          <span style={{
-                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                            padding: '2px 7px', borderRadius: 4,
-                            color: cfg.color,
-                            background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
-                            cursor: 'default',
-                          }}>
-                            {cfg.short}
-                          </span>
-                        </Tip>
-                      )
-                    },
-                  },
-                ]}
-                rows={claims}
-                maxRows={8}
-                compact
-              />
+              <ClaimsTable claims={claims} />
             </div>
           )}
 
@@ -492,10 +438,14 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
         reviewer: ev.evaluator || 'Unknown',
         reviewDate: ev.date,
         claims: (ev.claims || []).map(c => ({
-          requirement: c.label || c.requirementId,
-          output: c.humanValue || c.aiValue || '—',
+          label: c.label || c.requirementId,
+          description: c.description,
+          humanValue: c.humanValue,
+          aiValue: c.aiValue,
+          aiConfidence: c.aiConfidence,
           type: c.type === 'extraction' ? 'extraction' : 'inference',
           status: c.status,
+          requirementId: c.requirementId,
         })),
       }))
   }, [node])
@@ -519,6 +469,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
   }, [node, isOwner])
 
   const [tab, setTab] = useState(() => tabs[0]?.id || 'evaluations')
+  const [expandedTable, setExpandedTable] = useState(null)
 
   // Always reset to first tab and clear eval state on node change
   useEffect(() => {
@@ -641,8 +592,13 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       )}
       {tabs.some(t => t.id === 'parsed') && (
         <div style={{ display: tab === 'parsed' ? 'block' : 'none' }}>
-          <ParsedFieldsTab fields={node.parsedFields || []} isSelective={!!node._isSelective} />
+          <ParsedFieldsTab fields={node.parsedFields || []} isSelective={!!node._isSelective} nodeName={node.name} />
         </div>
+      )}
+      {expandedTable?.type === 'claims' && (
+        <TableModal title={expandedTable.title} onClose={() => setExpandedTable(null)}>
+          <ClaimsTable claims={expandedTable.claims} maxHeight={9999} />
+        </TableModal>
       )}
     </PanelShell>
   )

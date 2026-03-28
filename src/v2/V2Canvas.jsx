@@ -225,26 +225,33 @@ function layoutChildren(children, depthLevel = 1) {
     y: snapToGrid(0, depthLevel),
   }))
 
-  // Layout tier 2 below tier 1 — with cross-evidence collision avoidance
+  // Layout tier 2 below tier 1 — centered under parent evidence, spread bidirectionally on collision
   if (tier2.length > 0) {
     const tierGap = Math.round(200 / spacing) * spacing
     const occupiedTier2Xs = new Set()
 
     tier2.forEach(pepNode => {
       const sourceEvNode = positioned.find(p => p.id === pepNode.sourceEvidenceId)
-      let candidateX
+      let preferredX
       if (sourceEvNode) {
-        candidateX = snapToGrid(sourceEvNode.x, depthLevel)
-        while (occupiedTier2Xs.has(candidateX)) {
-          candidateX += stepX
-        }
+        preferredX = snapToGrid(sourceEvNode.x, depthLevel)
       } else {
-        const lastX = positioned.length > 0 ? Math.max(...positioned.map(p => p.x)) : 0
-        candidateX = snapToGrid(lastX + stepX, depthLevel)
-        while (occupiedTier2Xs.has(candidateX)) {
-          candidateX += stepX
+        preferredX = snapToGrid(0, depthLevel)
+      }
+
+      // Find nearest open slot, alternating left/right from preferred position
+      let candidateX = preferredX
+      if (occupiedTier2Xs.has(candidateX)) {
+        let offset = stepX
+        while (true) {
+          const rightX = snapToGrid(preferredX + offset, depthLevel)
+          if (!occupiedTier2Xs.has(rightX)) { candidateX = rightX; break }
+          const leftX = snapToGrid(preferredX - offset, depthLevel)
+          if (!occupiedTier2Xs.has(leftX)) { candidateX = leftX; break }
+          offset += stepX
         }
       }
+
       occupiedTier2Xs.add(candidateX)
       positioned.push({
         ...pepNode,
