@@ -239,7 +239,7 @@ function BulkUploadStep({ bulkFile, bulkSource, onSelectFile, onQSSelect, onSour
         <div
           onClick={() => bulkFileRef.current?.click()}
           style={{
-            padding: '20px', minHeight: 80,
+            padding: '20px', height: 100,
             border: `1.5px dashed ${bulkFile && bulkSource === 'local' ? 'var(--accent-green)' : 'var(--border)'}`,
             borderRadius: 8,
             background: bulkFile && bulkSource === 'local'
@@ -247,6 +247,7 @@ function BulkUploadStep({ bulkFile, bulkSource, onSelectFile, onQSSelect, onSour
               : 'var(--bg-card)',
             cursor: 'pointer', transition: 'all 150ms',
             textAlign: 'center',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           }}
         >
           {bulkFile && bulkSource === 'local' ? (
@@ -265,7 +266,7 @@ function BulkUploadStep({ bulkFile, bulkSource, onSelectFile, onQSSelect, onSour
         <div
           onClick={() => onQSSelect?.()}
           style={{
-            padding: '20px', minHeight: 80,
+            padding: '20px', height: 100,
             border: `1.5px dashed ${bulkFile && bulkSource === 'qs' ? 'var(--accent-green)' : 'var(--border)'}`,
             borderRadius: 8,
             background: bulkFile && bulkSource === 'qs'
@@ -273,6 +274,7 @@ function BulkUploadStep({ bulkFile, bulkSource, onSelectFile, onQSSelect, onSour
               : 'var(--bg-card)',
             cursor: 'pointer', transition: 'all 150ms',
             textAlign: 'center',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           }}
           onMouseEnter={e => { if (!(bulkFile && bulkSource === 'qs')) e.currentTarget.style.borderColor = 'var(--border-hover)' }}
           onMouseLeave={e => { if (!(bulkFile && bulkSource === 'qs')) e.currentTarget.style.borderColor = 'var(--border)' }}
@@ -558,7 +560,7 @@ export default function RegisterAssetModal({ parentNode, activeParty, nodeMap, o
   const formContent = (
     <Modal width={780}>
       <ModalHeader
-        title="Register Asset"
+        title="Register Assets"
         subtitle={
           <span>
             Create {mode === 'bulk' ? 'assets' : 'a new asset'} on your network under{' '}

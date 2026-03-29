@@ -18,6 +18,9 @@ export default function AddEvidenceModal({ parentNode, activeParty, onClose, onC
   const [source, setSource] = useState('local')
   const [showQSPicker, setShowQSPicker] = useState(false)
   const [qsFile, setQSFile] = useState(null)
+  const [endorsing, setEndorsing] = useState(false)
+  const [endorseStep, setEndorseStep] = useState(null)
+  const [endorsePin, setEndorsePin] = useState(null)
   const fileInputRef = useRef(null)
 
   const handleFileSelect = (e) => {
@@ -101,70 +104,98 @@ export default function AddEvidenceModal({ parentNode, activeParty, onClose, onC
           <div
             onClick={() => fileInputRef.current?.click()}
             style={{
-              padding: '16px 20px',
-              border: `1.5px dashed ${filename && !qsFile ? 'var(--accent-green, #22c55e)' : 'var(--border)'}`,
+              padding: '20px', height: 160,
+              border: `1.5px dashed ${filename && source === 'local' ? 'var(--accent-green)' : 'var(--border)'}`,
               borderRadius: 8,
-              background: filename && !qsFile
-                ? 'color-mix(in srgb, var(--accent-green, #22c55e) 4%, transparent)'
+              background: filename && source === 'local'
+                ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
                 : 'var(--bg-card)',
-              cursor: 'pointer',
-              transition: 'all 150ms',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-            }}
-            onMouseEnter={e => {
-              if (!filename || qsFile) e.currentTarget.style.borderColor = 'var(--border-hover)'
-            }}
-            onMouseLeave={e => {
-              if (!filename || qsFile) e.currentTarget.style.borderColor = 'var(--border)'
+              cursor: 'pointer', transition: 'all 150ms',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              textAlign: 'center',
             }}
           >
-            <svg width={20} height={20} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-              <path
-                d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5"
-                stroke={filename && !qsFile ? 'var(--accent-green, #22c55e)' : 'var(--text-dim)'}
-                strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
-              />
-            </svg>
-            <div>
-              {filename && !qsFile ? (
-                <>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{filename}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Click to change file</div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a file...</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>PDF, image, or any document. File content is not uploaded in this demo.</div>
-                </>
-              )}
-            </div>
+            {filename && source === 'local' ? (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{filename}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Click to change file</div>
+              </>
+            ) : (
+              <>
+                <svg width={24} height={24} viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 6 }}>
+                  <path d="M8 2v8M4 6l4-4 4 4" />
+                  <path d="M2 12v2h12v-2" />
+                </svg>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Choose a file...</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>PDF, image, or any document</div>
+              </>
+            )}
           </div>
         ) : (
           <div
-            onClick={() => setShowQSPicker(true)}
+            onClick={endorsing ? undefined : () => setShowQSPicker(true)}
             style={{
-              padding: '20px',
+              padding: '20px', height: 160,
               border: `1.5px dashed ${qsFile ? 'var(--accent-green)' : 'var(--border)'}`,
               borderRadius: 8,
               background: qsFile
                 ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
                 : 'var(--bg-card)',
-              cursor: 'pointer', transition: 'all 150ms',
+              cursor: endorsing ? 'default' : 'pointer', transition: 'all 150ms',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               textAlign: 'center',
             }}
-            onMouseEnter={e => { if (!qsFile) e.currentTarget.style.borderColor = 'var(--border-hover)' }}
-            onMouseLeave={e => { if (!qsFile) e.currentTarget.style.borderColor = 'var(--border)' }}
           >
-            {qsFile ? (
+            {endorsing ? (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{qsFile.name}</div>
+                {endorseStep === 'hashing' && (
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)' }}>Hashing file...</span>
+                )}
+                {endorseStep === 'endorsing' && (
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)' }}>Endorsing on ledger...</span>
+                )}
+                {endorseStep === 'done' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      fontSize: 10, fontFamily: 'var(--font-mono)',
+                      color: 'var(--accent-green)',
+                      padding: '3px 10px', borderRadius: 4,
+                      background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
+                    }}>
+                      &#10003; {endorsePin}
+                    </span>
+                  </div>
+                )}
+              </>
+            ) : qsFile ? (
               <>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{qsFile.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>{qsFile.path} &middot; {qsFile.size}</div>
+                <div style={{
+                  fontSize: 11, color: 'var(--text-dim)', marginTop: 4,
+                  maxWidth: 300, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                }}>{qsFile.path} &middot; {qsFile.size}</div>
+                {endorsePin && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      fontSize: 10, fontFamily: 'var(--font-mono)',
+                      color: 'var(--accent-green)',
+                      padding: '3px 10px', borderRadius: 4,
+                      background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
+                    }}>
+                      &#10003; {endorsePin}
+                    </span>
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: 'var(--accent-green)', marginTop: 4 }}>Click to change</div>
               </>
             ) : (
               <>
+                <svg width={24} height={24} viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.0" style={{ marginBottom: 6 }}>
+                  <path d="M4 11.5a3.5 3.5 0 01-.5-6.96A5 5 0 0113 6a4 4 0 01-1 7.9H4z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Browse Qualified Storage...</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Select a file from your connected AWS S3 bucket</div>
               </>
@@ -203,8 +234,19 @@ export default function AddEvidenceModal({ parentNode, activeParty, onClose, onC
               setQSFile(files[0])
               setFilename(files[0].name)
               if (!name) setName(files[0].name)
+              setShowQSPicker(false)
+              // Start Hash & Endorse animation
+              setEndorsing(true)
+              setEndorseStep('hashing')
+              setTimeout(() => setEndorseStep('endorsing'), 1000)
+              setTimeout(() => {
+                setEndorseStep('done')
+                setEndorsePin(`PIN-0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)}`)
+              }, 2200)
+              setTimeout(() => setEndorsing(false), 3500)
+            } else {
+              setShowQSPicker(false)
             }
-            setShowQSPicker(false)
           }}
           onCancel={() => setShowQSPicker(false)}
         />

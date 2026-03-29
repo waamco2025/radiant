@@ -23,7 +23,7 @@ const MOCK_BUCKETS = {
       '/sentinel-program/test-data': [
         { name: 'vibration-test-data.csv', size: '890 KB', date: '2026-03-14', type: 'csv' },
         { name: 'EMI-test-log.csv', size: '1.2 MB', date: '2026-03-11', type: 'csv' },
-        { name: 'batch-registration-template.csv', size: '12 KB', date: '2026-03-09', type: 'csv' },
+        { name: 'sentinel4-asset-batch-registration.csv', size: '12 KB', date: '2026-03-09', type: 'csv' },
       ],
       '/avionics-data/specifications': [
         { name: 'avionics-module-datasheet.pdf', size: '4.6 MB', date: '2026-03-18', type: 'pdf' },
@@ -36,7 +36,7 @@ const MOCK_BUCKETS = {
       '/compliance-docs': [
         { name: 'ITAR-classification-memo.pdf', size: '420 KB', date: '2026-03-20', type: 'pdf' },
         { name: 'EAR-export-review.pdf', size: '680 KB', date: '2026-03-19', type: 'pdf' },
-        { name: 'supplier-qualification-matrix.csv', size: '340 KB', date: '2026-03-08', type: 'csv' },
+        { name: 'govco-supplier-asset-batch.csv', size: '340 KB', date: '2026-03-08', type: 'csv' },
       ],
     },
   },
@@ -78,7 +78,7 @@ const MOCK_BUCKETS = {
       '/certifications': [
         { name: 'ISO-9001-certificate.pdf', size: '890 KB', date: '2026-03-21', type: 'pdf' },
         { name: 'RoHS-compliance-cert.pdf', size: '450 KB', date: '2026-03-20', type: 'pdf' },
-        { name: 'batch-components.csv', size: '28 KB', date: '2026-03-18', type: 'csv' },
+        { name: 'microco-component-batch-registration.csv', size: '28 KB', date: '2026-03-18', type: 'csv' },
       ],
     },
   },
@@ -123,14 +123,12 @@ function CloudIcon({ size = 14, color = 'currentColor' }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   MAIN COMPONENT
+   MAIN COMPONENT — Pure file browser (no Hash & Endorse step)
    ═══════════════════════════════════════════════════════════════════════ */
 export default function QualifiedStoragePicker({ activeParty, mode = 'single', accept, onSelect, onCancel }) {
   const data = MOCK_BUCKETS[activeParty] || MOCK_BUCKETS.GovCo
   const [currentPath, setCurrentPath] = useState('/')
   const [selected, setSelected] = useState(new Set())
-  const [step, setStep] = useState('browse') // 'browse' | 'endorse'
-  const [endorsePhase, setEndorsePhase] = useState([])
 
   const folders = data.folders[currentPath] || []
   const allFiles = data.files[currentPath] || []
@@ -184,27 +182,9 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
     path: `${data.bucket}${currentPath}/${f.name}`,
   }))
 
-  // Hash & Endorse animation
-  useEffect(() => {
-    if (step !== 'endorse') return
-    setEndorsePhase([])
-    selectedFiles.forEach((_, i) => {
-      setTimeout(() => {
-        setEndorsePhase(prev => [...prev.filter(p => p.idx !== i), { idx: i, step: 'hashing' }])
-      }, i * 1200)
-      setTimeout(() => {
-        setEndorsePhase(prev => prev.map(p => p.idx === i ? { ...p, step: 'endorsing' } : p))
-      }, i * 1200 + 800)
-      setTimeout(() => {
-        setEndorsePhase(prev => prev.map(p => p.idx === i ? {
-          ...p, step: 'done',
-          pin: `PIN-0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)}`,
-        } : p))
-      }, i * 1200 + 1600)
-    })
-  }, [step])
-
-  const allEndorsed = endorsePhase.length >= selectedFiles.length && endorsePhase.every(p => p.step === 'done')
+  const handleSelect = useCallback(() => {
+    if (selectedFiles.length > 0) onSelect(selectedFiles)
+  }, [selectedFiles, onSelect])
 
   // Escape handler
   useEffect(() => {
@@ -212,13 +192,12 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
       if (e.key === 'Escape') {
         e.stopPropagation()
         e.preventDefault()
-        if (step === 'endorse') setStep('browse')
-        else onCancel()
+        onCancel()
       }
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [step, onCancel])
+  }, [onCancel])
 
   const breadcrumbs = ['root', ...currentPath.split('/').filter(Boolean)]
 
@@ -228,7 +207,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
       background: 'var(--bg-deep)',
       display: 'flex', flexDirection: 'column',
     }}>
-      {/* Header */}
+      {/* Header — full width */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '14px 24px',
@@ -245,23 +224,49 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
           {data.bucket}
         </span>
         <div style={{ flex: 1 }} />
-        <button
-          onClick={onCancel}
-          style={{
-            background: 'transparent', border: '1px solid var(--border)',
-            borderRadius: 6, padding: '6px 14px', fontSize: 11,
-            fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-            cursor: 'pointer', transition: 'all 150ms',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-tertiary)' }}
-        >
-          Close
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Amazon S3 badge */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '4px 12px', borderRadius: 6,
+            background: 'color-mix(in srgb, #FF9900 8%, transparent)',
+            border: '1px solid color-mix(in srgb, #FF9900 20%, transparent)',
+          }}>
+            <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke="#FF9900" strokeWidth="1.5" fill="color-mix(in srgb, #FF9900 10%, transparent)" strokeLinejoin="round" />
+              <path d="M3 7l9 5 9-5" stroke="#FF9900" strokeWidth="1.2" />
+              <path d="M12 12v10" stroke="#FF9900" strokeWidth="1.2" />
+            </svg>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#FF9900', letterSpacing: '0.03em' }}>
+              Amazon S3
+            </span>
+          </div>
+          <button
+            onClick={onCancel}
+            style={{
+              background: 'transparent', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '6px 14px', fontSize: 11,
+              fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
+              cursor: 'pointer', transition: 'all 150ms',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-tertiary)' }}
+          >
+            Close
+          </button>
+        </div>
       </div>
 
-      {step === 'browse' ? (
-        <>
+      {/* File browser — centered fixed-size container */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        <div style={{
+          width: 1100, height: 720,
+          background: 'var(--bg-surface)',
+          borderRadius: 10,
+          border: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
           {/* Breadcrumb */}
           <div style={{
             padding: '10px 24px',
@@ -270,26 +275,32 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
             fontSize: 11, fontFamily: 'var(--font-mono)',
             flexShrink: 0,
           }}>
-            {breadcrumbs.map((crumb, i) => (
-              <span key={i}>
-                {i > 0 && <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>/</span>}
-                <span
-                  onClick={() => navigateToBreadcrumb(i)}
-                  style={{
-                    color: i === breadcrumbs.length - 1 ? 'var(--text-primary)' : 'var(--accent-indigo)',
-                    cursor: i === breadcrumbs.length - 1 ? 'default' : 'pointer',
-                    fontWeight: i === breadcrumbs.length - 1 ? 600 : 400,
-                  }}
-                >
-                  {i === 0 ? data.bucket : crumb}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+              {breadcrumbs.map((crumb, i) => (
+                <span key={i}>
+                  {i > 0 && <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>/</span>}
+                  <span
+                    onClick={() => navigateToBreadcrumb(i)}
+                    style={{
+                      color: i === breadcrumbs.length - 1 ? 'var(--text-primary)' : 'var(--accent-indigo)',
+                      cursor: i === breadcrumbs.length - 1 ? 'default' : 'pointer',
+                      fontWeight: i === breadcrumbs.length - 1 ? 600 : 400,
+                    }}
+                  >
+                    {i === 0 ? data.bucket : crumb}
+                  </span>
                 </span>
+              ))}
+            </div>
+            {accept && (
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                Showing {accept} files only
               </span>
-            ))}
+            )}
           </div>
 
-          {/* File list */}
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-          <div style={{ maxWidth: 560, margin: '0 auto', padding: '0 24px' }}>
+          {/* File list (scrollable) */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px' }}>
             {/* Back button */}
             {currentPath !== '/' && (
               <div
@@ -357,15 +368,26 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
                   onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-raised)' }}
                   onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
                 >
-                  <div style={{
-                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                    border: `1.5px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
-                    background: isSelected ? 'var(--accent-green)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'all 150ms',
-                  }}>
-                    {isSelected && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
-                  </div>
+                  {mode === 'single' ? (
+                    <div style={{
+                      width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                      border: `2px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 150ms',
+                    }}>
+                      {isSelected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />}
+                    </div>
+                  ) : (
+                    <div style={{
+                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                      border: `1.5px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                      background: isSelected ? 'var(--accent-green)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 150ms',
+                    }}>
+                      {isSelected && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+                    </div>
+                  )}
                   <FileIcon type={file.type} />
                   <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
                     {file.name}
@@ -387,137 +409,47 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
               </div>
             )}
           </div>
-          </div>
+        </div>
+      </div>
 
-          {/* Footer */}
-          <div style={{
-            padding: '12px 24px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-surface)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexShrink: 0,
-          }}>
-            <button
-              onClick={onCancel}
-              style={{
-                background: 'transparent', border: '1px solid var(--border)',
-                borderRadius: 6, padding: '8px 18px', fontSize: 12,
-                fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-                cursor: 'pointer',
-              }}
-            >Cancel</button>
-            <button
-              onClick={() => { if (selected.size > 0) setStep('endorse') }}
-              disabled={selected.size === 0}
-              style={{
-                background: selected.size > 0
-                  ? 'color-mix(in srgb, var(--accent-green) 10%, transparent)'
-                  : 'transparent',
-                border: `1px solid ${selected.size > 0 ? 'var(--accent-green)' : 'var(--border)'}`,
-                borderRadius: 6, padding: '8px 18px', fontSize: 12,
-                fontFamily: 'var(--font-mono)', fontWeight: 600,
-                color: selected.size > 0 ? 'var(--accent-green)' : 'var(--text-dim)',
-                cursor: selected.size > 0 ? 'pointer' : 'default',
-                opacity: selected.size > 0 ? 1 : 0.4,
-              }}
-            >
-              Select {selected.size} File{selected.size !== 1 ? 's' : ''} &rarr;
-            </button>
-          </div>
-        </>
-      ) : (
-        /* ─── Hash & Endorse Step ─── */
-        <>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-            <div style={{
-              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              color: 'var(--text-dim)', letterSpacing: '0.06em', marginBottom: 16,
-            }}>
-              HASH &amp; ENDORSE ({selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''})
-            </div>
-
-            {selectedFiles.map((file, i) => {
-              const phase = endorsePhase.find(p => p.idx === i)
-              return (
-                <div key={file.name} style={{
-                  padding: '14px 18px', marginBottom: 8,
-                  background: 'var(--bg-card)', borderRadius: 8,
-                  border: `1px solid ${phase?.step === 'done' ? 'color-mix(in srgb, var(--accent-green) 25%, transparent)' : 'var(--border)'}`,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  transition: 'border-color 300ms',
-                }}>
-                  <FileIcon type={file.type} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>{file.name}</div>
-                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>{file.path}</div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    {!phase && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>Waiting...</span>}
-                    {phase?.step === 'hashing' && (
-                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)' }}>
-                        Hashing...
-                      </span>
-                    )}
-                    {phase?.step === 'endorsing' && (
-                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)' }}>
-                        Endorsing on ledger...
-                      </span>
-                    )}
-                    {phase?.step === 'done' && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ color: 'var(--accent-green)', fontSize: 13 }}>&#10003;</span>
-                        <span style={{
-                          fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)',
-                          padding: '2px 8px', borderRadius: 4,
-                          background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
-                        }}>
-                          {phase.pin}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Footer */}
-          <div style={{
-            padding: '12px 24px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-surface)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexShrink: 0,
-          }}>
-            <button
-              onClick={() => { setStep('browse'); setEndorsePhase([]) }}
-              style={{
-                background: 'transparent', border: '1px solid var(--border)',
-                borderRadius: 6, padding: '8px 18px', fontSize: 12,
-                fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-                cursor: 'pointer',
-              }}
-            >&larr; Back</button>
-            <button
-              onClick={() => onSelect(selectedFiles)}
-              disabled={!allEndorsed}
-              style={{
-                background: allEndorsed
-                  ? 'color-mix(in srgb, var(--accent-green) 10%, transparent)'
-                  : 'transparent',
-                border: `1px solid ${allEndorsed ? 'var(--accent-green)' : 'var(--border)'}`,
-                borderRadius: 6, padding: '8px 18px', fontSize: 12,
-                fontFamily: 'var(--font-mono)', fontWeight: 600,
-                color: allEndorsed ? 'var(--accent-green)' : 'var(--text-dim)',
-                cursor: allEndorsed ? 'pointer' : 'default',
-                opacity: allEndorsed ? 1 : 0.4,
-              }}
-            >
-              Confirm &amp; Return
-            </button>
-          </div>
-        </>
-      )}
+      {/* Footer — full width */}
+      <div style={{
+        padding: '12px 24px',
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-surface)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={onCancel}
+          style={{
+            background: 'transparent', border: '1px solid var(--border)',
+            borderRadius: 6, padding: '8px 18px', fontSize: 12,
+            fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
+            cursor: 'pointer',
+          }}
+        >Cancel</button>
+        <button
+          onClick={handleSelect}
+          disabled={selected.size === 0}
+          style={{
+            background: selected.size > 0
+              ? 'color-mix(in srgb, var(--accent-green) 10%, transparent)'
+              : 'transparent',
+            border: `1px solid ${selected.size > 0 ? 'var(--accent-green)' : 'var(--border)'}`,
+            borderRadius: 6, padding: '8px 18px', fontSize: 12,
+            fontFamily: 'var(--font-mono)', fontWeight: 600,
+            color: selected.size > 0 ? 'var(--accent-green)' : 'var(--text-dim)',
+            cursor: selected.size > 0 ? 'pointer' : 'default',
+            opacity: selected.size > 0 ? 1 : 0.4,
+          }}
+        >
+          {mode === 'single'
+            ? 'Select File \u2192'
+            : `Select ${selected.size} File${selected.size !== 1 ? 's' : ''} \u2192`
+          }
+        </button>
+      </div>
     </div>
   )
 }

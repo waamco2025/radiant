@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
@@ -17,7 +18,6 @@ import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.js
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
 import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
-import { Tip } from '../components/DetailPanel/shared/Tooltip'
 import { getRequirementSetsForRole } from './requirementSets.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -495,6 +495,8 @@ export default function V2App() {
   const [showAcct, setShowAcct] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
+  const footerTipRef = useRef(null)
+  const [showFooterTip, setShowFooterTip] = useState(false)
   const [revealAnim, setRevealAnim] = useState(null)
   const [publishNode, setPublishNode] = useState(null)
   const [connectNode, setConnectNode] = useState(null)
@@ -1835,41 +1837,45 @@ export default function V2App() {
         flexShrink: 0,
         background: 'var(--bg-deep)',
       }}>
-        <Tip text={`Qualified Storage: s3://${activeRole.party.toLowerCase()}-qualified-storage · Connected · All evidence files are hashed and endorsed on the ledger`} w={340}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          cursor: 'default',
-        }}>
+        <div
+          ref={footerTipRef}
+          onMouseEnter={() => setShowFooterTip(true)}
+          onMouseLeave={() => setShowFooterTip(false)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'help' }}
+        >
           <div style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: 'var(--accent-green, #22c55e)',
-            flexShrink: 0,
+            width: 6, height: 6, borderRadius: '50%',
+            background: 'var(--accent-green, #22c55e)', flexShrink: 0,
           }} />
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 11,
-              color: 'var(--accent-green, #22c55e)',
-              letterSpacing: '0.04em',
-            }}
-          >
+          <span style={{
+            fontFamily: 'var(--font-mono)', fontSize: 11,
+            color: 'var(--accent-green, #22c55e)', letterSpacing: '0.04em',
+          }}>
             Connected to AWS S3
           </span>
-          <span style={{ margin: '0 8px', color: 'var(--border)' }}>·</span>
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            color: 'var(--text-muted)',
-          }}>
-            {activeRole.vertical}
-          </span>
         </div>
-        </Tip>
       </div>
+      {showFooterTip && footerTipRef.current && createPortal(
+        <div style={{
+          position: 'fixed',
+          left: footerTipRef.current.getBoundingClientRect().left,
+          top: footerTipRef.current.getBoundingClientRect().top - 48,
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          padding: '6px 12px',
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-secondary)',
+          zIndex: 99999,
+          pointerEvents: 'none',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+          whiteSpace: 'nowrap',
+        }}>
+          {`s3://${activeRole.party.toLowerCase().replace(/\s+/g, '-')}-qualified-storage · Connected · All evidence files are hashed and endorsed on the ledger`}
+        </div>,
+        document.body
+      )}
 
       {/* SubgraphModal — disabled, replaced by subchain canvas view */}
       {/* {modalNode && (

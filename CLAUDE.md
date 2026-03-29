@@ -4,7 +4,7 @@ Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS 
 
 ## Active Development: V2 Prototype
 
-V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–17.0 complete, Phases 0–4 + 6 + 7 partial + 9 done).
+V2 lives at `/v2.html`. V1 at `/index.html`. Shared: `tokens.js`, `index.css`. V1 is feature-complete; V2 is under active development (Batches 1–29.3 complete).
 
 **All new work targets V2 unless explicitly stated.**
 
@@ -18,18 +18,18 @@ The network has exactly two layers. All organizations and assets are parent-leve
 - All 5P entities: Party, Product, Place, Process, Person
 - Supply chain relationships = horizontal edges, not vertical dives
 - Edge types: `full` (same-owner structural), `selective`, `proofonly`, `cascade`, `provisional`
-- Actions: Connect Asset, Disclose, Add Evidence, Run Evaluation, View Chain, Exit Layer
+- Actions: Connect Asset, Publish, Add Evidence, Run Evaluation, View Chain, Exit Layer
 - Actions are **owner-only** — you can only act on nodes you own
 - Provisional nodes: `provisional: true` flag. Dashed border, muted opacity, no actions, "Awaiting owner response" text
+- Subchain view: third layer mode on same canvas, linear horizontal layout
 
 ### Child Layer (one per asset, artifact nodes only)
-- Tier 1: **EVIDENCE** nodes (source documents, orange). PARSED/UNPARSED badge computed dynamically via `_isParsed` flag
-- Tier 2: **PARSE** nodes (PEP extracted key-value fields, purple). Connected to source evidence via `sourceEvidenceId`. Category `'parse'`, `isParse: true`
-- Tier 3: **EVALUATION** nodes (results + claims, indigo) — planned
-- Parse nodes are **terminal** — no Connect, Disclose, or Add Evidence actions
-- Evidence nodes get Add Evidence (on anchor) and Parse Evidence actions
+- Tier 1: **EVIDENCE** nodes (source documents, orange). PARSED/UNPARSED badge computed dynamically via `_isParsed` flag. **EVALUATION** nodes (results + claims, indigo).
+- Tier 2: **PARSE** nodes (PEP extracted key-value fields, purple). Connected to source evidence via `sourceEvidenceId`. Category `'parse'`, `isParse: true`. Bidirectional spread from parent evidence.
+- Parse nodes are **terminal** — no Connect, Publish, or Add Evidence actions
+- Evidence nodes get Add Evidence (on anchor), Parse Evidence, and Run Evaluation actions
 - Accessed by diving into a parent-level asset
-- Multi-tier layout: `layoutChildren` separates by category, uses `occupiedTier2Xs` set to prevent cross-evidence collision at tier 2
+- Multi-tier layout: `layoutChildren` separates by category, bidirectional collision avoidance at tier 2
 
 ### Identity Model
 - **PIN** — Full 256-bit hex: `PIN-0x[64 hex chars]`. Displayed truncated as `PIN-0x[4hex]...[4hex]` in badges. Copy always gives full string.
@@ -39,10 +39,11 @@ The network has exactly two layers. All organizations and assets are parent-leve
 ### Disclosure Model
 - **Requestor cannot dictate disclosure type.** They can only: specify asset by PIN, attach requirements, send a message.
 - **Owner decides disclosure type:** Full, Selective, or Proof-only.
-- **Full** — receiving party accesses all parsed data fields and can run evaluations.
-- **Selective** — receiving party accesses owner-selected data fields only. Redaction is at the PEP field level (per-field, per-party).
-- **Proof-only** — receiving party sees pass/fail results from owner's evaluations only. No data access.
+- **Full** — receiving party accesses all parsed data fields and can run evaluations. Published to Radiant Network Public Directory = visible to everyone.
+- **Selective** — receiving party accesses owner-selected data fields only. Redaction is at the PEP field level (per-field, per-party). Owner selects fields via StepFieldSelection.
+- **Proof-only** — receiving party sees pass/fail results (SAT/UNSAT/MISS badges) from owner's evaluations only. No data values, confidence scores, or methodology (INF/EXT) visible.
 - **Anti-spam:** All disclosures are invitation-driven. Sellers cannot push disclosures to buyers.
+- **Three degrees planned:** Direct asset-to-asset, public directory, private catalogs.
 
 ### Protocol Waterfall
 Ingest → Curate → Consume: Register (DPP) → Prepare (PEP) → Share (SDP) → Evaluate (REP). PEP is the only process that touches raw evidence. All evaluations run against PEP output. SDP is the only mechanism granting access to curated data in Qualified Storage.
@@ -57,70 +58,90 @@ Ingest → Curate → Consume: Register (DPP) → Prepare (PEP) → Share (SDP) 
 ## V2 Architecture
 
 ### App Shell
-- `V2App.jsx` — Root. Per-role keyed state (`perRoleState`), selection state, modal state, layer info. Passes `isOwner` and `activeParty`. Notification inbox with persistence. `findClearY` for collision-free node placement (bidirectional search). All modal completion handlers here.
-- `V2Canvas.jsx` — Three.js WebGL canvas. `forwardRef` exposes `dive()` and `surface()`. `layoutChildren` handles multi-tier positioning. Root layer always-sync + child layer sync via `layerStackRef`. Edge legend with all 5 disclosure types + provisional.
-- `AssetNode.jsx` — Node card overlay. Action bar gated on ownership + `isEvidence` + `isTerminalNode` + `isProvisional`. Provisional cards: dashed border, muted, "PROVISIONAL" badge, suppressed actions.
+- `V2App.jsx` — Root. Per-role keyed state (`perRoleState`), selection state, modal state, layer info, subchain state, reveal animation state. Passes `isOwner` and `activeParty`. Notification inbox with persistence. `findClearY` for collision-free node placement. All modal completion handlers here. Footer with portal tooltip for QS indicator.
+- `V2Canvas.jsx` — Three.js WebGL canvas. `forwardRef` exposes `dive()`, `surface()`, `panToWithZoom()`, `fitAll()`, `playWarpStreaks()`, `playLateralStreaks()`, `fadeOutCards()`, `fadeInCards()`. `layoutChildren` handles multi-tier positioning with bidirectional tier 2 spread. Root layer always-sync + child layer sync via `layerStackRef`. LOD_THRESHOLD = 0.66 — cards become dots below this zoom.
+- `AssetNode.jsx` — Node card overlay. Action bar gated on ownership + `isEvidence` + `isTerminalNode` + `isProvisional`. Provisional cards: dashed border, grey selection outline, muted, "PROVISIONAL" badge, suppressed actions. Reveal animation: `revealPhase` prop drives border wipe, card flip (scaleY), badge color, and appearance swap via `_showAsProvisional` + `flipMidpoint`.
 
 ### Detail Panel (`src/components/DetailPanel/`)
-- `index.jsx` — Entry. Tabs conditional. Provisional nodes get minimal "Awaiting Disclosure" panel. Parse nodes get "Parsed Fields" tab.
-- `PanelShell.jsx` — Header (with description row), tabs, footer. Footer buttons gated on `isOwner`, `isEvidence`, `isParse`. Parse Evidence button for evidence nodes.
+- `index.jsx` — Entry. Tabs conditional. Provisional nodes get minimal "Awaiting Disclosure" panel. Parse nodes get parsed fields. Eval nodes get unified ClaimsTable.
+- `PanelShell.jsx` — Header (with description row), tabs, footer. Footer buttons gated on `isOwner`, `isEvidence`, `isParse`.
 - `EvaluationsTab.jsx` — Asset nodes: eval panels + Run Evaluation. Evidence nodes: always-open EvidenceBlock + attributed claims.
-- `DisclosuresTab.jsx` — SDA cards with click-to-pan on "Connected asset". Internal SDAs hide "Connected asset" row. Revoke flow.
-- `ChildrenTab.jsx` — Child cards with node type tooltips. Parse nodes show field count instead of eval/claims. Owner alignment fixed.
-- `ParsedFieldsTab.jsx` — Grouped field display for PEP parse nodes with confidence badges.
-- `constants.js` — CATEGORY_CONFIG with `tipText` tooltips for each node type.
+- `EvalPanel.jsx` — Expandable eval accordion. Summary bar + ClaimsTable. Expand-to-modal + CSV download.
+- `DisclosuresTab.jsx` — SDA cards with click-to-pan. Revoke flow with unified warning design. ProofOnlyEvalDisplay with expandable claims. State resets on node change.
+- `ChildrenTab.jsx` — Child cards with node type tooltips.
+- `ParsedFieldsTab.jsx` — Grouped field display with expand-to-modal + CSV download.
+- `shared/ClaimsTable.jsx` — Unified 3-line rows: label, description, value. INF/EXT + Conf% + SAT/UNSAT badges. `proofOnly` prop hides values/conf/type.
+- `shared/DataTable.jsx` — Generic data table.
+- `shared/TableActions.jsx` — Expand-to-modal + CSV download icon buttons. `claimsToCSV()` utility.
+- `shared/TableModal.jsx` — Full-width modal for expanded tables.
+- `constants.js` — CATEGORY_CONFIG, REVOKE_WARNINGS (contextual per type).
 
 ### Modals (`src/components/modals/`)
-- `ModalShared.jsx` — Shared `Backdrop` with fade-out animation (150ms on Escape/backdrop-click). `_noBackdrop` prop for persistent backdrop. Mousedown tracking prevents click-drag dismissal.
-- `RequestDisclosureModal.jsx` — Connect Asset. 3 steps. Step 2: PIN grid input (individual `<input>` rows with line numbers, paste splitting, add/remove buttons). Inline validation with debounced animation (pending → validating → result). `onValidatePins` prop for format/duplicate/existence checks. `onSubmitRequest` for batch provisional creation. Button label reflects valid count.
-- `DisclosureResponseModal.jsx` — Respond to request. Accept/Decline. Owner chooses type. Truncated PIN badges.
-- `RegisterAssetModal.jsx` — Single + Bulk CSV import tabs. Category SVG icons. `_noBackdrop`, `onBack`.
-- `AddEvidenceModal.jsx` — File picker, auto-label from filename. Unique ID param prevents same-filename collision.
-- `ParseEvidenceModal.jsx` — PEP template selection via custom dropdown (portal to document.body). Field preview scrollbox. Duplicate template detection (`existingParseTemplateIds`). All-templates-used amber message. PrimeRadiant spinner during processing. Credit cost display.
-- `RevocationNoticeModal.jsx` — Read-only revocation notice. Red banner, asset details with PIN badge, disclosure type, revoker's message (or "No reason given"), explanatory text. Dismiss button.
-- `RequirementsLibraryModal.jsx` — Library list view (all sets with expand/edit/delete) + editor view (create/edit with extraction/inference requirement types). Needs split-panel refactor per client feedback.
-- `PublishModal.jsx` — Publish to directory. 3-4 steps.
+- `ModalShared.jsx` — Shared `Backdrop`, `SDATypeCard`, `ExpiryPicker`, etc. `_noBackdrop` for persistent backdrop.
+- `RequestDisclosureModal.jsx` — Connect Asset. PIN grid input, directory browser, inline validation.
+- `DisclosureResponseModal.jsx` — Respond to request. Accept/Decline. Owner chooses type. StepFieldSelection for selective. Exports `StepFieldSelection`.
+- `RegisterAssetModal.jsx` — "Register Assets" (plural). Single + Bulk CSV tabs. Tab-style source selection: Local file / Qualified Storage.
+- `AddEvidenceModal.jsx` — Tab-style source: Local file / Qualified Storage. Hash & Endorse animation plays in drop area after QS selection.
+- `ParseEvidenceModal.jsx` — PEP template selection, field preview, duplicate detection, PrimeRadiant spinner.
+- `RunEvaluationModal.jsx` — Split-view: PDF/parsed fields left, eval form right. Claims in page-like container.
+- `RequirementsLibraryModal.jsx` — Library + editor. Search match highlighting in amber.
+- `PublishModal.jsx` — "Publish to Directory" / "Radiant Network Public Directory." Steps: confirm → permission → field selection (selective) / eval selection (proof-only) → expiry. Selective: scrollboxes showing fields. Full: red warning about exposing all evidence. useRef for isAlreadyPublished.
+- `QualifiedStoragePicker.jsx` — Full-screen takeover, centered 1100×720 file table. Mock S3 buckets per org. Radio buttons (single) / checkboxes (multi). File type filtering via `accept` prop. AWS S3 badge in header.
+- `RevocationNoticeModal.jsx` — Read-only revocation notice.
 - `CascadeModal.jsx` — Manage cascading disclosures.
 
-### Data Layer (`src/v2/v2Data.js`)
-Two roles:
-- **Bob@GovCo** (buyer, 6 nodes: GovCo + Sentinel-4 + Propulsion + Avionics + Power Reg [selective, evaluated, with PEP] + VReg IC [full, not evaluated])
-- **Alice@MicroCo** (seller, 8 nodes: MicroCo + 6 products + GovCo's Avionics Module. 1 pending request for PCB Substrate)
-
-Key functions: `makeNode()`, `makeEvidenceNode(parentId, meta, owner, claims, uniqueId?)`, `makePepNode()`, `makePin()` (256-bit), `makeDot()` (256-bit), `resolvePin()` (cross-role lookup).
-
-### PEP Templates (`src/v2/pepTemplates.js`)
-3 templates: Electronics Component Profile (10 fields), Mechanical Assembly Profile (8 fields), Regulatory Compliance Profile (7 fields). `FIELD_CATEGORIES` for grouping. `generateMockParsedFields()` for mock data.
-
-### Requirement Sets (`src/v2/requirementSets.js`)
-Demo sets per role: Bob has 3 (MIL-PRF compliance, system integration, material compliance), Alice has 1 (incoming QC). Two requirement types: `extraction` (find a value) and `inference` (determine if condition holds). `getRequirementSetsForRole(roleId)` returns defaults.
+### Data Layer
+- `v2Data.js` — Two roles. Bob@GovCo (buyer), Alice@MicroCo (seller). Key: `makeNode()`, `makeEvidenceNode()`, `makePepNode()`, `makePin()`, `makeDot()`, `resolvePin()`.
+- `pepTemplates.js` — 3 templates. `FIELD_CATEGORIES` for grouping. `generateMockParsedFields()`.
+- `requirementSets.js` — Demo sets per role. `extraction` and `inference` types.
+- `evaluationHelpers.js` — Mock AI evaluation generator. `CLAIM_STATUS` map.
 
 ---
 
 ## V2 Key Conventions
 
+### No Emojis
+All icons are SVG. No emoji characters anywhere in the app. Unicode symbols (✓, ✕, ⚠, ▸, ■, etc.) are acceptable.
+
 ### Flat Parent Layer
 All orgs and assets are peers. Supply chain = horizontal edges. Diving shows artifact children only.
 
 ### Ownership Gating
-Connect, Disclose, Add Evidence, Parse Evidence hidden on non-owned nodes. Threaded via `activeParty` from V2App → V2Canvas → AssetNode. Also gates Detail Panel footer and DisclosuresTab.
+Connect, Publish, Add Evidence, Parse Evidence hidden on non-owned nodes. Threaded via `activeParty` from V2App → V2Canvas → AssetNode.
 
 ### Terminal Nodes
-Parse nodes (`isParse: true` or `category === 'parse'`) have no Connect, Disclose, or Add Evidence actions. Only View Chain and Exit Layer.
+Parse nodes (`isParse: true`) have no Connect, Publish, or Add Evidence actions. Only View Chain and Exit Layer.
 
 ### Evidence Visibility
-Evidence fields gated by `isOwner`: hash/block/retention always visible. Filename/URI/provider owner-only. Non-owners see amber notice.
+Evidence fields gated by `isOwner`: hash/block/retention always visible. Filename/URI/provider owner-only.
 
 ### Health Display
-Always use `displayHealth` (not `health`) for rendering. Handles roll-up logic for parent nodes with evidence children.
+Always use `displayHealth` (not `health`) for rendering.
 
 ### CSS Variables
 All components use CSS variables. Never hardcode colors. Use `color-mix(in srgb, var(--accent-*) N%, transparent)` for alpha.
 
+### Chevrons
+All expand/collapse triangles (▸/▾) render at fontSize 20px app-wide, except the user menu dropdown (14px).
+
 ### State Conventions
 - Tab state: always-mounted with `display: none/block`.
-- Modal Escape: capture-phase keydown + `stopPropagation()`.
 - Notification persistence: `onClose` closes modal only. `onComplete` closes AND dismisses.
+- Revoke state: `exp`, `rev`, `revokeMessage` reset on `node.id` change via useEffect.
+
+### Subchain Conventions
+- Forward BFS from own party node for depth assignment. Unreached nodes go right.
+- Party node lookup: match by `n.name`, not `n.owner` (MicroCo has `owner: null`).
+- View Chain hidden on: focus node, party nodes, child layer nodes.
+- Lateral streaks for enter/exit. Radial warp for child layer dive/surface.
+- Fixed zoom 0.7 for enter/exit (above LOD_THRESHOLD 0.66).
+
+### Provisional Card Reveal
+- `_showAsProvisional`: card looks provisional until reveal animation plays
+- `_wasProvisional`: triggers reveal only on upgraded provisionals (not all _isNew nodes)
+- Reveal phases: zoom → border → flip → badge → panel → done
+- Detail Panel switches to Disclosures tab during reveal
+- Connected edge also stays provisional-styled until flip phase
 
 ### Do NOT Modify (Unless Specified)
 `V2SubgraphModal.jsx`, `LayerBorder.jsx`, `LayerPill.jsx`, `LayerTransitionOverlay.jsx`, `tokens.js`, `PrimeRadiant.jsx`, `V2BootScreen.jsx`, `demoData.js`
@@ -137,23 +158,29 @@ All components use CSS variables. Never hardcode colors. Use `color-mix(in srgb,
   childHealth?, totalHealth?, displayHealth?,
   claimCount, displayClaimCount?,
   hasEvidence, hasStack, childCount,
-  evidence?: { filename, hash, block, provider, uri, retention },
+  evidence?: { filename, hash, block, provider, uri, retention, localPath? },
   evaluations: Evaluation[],
   sdas: SDA[],
-  parsedFields?: ParsedField[],  // PEP parse nodes only
+  parsedFields?: ParsedField[],
   x, y,
   isEvidence?: boolean,
   isParse?: boolean,
-  sourceEvidenceId?: string,  // PEP parse nodes: links to parent evidence
-  _isParsed?: boolean,  // evidence nodes: computed dynamically
+  isEvaluation?: boolean,
+  sourceEvidenceId?: string,
+  _isParsed?: boolean,
   attributedClaims?: Claim[],
   isCascade?, cascadeVia?,
   upstreamSda?: { type, policy, owner, ownerDot },
   upstreamAssets?: Node[],
-  provisional?: boolean,  // provisional nodes: awaiting disclosure response
+  provisional?: boolean,
   requestContext?: { requirements, message, date, contextNodeName, contextNodePin },
-  _isNew?: boolean,  // freshly created nodes: renders NEW badge, cleared on deselection
+  _isNew?: boolean,
+  _wasProvisional?: boolean,
+  _showAsProvisional?: boolean,
+  _isDeclined?: boolean,
+  fromDirectory?: boolean,
   description?: string,
+  isNetworkNode?: boolean,
 }
 ```
 
@@ -161,70 +188,46 @@ All components use CSS variables. Never hardcode colors. Use `color-mix(in srgb,
 
 ## Dynamic State (Per-Role Keyed)
 
-V2App maintains `perRoleState` — an object keyed by role ID. Each role's state has:
+V2App maintains `perRoleState` — an object keyed by role ID:
 
 ```javascript
 {
-  addedNodes: [],       // Nodes created dynamically (registration, disclosure acceptance, provisional)
-  addedSDAs: {},        // { [nodeId]: SDA[] } merged into matching nodes
-  addedEdges: [],       // Edges created dynamically
-  dismissedReqs: [],    // Request IDs dismissed from inbox
-  addedChildren: {},    // { [parentNodeId]: childNode[] } — evidence + PEP nodes
-  addedRequests: [],    // Cross-role pending requests, revocation notices, acceptance notices
-  removedNodes: [],     // Node IDs to filter from static data (revocation)
-  removedEdges: [],     // Edge IDs to filter from static data (revocation)
-  removedSDAs: [],      // { nodeId, party, type, created } to filter from static data (revocation)
-  newlyDisclosedIds: [], // node IDs that just received disclosure — drives NEW badge
-  requirementSets: null, // null = use demo defaults; array = user-modified sets
+  addedNodes: [],
+  addedSDAs: {},        // { [nodeId]: SDA[] }
+  addedEdges: [],
+  dismissedReqs: [],
+  addedChildren: {},    // { [parentNodeId]: childNode[] }
+  addedRequests: [],
+  removedNodes: [],
+  removedEdges: [],
+  removedSDAs: [],
+  newlyDisclosedIds: [],
+  requirementSets: null,
 }
 ```
 
-All mutations persist across role switches (keyed state, not reset). Cross-role mutations write to the OTHER role's state directly (e.g. Alice accepting disclosure writes to Bob's state).
+All mutations persist across role switches. Cross-role mutations write to the OTHER role's state directly.
 
 ### useMemo Merge Pipeline
-0. Filter `removedNodes` from static nodes
-0b. Filter `removedEdges` from static edges
-0c. Filter `removedSDAs` from static node SDAs
-1. Merge `addedNodes` into `data.nodes`
-2. Merge `addedSDAs` into matching nodes
-3. Merge `addedChildren` into parent nodes (updates `hasStack`, `childCount`, `hasEvidence`)
-4. Compute `_isParsed` flag on evidence nodes (checks sibling parse nodes)
-5. Rebuild `nodeMap` (includes children)
-6. Merge `addedEdges`
-7. Merge `addedRequests` into `pendingRequests`
+0. Filter removedNodes/removedEdges/removedSDAs from static data
+1. Merge addedNodes into data.nodes
+2. Merge addedSDAs into matching nodes
+3. Merge addedChildren into parent nodes
+4. Compute _isParsed flag on evidence nodes
+5. Rebuild nodeMap
+6. Merge addedEdges
+7. Merge addedRequests into pendingRequests
 
 ### Provisional → Real Upgrade
-When owner accepts disclosure, `updateRoleState(otherRoleId, ...)` looks for `provisional-${reqNodeId}` in `addedNodes`. If found: replaces with real node (keeping position), recolors edge from `'provisional'` to actual disclosure type. If not found: creates fresh node (existing behavior).
-
-### Revoke Disclosures
-Ownership-aware handler: determines `ownAssetId` and `foreignNodeId` based on `node.owner === activeRole.party`, regardless of which panel initiated the revoke. Three steps:
-1. Remove SDA from own asset (dynamic splice or `removedSDAs` tracking for static)
-2. Remove foreign node + edge from own network (dynamic filter or `removedNodes`/`removedEdges` for static). Only removes foreign node if it has no remaining edges to other assets.
-3. Remove own asset + edge from other role's network (same static/dynamic pattern). Adds revocation notification to other role's `addedRequests`.
-
-### Notification Types
-`addedRequests` carries four notification types distinguished by `type` field:
-- **request** (default/no type field) — disclosure request, opens `DisclosureResponseModal`
-- **revocation** (`type: 'revocation'`) — red badge, opens `RevocationNoticeModal`
-- **acceptance** (`type: 'acceptance'`) — green badge, click dismisses + pans to asset
-- **decline** (`type: 'decline'`) — red badge, click dismisses notification. Decline also removes provisional node + edges from requester's network.
-
-### NEW Badge
-`_isNew: true` set on all created nodes (registration, provisional, disclosure acceptance, provisional→real upgrade). Cleared when the node is deselected for the first time via `useEffect` watching `sel` changes. Renders green badge (real nodes) or grey badge (provisional).
-
-### Child Layer Sync
-`useEffect` in V2Canvas watches `rootNodeMap` for changes in parent node's children count. When it changes, rebuilds child layer nodes + edges using `layoutChildren` + `occupiedTier2Xs`. Uses `layerStackRef` (not `layerStack` in deps) to avoid circular dependency. Guarded by `transitioningRef.current`.
-
-### Root Layer Always-Sync
-`useEffect` always updates `layerStack[0]` from latest `rootNodes`/`rootEdges`, even when viewing child layers. Preserves deeper layers with `[updatedRoot, ...prev.slice(1)]`.
+When owner accepts disclosure: replaces `provisional-${reqNodeId}` with real node (keeping position). Adds `_isNew: true`, `_wasProvisional: true`, `_showAsProvisional: true`. Edge upgraded from `'provisional'` to actual type with `_showAsProvisional: true`.
 
 ---
 
 ## Batch History
 
-Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes, minibar roll-up), 7–7.8 (flat parent layer, clean datasets, disclosure flow redesign, ownership gating, terminology update), 8–8.7 (Detail Panel fixes, per-role keyed state, direction-aware edges, cross-role disclosure reflection), 9–9.2 (Register Asset with bulk CSV import, collision avoidance), 10–10.1 (Add Evidence modal, addedChildren mechanism, child layer sync), 11 (Bulk CSV evidence URI auto-creates child nodes), 12–12.3 (PEP Parse: templates, modal, multi-tier layout, child layer sync fix, root always-sync), 13–13.4 (Refinements: click-to-pan, template dropdown, credit display, tooltips, backdrop fade-out, duplicate PEP prevention, PrimeRadiant spinner), 14–14.9 (Connect by PIN: provisional cards, cross-role requests, PIN validation grid, full 256-bit PINs, evidence ID uniqueness, provisional stacking fix, provisional detail panel with requirements, cancel request, bidirectional positioning, NEW badge), 15–15.3 (Revoke Disclosures: ownership-aware handler, removedNodes/removedEdges/removedSDAs, cross-role cleanup, revocation+acceptance notifications, RevocationNoticeModal), 16–16.4 (Selective Disclosure: field picker, field filtering, no-PEP warning, children copy to disclosed nodes, NEW badge role-switch fix), 17–17.7 (Requirements Library: data structure, CRUD modal, Connect Asset integration, split-panel rewrite, Escape fix, styling refinements, versioning with lineageId/version fields, collapsed-by-lineage left panel, New Version replaces Edit, immutable sets with always-append save, search clear button + result count, Create button moved to modal header, PanelShell-style tabs, read-only name in New Version, top bar button normalization with 36px icon boxes, pill height 36px, V1 footer link removed, nested lineage cards with inner version items, search auto-expand for older version matches, New Version button in title row, icon button bg unified with pill bg), 17.8 (Requirement set viewing in Connect Asset + Disclosure Response: ReqSetPicker with scrollbox/expandable details/version badges/lineage dedup, ReqSetCard with expandable requirements in StepReview, step numbering fix), 17.9 (Decline flow cross-role effects with provisional cleanup + decline notification, removed demo pending request, Proof-Only blocker consistency matching Selective pattern, widened Request Sent confirmation modal), 17.10 (Hide expiration/summary/cascade when blocked in StepTerms, summary title as FieldLabel above card, re-request deduplication fix filtering by undismissed pending requests only), 17.11 (Detail Panel clickable requirement set links opening library with initialSelectedId, CSV import parsing in Requirements Library replacing placeholder with working file upload + auto-populate form), 18.0 (Evaluation data layer: evaluationHelpers.js with CLAIM_STATUS/EVAL_STATUS/calculateEvalCost/generateMockAIResults/summarizeEvaluation, makeEvalNode in v2Data.js, updated CATEGORY_CONFIG evaluation entry), 18.1 (Run Evaluation Modal: 4-step flow — Setup with requirement set picker/cost estimate/credit balance check, AI Processing with PrimeRadiant spinner/cycling messages/auto-advance, Human Review with extraction inputs/inference toggles/status radios/summary bar, Confirmation with green checkmark/InfoRows. V2App wiring: evalContext state, canEvaluate gating on PEP children + access, onComplete creates evalNode via makeEvalNode + addedChildren + credit deduction + dive-and-select. PanelShell Run Evaluation footer button), 18.2 (Evaluation node gating + detail panel + review UX: AssetNode terminal gating extended to isEvaluation/category=evaluation with EVALUATION badge + claims subtitle, DetailPanel specialized eval panel with version/disclosure/status badges + summary bar + claim cards with colored left border + confidence coloring + credits used, PanelShell footer gating with isEvaluation prop, EvaluationsTab Run Evaluation button wired with canEvaluate/onRunEvaluation props, RunEvaluationModal review UX — fixed summary bar above scrollable body, Back button in step 3, remaining count in button label, wider modal at 760px for review step).
+Complete: 1–3.6 (NetGraph + Detail Panel + cards), 4–4.6 (disclosure modals), 5–5.7 (cascade disclosures), 5.8 (evidence visibility), 6–6.6 (evidence as child nodes), 7–7.8 (flat parent layer), 8–8.7 (Detail Panel fixes, per-role state), 9–9.2 (Register Asset), 10–10.1 (Add Evidence), 11 (Bulk CSV evidence), 12–12.3 (PEP Parse), 13–13.4 (Refinements), 14–14.9 (Connect by PIN, provisional cards), 15–15.3 (Revoke Disclosures), 16–16.4 (Selective Disclosure), 17.0 (Requirements Library), 17.1–17.11 (Requirements Library refinements), 18.0–18.14 (Run Evaluation), 19.0–19.4 (Public Directory + Publish), 20.0–20.2 (Footer scaling, revocation fix, declined persistence), 21.0–21.3 (Design system unification, DataTable), 22.0–22.3 (Evidence file viewer, eval trigger change), 23.0–23.1k (Subchain view), 24.0–24.1 (Quick wins: warnings, badges, highlighting, card size), 25.0–25.2 (Selective field picker, revoke fixes, emoji removal, button rename), 26.0–26.3 (POE display, claims table harmonization, expand-to-modal, CSV download), 27.0 (Bidirectional PEP layout), 28.0–28.1 (Provisional card reveal animation, publish modal polish), 29.0–29.3 (Qualified Storage picker).
 
 ---
 
-**QA format:** Numbered checklist items. Action → expected result.
+**QA format:** Numbered checklist items. Action → expected result → Succeeded / Failed.
 **Session management:** Always update CLAUDE.md after batch sequences.
