@@ -109,6 +109,19 @@ export default function V2App() {
           changed = true
         }
 
+        // Clear _isNew from connected edges
+        const currentEdges = newState.addedEdges || prev.addedEdges
+        const updatedEdges = currentEdges.map(e => {
+          if ((e.from === prevSel || e.to === prevSel) && e._isNew) {
+            return { ...e, _isNew: false }
+          }
+          return e
+        })
+        if (updatedEdges.some((e, i) => e !== currentEdges[i])) {
+          newState.addedEdges = updatedEdges
+          changed = true
+        }
+
         return changed ? newState : prev
       })
     }
@@ -496,8 +509,10 @@ export default function V2App() {
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
   const footerTipRef = useRef(null)
+  const pendingPanRef = useRef(null)
   const [showFooterTip, setShowFooterTip] = useState(false)
   const [revealAnim, setRevealAnim] = useState(null)
+  const [forcePanelTab, setForcePanelTab] = useState(null)
   const [publishNode, setPublishNode] = useState(null)
   const [connectNode, setConnectNode] = useState(null)
   const [registerNode, setRegisterNode] = useState(null)
@@ -514,24 +529,46 @@ export default function V2App() {
   // Reveal animation state machine for provisional→real card transitions
   const startReveal = useCallback((nodeId) => {
     setRevealAnim({ nodeId, phase: 'zoom' })
-    // Delay pan to ensure node is rendered
-    setTimeout(() => {
-      const target = nodeMap[nodeId]
-      if (target) canvasRef.current?.panToWithZoom?.(target.x, target.y, 1.28)
-    }, 50)
+    // Immediately position camera with panel offsets — cancels any running pan animation
+    const target = nodeMap[nodeId]
+    if (target) {
+      const container = document.querySelector('[data-canvas-container]')
+      const z = 1.28
+      const viewportOffsetY = container ? (container.clientHeight * 0.10) / z : 0
+      const horizontalOffsetX = 180 / z
+      canvasRef.current?.panToWithZoom?.(
+        target.x + horizontalOffsetX,
+        target.y + viewportOffsetY,
+        z
+      )
+    }
     setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'border' } : prev), 500)
     setTimeout(() => {
       setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'flip' } : prev)
-      // Clear provisional appearance on connected edges
+      // Clear provisional appearance on connected edges and the node itself
       updateRoleState(roleId, prev => {
+        let newState = { ...prev }
+        let changed = false
+        // Clear edge flags
         const updatedEdges = prev.addedEdges.map(e => {
           if ((e.from === nodeId || e.to === nodeId) && e._showAsProvisional) {
             return { ...e, _showAsProvisional: false }
           }
           return e
         })
-        const edgesChanged = updatedEdges.some((e, i) => e !== prev.addedEdges[i])
-        return edgesChanged ? { ...prev, addedEdges: updatedEdges } : prev
+        if (updatedEdges.some((e, i) => e !== prev.addedEdges[i])) {
+          newState.addedEdges = updatedEdges
+          changed = true
+        }
+        // Clear node flag
+        const nodeIdx = prev.addedNodes.findIndex(n => n.id === nodeId && n._showAsProvisional)
+        if (nodeIdx >= 0) {
+          const updatedNodes = [...prev.addedNodes]
+          updatedNodes[nodeIdx] = { ...updatedNodes[nodeIdx], _showAsProvisional: false }
+          newState.addedNodes = updatedNodes
+          changed = true
+        }
+        return changed ? newState : prev
       })
     }, 1100)
     setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'badge' } : prev), 1800)
@@ -551,6 +588,44 @@ export default function V2App() {
       })
     }
   }, [nodeMap, roleId])
+
+  // Pan to pending target after Connect Asset or Disclosure Response modal closes
+  useEffect(() => {
+    if (!pendingPanRef.current) return
+    if (connectNode !== null && responseRequest !== null) return
+    const pending = pendingPanRef.current
+    pendingPanRef.current = null
+
+    if (pending.type === 'pair') {
+      setTimeout(() => {
+        setForcePanelTab('disclosures')
+        setSel(pending.ownNodeId)
+        const pairedNode = nodeMapRef.current[pending.pairedNodeId]
+        if (pairedNode) {
+          const midX = (pending.ownX + pairedNode.x) / 2
+          const midY = (pending.ownY + pairedNode.y) / 2
+          const container = document.querySelector('[data-canvas-container]')
+          let targetZoom = 1.28
+          if (container) {
+            const pad = 300
+            const dataW = Math.abs(pairedNode.x - pending.ownX) + pad * 2
+            const dataH = Math.abs((pairedNode.y || 0) - pending.ownY) + pad * 2
+            const fitZoom = Math.min(container.clientWidth / dataW, container.clientHeight / dataH) * 0.85
+            targetZoom = Math.max(0.5, Math.min(1.35, fitZoom))
+          }
+          const panelCompX = container ? (180 / targetZoom) : 0
+          canvasRef.current?.animatedPanToWithZoom?.(midX + panelCompX, midY, targetZoom, 600)
+        } else {
+          canvasRef.current?.animatedPanToWithZoom?.(pending.ownX, pending.ownY, 1.28, 600)
+        }
+      }, 100)
+    } else {
+      setTimeout(() => {
+        setSel(pending.nodeId)
+        canvasRef.current?.animatedPanToWithZoom?.(pending.x, pending.y, 1.28, 600)
+      }, 100)
+    }
+  }, [connectNode, responseRequest])
 
   // Requirement sets — per-role, defaults from demo data
   const requirementSets = useMemo(() => {
@@ -616,10 +691,12 @@ export default function V2App() {
 
   const handleSelect = useCallback((node) => {
     setSel(node.id)
+    setForcePanelTab(null)
   }, [])
 
   const handleCloseSel = useCallback(() => {
     setSel(null)
+    setForcePanelTab(null)
   }, [])
 
   const enterSubchain = useCallback((nodeId) => {
@@ -846,6 +923,8 @@ export default function V2App() {
         from: ctxNode.id,
         to: provNodeId,
         sdaType: 'provisional',
+        _isNew: true,
+        _createdAt: Date.now(),
       })
     })
 
@@ -856,8 +935,12 @@ export default function V2App() {
         addedNodes: [...prev.addedNodes, ...newProvNodes],
         addedEdges: [...prev.addedEdges, ...newProvEdges],
       }))
-      // Pan to the first provisional node after state settles
-      setTimeout(() => setSel(newProvNodes[0].id), 300)
+      // Store target — pan will fire when the modal closes
+      pendingPanRef.current = {
+        nodeId: newProvNodes[0].id,
+        x: newProvNodes[0].x,
+        y: newProvNodes[0].y,
+      }
     }
 
     // Cross-role requests — also batch into single update
@@ -1101,6 +1184,15 @@ export default function V2App() {
                               if (targetNode._isNew && targetNode._wasProvisional) {
                                 canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 1.28)
                                 startReveal(targetNode.id)
+                              } else {
+                                const pairedNode = req.connectTo?.id ? nodeMap[req.connectTo.id] : null
+                                if (pairedNode) {
+                                  const midX = (targetNode.x + pairedNode.x) / 2
+                                  const midY = (targetNode.y + pairedNode.y) / 2
+                                  canvasRef.current?.panToWithZoom?.(midX, midY, 0.7)
+                                } else {
+                                  canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 0.7)
+                                }
                               }
                             }
                           }
@@ -1543,6 +1635,7 @@ export default function V2App() {
               onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
               isOwner={nodeMap[sel]?.owner === activeRole.party}
               revealPhase={revealAnim?.nodeId === sel ? revealAnim.phase : null}
+              forceTab={forcePanelTab}
               onViewChild={handleViewChild}
               onCancelRequest={(provNode) => {
                 updateRoleState(roleId, prev => ({
@@ -2315,6 +2408,8 @@ export default function V2App() {
                     from: req.connectTo.id,
                     to: reqNodeId,
                     sdaType: disclosureType,
+                    _isNew: true,
+                    _createdAt: Date.now(),
                   }],
                 }))
               }
@@ -2337,6 +2432,8 @@ export default function V2App() {
                     from: req.connectTo.id,
                     to: reqNodeId,
                     sdaType: disclosureType,
+                    _isNew: true,
+                    _createdAt: Date.now(),
                   }],
                   addedSDAs: {
                     ...prev.addedSDAs,
@@ -2484,6 +2581,8 @@ export default function V2App() {
                         to: reqNodeId,
                         sdaType: disclosureType,
                         _showAsProvisional: true,
+                        _isNew: true,
+                        _createdAt: Date.now(),
                       })
                   } else if (!existsInStatic && !existsInDynamic) {
                     newState.addedNodes = [...prev.addedNodes, disclosedNodeForOther]
@@ -2493,6 +2592,8 @@ export default function V2App() {
                       from: req.connectTo.id,
                       to: reqNodeId,
                       sdaType: disclosureType,
+                      _isNew: true,
+                      _createdAt: Date.now(),
                     }]
                   } else {
                     // Node exists — just add the SDA to it
@@ -2506,6 +2607,8 @@ export default function V2App() {
                       from: req.connectTo.id,
                       to: reqNodeId,
                       sdaType: disclosureType,
+                      _isNew: true,
+                      _createdAt: Date.now(),
                     }]
                   }
 
@@ -2517,6 +2620,10 @@ export default function V2App() {
                     asset: {
                       name: req.asset.name,
                       pin: req.node?.pin || '',
+                    },
+                    connectTo: {
+                      id: req.connectTo.id,
+                      pin: req.connectTo.pin,
                     },
                     disclosureType: disclosureType,
                     date: today,
@@ -2559,7 +2666,15 @@ export default function V2App() {
               dismissedReqs: [...prev.dismissedReqs, req.id],
             }))
             setResponseRequest(null)
-            if (reqNodeId) {
+            if (reqNodeId && disclosureType) {
+              pendingPanRef.current = {
+                type: 'pair',
+                ownNodeId: reqNodeId,
+                ownX: nodeMap[reqNodeId]?.x ?? 0,
+                ownY: nodeMap[reqNodeId]?.y ?? 0,
+                pairedNodeId: req.connectTo?.id || null,
+              }
+            } else if (reqNodeId) {
               setTimeout(() => setSel(reqNodeId), 100)
             }
           }}

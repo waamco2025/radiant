@@ -318,13 +318,16 @@ const V2Canvas = forwardRef(function V2Canvas({
   const cameraRef = useRef(null)
   const edgeGroupRef = useRef(null)
   const gridGroupRef = useRef(null)
+  const newEdgeAnimTimerRef = useRef(null)
 
   // Camera state
   const camPosRef = useRef({ x: 0, y: 0 })
   const zoomRef = useRef(0.7)
   const [zoom, setZoom] = useState(0.7)
+  const [threeReady, setThreeReady] = useState(false)
   const dirtyRef = useRef(true)
   const edgeAnimRef = useRef(null)
+  const externalPanRef = useRef(false)
 
   // Pan state
   const draggingRef = useRef(false)
@@ -585,6 +588,9 @@ const V2Canvas = forwardRef(function V2Canvas({
     setScreenPositions(positions)
   }, [currentLayer.nodes, worldToScreen])
 
+  const updateOverlayRef = useRef(updateOverlay)
+  useEffect(() => { updateOverlayRef.current = updateOverlay }, [updateOverlay])
+
   // ===== EDGE MANAGEMENT =====
   const clearGroup = useCallback((group) => {
     if (!group) return
@@ -690,8 +696,11 @@ const V2Canvas = forwardRef(function V2Canvas({
       // Per-edge SDA type styling
       const effectiveSdaType = edge._showAsProvisional ? 'provisional' : edge.sdaType
       const sdaCfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
-      const edgeColor = new THREE.Color(sdaCfg.color)
-      const lineWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
+      const isNewEdge = !!edge._isNew
+      const edgeColor = isNewEdge
+        ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
+        : new THREE.Color(sdaCfg.color)
+      const lineWidth = isNewEdge ? 3.0 : (SDA_EDGE_WIDTH[effectiveSdaType] || 2.0)
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -742,6 +751,8 @@ const V2Canvas = forwardRef(function V2Canvas({
         discloser: edge.discloser || null,
         cascadePolicy: edge.cascadePolicy || null,
         redacted: edge.redacted || null,
+        _isNew: !!edge._isNew,
+        _createdAt: edge._createdAt || null,
       }
       group.add(line)
     })
@@ -839,6 +850,32 @@ const V2Canvas = forwardRef(function V2Canvas({
 
       const allDone = lines.every((l, i) => l.geometry.instanceCount >= fullCounts[i])
       if (!allDone) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }, [])
+
+  const animateNewEdges = useCallback(() => {
+    const group = edgeGroupRef.current
+    if (!group) return
+    const newLines = group.children.filter(c =>
+      c.userData?._isNew && c.geometry?.instanceCount !== undefined
+    )
+    if (newLines.length === 0) return
+    const fullCounts = newLines.map(l => l.geometry.instanceCount)
+    newLines.forEach(l => { l.geometry.instanceCount = 0 })
+    dirtyRef.current = true
+    let startTime = null
+    const duration = 800
+    const tick = (time) => {
+      if (!startTime) startTime = time
+      const elapsed = time - startTime
+      const t = Math.min(1, elapsed / duration)
+      const ease = 1 - Math.pow(1 - t, 2)
+      newLines.forEach((l, i) => {
+        l.geometry.instanceCount = Math.round(ease * fullCounts[i])
+      })
+      dirtyRef.current = true
+      if (t < 1) requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
   }, [])
@@ -1303,11 +1340,42 @@ const V2Canvas = forwardRef(function V2Canvas({
     panAnimRef.current = requestAnimationFrame(tick)
   }, [clampPan, updateCamera])
 
+  const animatedPanToWithZoom = useCallback((worldX, worldY, targetZoom, duration = 500) => {
+    if (panAnimRef.current) cancelAnimationFrame(panAnimRef.current)
+    externalPanRef.current = true
+    const startX = camPosRef.current.x
+    const startY = camPosRef.current.y
+    const startZoom = zoomRef.current
+    let startTime = null
+    const tick = (time) => {
+      if (!startTime) startTime = time
+      const elapsed = time - startTime
+      const t = Math.min(1, elapsed / duration)
+      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+      const clamped = clampPan(
+        startX + (worldX - startX) * ease,
+        startY + (worldY - startY) * ease
+      )
+      camPosRef.current = clamped
+      zoomRef.current = startZoom + (targetZoom - startZoom) * ease
+      setZoom(zoomRef.current)
+      updateCamera()
+      if (t < 1) {
+        panAnimRef.current = requestAnimationFrame(tick)
+      } else {
+        panAnimRef.current = null
+        externalPanRef.current = false
+      }
+    }
+    panAnimRef.current = requestAnimationFrame(tick)
+  }, [clampPan, updateCamera])
+
   // Pan to selected node when selection changes
   // Offset upward by ~10% of visible viewport height (in world units)
   // Offset left to compensate for Detail Panel width
   useEffect(() => {
     if (!selectedId || transitioningRef.current) return
+    if (externalPanRef.current) return
     const node = currentNodeMap[selectedId]
     if (!node || node.x === undefined) return
     const container = containerRef.current
@@ -1685,6 +1753,8 @@ const V2Canvas = forwardRef(function V2Canvas({
       updateCamera()
       dirtyRef.current = true
     },
+    animatedPanToWithZoom: (x, y, z, duration) => animatedPanToWithZoom(x, y, z, duration),
+    animateNewEdges: () => animateNewEdges(),
     fadeOutCards: (duration = 180) => {
       const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
       if (!cards) return
@@ -1709,7 +1779,7 @@ const V2Canvas = forwardRef(function V2Canvas({
         }, duration + 50)
       })
     },
-  }), [handleDive, handleSurface, animateDotStreaks, animateLateralStreaks, fitToNodes, updateCamera])
+  }), [handleDive, handleSurface, animateDotStreaks, animateLateralStreaks, fitToNodes, updateCamera, animatedPanToWithZoom, animateNewEdges])
 
   // Report layer changes to parent
   useEffect(() => {
@@ -1729,18 +1799,90 @@ const V2Canvas = forwardRef(function V2Canvas({
     return () => window.removeEventListener('keydown', handleKey)
   }, [handleSurface, modalOpen, depth])
 
-  // Rebuild edges when layer changes (covers initial load + theme changes + LOD toggle)
+  // Rebuild edges when layer/chain changes — synchronous so chain dimming works correctly
   useEffect(() => {
     if (!edgeGroupRef.current) return
     if (transitioningRef.current) return
     const lodMode = zoomRef.current < LOD_THRESHOLD
-    // Defer to next frame to ensure dirty flag is picked up by the render loop
-    requestAnimationFrame(() => {
-      if (!edgeGroupRef.current) return
-      buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
-      dirtyRef.current = true
-    })
-  }, [currentLayer, currentNodeMap, buildEdges, zoom])
+
+    buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)
+
+    // Cancel any pending new-edge draw animation from a previous rebuild
+    const group = edgeGroupRef.current
+    if (newEdgeAnimTimerRef.current) {
+      clearTimeout(newEdgeAnimTimerRef.current)
+      newEdgeAnimTimerRef.current = null
+    }
+
+    // Find recent _isNew edges that haven't been zeroed yet
+    const now = Date.now()
+    const newEdgeLines = group.children.filter(c =>
+      c.userData?._isNew &&
+      c.geometry?.instanceCount !== undefined &&
+      c.userData._fullInstanceCount === undefined &&
+      (!c.userData._createdAt || (now - c.userData._createdAt) < 3000)
+    )
+    if (newEdgeLines.length > 0) {
+      newEdgeLines.forEach(l => {
+        l.userData._fullInstanceCount = l.geometry.instanceCount
+        l.geometry.instanceCount = 0
+      })
+    }
+
+    // If any lines have a pending animation, schedule the draw
+    const pendingLines = group.children.filter(c => c.userData?._fullInstanceCount !== undefined)
+    if (pendingLines.length > 0) {
+      newEdgeAnimTimerRef.current = setTimeout(() => {
+        newEdgeAnimTimerRef.current = null
+        const currentGroup = edgeGroupRef.current
+        if (!currentGroup) return
+        const linesToAnimate = currentGroup.children.filter(c =>
+          c.userData?._fullInstanceCount !== undefined &&
+          c.geometry?.instanceCount !== undefined
+        )
+        if (linesToAnimate.length === 0) return
+        let startTime = null
+        const dur = 800
+        const tick = (time) => {
+          if (!startTime) startTime = time
+          const t = Math.min(1, (time - startTime) / dur)
+          const ease = 1 - Math.pow(1 - t, 2)
+          let anyIncomplete = false
+          linesToAnimate.forEach(l => {
+            if (!l.geometry || l.geometry.instanceCount === undefined) return
+            const target = l.userData._fullInstanceCount
+            l.geometry.instanceCount = Math.round(ease * target)
+            if (l.geometry.instanceCount < target) anyIncomplete = true
+          })
+          dirtyRef.current = true
+          if (anyIncomplete && t < 1) {
+            requestAnimationFrame(tick)
+          } else {
+            linesToAnimate.forEach(l => { delete l.userData._fullInstanceCount })
+          }
+        }
+        requestAnimationFrame(tick)
+      }, 400)
+    }
+
+    // Re-apply chain dimming after edge build
+    if (chainNodeIds) {
+      group.children.forEach(line => {
+        const mat = line.material
+        if (!mat) return
+        const inChain = chainNodeIds.has(line.userData.from) && chainNodeIds.has(line.userData.to)
+        if (mat.userData?.isSolid) {
+          mat.transparent = true
+          mat.opacity = inChain ? 1.0 : 0.12
+        } else {
+          mat.opacity = inChain ? 0.5 : 0.12
+        }
+        mat.needsUpdate = true
+      })
+    }
+
+    dirtyRef.current = true
+  }, [currentLayer, currentNodeMap, buildEdges, zoom, chainNodeIds, threeReady])
 
   // Dim non-chain edges + animate in-chain edges when selection changes
   useEffect(() => {
@@ -1858,13 +2000,14 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     updateCamera()
     buildGrid(0)
+    setThreeReady(true)
 
     let animId
     const animate = () => {
       animId = requestAnimationFrame(animate)
       if (dirtyRef.current) {
         renderer.render(scene, camera)
-        updateOverlay()
+        updateOverlayRef.current()
         dirtyRef.current = false
       }
     }
@@ -1893,8 +2036,9 @@ const V2Canvas = forwardRef(function V2Canvas({
       if (panAnimRef.current) cancelAnimationFrame(panAnimRef.current)
       ro.disconnect()
       renderer.dispose()
+      setThreeReady(false)
     }
-  }, [updateCamera, updateOverlay, buildGrid])
+  }, [updateCamera, buildGrid])
 
   // Cleanup streak artifacts on unmount (handles key-change remounts mid-animation)
   useEffect(() => {
@@ -2158,6 +2302,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   return (
     <div
       ref={containerRef}
+      data-canvas-container
       style={{
         position: 'relative',
         width: '100%',

@@ -667,7 +667,7 @@ export default function AssetNode({
             color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
             fontStyle: 'italic',
           }}>
-            {isDeclined ? 'Disclosure declined' : 'Awaiting owner response'}
+            {isDeclined ? 'Disclosure declined' : 'Awaiting disclosure from owner'}
           </div>
         ) : (
           <div style={{

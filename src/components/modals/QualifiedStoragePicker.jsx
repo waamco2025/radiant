@@ -129,6 +129,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
   const data = MOCK_BUCKETS[activeParty] || MOCK_BUCKETS.GovCo
   const [currentPath, setCurrentPath] = useState('/')
   const [selected, setSelected] = useState(new Set())
+  const [previewFile, setPreviewFile] = useState(null)
 
   const folders = data.folders[currentPath] || []
   const allFiles = data.files[currentPath] || []
@@ -140,6 +141,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
     const newPath = currentPath === '/' ? `/${folder}` : `${currentPath}/${folder}`
     setCurrentPath(newPath)
     setSelected(new Set())
+    setPreviewFile(null)
   }, [currentPath])
 
   const navigateUp = useCallback(() => {
@@ -148,6 +150,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
     parts.pop()
     setCurrentPath(parts.join('/') || '/')
     setSelected(new Set())
+    setPreviewFile(null)
   }, [currentPath])
 
   const navigateToBreadcrumb = useCallback((idx) => {
@@ -155,6 +158,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
     const newPath = '/' + parts.slice(0, idx).join('/')
     setCurrentPath(newPath === '/' ? '/' : newPath)
     setSelected(new Set())
+    setPreviewFile(null)
   }, [currentPath])
 
   const toggleFile = useCallback((fileName) => {
@@ -260,7 +264,7 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
       {/* File browser — centered fixed-size container */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         <div style={{
-          width: 1100, height: 720,
+          width: 1100, height: '85%', maxHeight: 800,
           background: 'var(--bg-surface)',
           borderRadius: 10,
           border: '1px solid var(--border)',
@@ -299,113 +303,251 @@ export default function QualifiedStoragePicker({ activeParty, mode = 'single', a
             )}
           </div>
 
-          {/* File list (scrollable) */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px' }}>
-            {/* Back button */}
-            {currentPath !== '/' && (
-              <div
-                onClick={navigateUp}
-                style={{
-                  padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                  borderBottom: '1px solid var(--border)', transition: 'color 100ms',
-                  color: 'var(--text-dim)',
-                }}
-                onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
-                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
-              >
-                <span style={{ fontSize: 12 }}>&larr;</span>
-                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>..</span>
-              </div>
-            )}
-
-            {/* Folders */}
-            {folders.map(folder => (
-              <div
-                key={folder}
-                onClick={() => navigateTo(folder)}
-                style={{
-                  padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
-                  borderBottom: '1px solid var(--border)', transition: 'background 100ms',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <span style={{ fontSize: 14, color: 'var(--accent-amber)', width: 28, textAlign: 'center', flexShrink: 0 }}>
-                  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="var(--accent-amber)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 4.5V12a1 1 0 001 1h10a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H3a1 1 0 00-1 1z" />
-                  </svg>
-                </span>
-                <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{folder}</span>
-              </div>
-            ))}
-
-            {/* Select all (multi mode) */}
-            {mode === 'multi' && files.length > 0 && (
-              <div
-                onClick={toggleAll}
-                style={{
-                  padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
-                  borderBottom: '1px solid var(--border)',
-                  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
-                }}
-              >
-                {selected.size === files.length ? 'Deselect all' : 'Select all'} ({files.length} files)
-              </div>
-            )}
-
-            {/* Files */}
-            {files.map(file => {
-              const isSelected = selected.has(file.name)
-              return (
+          {/* File list + preview pane */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* File list (scrollable) */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px' }}>
+              {/* Back button */}
+              {currentPath !== '/' && (
                 <div
-                  key={file.name}
-                  onClick={() => toggleFile(file.name)}
+                  onClick={navigateUp}
+                  style={{
+                    padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                    borderBottom: '1px solid var(--border)', transition: 'color 100ms',
+                    color: 'var(--text-dim)',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+                >
+                  <span style={{ fontSize: 12 }}>&larr;</span>
+                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>..</span>
+                </div>
+              )}
+
+              {/* Folders */}
+              {folders.map(folder => (
+                <div
+                  key={folder}
+                  onClick={() => navigateTo(folder)}
                   style={{
                     padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
                     borderBottom: '1px solid var(--border)', transition: 'background 100ms',
-                    background: isSelected ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)' : 'transparent',
                   }}
-                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-raised)' }}
-                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  {mode === 'single' ? (
-                    <div style={{
-                      width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                      border: `2px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 150ms',
-                    }}>
-                      {isSelected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />}
-                    </div>
-                  ) : (
-                    <div style={{
-                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                      border: `1.5px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
-                      background: isSelected ? 'var(--accent-green)' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 150ms',
-                    }}>
-                      {isSelected && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
-                    </div>
-                  )}
-                  <FileIcon type={file.type} />
-                  <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                    {file.name}
+                  <span style={{ fontSize: 14, color: 'var(--accent-amber)', width: 28, textAlign: 'center', flexShrink: 0 }}>
+                    <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="var(--accent-amber)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 4.5V12a1 1 0 001 1h10a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H3a1 1 0 00-1 1z" />
+                    </svg>
                   </span>
-                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', width: 80, textAlign: 'right' }}>
-                    {file.size}
-                  </span>
-                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', width: 90, textAlign: 'right' }}>
-                    {file.date}
-                  </span>
+                  <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{folder}</span>
                 </div>
-              )
-            })}
+              ))}
 
-            {/* Empty state */}
-            {folders.length === 0 && files.length === 0 && (
-              <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-                No {accept ? accept.replace('.', '').toUpperCase() + ' ' : ''}files in this folder
+              {/* Select all (multi mode) */}
+              {mode === 'multi' && files.length > 0 && (
+                <div
+                  onClick={toggleAll}
+                  style={{
+                    padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+                  }}
+                >
+                  {selected.size === files.length ? 'Deselect all' : 'Select all'} ({files.length} files)
+                </div>
+              )}
+
+              {/* Files */}
+              {files.map(file => {
+                const isSelected = selected.has(file.name)
+                const isFocused = previewFile?.name === file.name
+                return (
+                  <div
+                    key={file.name}
+                    onClick={() => {
+                      const wasSelected = selected.has(file.name)
+                      toggleFile(file.name)
+                      if (mode === 'single' && wasSelected) {
+                        setPreviewFile(null)
+                      } else {
+                        setPreviewFile(file)
+                      }
+                    }}
+                    style={{
+                      padding: '8px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                      borderBottom: '1px solid var(--border)', transition: 'background 100ms',
+                      background: isFocused
+                        ? 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)'
+                        : isSelected
+                          ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
+                          : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isSelected && !isFocused) e.currentTarget.style.background = 'var(--bg-raised)' }}
+                    onMouseLeave={e => { if (!isSelected && !isFocused) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {mode === 'single' ? (
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 150ms',
+                      }}>
+                        {isSelected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />}
+                      </div>
+                    ) : (
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                        border: `1.5px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                        background: isSelected ? 'var(--accent-green)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 150ms',
+                      }}>
+                        {isSelected && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+                      </div>
+                    )}
+                    <FileIcon type={file.type} />
+                    <span style={{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+                      {file.name}
+                    </span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', width: 80, textAlign: 'right' }}>
+                      {file.size}
+                    </span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', width: 90, textAlign: 'right' }}>
+                      {file.date}
+                    </span>
+                  </div>
+                )
+              })}
+
+              {/* Empty state */}
+              {folders.length === 0 && files.length === 0 && (
+                <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+                  No {accept ? accept.replace('.', '').toUpperCase() + ' ' : ''}files in this folder
+                </div>
+              )}
+            </div>
+
+            {/* Preview pane */}
+            {previewFile && (
+              <div style={{
+                width: 380, flexShrink: 0,
+                borderLeft: '1px solid var(--border)',
+                display: 'flex', flexDirection: 'column',
+                overflow: 'hidden',
+              }}>
+                {/* Preview header */}
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  flexShrink: 0,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <ShieldIcon size={14} />
+                        <span style={{
+                          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          color: 'var(--accent-green)', letterSpacing: '0.06em',
+                        }}>FILE DETAILS</span>
+                      </div>
+                      <div style={{
+                        fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',
+                        wordBreak: 'break-all', lineHeight: 1.4,
+                      }}>
+                        {previewFile.name}
+                      </div>
+                    </div>
+                    <span
+                      onClick={() => setPreviewFile(null)}
+                      style={{
+                        fontSize: 14, color: 'var(--text-dim)', cursor: 'pointer',
+                        padding: '0 2px', lineHeight: 1, flexShrink: 0,
+                      }}
+                    >&#10005;</span>
+                  </div>
+                </div>
+
+                {/* Metadata rows */}
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                  {[
+                    { label: 'Type', value: previewFile.type?.toUpperCase() || 'FILE' },
+                    { label: 'Size', value: previewFile.size },
+                    { label: 'Modified', value: previewFile.date },
+                    { label: 'Path', value: `${data.bucket}${currentPath}/${previewFile.name}` },
+                  ].map(row => (
+                    <div key={row.label} style={{
+                      display: 'flex', alignItems: 'baseline', gap: 8,
+                      padding: '4px 0', fontSize: 11,
+                    }}>
+                      <span style={{
+                        width: 60, flexShrink: 0,
+                        color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                      }}>{row.label}</span>
+                      <span style={{
+                        flex: 1, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+                        wordBreak: 'break-all',
+                      }}>{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Preview area — placeholder */}
+                <div style={{
+                  flex: 1, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  padding: '24px 16px',
+                  color: 'var(--text-dim)',
+                }}>
+                  <div style={{
+                    width: 80, height: 100, borderRadius: 8,
+                    border: '2px dashed var(--border)',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    marginBottom: 16,
+                    background: 'color-mix(in srgb, var(--border) 20%, transparent)',
+                  }}>
+                    <FileIcon type={previewFile.type} />
+                  </div>
+                  <div style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.6,
+                  }}>
+                    Preview not available
+                    <br />
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      Select to attach this file
+                    </span>
+                  </div>
+                </div>
+
+                {/* Ledger status */}
+                <div style={{
+                  padding: '10px 16px',
+                  borderTop: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  flexShrink: 0,
+                }}>
+                  <div style={{
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: 'var(--accent-green)', letterSpacing: '0.06em',
+                    marginBottom: 4,
+                  }}>LEDGER STATUS</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{
+                      width: 6, height: 6, borderRadius: '50%',
+                      background: 'var(--accent-green)',
+                    }} />
+                    <span style={{
+                      fontSize: 10, fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-secondary)',
+                    }}>
+                      Hashed &amp; endorsed on-chain
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
           </div>

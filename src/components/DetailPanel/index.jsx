@@ -24,7 +24,7 @@ if (typeof document !== 'undefined' && !document.getElementById('panel-reveal-ke
   document.head.appendChild(style)
 }
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary, revealPhase }) {
+export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary, revealPhase, forceTab }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -491,15 +491,15 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
     }
   }, [revealPhase])
 
-  // Always reset to first tab and clear eval state on node change
+  // Always reset to first tab and clear eval state on node change, then apply forceTab
   useEffect(() => {
     if (tabs.length > 0) {
-      setTab(tabs[0].id)
+      setTab(forceTab && tabs.some(t => t.id === forceTab) ? forceTab : tabs[0].id)
     }
     setEvalOpen({})
     setClaimsOpen({})
     setEvOpen(false)
-  }, [node.id])
+  }, [node.id, forceTab])
 
   // Eval panel state (lifted)
   const [evalOpen, setEvalOpen] = useState({})
