@@ -163,7 +163,7 @@ function ProofOnlyEvalDisplay({ evals }) {
   )
 }
 
-export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda, onReviseSda, nodes }) {
+export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda, onReviseSda, nodes, onViewEvidence }) {
   const [allOpen, setAllOpen] = useState(false)
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
@@ -223,7 +223,15 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
                 <SDABadge type={sda.type} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>{sda.party}</span>
-                {sda.partyLabel && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{sda.partyLabel}</span>}
+                {sda.partyLabel === 'internal' ? (
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>internal</span>
+                ) : sda.party === 'Radiant Network' ? (
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>directory</span>
+                ) : (
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                    {sda._isGrantor ? 'disclosed to' : 'disclosed by'}
+                  </span>
+                )}
                 {sda.assetName && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0, minWidth: 0 }}>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>&middot;&nbsp;</span>
@@ -346,6 +354,19 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                                 color: 'var(--accent-green)', flexShrink: 0,
                               }}>PARSED</span>
                             )}
+                            {onViewEvidence && (
+                              <span
+                                onClick={e => { e.stopPropagation(); onViewEvidence(evId) }}
+                                style={{
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                                  cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+                                  transition: 'color 150ms, background 150ms', flexShrink: 0,
+                                }}
+                                onMouseEnter={e => { e.target.style.color = 'var(--accent-indigo)'; e.target.style.background = 'var(--bg-raised)' }}
+                                onMouseLeave={e => { e.target.style.color = 'var(--text-dim)'; e.target.style.background = 'transparent' }}
+                                title="View evidence in child layer"
+                              >&#9656;</span>
+                            )}
                           </div>
                         )
                       })}
@@ -374,6 +395,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                         const parseNode = node?.children?.find(c => c.id === parseNodeId)
                           || (nodes || []).flatMap(n => n.children || []).find(c => c.id === parseNodeId)
                         const field = parseNode?.parsedFields?.find(f => f.id === fieldId)
+                          || parseNode?.parsedFields?.find(f => f.name === fieldId)
                         return (
                           <div key={fieldKey} style={{
                             display: 'flex', alignItems: 'center', gap: 8,
@@ -381,7 +403,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                             borderBottom: fi < sda.selectedFieldIds.length - 1 ? '1px solid var(--border)' : 'none',
                           }}>
                             <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>
-                              {field?.name || fieldId}
+                              {field?.name || fieldId.replace(/^f-/, '').replace(/-/g, ' ')}
                             </span>
                             <span style={{
                               flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)',

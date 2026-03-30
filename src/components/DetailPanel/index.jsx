@@ -614,7 +614,11 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       )}
       {tabs.some(t => t.id === 'disclosures') && (
         <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
-          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} nodes={nodes} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} onReviseSda={onReviseSda} />
+          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} nodes={nodes} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} onReviseSda={onReviseSda} onViewEvidence={onViewChild ? (evId) => {
+            const evNode = (node.children || []).find(c => c.id === evId)
+              || (nodes || []).flatMap(n => n.children || []).find(c => c.id === evId)
+            if (evNode) onViewChild(evNode)
+          } : undefined} />
         </div>
       )}
       {tabs.some(t => t.id === 'parsed') && (

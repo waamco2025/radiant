@@ -527,6 +527,7 @@ export default function V2App() {
   const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
   const [evalContext, setEvalContext] = useState(null)
   const [reviseContext, setReviseContext] = useState(null)
+  const [showChangelog, setShowChangelog] = useState(false)
 
   // Reveal animation state machine for provisional→real card transitions
   const startReveal = useCallback((nodeId) => {
@@ -793,6 +794,18 @@ export default function V2App() {
       }, 50)
     }, 250)
   }, [sel, nodeMap])
+
+  const ensureParentLayer = useCallback((callback) => {
+    if (layerInfo.depth > 0) {
+      canvasRef.current?.surface()
+      setTimeout(callback, 400)
+    } else if (subchainFocusId) {
+      exitSubchain()
+      setTimeout(callback, 400)
+    } else {
+      callback()
+    }
+  }, [layerInfo.depth, subchainFocusId, exitSubchain])
 
   const handlePanelSurface = useCallback(() => {
     if (layerInfo.depth > 0) {
@@ -1173,53 +1186,58 @@ export default function V2App() {
                       onClick={() => {
                         setShowInbox(false)
                         if (isRevocation) {
-                          setRevocationNotice(req)
+                          ensureParentLayer(() => setRevocationNotice(req))
                         } else if (isRevision) {
-                          updateRoleState(roleId, prev => ({
-                            ...prev,
-                            dismissedReqs: [...prev.dismissedReqs, req.id],
-                          }))
-                          const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
-                          if (targetNode) {
-                            setSel(targetNode.id)
-                            setForcePanelTab('disclosures')
-                          }
-                        } else if (isAcceptance || isDecline) {
-                          // Dismiss notification and pan to asset
-                          updateRoleState(roleId, prev => ({
-                            ...prev,
-                            dismissedReqs: [...prev.dismissedReqs, req.id],
-                          }))
-                          if (isAcceptance) {
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
                             const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
                             if (targetNode) {
                               setSel(targetNode.id)
-                              if (targetNode._isNew && targetNode._wasProvisional) {
-                                canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 1.28)
-                                startReveal(targetNode.id)
-                              } else {
-                                const pairedNode = req.connectTo?.id ? nodeMap[req.connectTo.id] : null
-                                if (pairedNode) {
-                                  const midX = (targetNode.x + pairedNode.x) / 2
-                                  const midY = (targetNode.y + pairedNode.y) / 2
-                                  canvasRef.current?.panToWithZoom?.(midX, midY, 0.7)
+                              setForcePanelTab('disclosures')
+                            }
+                          })
+                        } else if (isAcceptance || isDecline) {
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
+                            if (isAcceptance) {
+                              const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
+                              if (targetNode) {
+                                setSel(targetNode.id)
+                                if (targetNode._isNew && targetNode._wasProvisional) {
+                                  canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 1.28)
+                                  startReveal(targetNode.id)
                                 } else {
-                                  canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 0.7)
+                                  const pairedNode = req.connectTo?.id ? nodeMap[req.connectTo.id] : null
+                                  if (pairedNode) {
+                                    const midX = (targetNode.x + pairedNode.x) / 2
+                                    const midY = (targetNode.y + pairedNode.y) / 2
+                                    canvasRef.current?.panToWithZoom?.(midX, midY, 0.7)
+                                  } else {
+                                    canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 0.7)
+                                  }
                                 }
                               }
                             }
-                          }
-                          if (isDecline) {
-                            const targetNode = Object.values(nodeMap).find(n =>
-                              n.pin === req.asset?.pin && n._isDeclined
-                            )
-                            if (targetNode) {
-                              setTimeout(() => setSel(targetNode.id), 100)
+                            if (isDecline) {
+                              const targetNode = Object.values(nodeMap).find(n =>
+                                n.pin === req.asset?.pin && n._isDeclined
+                              )
+                              if (targetNode) {
+                                setTimeout(() => setSel(targetNode.id), 100)
+                              }
                             }
-                          }
+                          })
                         } else {
-                          const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
-                          setResponseRequest(reqNode ? { ...req, node: reqNode } : req)
+                          ensureParentLayer(() => {
+                            const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
+                            setResponseRequest(reqNode ? { ...req, node: reqNode } : req)
+                          })
                         }
                       }}
                       style={{
@@ -1967,6 +1985,18 @@ export default function V2App() {
             Connected to AWS S3
           </span>
         </div>
+        <span
+          onClick={() => setShowChangelog(true)}
+          style={{
+            fontFamily: 'var(--font-mono)', fontSize: 10,
+            color: 'var(--text-dim)', cursor: 'pointer',
+            transition: 'color 150ms',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+        >
+          v0.3.0 &middot; Changelog
+        </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
         <div style={{
@@ -1988,6 +2018,95 @@ export default function V2App() {
           {`s3://${activeRole.party.toLowerCase().replace(/\s+/g, '-')}-qualified-storage · Connected · All evidence files are hashed and endorsed on the ledger`}
         </div>,
         document.body
+      )}
+
+      {showChangelog && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowChangelog(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: 560, maxHeight: '80vh', background: 'var(--bg-surface)',
+            border: '1px solid var(--border)', borderRadius: 10,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '18px 24px', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>Prototype Changelog</div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>Radiant V2 — PCN Prototyping</div>
+              </div>
+              <span onClick={() => setShowChangelog(false)} style={{ fontSize: 16, color: 'var(--text-dim)', cursor: 'pointer', padding: '4px 8px' }}>&#10005;</span>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
+              {[
+                { version: '0.3.0', date: '2026-03-30', label: 'Round 8', items: [
+                  'Evidence selection step — scope which evidence to include in any disclosure type',
+                  'Proof-only evaluation selection — choose which eval results to share (replaces evidence step)',
+                  'Revise SDA modal — add evidence and fields to existing disclosures with locked/unlocked UI',
+                  'Disclosed evidence and fields tables inside each SDA card',
+                  'Grantor/grantee labeling on SDAs (disclosed to / disclosed by / internal / directory)',
+                  'View evidence button in Disclosures tab — dives to child layer',
+                  'Surface-before-navigate — notification clicks auto-surface from child layer',
+                  'LOD dot dimming fix after surface transitions',
+                  'Prototype changelog modal',
+                ]},
+                { version: '0.2.0', date: '2026-03-29', label: 'Round 7', items: [
+                  'Animated pan + zoom on disclosure creation and acceptance',
+                  'Progressive edge draw animation for new connections',
+                  'Qualified Storage file picker with S3 bucket browser and preview pane',
+                  'Hash and Endorse animation in Add Evidence modal',
+                  'Provisional card reveal animation (zoom, border wipe, flip, badge)',
+                  'Publish to Radiant Network Public Directory with selective field scrollboxes',
+                  'Proof-of-evaluation display for proof-only disclosures',
+                  'Revision notifications with cross-role sync',
+                  'Footer portal tooltip for QS indicator',
+                ]},
+                { version: '0.1.0', date: '2026-03-28', label: 'Rounds 5-6', items: [
+                  'Unified ClaimsTable component (3-line rows with proofOnly mode)',
+                  'Expand-to-modal + CSV download on all data tables',
+                  'Bidirectional PEP layout in child layer',
+                  'Subchain view with lateral streak transitions',
+                  'Chevron size normalization, emoji removal (all SVG icons)',
+                  'Revoke warning redesign with contextual messages',
+                  'Requirements Library search match highlighting',
+                ]},
+                { version: '0.0.1', date: '2026-03-15', label: 'Rounds 1-4', items: [
+                  'Two-layer graph with parent + child architecture',
+                  'Five disclosure types: Full, Selective, Proof-only, Cascade, Provisional',
+                  'AI-powered evaluation with human review',
+                  'PEP parse with template selection',
+                  'Requirements Library with search and versioning',
+                  'Register Assets (single + bulk CSV)',
+                  'Role switching between Bob@GovCo and Alice@MicroCo',
+                ]},
+              ].map(release => (
+                <div key={release.version} style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <span style={{
+                      fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: 'var(--accent-indigo)', padding: '2px 8px', borderRadius: 4,
+                      background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                    }}>v{release.version}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{release.label}</span>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{release.date}</span>
+                  </div>
+                  {release.items.map((item, ii) => (
+                    <div key={ii} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                      padding: '3px 0', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
+                    }}>
+                      <span style={{ color: 'var(--text-dim)', flexShrink: 0, marginTop: 2 }}>&middot;</span>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* SubgraphModal — disabled, replaced by subchain canvas view */}

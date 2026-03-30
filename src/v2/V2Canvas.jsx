@@ -325,6 +325,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   const zoomRef = useRef(0.7)
   const [zoom, setZoom] = useState(0.7)
   const [threeReady, setThreeReady] = useState(false)
+  const chainNodeIdsRef = useRef(null)
   const dirtyRef = useRef(true)
   const edgeAnimRef = useRef(null)
   const externalPanRef = useRef(false)
@@ -487,6 +488,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     }
     return visited
   }, [selectedId, currentLayer.edges, currentNodeMap])
+  useEffect(() => { chainNodeIdsRef.current = chainNodeIds }, [chainNodeIds])
 
   // Node positions for overlay (screen coords)
   const [screenPositions, setScreenPositions] = useState([])
@@ -1689,20 +1691,20 @@ const V2Canvas = forwardRef(function V2Canvas({
           flipAnimate(newAnchorEl, fromRect, toRect, 350)
         }
 
-        // Fade in other parent cards
+        // Fade in other parent cards — respect chain dimming
         const newCards = overlayRef.current?.querySelectorAll('[data-card-id]') || []
         newCards.forEach(card => {
           if (card.dataset.cardId !== anchorCardId) {
+            const cardId = card.dataset.cardId
+            const inChain = !chainNodeIds || chainNodeIds.has(cardId)
+            const targetOpacity = inChain ? '1' : '0.18'
             card.style.transition = 'none'
             card.style.opacity = '0'
             card.offsetHeight
             card.style.transition = 'opacity 300ms ease-out 100ms'
-            card.style.opacity = '1'
+            card.style.opacity = targetOpacity
           }
         })
-        setTimeout(() => {
-          newCards.forEach(card => { card.style.transition = ''; card.style.opacity = '' })
-        }, 450)
       })
     }, 200)
 
@@ -1714,12 +1716,27 @@ const V2Canvas = forwardRef(function V2Canvas({
       setTransitioning(false)
       setDiveTargetId(null)
       setUnfurlSettle(false)
+      // Re-apply correct styles using refs (avoids stale closure)
       requestAnimationFrame(() => {
         const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
-        if (cards) cards.forEach(card => {
-          card.style.viewTransitionName = ''
-          card.style.transform = ''
-        })
+        if (cards) {
+          const chain = chainNodeIdsRef.current
+          const z = zoomRef.current
+          cards.forEach(card => {
+            card.style.viewTransitionName = ''
+            card.style.transition = 'none'
+          })
+          overlayRef.current?.offsetHeight
+          cards.forEach(card => {
+            card.style.transform = `scale(${z})`
+            const cardId = card.getAttribute('data-card-id')
+            const inChain = !chain || chain.has(cardId)
+            card.style.opacity = inChain ? '1' : '0.18'
+          })
+          requestAnimationFrame(() => {
+            cards.forEach(card => { card.style.transition = 'opacity 200ms ease' })
+          })
+        }
       })
     }, 600)
   }, [layerStack, currentLayer.parentNode, updateCamera, clearGroup, buildEdges, fadeEdgesIn, updateClearColor, worldToScreen, onSelect, animateDotStreaks, buildGrid])
