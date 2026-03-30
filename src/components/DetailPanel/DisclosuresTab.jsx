@@ -94,7 +94,7 @@ function ProofOnlyEvalDisplay({ evals }) {
         display: 'flex', alignItems: 'center', gap: 6,
       }}>
         <span style={{ fontSize: 13 }}>✓</span>
-        PROOF OF EVALUATION · {evals.length} {evals.length === 1 ? 'evaluation' : 'evaluations'}
+        PROOF OF EVALUATION · {evals.length}
       </div>
 
       {evals.map((ev, ei) => {
@@ -163,7 +163,7 @@ function ProofOnlyEvalDisplay({ evals }) {
   )
 }
 
-export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda }) {
+export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda, onReviseSda, nodes }) {
   const [allOpen, setAllOpen] = useState(false)
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
@@ -261,6 +261,20 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                     }}>{s.label}</span>
                   </Tip>
                 } />
+                {sda.selectedEvidenceIds && sda.selectedEvidenceIds.length > 0 && sda.partyLabel !== 'internal' && (
+                  <GridRow label="Evidence" value={
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11, color: 'var(--accent-orange, #fb923c)' }}>
+                      {sda.selectedEvidenceIds.length} document{sda.selectedEvidenceIds.length !== 1 ? 's' : ''}
+                    </span>
+                  } />
+                )}
+                {sda.type === 'selective' && sda.selectedFieldIds && sda.selectedFieldIds.length > 0 && sda.partyLabel !== 'internal' && (
+                  <GridRow label="Fields" value={
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11, color: 'var(--accent-amber)' }}>
+                      {sda.selectedFieldIds.length} field{sda.selectedFieldIds.length !== 1 ? 's' : ''} disclosed
+                    </span>
+                  } />
+                )}
                 {sda.partyLabel !== 'internal' && (
                   <GridRow label="Connected asset" value={
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -286,7 +300,103 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                     </div>
                   } />
                 )}
-                {sda.pins && <GridRow label="PINs" value={`${sda.pins.length} asset${sda.pins.length > 1 ? 's' : ''}`} />}
+                {sda.pins && <GridRow label="PINs" value={sda.pins.length === 0 ? <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: 11 }}>No assets</span> : `${sda.pins.length} asset${sda.pins.length !== 1 ? 's' : ''}`} />}
+
+                {/* Disclosed evidence */}
+                {sda.selectedEvidenceIds && sda.selectedEvidenceIds.length > 0 && sda.partyLabel !== 'internal' && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{
+                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: 'var(--accent-orange, #fb923c)', letterSpacing: '0.05em',
+                      marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <span style={{ fontSize: 12 }}>&#9703;</span>
+                      DISCLOSED EVIDENCE &middot; {sda.selectedEvidenceIds.length}
+                    </div>
+                    <div style={{
+                      borderRadius: 6, overflow: 'hidden',
+                      border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                    }}>
+                      {sda.selectedEvidenceIds.map((evId, ei) => {
+                        const evNode = node?.children?.find(c => c.id === evId)
+                          || (nodes || []).flatMap(n => n.children || []).find(c => c.id === evId)
+                        return (
+                          <div key={evId} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '6px 10px',
+                            borderBottom: ei < sda.selectedEvidenceIds.length - 1 ? '1px solid var(--border)' : 'none',
+                          }}>
+                            <span style={{
+                              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              padding: '2px 5px', borderRadius: 3,
+                              background: 'color-mix(in srgb, var(--accent-orange, #fb923c) 12%, transparent)',
+                              color: 'var(--accent-orange, #fb923c)', flexShrink: 0,
+                            }}>EV</span>
+                            <span style={{
+                              flex: 1, fontSize: 11, fontFamily: 'var(--font-mono)',
+                              color: 'var(--text-secondary)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {evNode?.name || evNode?.evidence?.filename || evId}
+                            </span>
+                            {evNode?._isParsed && (
+                              <span style={{
+                                fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                                background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+                                color: 'var(--accent-green)', flexShrink: 0,
+                              }}>PARSED</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Disclosed fields (selective) */}
+                {sda.type === 'selective' && sda.selectedFieldIds && sda.selectedFieldIds.length > 0 && sda.partyLabel !== 'internal' && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{
+                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: 'var(--accent-amber)', letterSpacing: '0.05em',
+                      marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <span style={{ fontSize: 12 }}>&#8862;</span>
+                      DISCLOSED FIELDS &middot; {sda.selectedFieldIds.length}
+                    </div>
+                    <div style={{
+                      borderRadius: 6, overflow: 'hidden',
+                      border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                      maxHeight: 200, overflowY: 'auto',
+                    }}>
+                      {sda.selectedFieldIds.map((fieldKey, fi) => {
+                        const [parseNodeId, fieldId] = fieldKey.split('::')
+                        const parseNode = node?.children?.find(c => c.id === parseNodeId)
+                          || (nodes || []).flatMap(n => n.children || []).find(c => c.id === parseNodeId)
+                        const field = parseNode?.parsedFields?.find(f => f.id === fieldId)
+                        return (
+                          <div key={fieldKey} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '5px 10px',
+                            borderBottom: fi < sda.selectedFieldIds.length - 1 ? '1px solid var(--border)' : 'none',
+                          }}>
+                            <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>
+                              {field?.name || fieldId}
+                            </span>
+                            <span style={{
+                              flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)',
+                              color: 'var(--text-secondary)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {field?.value || '\u2014'}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {sda.type === 'proofonly' && (
                   <ProofOnlyEvalDisplay evals={sda.selectedEvals} />
                 )}
@@ -351,7 +461,12 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                   return (
                     <div style={{ marginTop: 14 }}>
                       {!isRevoking ? (
-                        <Btn label={isSelfSda ? 'Remove from Network' : 'Revoke SDA'} onClick={() => setRev(i)} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {isOwner && sda.partyLabel !== 'internal' && sda.party !== 'Radiant Network' && sda._isGrantor && (
+                            <Btn label="Revise SDA" accent onClick={() => onReviseSda && onReviseSda({ sda, nodeId: node?.id })} />
+                          )}
+                          <Btn label={isSelfSda ? 'Remove from Network' : 'Revoke SDA'} onClick={() => setRev(i)} />
+                        </div>
                       ) : (
                         <div>
                           {/* Warning box — always shown, above actions */}

@@ -329,7 +329,7 @@ function StepCascade({ request, node, level, selected, setSelected, upstreamAsse
 }
 
 /* ─── Step: Field Selection (Selective Disclosure) ─── */
-export function StepFieldSelection({ pepFields, selectedFields, setSelectedFields, allFieldsSelected, setAllFieldsSelected }) {
+export function StepFieldSelection({ pepFields, selectedFields, setSelectedFields, allFieldsSelected, setAllFieldsSelected, lockedFieldIds, isRevision }) {
   const totalCount = pepFields.length
   const selectedCount = selectedFields.size
 
@@ -366,7 +366,8 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
 
   const toggleAll = () => {
     if (allFieldsSelected) {
-      setSelectedFields(new Set())
+      const locked = lockedFieldIds || new Set()
+      setSelectedFields(new Set([...locked].filter(fk => pepFields.some(f => f.fieldKey === fk))))
       setAllFieldsSelected(false)
     } else {
       setSelectedFields(new Set(pepFields.map(f => f.fieldKey)))
@@ -376,14 +377,25 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
 
   return (
     <div>
-      <div style={{
-        padding: '14px 16px',
-        background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
-        border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
-        borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
-      }}>
-        <strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> — choose which parsed fields to share. Withheld fields will not be visible to the receiving party.
-      </div>
+      {isRevision ? (
+        <div style={{
+          padding: '14px 16px',
+          background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
+          borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+        }}>
+          <strong style={{ color: 'var(--accent-indigo)' }}>Revise selective disclosure</strong> — add fields to share with the receiving party. Currently disclosed fields cannot be removed — revoke the entire disclosure to remove access.
+        </div>
+      ) : (
+        <div style={{
+          padding: '14px 16px',
+          background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+          borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+        }}>
+          <strong style={{ color: 'var(--accent-amber)' }}>Selective disclosure</strong> — choose which parsed fields to share. Withheld fields will not be visible to the receiving party.
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -456,26 +468,29 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
                     </div>
                     {catFields.map(f => {
                       const checked = selectedFields.has(f.fieldKey)
+                      const isLocked = lockedFieldIds && lockedFieldIds.has(f.fieldKey)
                       return (
                         <div
                           key={f.fieldKey}
-                          onClick={() => toggleField(f.fieldKey)}
+                          onClick={() => { if (!isLocked) toggleField(f.fieldKey) }}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '5px 14px', cursor: 'pointer',
+                            padding: '5px 14px',
+                            cursor: isLocked ? 'default' : 'pointer',
+                            opacity: isLocked ? 0.7 : 1,
                             transition: 'background 100ms',
                           }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--text-primary) 3%, transparent)'}
+                          onMouseEnter={e => { if (!isLocked) e.currentTarget.style.background = 'color-mix(in srgb, var(--text-primary) 3%, transparent)' }}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                         >
                           <span style={{
                             width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                            border: `2px solid ${checked ? 'var(--accent-blue)' : 'var(--border)'}`,
-                            background: checked ? 'var(--accent-blue)' : 'transparent',
+                            border: `2px solid ${isLocked ? 'var(--text-dim)' : checked ? 'var(--accent-blue)' : 'var(--border)'}`,
+                            background: isLocked ? 'var(--text-dim)' : checked ? 'var(--accent-blue)' : 'transparent',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: 9, color: '#fff', fontWeight: 700,
                           }}>
-                            {checked ? '✓' : ''}
+                            {(checked || isLocked) ? '✓' : ''}
                           </span>
                           <span style={{ width: 130, flexShrink: 0, fontSize: 11, color: 'var(--text-secondary)' }}>
                             {f.name}
@@ -486,6 +501,13 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
                           }}>
                             {f.value?.length > 40 ? f.value.slice(0, 40) + '…' : f.value}
                           </span>
+                          {isLocked && (
+                            <span style={{
+                              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                              color: 'var(--text-dim)', padding: '1px 5px', borderRadius: 3,
+                              background: 'var(--bg-raised)', flexShrink: 0, marginLeft: 4,
+                            }}>DISCLOSED</span>
+                          )}
                         </div>
                       )
                     })}
@@ -496,6 +518,186 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/* ─── Step: Evidence Selection ─── */
+function StepEvidenceSelection({ evidenceNodes, selectedEvidenceIds, setSelectedEvidenceIds, level }) {
+  const totalCount = evidenceNodes.length
+  const selectedCount = selectedEvidenceIds.size
+  const allSelected = selectedCount === totalCount
+
+  const toggleEvidence = (evId) => {
+    setSelectedEvidenceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(evId)) next.delete(evId)
+      else next.add(evId)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (allSelected) setSelectedEvidenceIds(new Set())
+    else setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
+  }
+
+  const typeLabel = level === 'full' ? 'Full' : level === 'selective' ? 'Selective' : 'Proof-only'
+  const typeColor = level === 'full' ? 'var(--accent-blue)' : level === 'selective' ? 'var(--accent-amber)' : 'var(--accent-green)'
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px',
+        background: `color-mix(in srgb, ${typeColor} 6%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${typeColor} 25%, transparent)`,
+        borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+      }}>
+        <strong style={{ color: typeColor }}>{typeLabel} disclosure</strong> — select which evidence documents to include. Only selected evidence (and data parsed from it) will be accessible to the receiving party.
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {selectedCount} of {totalCount} evidence document{totalCount !== 1 ? 's' : ''} selected
+        </span>
+        <span onClick={toggleAll} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}>
+          {allSelected ? 'Deselect All' : 'Select All'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {evidenceNodes.map(ev => {
+          const checked = selectedEvidenceIds.has(ev.id)
+          return (
+            <div key={ev.id} onClick={() => toggleEvidence(ev.id)} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+              border: `1.5px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
+              background: checked ? 'color-mix(in srgb, var(--accent-orange) 4%, transparent)' : 'var(--bg-card)',
+              transition: 'all 150ms',
+            }}>
+              <span style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                border: `2px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
+                background: checked ? 'var(--accent-orange)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 150ms',
+              }}>
+                {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+              </span>
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-orange)' }}>EV</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{ev.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                  {ev.evidence?.filename && (
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{ev.evidence.filename}</span>
+                  )}
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                    background: ev._isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)',
+                    color: ev._isParsed ? 'var(--accent-green)' : 'var(--text-dim)',
+                  }}>{ev._isParsed ? 'PARSED' : 'UNPARSED'}</span>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Step: Evaluation Selection (Proof-only Disclosure) ─── */
+function StepEvalSelection({ evalNodes, selectedEvalIds, setSelectedEvalIds }) {
+  const totalCount = evalNodes.length
+  const selectedCount = selectedEvalIds.size
+
+  const toggleEval = (evId) => {
+    setSelectedEvalIds(prev => {
+      const next = new Set(prev)
+      if (next.has(evId)) next.delete(evId)
+      else next.add(evId)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (selectedCount === totalCount) setSelectedEvalIds(new Set())
+    else setSelectedEvalIds(new Set(evalNodes.map(e => e.id)))
+  }
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px',
+        background: 'color-mix(in srgb, var(--accent-green) 6%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-green) 25%, transparent)',
+        borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+      }}>
+        <strong style={{ color: 'var(--accent-green)' }}>Proof-only disclosure</strong> — select which evaluation results to share. The receiving party will see pass/fail outcomes only — no evidence, parsed data, or evaluation methodology.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {selectedCount} of {totalCount} evaluation{totalCount !== 1 ? 's' : ''} selected
+        </span>
+        <span onClick={toggleAll} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}>
+          {selectedCount === totalCount ? 'Deselect All' : 'Select All'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {evalNodes.map(ev => {
+          const checked = selectedEvalIds.has(ev.id)
+          const claims = ev.claims || []
+          const ok = claims.filter(c => c.status === 'satisfactory' || c.status === 'verified').length
+          const bad = claims.filter(c => c.status === 'unsatisfactory' || c.status === 'failed' || c.status === 'contested').length
+          const miss = claims.filter(c => c.status === 'missing').length
+          return (
+            <div key={ev.id} onClick={() => toggleEval(ev.id)} style={{
+              padding: '14px 16px', borderRadius: 8, cursor: 'pointer',
+              border: `1.5px solid ${checked ? 'var(--accent-green)' : 'var(--border)'}`,
+              background: checked ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)' : 'var(--bg-card)',
+              transition: 'all 150ms', display: 'flex', alignItems: 'flex-start', gap: 12,
+            }}>
+              <span style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 1,
+                border: `2px solid ${checked ? 'var(--accent-green)' : 'var(--border)'}`,
+                background: checked ? 'var(--accent-green)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 150ms',
+              }}>
+                {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+              </span>
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                background: 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ fontSize: 10, color: 'var(--accent-indigo)' }}>&#9670;</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {ev.name || ev.requirementSetName || 'Evaluation'}
+                  </span>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{ev.date}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                  <span style={{ color: 'var(--text-dim)' }}>by {ev.evaluatorParty || ev.owner}</span>
+                  <span style={{ color: 'var(--accent-green)' }}>{ok} SAT</span>
+                  {bad > 0 && <span style={{ color: 'var(--accent-red)' }}>{bad} UNSAT</span>}
+                  {miss > 0 && <span style={{ color: 'var(--text-dim)' }}>{miss} MISS</span>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -515,7 +717,9 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   const [completed, setCompleted] = useState(false)
   const [selectedFields, setSelectedFields] = useState(new Set())
   const [allFieldsSelected, setAllFieldsSelected] = useState(true)
-  const hasProofEval = false // No evaluations implemented yet
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
+  const [selectedEvalIds, setSelectedEvalIds] = useState(new Set())
+  const hasProofEval = assetNode?.children?.some(c => c.isEvaluation || c.category === 'evaluation') || false
 
   // Collect all PEP fields from asset's parse children
   const pepFields = useMemo(() => {
@@ -528,13 +732,50 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
       })))
   }, [assetNode])
 
-  // Initialize all fields selected when pepFields changes
+  const evidenceNodes = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children.filter(c => c.isEvidence)
+  }, [assetNode])
+
+  // Initialize all evidence selected
   useEffect(() => {
-    if (pepFields.length > 0) {
-      setSelectedFields(new Set(pepFields.map(f => f.fieldKey)))
-      setAllFieldsSelected(true)
+    if (evidenceNodes.length > 0) {
+      setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
     }
-  }, [pepFields])
+  }, [evidenceNodes])
+
+  const evalNodes = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children.filter(c => c.isEvaluation || c.category === 'evaluation')
+  }, [assetNode])
+
+  useEffect(() => {
+    if (evalNodes.length > 0) {
+      setSelectedEvalIds(new Set(evalNodes.map(e => e.id)))
+    }
+  }, [evalNodes])
+
+  // Filter pepFields by selected evidence
+  const filteredPepFields = useMemo(() => {
+    if (evidenceNodes.length === 0 || selectedEvidenceIds.size === 0) return pepFields
+    if (!assetNode?.children) return pepFields
+    const selectedParseNodeIds = new Set()
+    assetNode.children
+      .filter(c => (c.isParse || c.category === 'parse') && selectedEvidenceIds.has(c.sourceEvidenceId))
+      .forEach(c => selectedParseNodeIds.add(c.id))
+    return pepFields.filter(f => selectedParseNodeIds.has(f.parseNodeId))
+  }, [pepFields, selectedEvidenceIds, evidenceNodes, assetNode])
+
+  // Re-initialize selectedFields when filtered fields change
+  useEffect(() => {
+    if (filteredPepFields.length > 0) {
+      setSelectedFields(new Set(filteredPepFields.map(f => f.fieldKey)))
+      setAllFieldsSelected(true)
+    } else {
+      setSelectedFields(new Set())
+      setAllFieldsSelected(false)
+    }
+  }, [filteredPepFields])
 
   // Build upstream asset list from node's upstreamAssets (if node is provided)
   const node = request.node
@@ -556,10 +797,19 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   }, [node, request.from.name])
 
   const hasCascadableAssets = upstreamAssets.some(a => a.cascadePolicy === 'open')
+  const showEvidenceStep = decision !== 'decline' && level !== 'proofonly' && evidenceNodes.length > 0
+  const showEvalStep = decision !== 'decline' && level === 'proofonly' && evalNodes.length > 0
+  const showFieldStep = decision !== 'decline' && level === 'selective' && filteredPepFields.length > 0
   const showCascadeStep = decision !== 'decline' && hasCascadableAssets && cascadePolicy === 'open'
-  const showFieldStep = decision !== 'decline' && level === 'selective' && pepFields.length > 0
 
-  const totalSteps = decision === 'decline' ? 2 : (2 + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
+  const evidenceStepIdx = showEvidenceStep ? 2 : -1
+  const evalStepIdx = showEvalStep ? 2 : -1
+  const fieldStepIdx = showFieldStep ? (showEvidenceStep ? 3 : 2) : -1
+  const cascadeStepIdx = showCascadeStep
+    ? ((fieldStepIdx >= 0 ? fieldStepIdx : evalStepIdx >= 0 ? evalStepIdx : evidenceStepIdx >= 0 ? evidenceStepIdx : 1) + 1)
+    : -1
+
+  const totalSteps = decision === 'decline' ? 2 : (2 + (showEvidenceStep ? 1 : 0) + (showEvalStep ? 1 : 0) + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
   const effectiveLevel = level
 
   if (completed) {
@@ -622,10 +872,24 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
                   </div>
                 } />
               )}
-              {effectiveLevel === 'selective' && pepFields.length > 0 && (
+              {showEvidenceStep && (
+                <InfoRow label="Evidence included" value={
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-orange)' }}>
+                    {selectedEvidenceIds.size} of {evidenceNodes.length}
+                  </span>
+                } />
+              )}
+              {showEvalStep && (
+                <InfoRow label="Evaluations shared" value={
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-green)' }}>
+                    {selectedEvalIds.size} of {evalNodes.length}
+                  </span>
+                } />
+              )}
+              {effectiveLevel === 'selective' && filteredPepFields.length > 0 && (
                 <InfoRow label="Disclosed fields" value={
                   <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12, color: 'var(--accent-amber)' }}>
-                    {selectedFields.size} of {pepFields.length}
+                    {selectedFields.size} of {filteredPepFields.length}
                   </span>
                 } />
               )}
@@ -636,7 +900,9 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
             if (onComplete) {
               onComplete(
                 decision === 'decline' ? null : level,
-                level === 'selective' && pepFields.length > 0 ? [...selectedFields] : null,
+                level === 'selective' && filteredPepFields.length > 0 ? [...selectedFields] : null,
+                level !== 'proofonly' && evidenceNodes.length > 0 ? [...selectedEvidenceIds] : null,
+                level === 'proofonly' && selectedEvalIds.size > 0 ? [...selectedEvalIds] : null,
               )
             } else if (onClose) {
               onClose()
@@ -677,16 +943,31 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
             hasPepFields={pepFields.length > 0}
           />
         )}
-        {step === 2 && decision !== 'decline' && showFieldStep && (
+        {step === evidenceStepIdx && decision !== 'decline' && showEvidenceStep && (
+          <StepEvidenceSelection
+            evidenceNodes={evidenceNodes}
+            selectedEvidenceIds={selectedEvidenceIds}
+            setSelectedEvidenceIds={setSelectedEvidenceIds}
+            level={level}
+          />
+        )}
+        {step === evalStepIdx && decision !== 'decline' && showEvalStep && (
+          <StepEvalSelection
+            evalNodes={evalNodes}
+            selectedEvalIds={selectedEvalIds}
+            setSelectedEvalIds={setSelectedEvalIds}
+          />
+        )}
+        {step === fieldStepIdx && decision !== 'decline' && showFieldStep && (
           <StepFieldSelection
-            pepFields={pepFields}
+            pepFields={filteredPepFields}
             selectedFields={selectedFields}
             setSelectedFields={setSelectedFields}
             allFieldsSelected={allFieldsSelected}
             setAllFieldsSelected={setAllFieldsSelected}
           />
         )}
-        {step === (showFieldStep ? 3 : 2) && decision !== 'decline' && showCascadeStep && (
+        {step === cascadeStepIdx && decision !== 'decline' && showCascadeStep && (
           <StepCascade
             request={request} node={node} level={level}
             selected={cascadeSelected} setSelected={setCascadeSelected}
@@ -705,23 +986,32 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
         {step === 0 && !decision && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a response above</div>}
         {step === 0 && decision && <Btn label={decision === 'decline' ? 'Next →' : 'Set Terms →'} accent onClick={() => setStep(1)} />}
         {step === 1 && decision === 'decline' && <Btn label="Decline Request" danger onClick={() => setCompleted(true)} />}
-        {step === 1 && decision !== 'decline' && (
-          showFieldStep
-            ? <Btn label="Select Fields →" accent onClick={() => setStep(2)} />
-            : level === 'selective' && pepFields.length === 0
-              ? <Btn label="No PEP Data Available" disabled />
-              : level === 'proofonly' && !hasProofEval
-                ? <Btn label="No Evaluation Available" disabled />
-                : showCascadeStep
-                  ? <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(2)} />
-                  : <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
-        )}
-        {step === 2 && decision !== 'decline' && showFieldStep && (
+        {step === 1 && decision !== 'decline' && (() => {
+          const selectiveBlocked = level === 'selective' && pepFields.length === 0
+          const proofBlocked = level === 'proofonly' && !hasProofEval
+          if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
+          if (proofBlocked) return <Btn label="No Evaluation Available" disabled />
+          if (showEvalStep) return <Btn label="Select Evaluations →" accent onClick={() => setStep(evalStepIdx)} />
+          if (showEvidenceStep) return <Btn label="Select Evidence →" accent onClick={() => setStep(2)} />
+          if (showFieldStep) return <Btn label="Select Fields →" accent onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(cascadeStepIdx)} />
+          return <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
+        })()}
+        {step === evalStepIdx && decision !== 'decline' && showEvalStep && (() => {
+          if (showCascadeStep) return <Btn label={`${selectedEvalIds.size} Evaluation${selectedEvalIds.size !== 1 ? 's' : ''} — Next →`} accent disabled={selectedEvalIds.size === 0} onClick={() => setStep(cascadeStepIdx)} />
+          return <Btn label={`Disclose ${selectedEvalIds.size} Evaluation${selectedEvalIds.size !== 1 ? 's' : ''}`} accent disabled={selectedEvalIds.size === 0} onClick={() => setCompleted(true)} />
+        })()}
+        {step === evidenceStepIdx && decision !== 'decline' && showEvidenceStep && (() => {
+          if (showFieldStep) return <Btn label={`${selectedEvidenceIds.size} Evidence — Select Fields →`} accent disabled={selectedEvidenceIds.size === 0} onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label={`${selectedEvidenceIds.size} Evidence — Next →`} accent disabled={selectedEvidenceIds.size === 0} onClick={() => setStep(cascadeStepIdx)} />
+          return <Btn label={`Disclose ${selectedEvidenceIds.size} Evidence`} accent disabled={selectedEvidenceIds.size === 0} onClick={() => setCompleted(true)} />
+        })()}
+        {step === fieldStepIdx && decision !== 'decline' && showFieldStep && (
           showCascadeStep
-            ? <Btn label={`Disclose ${selectedFields.size} Fields — Next →`} accent disabled={selectedFields.size === 0} onClick={() => setStep(3)} />
+            ? <Btn label={`Disclose ${selectedFields.size} Fields — Next →`} accent disabled={selectedFields.size === 0} onClick={() => setStep(cascadeStepIdx)} />
             : <Btn label={`Disclose ${selectedFields.size} Fields`} accent disabled={selectedFields.size === 0} onClick={() => setCompleted(true)} />
         )}
-        {step === (showFieldStep ? 3 : 2) && decision !== 'decline' && showCascadeStep && (
+        {step === cascadeStepIdx && decision !== 'decline' && showCascadeStep && (
           <Btn
             label={cascadeSelected.length > 0 ? `Create Disclosure (${cascadeSelected.length} cascading)` : 'Skip — No Cascading Assets'}
             purple={cascadeSelected.length > 0}

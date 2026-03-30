@@ -24,7 +24,7 @@ if (typeof document !== 'undefined' && !document.getElementById('panel-reveal-ke
   document.head.appendChild(style)
 }
 
-export default function DetailPanel({ node, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onOpenLibrary, revealPhase, forceTab }) {
+export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -614,7 +614,7 @@ export default function DetailPanel({ node, onClose, onViewChain, onExpandStack,
       )}
       {tabs.some(t => t.id === 'disclosures') && (
         <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
-          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} />
+          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} nodes={nodes} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} onReviseSda={onReviseSda} />
         </div>
       )}
       {tabs.some(t => t.id === 'parsed') && (

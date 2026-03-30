@@ -452,7 +452,11 @@ function buildBobData() {
 
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [],
-    sdas: [{ ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') }],
+    sdas: [{
+      ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics'),
+      selectedEvidenceIds: [powerRegEv.id],
+      selectedFieldIds: [`${powerRegPep.id}::f-voltage`, `${powerRegPep.id}::f-power`, `${powerRegPep.id}::f-temp`, `${powerRegPep.id}::f-radiation`, `${powerRegPep.id}::f-itar`],
+    }],
     children: [powerRegEv, powerRegPep, powerRegEval],
     x: 1400, y: 0,
   })
@@ -475,10 +479,18 @@ function buildBobData() {
 
   const vregIc = makeNode('vreg-ic', 'Voltage Regulator IC', 'product', 'MicroCo', {
     evaluations: [],
-    sdas: [{ ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') }],
+    sdas: [{
+      ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics'),
+      selectedEvidenceIds: [vregEv.id],
+    }],
     children: [vregEv, vregPep],
     x: 1400, y: 400,
   })
+
+  // Backfill SDA evidence/field IDs on avionics (references created after avionics node)
+  avionics.sdas[1].selectedEvidenceIds = [powerRegEv.id]
+  avionics.sdas[1].selectedFieldIds = [`${powerRegPep.id}::f-voltage`, `${powerRegPep.id}::f-power`, `${powerRegPep.id}::f-temp`, `${powerRegPep.id}::f-radiation`, `${powerRegPep.id}::f-itar`]
+  avionics.sdas[2].selectedEvidenceIds = [vregEv.id]
 
   const nodes = [govco, sentinel4, propulsion, avionics, powerReg, vregIc]
 
@@ -615,6 +627,7 @@ function buildAliceData() {
     pins: [],
     assetName: 'Radiant Network',
     assetPin: RADIANT_NETWORK_PIN,
+    _isGrantor: true,
   }
 
   const SDA_RADIANT_VREG = {
@@ -626,12 +639,18 @@ function buildAliceData() {
     pins: [],
     assetName: 'Radiant Network',
     assetPin: RADIANT_NETWORK_PIN,
+    _isGrantor: true,
   }
 
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [
-      { ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
+      {
+        ...SDA_POWER_REG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics'),
+        selectedEvidenceIds: [powerRegEv.id],
+        selectedFieldIds: [`${powerRegPep.id}::f-voltage`, `${powerRegPep.id}::f-power`, `${powerRegPep.id}::f-temp`, `${powerRegPep.id}::f-radiation`, `${powerRegPep.id}::f-itar`],
+        _isGrantor: true,
+      },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
       SDA_RADIANT_POWERREG,
     ],
@@ -658,7 +677,11 @@ function buildAliceData() {
   const vregIc = makeNode('vreg-ic', 'Voltage Regulator IC', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [
-      { ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
+      {
+        ...SDA_VREG_TO_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics'),
+        selectedEvidenceIds: [vregEv.id],
+        _isGrantor: true,
+      },
       { ...SDA_INTERNAL_MICROCO, pins: [] },
       SDA_RADIANT_VREG,
     ],
@@ -703,6 +726,7 @@ function buildAliceData() {
         pins: [],
         assetName: null,
         assetPin: null,
+        _isGrantor: true,
       },
     ],
     children: [emiShieldEv, emiShieldPep],
