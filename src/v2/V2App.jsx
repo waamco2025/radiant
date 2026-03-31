@@ -514,6 +514,7 @@ export default function V2App() {
   const [showFooterTip, setShowFooterTip] = useState(false)
   const [revealAnim, setRevealAnim] = useState(null)
   const [forcePanelTab, setForcePanelTab] = useState(null)
+  const [forceExpandSda, setForceExpandSda] = useState(null)
   const [publishNode, setPublishNode] = useState(null)
   const [connectNode, setConnectNode] = useState(null)
   const [registerNode, setRegisterNode] = useState(null)
@@ -695,11 +696,13 @@ export default function V2App() {
   const handleSelect = useCallback((node) => {
     setSel(node.id)
     setForcePanelTab(null)
+    setForceExpandSda(null)
   }, [])
 
   const handleCloseSel = useCallback(() => {
     setSel(null)
     setForcePanelTab(null)
+    setForceExpandSda(null)
   }, [])
 
   const enterSubchain = useCallback((nodeId) => {
@@ -1556,6 +1559,25 @@ export default function V2App() {
               setEvalContext({ assetNode: node, disclosureType })
             }
           }}
+          onAmendEval={(node) => {
+            if (!node || !node.isEvaluation) return
+            const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
+            if (!parentAsset) return
+            const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+            const disclosureType = sda?.type || 'full'
+            setEvalContext({
+              assetNode: parentAsset,
+              evidenceNode: null,
+              disclosureType,
+              amendingEval: {
+                id: node.id,
+                requirementSetId: node.requirementSetId,
+                requirementSetName: node.requirementSetName || node.name,
+                claims: (node.claims || []).map(c => ({ ...c })),
+                version: node.evalVersion || 1,
+              },
+            })
+          }}
           activeParty={activeRole.party}
           revealAnim={revealAnim}
         />
@@ -1632,24 +1654,26 @@ export default function V2App() {
                   parentAssetName: parentAsset?.name || 'Unknown Asset',
                 })
               }}
-              onRunEvaluation={() => {
-                if (!sel || !nodeMap[sel]) return
-                const evidenceNode = nodeMap[sel]
-                if (!evidenceNode.isEvidence) return
-                // Find parent asset
-                const parentAsset = nodes.find(n => n.children?.some(c => c.id === evidenceNode.id))
-                if (!parentAsset) return
-                // Resolve parsed fields from sibling parse nodes
-                const resolvedParsedFields = (parentAsset.children || [])
-                  .filter(c => c.isParse || c.category === 'parse')
-                  .flatMap(pn => pn.parsedFields || [])
-                // Determine disclosure type
-                let discType = 'full'
-                if (parentAsset.owner !== activeRole.party) {
-                  const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party)
-                  discType = sda?.type || 'full'
+              onRunEvaluation={(targetNode) => {
+                const n = targetNode || nodeMap[sel]
+                if (!n) return
+                if (n.isEvidence) {
+                  const parentAsset = nodes.find(p => p.children?.some(c => c.id === n.id))
+                  if (!parentAsset) return
+                  const resolvedParsedFields = (parentAsset.children || [])
+                    .filter(c => c.isParse || c.category === 'parse')
+                    .flatMap(pn => pn.parsedFields || [])
+                  let discType = 'full'
+                  if (parentAsset.owner !== activeRole.party) {
+                    const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party)
+                    discType = sda?.type || 'full'
+                  }
+                  setEvalContext({ assetNode: parentAsset, evidenceNode: n, disclosureType: discType, parsedFields: resolvedParsedFields })
+                } else {
+                  const sda = (n.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+                  const disclosureType = sda?.type || 'full'
+                  setEvalContext({ assetNode: n, evidenceNode: null, disclosureType })
                 }
-                setEvalContext({ assetNode: parentAsset, evidenceNode, disclosureType: discType, parsedFields: resolvedParsedFields })
               }}
               canEvaluate={(() => {
                 const n = nodeMap[sel]
@@ -1670,6 +1694,7 @@ export default function V2App() {
               isOwner={nodeMap[sel]?.owner === activeRole.party}
               revealPhase={revealAnim?.nodeId === sel ? revealAnim.phase : null}
               forceTab={forcePanelTab}
+              forceExpandSda={forceExpandSda}
               onViewChild={handleViewChild}
               onCancelRequest={(provNode) => {
                 updateRoleState(roleId, prev => ({
@@ -1704,6 +1729,26 @@ export default function V2App() {
                   addedEdges: prev.addedEdges.filter(e => e.to !== provNode.id && e.from !== provNode.id),
                 }))
                 setSel(null)
+              }}
+              activeParty={activeRole.party}
+              onAmendEval={(ev) => {
+                const assetNode = nodeMap[sel]
+                if (!assetNode) return
+                const sda = (assetNode.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+                const dt = sda?.type || 'full'
+                const evalChild = (assetNode.children || []).find(c => c.id === ev.id)
+                setEvalContext({
+                  assetNode,
+                  evidenceNode: null,
+                  disclosureType: dt,
+                  amendingEval: {
+                    id: evalChild?.id || ev.id,
+                    requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
+                    requirementSetName: evalChild?.requirementSetName || ev.requirements,
+                    claims: ev.claims || [],
+                    version: evalChild?.evalVersion || 1,
+                  },
+                })
               }}
               onReviseSda={({ sda, nodeId }) => {
                 const targetNode = nodeMap[nodeId]
@@ -1995,7 +2040,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.3.0 &middot; Changelog
+          v0.4.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -2042,15 +2087,28 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.4.0', date: '2026-03-31', label: 'Round 9', items: [
+                  'Multi-evidence evaluation — run evals from asset level with evidence selection',
+                  'Evaluation amendment — amend existing evals with new evidence, preserving SAT claims',
+                  'Superseded eval chain — old evals marked SUPERSEDED with version badges and lineage edges',
+                  'Evidence selection in Publish to Directory modal',
+                  'Three-tier child layout — evidence, parse, evaluation rows with collision avoidance',
+                  'Amend Evaluation button on eval node cards and inside EvalPanel',
+                  'Footer button reorder — Run Eval on assets, Amend on evals, no View Chain in child layer',
+                  'No-evidence/unparsed messaging in Run Evaluation modal',
+                  'Light mode redesign — neutral grey palette, darker borders/text, desaturated SDA edges',
+                  'Surface transition fix — anchor card fade-in replaces FLIP animation',
+                  'Amend SDA auto-expands revised card in Disclosures tab',
+                  'PRESERVED badge + before/after comparison in amend confirmation',
+                ]},
                 { version: '0.3.0', date: '2026-03-30', label: 'Round 8', items: [
                   'Evidence selection step — scope which evidence to include in any disclosure type',
-                  'Proof-only evaluation selection — choose which eval results to share (replaces evidence step)',
-                  'Revise SDA modal — add evidence and fields to existing disclosures with locked/unlocked UI',
+                  'Proof-only evaluation selection — choose which eval results to share',
+                  'Amend SDA modal — add evidence and fields to existing disclosures with locked/unlocked UI',
                   'Disclosed evidence and fields tables inside each SDA card',
-                  'Grantor/grantee labeling on SDAs (disclosed to / disclosed by / internal / directory)',
+                  'Grantor/grantee labeling on SDAs (Disclosure to / Disclosed by / Internal / Directory)',
                   'View evidence button in Disclosures tab — dives to child layer',
                   'Surface-before-navigate — notification clicks auto-surface from child layer',
-                  'LOD dot dimming fix after surface transitions',
                   'Prototype changelog modal',
                 ]},
                 { version: '0.2.0', date: '2026-03-29', label: 'Round 7', items: [
@@ -2133,7 +2191,7 @@ export default function V2App() {
         <PublishModal
           node={nodeMap[publishNode.id] || publishNode}
           onClose={() => setPublishNode(null)}
-          onComplete={({ assetId, disclosureType, selectedFields, selectedEvals, expiry, customDate }) => {
+          onComplete={({ assetId, disclosureType, selectedFields, selectedEvals, selectedEvidenceIds, expiry, customDate }) => {
             const today = new Date().toISOString().slice(0, 10)
             const radiantDot = makeDot('Radiant Network')
             const publicSda = {
@@ -2151,6 +2209,7 @@ export default function V2App() {
               assetName: null,
               assetPin: null,
               disclosedFields: selectedFields || null,
+              selectedEvidenceIds: selectedEvidenceIds || null,
               selectedEvals: disclosureType === 'proofonly' && selectedEvals ? selectedEvals.map(ev => ({
                 id: ev.id,
                 name: ev.requirements,
@@ -3013,29 +3072,51 @@ export default function V2App() {
           activeParty={activeRole.party}
           activeUser={activeRole.user || activeRole.party}
           credits={credits}
+          amendingEval={evalContext.amendingEval}
           onClose={() => setEvalContext(null)}
-          onComplete={({ requirementSet, claims, creditCost }) => {
+          onComplete={({ requirementSet, claims, creditCost, selectedEvidenceIds: evalEvidenceIds }) => {
             const assetNode = evalContext.assetNode
+            const previousEvalId = evalContext.amendingEval?.id || null
             const evalNode = makeEvalNode(
               assetNode.id,
               requirementSet,
               claims,
               activeRole.party,
               activeRole.user || activeRole.party,
-              evalContext.disclosureType
+              evalContext.disclosureType,
+              previousEvalId
             )
+            if (previousEvalId && evalContext.amendingEval) {
+              evalNode.evalVersion = (evalContext.amendingEval.version || 1) + 1
+            }
 
             // Add eval node as child of the asset
             updateRoleState(roleId, prev => {
               const existingChildren = prev.addedChildren?.[assetNode.id] || []
+              // If amending, mark the old eval as superseded
+              let updatedChildren = existingChildren
+              if (previousEvalId) {
+                updatedChildren = existingChildren.map(c =>
+                  c.id === previousEvalId ? { ...c, status: 'superseded' } : c
+                )
+              }
               return {
                 ...prev,
                 addedChildren: {
                   ...(prev.addedChildren || {}),
-                  [assetNode.id]: [...existingChildren, evalNode],
+                  [assetNode.id]: [...updatedChildren, evalNode],
                 },
               }
             })
+
+            // Also supersede static eval children on the node itself
+            if (previousEvalId) {
+              const n = nodeMapRef.current[assetNode.id]
+              if (n) {
+                const child = n.children?.find(c => c.id === previousEvalId)
+                if (child) child.status = 'superseded'
+              }
+            }
 
             // Deduct credits
             setCredits(c => c - creditCost)
@@ -3100,12 +3181,14 @@ export default function V2App() {
 
                 if (existingIdx >= 0) {
                   const existingNode = prev.addedNodes[existingIdx]
-                  const sourceChildren = targetNode.children || []
+                  // Use latest merged node from nodeMapRef (includes addedChildren)
+                  const latestSourceNode = nodeMapRef.current[targetNode.id] || targetNode
+                  const sourceChildren = latestSourceNode.children || []
                   const evidenceSet = new Set(newEvIds || [])
                   let relevantChildren = sourceChildren.filter(c => {
                     if (c.isEvidence) return evidenceSet.has(c.id)
                     if (c.isParse || c.category === 'parse') return evidenceSet.has(c.sourceEvidenceId)
-                    if (c.isEvaluation || c.category === 'evaluation') return true
+                    if (c.isEvaluation || c.category === 'evaluation') return false
                     return true
                   })
                   let updatedChildren
@@ -3138,6 +3221,63 @@ export default function V2App() {
                   })
                   updatedNodes[existingIdx] = { ...updatedNodes[existingIdx], sdas: updatedSDAs }
                   newState.addedNodes = updatedNodes
+                } else {
+                  // Static disclosed node — use addedChildren overlay for delta only
+                  const latestSrc = nodeMapRef.current[targetNode.id] || targetNode
+                  const srcChildren = latestSrc.children || []
+                  const evidenceSet2 = new Set(newEvIds || [])
+                  let targetChildren = srcChildren.filter(c => {
+                    if (c.isEvidence) return evidenceSet2.has(c.id)
+                    if (c.isParse || c.category === 'parse') return evidenceSet2.has(c.sourceEvidenceId)
+                    if (c.isEvaluation || c.category === 'evaluation') return false
+                    return true
+                  })
+                  if (sda.type === 'selective' && newFieldIds && newFieldIds.length > 0) {
+                    const fieldSet2 = new Set(newFieldIds)
+                    targetChildren = targetChildren.map(c => {
+                      if (!c.isParse && c.category !== 'parse') return { ...c }
+                      if (!c.parsedFields) return { ...c }
+                      return { ...c, parsedFields: c.parsedFields.filter(f => fieldSet2.has(`${c.id}::${f.id}`)), _isSelective: true }
+                    })
+                  } else if (sda.type === 'proofonly') {
+                    targetChildren = targetChildren.filter(c => c.isEvaluation || c.category === 'evaluation').map(c => ({ ...c }))
+                  } else {
+                    targetChildren = targetChildren.map(c => ({ ...c }))
+                  }
+
+                  // Get Bob's static node's ORIGINAL children
+                  const bobRoleData = getDataForRole(otherRoleId)
+                  const bobStaticNode = bobRoleData?.nodes?.find(n => n.id === disclosedNodeId)
+                  const staticChildIds = new Set((bobStaticNode?.children || []).map(c => c.id))
+                  const existingAdded = prev.addedChildren?.[disclosedNodeId] || []
+                  const existingAddedIds = new Set(existingAdded.map(c => c.id))
+                  const childrenToAdd = targetChildren.filter(c => !staticChildIds.has(c.id) && !existingAddedIds.has(c.id))
+
+                  if (childrenToAdd.length > 0) {
+                    newState.addedChildren = {
+                      ...(newState.addedChildren || prev.addedChildren || {}),
+                      [disclosedNodeId]: [...existingAdded, ...childrenToAdd],
+                    }
+                  }
+
+                  // Update SDAs via addedSDAs overlay
+                  const staticSDAs = prev.addedSDAs[disclosedNodeId] || []
+                  const matchIdx = staticSDAs.findIndex(s =>
+                    s.type === sda.type && (s.assetPin === targetNode.pin || s.assetName === targetNode.name)
+                  )
+                  if (matchIdx >= 0) {
+                    const updated = [...staticSDAs]
+                    updated[matchIdx] = { ...updated[matchIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                    newState.addedSDAs = {
+                      ...(newState.addedSDAs || prev.addedSDAs || {}),
+                      [disclosedNodeId]: updated,
+                    }
+                  } else {
+                    newState.addedSDAs = {
+                      ...(newState.addedSDAs || prev.addedSDAs || {}),
+                      [disclosedNodeId]: [...staticSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, party: activeRole.party }],
+                    }
+                  }
                 }
 
                 // Update addedSDAs for the disclosed node
@@ -3200,7 +3340,9 @@ export default function V2App() {
               })
             }
 
+            setForceExpandSda({ party: sda.party, type: sda.type })
             setReviseContext(null)
+            setForcePanelTab('disclosures')
           }}
           _noBackdrop
         />

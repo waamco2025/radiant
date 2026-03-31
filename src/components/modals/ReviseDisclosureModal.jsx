@@ -92,7 +92,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
   const content = (
     <Modal width={720}>
       <ModalHeader
-        title="Revise Disclosure"
+        title="Amend Disclosure"
         subtitle={`${sda.type.charAt(0).toUpperCase() + sda.type.slice(1)} disclosure to ${sda.party}`}
         step={step + 1}
         totalSteps={totalSteps}
@@ -107,7 +107,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
               border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
               borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
             }}>
-              Add evidence to this disclosure. Currently disclosed evidence cannot be removed — revoke the entire disclosure to remove access.
+              Amend this disclosure by adding evidence. Currently disclosed evidence cannot be removed — revoke the entire disclosure to remove access.
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -233,7 +233,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
         </div>
         {step === 0 && !showFieldStep && (
           <Btn
-            label={canComplete ? `Revise Disclosure (+${addedCount} evidence)` : 'Select New Evidence'}
+            label={canComplete ? `Amend Disclosure (+${addedCount} evidence)` : 'Select New Evidence'}
             accent={canComplete}
             disabled={!canComplete}
             onClick={handleComplete}
@@ -244,7 +244,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
         )}
         {step === 1 && showFieldStep && (
           <Btn
-            label={canComplete ? `Revise Disclosure (+${addedCount} ev, +${addedFieldCount} fields)` : 'Select New Items'}
+            label={canComplete ? `Amend Disclosure (+${addedCount} ev, +${addedFieldCount} fields)` : 'Select New Items'}
             accent={canComplete}
             disabled={!canComplete}
             onClick={handleComplete}

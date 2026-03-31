@@ -140,34 +140,34 @@ body {
 
 /* ═══ Light Theme ═══ */
 [data-theme="light"] {
-  /* Backgrounds */
-  --bg-deep: #ede9e3;
-  --bg-app: #ede9e3;
-  --bg-card: #f5f2ee;
-  --bg-app-header: #faf8f5;
-  --bg-surface: #faf8f5;
-  --bg-raised: #f0ece6;
-  --bg-input: #f5f2ee;
-  --bg-overlay: rgba(250,248,245,0.95);
-  --bg-hover: rgba(0,0,0,0.04);
+  /* Backgrounds — neutral grey, desaturated */
+  --bg-deep: #edeef1;
+  --bg-app: #e8e9ec;
+  --bg-card: #f2f3f5;
+  --bg-app-header: #f8f8fa;
+  --bg-surface: #f8f8fa;
+  --bg-raised: #f2f3f5;
+  --bg-input: #f2f3f5;
+  --bg-overlay: rgba(248,248,250,0.95);
+  --bg-hover: rgba(0,0,0,0.05);
   --bg-active: rgba(99,102,241,0.10);
 
-  /* Borders */
-  --border: #d4cfc8;
-  --border-hover: #b8b2a9;
-  --border-faint: #d4cfc822;
-  --border-subtle: #d4cfc844;
-  --border-mid: #d4cfc866;
+  /* Borders — darker for contrast */
+  --border: #a8acb6;
+  --border-hover: #858a96;
+  --border-faint: #a8acb622;
+  --border-subtle: #a8acb644;
+  --border-mid: #a8acb666;
 
-  /* Text */
-  --text-bright: #1a1816;
-  --text-primary: #2c2825;
-  --text-secondary: #5a5550;
-  --text-tertiary: #7a756e;
-  --text-dim: #b8b2a9;
-  --text-muted: #9e9890;
-  --text-faint: #c8c2ba;
-  --text-heading: #1a1816;
+  /* Text — darker for readability */
+  --text-bright: #111318;
+  --text-primary: #1e2028;
+  --text-secondary: #3d4250;
+  --text-tertiary: #5a5f6e;
+  --text-dim: #7c818e;
+  --text-muted: #6b7080;
+  --text-faint: #b0b4bc;
+  --text-heading: #111318;
 
   /* Accent colors — slightly more saturated for readability on light bg */
   --accent-indigo: #6366f1;
@@ -188,10 +188,10 @@ body {
   --accent-purple-light: #a855f7;
   --accent-blue: #2563eb;
   --accent-lime: #65a30d;
-  --accent-sda-full: #4f6ad0;
-  --accent-sda-selective: #d97706;
-  --accent-sda-derivative: #16a34a;
-  --accent-sda-cascade: #7c3aed;
+  --accent-sda-full: #3a52b0;
+  --accent-sda-selective: #b5600a;
+  --accent-sda-derivative: #0f7a38;
+  --accent-sda-cascade: #5b21b6;
 
   /* Shadows */
   --shadow-dropdown: 0 8px 24px rgba(0,0,0,.12);

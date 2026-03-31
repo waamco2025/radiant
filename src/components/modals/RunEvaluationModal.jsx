@@ -154,7 +154,9 @@ function ClaimCard({ claim, onUpdateClaim }) {
   return (
     <div style={{
       padding: '14px 16px', borderRadius: 8,
-      background: 'var(--bg-card)', border: '1px solid var(--border)',
+      background: 'var(--bg-card)',
+      border: claim._carriedForward ? '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)' : '1px solid var(--border)',
+      borderLeft: claim._carriedForward ? '3px solid var(--accent-green)' : undefined,
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -166,6 +168,14 @@ function ClaimCard({ claim, onUpdateClaim }) {
             : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
           color: isExtraction ? 'var(--accent-cyan)' : 'var(--accent-amber)',
         }}>{isExtraction ? 'EXTRACTION' : 'INFERENCE'}</span>
+        {claim._carriedForward && (
+          <span style={{
+            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            padding: '2px 6px', borderRadius: 3,
+            background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+            color: 'var(--accent-green)', flexShrink: 0,
+          }}>PRESERVED</span>
+        )}
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', flex: 1 }}>{claim.label}</span>
         <span style={{
           fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
@@ -259,7 +269,7 @@ function ClaimCard({ claim, onUpdateClaim }) {
   )
 }
 
-function StepConfirmation({ assetNode, selectedSet, claims, creditCost }) {
+function StepConfirmation({ assetNode, selectedSet, claims, creditCost, amendingEval }) {
   const summary = useMemo(() => {
     const s = { ok: 0, bad: 0, miss: 0 }
     claims.forEach(c => {
@@ -281,7 +291,7 @@ function StepConfirmation({ assetNode, selectedSet, claims, creditCost }) {
         marginBottom: 20, fontSize: 24, color: 'var(--accent-green)',
       }}>✓</div>
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-        Evaluation Complete
+        {amendingEval ? 'Evaluation Amendment Complete' : 'Evaluation Complete'}
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 24 }}>
         Results have been recorded on-chain.
@@ -304,15 +314,194 @@ function StepConfirmation({ assetNode, selectedSet, claims, creditCost }) {
         } />
         <InfoRow label="Credits used" value={`${creditCost}`} mono />
       </div>
+      {amendingEval && (() => {
+        const preserved = claims.filter(c => c._carriedForward).length
+        const reEvaluated = claims.filter(c => !c._carriedForward).length
+        const newSat = claims.filter(c => c.status === 'satisfactory').length
+        const newUnsat = claims.filter(c => c.status === 'unsatisfactory').length
+        const newMiss = claims.filter(c => c.status === 'missing').length
+        const oldSat = amendingEval.claims.filter(c => c.status === 'satisfactory' || c.status === 'verified').length
+        const oldUnsat = amendingEval.claims.filter(c => c.status === 'unsatisfactory' || c.status === 'failed' || c.status === 'contested').length
+        const oldMiss = amendingEval.claims.filter(c => c.status === 'missing').length
+        const newVersion = (amendingEval.version || 1) + 1
+        return (
+          <div style={{
+            width: '100%', marginTop: 12, padding: '14px 16px', borderRadius: 8,
+            background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+          }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-indigo)', letterSpacing: '0.05em', marginBottom: 10 }}>
+              AMENDMENT SUMMARY
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginBottom: 4 }}>PREVIOUS (v{amendingEval.version || 1})</div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                  <span style={{ color: 'var(--accent-green)' }}>{oldSat} SAT</span>
+                  {oldUnsat > 0 && <span style={{ color: 'var(--accent-red)', marginLeft: 8 }}>{oldUnsat} UNSAT</span>}
+                  {oldMiss > 0 && <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>{oldMiss} MISS</span>}
+                </div>
+              </div>
+              <div style={{ width: 1, background: 'var(--border)' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginBottom: 4 }}>AMENDED (v{newVersion})</div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                  <span style={{ color: 'var(--accent-green)' }}>{newSat} SAT</span>
+                  {newUnsat > 0 && <span style={{ color: 'var(--accent-red)', marginLeft: 8 }}>{newUnsat} UNSAT</span>}
+                  {newMiss > 0 && <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>{newMiss} MISS</span>}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+              {preserved} claim{preserved !== 1 ? 's' : ''} preserved &middot; {reEvaluated} re-evaluated &middot; Previous version superseded
+            </div>
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+/* ─── Step: Evidence Selection for Multi-Evidence Eval ─── */
+function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenceIds }) {
+  const evidenceNodes = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children.filter(c => c.isEvidence)
+  }, [assetNode])
+
+  const toggleEvidence = (evId) => {
+    setSelectedEvidenceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(evId)) next.delete(evId)
+      else next.add(evId)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (selectedEvidenceIds.size === evidenceNodes.length) setSelectedEvidenceIds(new Set())
+    else setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
+  }
+
+  useEffect(() => {
+    if (evidenceNodes.length > 0 && selectedEvidenceIds.size === 0) {
+      setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
+    }
+  }, [evidenceNodes])
+
+  return (
+    <div>
+      <FieldLabel label="Select evidence to evaluate" />
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 18, lineHeight: 1.7 }}>
+        The evaluation will run against parsed data from the selected evidence files.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {selectedEvidenceIds.size} of {evidenceNodes.length} selected
+        </span>
+        <span onClick={toggleAll} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}>
+          {selectedEvidenceIds.size === evidenceNodes.length ? 'Deselect All' : 'Select All'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {evidenceNodes.map(ev => {
+          const checked = selectedEvidenceIds.has(ev.id)
+          const isParsed = assetNode.children?.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === ev.id)
+          const fieldCount = isParsed
+            ? assetNode.children.filter(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === ev.id)
+                .reduce((acc, pn) => acc + (pn.parsedFields?.length || 0), 0)
+            : 0
+          return (
+            <div key={ev.id} onClick={() => toggleEvidence(ev.id)} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+              border: `1.5px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
+              background: checked ? 'color-mix(in srgb, var(--accent-orange) 4%, transparent)' : 'var(--bg-card)',
+              transition: 'all 150ms', opacity: isParsed ? 1 : 0.5,
+            }}>
+              <span style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                border: `2px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
+                background: checked ? 'var(--accent-orange)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+              </span>
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-orange)' }}>EV</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{ev.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                  {ev.evidence?.filename && (
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{ev.evidence.filename}</span>
+                  )}
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                    background: isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)',
+                    color: isParsed ? 'var(--accent-green)' : 'var(--text-dim)',
+                  }}>{isParsed ? `PARSED \u00b7 ${fieldCount} fields` : 'UNPARSED'}</span>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {evidenceNodes.length === 0 && (
+        <div style={{
+          padding: '24px 16px', textAlign: 'center', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-amber)', marginBottom: 8 }}>No evidence to evaluate</div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Add evidence files to this asset and parse them before running an evaluation.
+          </div>
+        </div>
+      )}
+      {evidenceNodes.length > 0 && !evidenceNodes.some(ev =>
+        assetNode.children?.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === ev.id)
+      ) && (
+        <div style={{
+          marginTop: 12, padding: '10px 14px', borderRadius: 6,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 11, color: 'var(--accent-amber)', lineHeight: 1.6,
+        }}>
+          All evidence is unparsed. Parse at least one evidence file before evaluation.
+        </div>
+      )}
     </div>
   )
 }
 
 export default function RunEvaluationModal({
   assetNode, evidenceNode, disclosureType, requirementSets, activeParty, activeUser,
-  credits, onClose, onComplete, parsedFields: passedParsedFields, _noBackdrop,
+  credits, onClose, onComplete, parsedFields: passedParsedFields, _noBackdrop, amendingEval,
 }) {
-  const [step, setStep] = useState(0) // 0=setup, 1=processing, 2=review, 3=confirmation
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
+
+  const hasMultipleEvidence = useMemo(() => {
+    if (!assetNode?.children) return false
+    return assetNode.children.filter(c => c.isEvidence).length > 0
+  }, [assetNode])
+
+  const isAmend = !!amendingEval
+  const showEvidenceStep = !evidenceNode
+  const evidenceStep = showEvidenceStep ? 0 : -1
+  const setupStep = !isAmend ? (showEvidenceStep ? 1 : 0) : -1
+  const processingStep = isAmend
+    ? (showEvidenceStep ? 1 : 0)
+    : (showEvidenceStep ? 2 : 1)
+  const reviewStep = processingStep + 1
+  const confirmStep = reviewStep + 1
+  const totalStepCount = confirmStep + 1
+
+  const [step, setStep] = useState(showEvidenceStep ? 0 : 0)
   const [selectedSetId, setSelectedSetId] = useState(null)
   const [claims, setClaims] = useState([])
   const [messageIndex, setMessageIndex] = useState(0)
@@ -321,14 +510,27 @@ export default function RunEvaluationModal({
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
   const canAfford = credits >= cost
 
-  // Use directly passed fields (resolved by V2App), fallback to extracting from children
+  // Auto-select requirement set in amend mode
+  useEffect(() => {
+    if (amendingEval?.requirementSetId) {
+      const matching = requirementSets.find(s => s.id === amendingEval.requirementSetId)
+      if (matching) setSelectedSetId(matching.id)
+    }
+  }, [amendingEval, requirementSets])
+
+  // Use directly passed fields, or filter by selected evidence, or extract all
   const parsedFields = useMemo(() => {
     if (passedParsedFields && passedParsedFields.length > 0) return passedParsedFields
     if (!assetNode?.children) return []
+    if (showEvidenceStep && selectedEvidenceIds.size > 0) {
+      return assetNode.children
+        .filter(c => (c.isParse || c.category === 'parse') && selectedEvidenceIds.has(c.sourceEvidenceId))
+        .flatMap(pn => pn.parsedFields || [])
+    }
     return assetNode.children
       .filter(c => c.isParse || c.category === 'parse')
       .flatMap(pn => pn.parsedFields || [])
-  }, [passedParsedFields, assetNode])
+  }, [passedParsedFields, assetNode, selectedEvidenceIds, showEvidenceStep])
 
   const isFullDisclosure = disclosureType === 'full'
 
@@ -351,25 +553,34 @@ export default function RunEvaluationModal({
 
   // Processing step — cycle messages + auto-advance
   useEffect(() => {
-    if (step !== 1) return
+    if (step !== processingStep) return
     const msgInterval = setInterval(() => {
       setMessageIndex(prev => prev + 1)
     }, 1200)
     const advanceTimer = setTimeout(() => {
-      // Generate AI results
       if (selectedSet) {
-        const results = generateMockAIResults(selectedSet, disclosureType, parsedFields)
+        let results = generateMockAIResults(selectedSet, disclosureType, parsedFields)
+        // Amend mode: preserve SAT claims from predecessor
+        if (amendingEval?.claims) {
+          results = results.map(claim => {
+            const prev = amendingEval.claims.find(c => c.requirementId === claim.requirementId || c.label === claim.label)
+            if (prev && (prev.status === 'satisfactory' || prev.status === 'verified')) {
+              return { ...claim, aiValue: prev.humanValue || prev.aiValue, humanValue: prev.humanValue || prev.aiValue, aiConfidence: 0.98, status: 'satisfactory', _carriedForward: true }
+            }
+            return claim
+          })
+        }
         setClaims(results)
       }
-      setStep(2)
+      setStep(reviewStep)
     }, 4000)
     return () => { clearInterval(msgInterval); clearTimeout(advanceTimer) }
-  }, [step, selectedSet, disclosureType, parsedFields])
+  }, [step, selectedSet, disclosureType, parsedFields, processingStep, reviewStep, amendingEval])
 
   const unreviewedCount = claims.filter(c => c.status === null).length
   const allReviewed = claims.length > 0 && unreviewedCount === 0
 
-  const totalSteps = 4
+  const totalSteps = totalStepCount
 
   // Compute summary tallies for fixed bar in step 2
   const reviewSummary = useMemo(() => {
@@ -383,29 +594,32 @@ export default function RunEvaluationModal({
   }, [claims])
 
   const handleNext = () => {
-    if (step === 0 && selectedSet && canAfford) {
-      setStep(1)
-    } else if (step === 2 && allReviewed) {
-      setStep(3)
-    } else if (step === 3) {
-      onComplete({ requirementSet: selectedSet, claims, creditCost: cost })
+    if (step === evidenceStep && showEvidenceStep) {
+      setStep(isAmend ? processingStep : setupStep)
+    } else if (step === setupStep && !isAmend && selectedSet && canAfford) {
+      setStep(processingStep)
+    } else if (step === reviewStep && allReviewed) {
+      setStep(confirmStep)
+    } else if (step === confirmStep) {
+      onComplete({ requirementSet: selectedSet, claims, creditCost: cost, selectedEvidenceIds: [...selectedEvidenceIds] })
     }
   }
 
   return (
-    <Modal width={step === 2 ? (showSplitView ? 1100 : 760) : 680}>
+    <Modal width={step === reviewStep ? (showSplitView ? 1100 : 760) : 680}>
       <ModalHeader
-        title="Run Evaluation"
-        subtitle={step === 0 ? 'Select a requirement set to evaluate this asset against.'
-          : step === 2 ? `${assetNode.name} — Review AI findings`
+        title={amendingEval ? 'Amend Evaluation' : 'Run Evaluation'}
+        subtitle={step === evidenceStep && showEvidenceStep ? 'Select evidence to evaluate against.'
+          : step === setupStep ? (amendingEval ? `Amending v${amendingEval.version} · ${assetNode.name}` : 'Select a requirement set to evaluate this asset against.')
+          : step === reviewStep ? `${assetNode.name} — Review AI findings`
           : undefined}
-        step={step < 3 ? step + 1 : undefined}
-        totalSteps={step < 3 ? 3 : undefined}
+        step={step < confirmStep ? step + 1 : undefined}
+        totalSteps={step < confirmStep ? totalSteps - 1 : undefined}
         onClose={onClose}
       />
 
       {/* Fixed summary tally — outside ModalBody, does not scroll (non-split only) */}
-      {step === 2 && !showSplitView && (
+      {step === reviewStep && !showSplitView && (
         <div style={{
           padding: '10px 28px', borderBottom: '1px solid var(--border)',
           flexShrink: 0,
@@ -422,12 +636,15 @@ export default function RunEvaluationModal({
             <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
             <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
             {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
+            {claims.some(c => c._carriedForward) && (
+              <span style={{ color: 'var(--accent-green)' }}>{claims.filter(c => c._carriedForward).length} preserved</span>
+            )}
           </div>
         </div>
       )}
 
       {/* Split view for Step 2 review */}
-      {step === 2 && showSplitView ? (
+      {step === reviewStep && showSplitView ? (
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {/* Left panel — Evidence / Disclosed Fields */}
           <div style={{
@@ -534,6 +751,9 @@ export default function RunEvaluationModal({
               <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
               <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
               {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
+              {claims.some(c => c._carriedForward) && (
+                <span style={{ color: 'var(--accent-green)' }}>{claims.filter(c => c._carriedForward).length} preserved</span>
+              )}
             </div>
 
             {/* Scrollable claims in page container */}
@@ -545,7 +765,10 @@ export default function RunEvaluationModal({
                 {claims.map((claim, i) => (
                   <div key={claim.requirementId}>
                     {i > 0 && <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />}
-                    <div>
+                    <div style={claim._carriedForward ? {
+                      borderLeft: '3px solid var(--accent-green)',
+                      paddingLeft: 12,
+                    } : undefined}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                         <span style={{
                           fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
@@ -557,6 +780,14 @@ export default function RunEvaluationModal({
                         }}>
                           {claim.type === 'extraction' ? 'EXT' : 'INF'}
                         </span>
+                        {claim._carriedForward && (
+                          <span style={{
+                            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '2px 6px', borderRadius: 3,
+                            background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+                            color: 'var(--accent-green)', flexShrink: 0,
+                          }}>PRESERVED</span>
+                        )}
                         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{claim.label}</span>
                         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
                           {Math.round(claim.aiConfidence * 100)}% conf.
@@ -640,18 +871,37 @@ export default function RunEvaluationModal({
         </div>
       ) : (
         <ModalBody>
-          {step === 0 && (
-            <StepSetup
+          {step === evidenceStep && showEvidenceStep && (
+            <StepEvidenceSelect
               assetNode={assetNode}
-              requirementSets={requirementSets}
-              selectedSetId={selectedSetId}
-              setSelectedSetId={setSelectedSetId}
-              credits={credits}
-              disclosureType={disclosureType}
+              selectedEvidenceIds={selectedEvidenceIds}
+              setSelectedEvidenceIds={setSelectedEvidenceIds}
             />
           )}
-          {step === 1 && <StepProcessing messageIndex={messageIndex} />}
-          {step === 2 && (
+          {step === setupStep && (
+            <div>
+              {amendingEval && (
+                <div style={{
+                  padding: '14px 16px', borderRadius: 8, marginBottom: 16,
+                  background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
+                  fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+                }}>
+                  <strong style={{ color: 'var(--accent-indigo)' }}>Amending evaluation v{amendingEval.version}</strong> — previously satisfactory claims will be preserved. Missing and unsatisfactory claims will be re-evaluated against the expanded evidence pool.
+                </div>
+              )}
+              <StepSetup
+                assetNode={assetNode}
+                requirementSets={requirementSets}
+                selectedSetId={selectedSetId}
+                setSelectedSetId={setSelectedSetId}
+                credits={credits}
+                disclosureType={disclosureType}
+              />
+            </div>
+          )}
+          {step === processingStep && <StepProcessing messageIndex={messageIndex} />}
+          {step === reviewStep && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {claims.map(claim => (
                 <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
@@ -660,12 +910,13 @@ export default function RunEvaluationModal({
               ))}
             </div>
           )}
-          {step === 3 && (
+          {step === confirmStep && (
             <StepConfirmation
               assetNode={assetNode}
               selectedSet={selectedSet}
               claims={claims}
               creditCost={cost}
+              amendingEval={amendingEval}
             />
           )}
         </ModalBody>
@@ -675,23 +926,48 @@ export default function RunEvaluationModal({
           <StepDots current={step} total={totalSteps} />
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {step === 0 && (
+          {step === evidenceStep && showEvidenceStep && (() => {
+            const hasParsedSelected = assetNode?.children && [...selectedEvidenceIds].some(evId =>
+              assetNode.children.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === evId)
+            )
+            const noEvidence = !assetNode?.children?.some(c => c.isEvidence)
+            const btnDisabled = selectedEvidenceIds.size === 0 || !hasParsedSelected || noEvidence
+            const btnLabel = noEvidence
+              ? 'No Evidence Available'
+              : selectedEvidenceIds.size === 0
+                ? 'Select Evidence'
+                : !hasParsedSelected
+                  ? 'Selected evidence needs parsing'
+                  : isAmend
+                    ? `${selectedEvidenceIds.size} Evidence \u2014 Amend Evaluation \u2192`
+                    : `${selectedEvidenceIds.size} Evidence \u2014 Select Requirement Set \u2192`
+            return <Btn label={btnLabel} accent={!btnDisabled} disabled={btnDisabled} onClick={() => setStep(isAmend ? processingStep : setupStep)} />
+          })()}
+          {step === setupStep && setupStep >= 0 && (
             <Btn
-              label={`Run Evaluation · ${cost} credits`}
+              label={`Run Evaluation \u00b7 ${cost} credits`}
               accent
               onClick={handleNext}
               disabled={!selectedSet || !canAfford}
             />
           )}
-          {step === 2 && (
+          {isAmend && !showEvidenceStep && step === 0 && (
             <Btn
-              label={unreviewedCount > 0 ? `Review ${unreviewedCount} Remaining` : 'Complete Evaluation →'}
+              label={`Amend Evaluation \u00b7 ${cost} credits`}
+              accent
+              onClick={() => setStep(processingStep)}
+              disabled={!selectedSet || !canAfford}
+            />
+          )}
+          {step === reviewStep && (
+            <Btn
+              label={unreviewedCount > 0 ? `Review ${unreviewedCount} Remaining` : 'Complete Evaluation \u2192'}
               accent
               onClick={handleNext}
               disabled={unreviewedCount > 0}
             />
           )}
-          {step === 3 && (
+          {step === confirmStep && (
             <Btn label="Done" accent onClick={handleNext} />
           )}
         </div>

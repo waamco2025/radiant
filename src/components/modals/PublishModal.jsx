@@ -228,6 +228,18 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
   const [expiry, setExpiry] = useState('1-year')
   const [customDate, setCustomDate] = useState('')
   const [published, setPublished] = useState(false)
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
+
+  const evidenceNodes = useMemo(() => {
+    if (!node?.children) return []
+    return node.children.filter(c => c.isEvidence)
+  }, [node])
+
+  useEffect(() => {
+    if (evidenceNodes.length > 0) {
+      setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
+    }
+  }, [evidenceNodes])
 
   const completedEvals = useMemo(() => {
     return (node.children || [])
@@ -264,9 +276,17 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
   }, [pepFields])
 
   const hasProofEval = completedEvals.length > 0
+  const needsEvidenceStep = evidenceNodes.length > 0
   const needsFieldStep = level === 'selective' && pepFields.length > 0
   const needsEvalStep = level === 'proofonly'
-  const totalSteps = 3 + (needsFieldStep ? 1 : 0) + (needsEvalStep ? 1 : 0)
+
+  const STEP_CONFIRM = 0
+  const STEP_EVIDENCE = needsEvidenceStep ? 1 : -1
+  const STEP_PERMISSION = needsEvidenceStep ? 2 : 1
+  const STEP_FIELDS = needsFieldStep ? STEP_PERMISSION + 1 : -1
+  const STEP_EVALS = needsEvalStep ? (STEP_FIELDS >= 0 ? STEP_FIELDS + 1 : STEP_PERMISSION + 1) : -1
+  const STEP_EXPIRY = Math.max(STEP_PERMISSION, STEP_FIELDS, STEP_EVALS) + 1
+  const totalSteps = STEP_EXPIRY + 1
 
   const hasChildren = node.children && node.children.length > 0
   const hasParsedData = node.children?.some(c => c.isParse || c.category === 'parse')
@@ -285,39 +305,30 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
   }
 
   const nextStep = () => {
-    if (step === 1) {
-      if (needsFieldStep) setStep(2)
-      else if (needsEvalStep) setStep(3)
-      else setStep(4)
-    } else if (step === 2 && needsFieldStep) {
-      setStep(4)
-    } else if (step === 3 && needsEvalStep) {
-      setStep(4)
-    } else {
-      setStep(step + 1)
+    if (step === STEP_CONFIRM) setStep(needsEvidenceStep ? STEP_EVIDENCE : STEP_PERMISSION)
+    else if (step === STEP_EVIDENCE) setStep(STEP_PERMISSION)
+    else if (step === STEP_PERMISSION) {
+      if (needsFieldStep) setStep(STEP_FIELDS)
+      else if (needsEvalStep) setStep(STEP_EVALS)
+      else setStep(STEP_EXPIRY)
     }
+    else if (step === STEP_FIELDS) setStep(STEP_EXPIRY)
+    else if (step === STEP_EVALS) setStep(STEP_EXPIRY)
+    else setStep(step + 1)
   }
   const prevStep = () => {
-    if (step === 4) {
-      if (needsFieldStep) setStep(2)
-      else if (needsEvalStep) setStep(3)
-      else setStep(1)
-    } else if (step === 3 && needsEvalStep) {
-      setStep(1)
-    } else if (step === 2 && needsFieldStep) {
-      setStep(1)
-    } else {
-      setStep(step - 1)
+    if (step === STEP_EXPIRY) {
+      if (needsFieldStep) setStep(STEP_FIELDS)
+      else if (needsEvalStep) setStep(STEP_EVALS)
+      else setStep(STEP_PERMISSION)
     }
+    else if (step === STEP_EVALS) setStep(STEP_PERMISSION)
+    else if (step === STEP_FIELDS) setStep(STEP_PERMISSION)
+    else if (step === STEP_PERMISSION) setStep(needsEvidenceStep ? STEP_EVIDENCE : STEP_CONFIRM)
+    else if (step === STEP_EVIDENCE) setStep(STEP_CONFIRM)
+    else setStep(step - 1)
   }
-  const currentStepNum = () => {
-    if (step === 0) return 1
-    if (step === 1) return 2
-    if (step === 2 && needsFieldStep) return 3
-    if (step === 3 && needsEvalStep) return 3
-    if (step === 4) return needsFieldStep || needsEvalStep ? 4 : 3
-    return step + 1
-  }
+  const currentStepNum = () => step + 1
 
   const handlePublish = () => {
     onComplete?.({
@@ -327,6 +338,7 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
       disclosureType: level,
       selectedEvals: level === 'proofonly' ? selectedEvals : null,
       selectedFields: level === 'selective' ? [...selectedFields] : null,
+      selectedEvidenceIds: [...selectedEvidenceIds],
       expiry,
       customDate,
     })
@@ -446,9 +458,54 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
     <Modal>
       <ModalHeader title="Publish to Directory" subtitle="Radiant Network Public Directory" step={currentStepNum()} totalSteps={totalSteps} onClose={onClose} />
       <ModalBody>
-        {step === 0 && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
-        {step === 1 && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}
-        {step === 2 && needsFieldStep && (
+        {step === STEP_CONFIRM && <StepConfirm asset={asset} isPublishReady={isPublishReady} />}
+        {step === STEP_EVIDENCE && needsEvidenceStep && (
+          <div>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-orange)', letterSpacing: '0.05em', marginBottom: 12 }}>SELECT EVIDENCE TO PUBLISH</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 18, lineHeight: 1.7 }}>
+              Choose which evidence files to include in this directory listing.
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{selectedEvidenceIds.size} of {evidenceNodes.length} selected</span>
+              <span onClick={() => {
+                if (selectedEvidenceIds.size === evidenceNodes.length) setSelectedEvidenceIds(new Set())
+                else setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
+              }} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}>
+                {selectedEvidenceIds.size === evidenceNodes.length ? 'Deselect All' : 'Select All'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {evidenceNodes.map(ev => {
+                const checked = selectedEvidenceIds.has(ev.id)
+                const isParsed = node.children?.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === ev.id)
+                return (
+                  <div key={ev.id} onClick={() => {
+                    setSelectedEvidenceIds(prev => { const next = new Set(prev); if (next.has(ev.id)) next.delete(ev.id); else next.add(ev.id); return next })
+                  }} style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+                    border: `1.5px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
+                    background: checked ? 'color-mix(in srgb, var(--accent-orange) 4%, transparent)' : 'var(--bg-card)', transition: 'all 150ms',
+                  }}>
+                    <span style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0, border: `2px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`, background: checked ? 'var(--accent-orange)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+                    </span>
+                    <div style={{ width: 28, height: 28, borderRadius: 6, flexShrink: 0, background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-orange)' }}>EV</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{ev.name}</div>
+                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                        <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)', color: isParsed ? 'var(--accent-green)' : 'var(--text-dim)' }}>{isParsed ? 'PARSED' : 'UNPARSED'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {step === STEP_PERMISSION && <StepPermission level={level} setLevel={setLevel} hasProofEval={hasProofEval} />}
+        {step === STEP_FIELDS && needsFieldStep && (
           <StepFieldSelection
             pepFields={pepFields}
             selectedFields={selectedFields}
@@ -457,21 +514,22 @@ export default function PublishModal({ node, onClose, onComplete, _noBackdrop })
             setAllFieldsSelected={setAllFieldsSelected}
           />
         )}
-        {step === 3 && needsEvalStep && <StepEvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals} />}
-        {step === 4 && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} pepFields={pepFields} selectedFields={selectedFields} />}
+        {step === STEP_EVALS && needsEvalStep && <StepEvalSelect evals={completedEvals} selected={selectedEvals} setSelected={setSelectedEvals} />}
+        {step === STEP_EXPIRY && <StepExpiry expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} level={level} asset={asset} selectedEvals={selectedEvals} pepFields={pepFields} selectedFields={selectedFields} />}
       </ModalBody>
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step > 0 && <Btn label="← Back" onClick={prevStep} />}
           <StepDots current={currentStepNum() - 1} total={totalSteps} />
         </div>
-        {step === 0 && <Btn label="Next →" accent disabled={!isPublishReady} onClick={() => setStep(1)} />}
-        {step === 1 && <Btn label="Next →" accent disabled={!level || (level === 'proofonly' && !hasProofEval)} onClick={nextStep} />}
-        {step === 2 && needsFieldStep && (
+        {step === STEP_CONFIRM && <Btn label="Next →" accent disabled={!isPublishReady} onClick={nextStep} />}
+        {step === STEP_EVIDENCE && needsEvidenceStep && <Btn label={`${selectedEvidenceIds.size} Evidence — Set Access Level →`} accent disabled={selectedEvidenceIds.size === 0} onClick={nextStep} />}
+        {step === STEP_PERMISSION && <Btn label="Next →" accent disabled={!level || (level === 'proofonly' && !hasProofEval)} onClick={nextStep} />}
+        {step === STEP_FIELDS && needsFieldStep && (
           <Btn label={`Publish ${selectedFields.size} Fields →`} accent disabled={selectedFields.size === 0} onClick={nextStep} />
         )}
-        {step === 3 && needsEvalStep && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={nextStep} />}
-        {step === 4 && <Btn label="Publish to Directory" accent onClick={handlePublish} />}
+        {step === STEP_EVALS && needsEvalStep && <Btn label="Next →" accent disabled={selectedEvals.length === 0} onClick={nextStep} />}
+        {step === STEP_EXPIRY && <Btn label="Publish to Directory" accent onClick={handlePublish} />}
       </ModalFooter>
     </Modal>
   )

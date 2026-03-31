@@ -60,7 +60,7 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover, 
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, isEvidence, isParse, isEvaluation, isOwner,
+  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isOwner, onAmendEval, depth,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
@@ -122,12 +122,17 @@ export default function PanelShell({
         </div>
 
         {/* Description */}
-        {node.description && (
+        {node.description && node.description.length > 60 && (
           <div onClick={() => setDescExpanded(prev => !prev)} style={{ marginBottom: 8, cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: descExpanded ? 'unset' : 1, WebkitBoxOrient: 'vertical' }}>
               {node.description}
             </span>
             <span style={{ fontSize: 20, color: 'var(--text-dim)', flexShrink: 0, marginTop: 2, transition: 'transform 150ms', transform: descExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▾</span>
+          </div>
+        )}
+        {node.description && node.description.length <= 60 && (
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginBottom: 8 }}>
+            {node.description}
           </div>
         )}
 
@@ -188,33 +193,32 @@ export default function PanelShell({
 
       {/* Footer */}
       {(() => {
-        let btnCount = 2 // layer + chain always present
-        if (isOwner && !isEvidence && !isParse && !isEvaluation) btnCount += 3
-        if (isOwner && isEvidence && !isEvaluation) btnCount += 1
-        if (canEvaluate && !isEvaluation) btnCount += 1
-        const showLabels = btnCount <= 3
+        const isChildLayer = isAnchor || depth > 0
+        const isActiveEval = isEvaluation && node.status !== 'superseded'
+        const buttons = []
+        if (isOwner && !isEvidence && !isParse && !isEvaluation) {
+          buttons.push({ icon: '+', label: 'Connect Asset', onClick: onConnect, id: 'connect' })
+          buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>, label: 'Publish', onClick: onDisclose, id: 'disclose' })
+          buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
+        }
+        if (canAssetEvaluate) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })
+        if (isOwner && isEvidence && !isEvaluation) buttons.push({ icon: '⊞', label: 'Parse Evidence', onClick: onParseEvidence, id: 'parse' })
+        if (isActiveEval && onAmendEval) buttons.push({ icon: '◆', label: 'Amend Evaluation', onClick: () => onAmendEval(node), id: 'amend' })
+        if (isAnchor) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })
+        else if (hasStack) buttons.push({ icon: '⊞', label: 'Expand Stack', onClick: onExpandStack, id: 'layer' })
+        else if (hasParent) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })
+        if (!isChildLayer) buttons.push({ icon: '⛓', label: 'View Chain', onClick: onViewChain, id: 'chain' })
+        const showLabels = buttons.length <= 3
         return (
           <div style={{
             borderTop: '1px solid var(--border)',
             padding: `12px ${GUTTER}px`,
-            display: 'flex',
-            gap: 6,
-            flexShrink: 0,
-            background: 'var(--bg-card)',
+            display: 'flex', gap: 6, flexShrink: 0, background: 'var(--bg-card)',
           }}>
-            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon={<svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>} label="Publish" onClick={onDisclose} btnId="disclose" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
-            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="◧" label="Add Evidence" onClick={onAddEvidence} btnId="evidence" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
-            {isOwner && !isEvidence && !isParse && !isEvaluation && <FooterBtn icon="+" label="Connect Asset" onClick={onConnect} btnId="connect" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
-            {isOwner && isEvidence && !isEvaluation && <FooterBtn icon="⊞" label="Parse Evidence" onClick={onParseEvidence} btnId="parse" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
-            {canEvaluate && !isEvaluation && <FooterBtn icon="◆" label="Run Evaluation" onClick={onRunEvaluation} btnId="evaluate" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />}
-            <FooterBtn
-              icon={isAnchor ? '⊟' : hasStack ? '⊞' : '⊟'}
-              label={isAnchor ? 'Exit Layer' : hasStack ? 'Expand Stack' : hasParent ? 'Exit Layer' : 'Surface'}
-              onClick={isAnchor ? onSurface : hasStack ? onExpandStack : onSurface}
-              disabled={!isAnchor && !hasStack && !hasParent}
-              btnId="layer" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels}
-            />
-            <FooterBtn icon="⛓" label="View Chain" onClick={onViewChain} btnId="chain" hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />
+            {buttons.map(b => (
+              <FooterBtn key={b.id} icon={b.icon} label={b.label} onClick={b.onClick} disabled={b.disabled}
+                btnId={b.id} hoveredId={hoveredFooterBtn} onHover={setHoveredFooterBtn} showLabels={showLabels} />
+            ))}
           </div>
         )
       })()}

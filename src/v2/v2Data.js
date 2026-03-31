@@ -858,7 +858,7 @@ function resolvePin(pin) {
   return null
 }
 
-function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, evaluatorUser, disclosureType) {
+function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, evaluatorUser, disclosureType, previousEvalId = null) {
   const id = `eval-${parentAssetId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   const pin = makePin(id)
   const dot = makeDot(evaluatorParty)
@@ -906,6 +906,8 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
     cascadeVia: null,
     upstreamSda: null,
     lastEval: null,
+    previousEvalId,
+    evalVersion: previousEvalId ? 2 : 1,
   }
 }
 

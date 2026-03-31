@@ -268,7 +268,7 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onAmendEval, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
   if (onCreateSDA && !isParty) buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}>
@@ -279,6 +279,7 @@ function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence,
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })
+  if (onAmendEval) buttons.push({ icon: '◆', tooltip: 'Amend Evaluation', onClick: onAmendEval })
   if (isAnchor && onSurface) {
     buttons.push({ icon: '⊟', tooltip: 'Exit Layer', onClick: onSurface })
   } else if (hasChildren) {
@@ -376,6 +377,7 @@ export default function AssetNode({
   onAddEvidence,
   onParseEvidence,
   onRunEvaluation,
+  onAmendEval,
   activeParty,
   revealPhase,
 }) {
@@ -433,7 +435,8 @@ export default function AssetNode({
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
-  const handleRunEvaluation = (node.isEvidence && node._isParsed && !isProvisional && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
+  const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
+  const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && onAmendEval) ? () => onAmendEval?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
   const borderColor = isDeclined
@@ -547,6 +550,7 @@ export default function AssetNode({
           zIndex: 1,
           boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
           transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
+          ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
           userSelect: 'none',
           WebkitUserSelect: 'none',
           display: 'flex',
@@ -593,6 +597,17 @@ export default function AssetNode({
                 background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
               }}>
                 PROVISIONAL
+              </span>
+            )}
+            {node.isEvaluation && node.status === 'superseded' && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4,
+                letterSpacing: '0.04em',
+                color: 'var(--text-dim)',
+                background: 'var(--bg-raised)',
+              }}>
+                SUPERSEDED
               </span>
             )}
             {isDeclined && (
@@ -709,6 +724,7 @@ export default function AssetNode({
           onAddEvidence={handleAddEvidence}
           onParseEvidence={handleParseEvidence}
           onRunEvaluation={handleRunEvaluation}
+          onAmendEval={handleAmendEval}
           onDive={handleDive}
           onOpenSubgraph={onOpenSubgraph ? () => onOpenSubgraph(node) : undefined}
           onSurface={onSurface}

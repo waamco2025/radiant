@@ -384,7 +384,7 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
           border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
           borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
         }}>
-          <strong style={{ color: 'var(--accent-indigo)' }}>Revise selective disclosure</strong> — add fields to share with the receiving party. Currently disclosed fields cannot be removed — revoke the entire disclosure to remove access.
+          <strong style={{ color: 'var(--accent-indigo)' }}>Amend selective disclosure</strong> — add fields to share with the receiving party. Currently disclosed fields cannot be removed — revoke the entire disclosure to remove access.
         </div>
       ) : (
         <div style={{

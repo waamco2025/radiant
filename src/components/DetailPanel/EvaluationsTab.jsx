@@ -59,7 +59,7 @@ export default function EvaluationsTab({
   evidence, evals, evalOpen, claimsOpen,
   toggleEval, toggleClaims, expandAll, collapseAll,
   evOpen, toggleEv, isOwner, isEvidence, attributedClaims,
-  onRunEvaluation, canEvaluate,
+  onRunEvaluation, canEvaluate, canAssetEvaluate, onAmendEval, activeParty,
 }) {
   return (
     <div>
@@ -130,17 +130,21 @@ export default function EvaluationsTab({
               <TinyBtn icon="⊟" tip="Collapse all" onClick={collapseAll} />
             </div>
             <div style={{ flex: 1 }} />
-            {canEvaluate && <Btn label="✦ Run Evaluation" accent onClick={onRunEvaluation} />}
+            {canEvaluate && <Btn label="&#10022; Run Evaluation" accent onClick={onRunEvaluation} />}
+            {canAssetEvaluate && !canEvaluate && <Btn label="&#9670; Run Evaluation" accent onClick={onRunEvaluation} />}
           </div>
           {evals.map((ev, i) => (
-            <EvalPanel
-              key={ev.id}
-              ev={ev}
-              open={!!evalOpen[i]}
-              onToggle={() => toggleEval(i)}
-              claimsOpen={!!claimsOpen[i]}
-              onToggleClaims={() => toggleClaims(i)}
-            />
+            <div key={ev.id}>
+              <EvalPanel
+                ev={ev}
+                open={!!evalOpen[i]}
+                onToggle={() => toggleEval(i)}
+                claimsOpen={!!claimsOpen[i]}
+                onToggleClaims={() => toggleClaims(i)}
+                onAmendEval={onAmendEval}
+                activeParty={activeParty}
+              />
+            </div>
           ))}
         </>
       )}

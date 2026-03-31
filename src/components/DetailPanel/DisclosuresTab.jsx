@@ -163,7 +163,7 @@ function ProofOnlyEvalDisplay({ evals }) {
   )
 }
 
-export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda, onReviseSda, nodes, onViewEvidence }) {
+export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade, isOwner, onSelectAsset, onRevokeSda, onReviseSda, nodes, onViewEvidence, forceExpandSda }) {
   const [allOpen, setAllOpen] = useState(false)
   const [exp, setExp] = useState(null)
   const [rev, setRev] = useState(null)
@@ -176,6 +176,18 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
     setRevokeMessage('')
     setAllOpen(false)
   }, [node?.id])
+
+  // Auto-expand a specific SDA after revision
+  useEffect(() => {
+    if (!forceExpandSda) return
+    const idx = sdas.findIndex(s =>
+      s.party === forceExpandSda.party && s.type === forceExpandSda.type
+    )
+    if (idx >= 0) {
+      setExp(idx)
+      setAllOpen(false)
+    }
+  }, [forceExpandSda, sdas])
 
   const toggleAll = useCallback((open) => {
     setAllOpen(open)
@@ -220,26 +232,34 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                 transition: 'background 150ms',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                 <SDABadge type={sda.type} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>{sda.party}</span>
                 {sda.partyLabel === 'internal' ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>internal</span>
+                  <>
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>Internal to</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>{sda.party}</span>
+                  </>
                 ) : sda.party === 'Radiant Network' ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>directory</span>
+                  <>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>Radiant Network</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>directory</span>
+                  </>
                 ) : (
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-                    {sda._isGrantor ? 'disclosed to' : 'disclosed by'}
-                  </span>
+                  <>
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                      {sda._isGrantor ? 'Disclosure to' : 'Disclosed by'}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>{sda.party}</span>
+                  </>
                 )}
-                {sda.assetName && (
+                {sda.assetName && sda.partyLabel !== 'internal' && sda.party !== 'Radiant Network' && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0, minWidth: 0 }}>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>&middot;&nbsp;</span>
                     <Tip text={sda.assetName}>
                       <span style={{
                         fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        maxWidth: 160, cursor: 'default',
+                        maxWidth: 120, cursor: 'default',
                         borderBottom: '1px dashed transparent',
                         transition: 'border-color 150ms',
                       }}
@@ -485,7 +505,7 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                       {!isRevoking ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           {isOwner && sda.partyLabel !== 'internal' && sda.party !== 'Radiant Network' && sda._isGrantor && (
-                            <Btn label="Revise SDA" accent onClick={() => onReviseSda && onReviseSda({ sda, nodeId: node?.id })} />
+                            <Btn label="Amend SDA" accent onClick={() => onReviseSda && onReviseSda({ sda, nodeId: node?.id })} />
                           )}
                           <Btn label={isSelfSda ? 'Remove from Network' : 'Revoke SDA'} onClick={() => setRev(i)} />
                         </div>

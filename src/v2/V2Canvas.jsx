@@ -210,13 +210,24 @@ function snapToGrid(val, depthLevel) {
 
 function layoutChildren(children, depthLevel = 1) {
   const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
-  const stepX = Math.ceil(300 / spacing) * spacing
+  let stepUnits = Math.ceil(300 / spacing)
+  if (stepUnits % 2 !== 0) stepUnits++
+  const stepX = stepUnits * spacing
 
   // Separate children by tier
-  const tier1 = children.filter(c => c.category === 'evidence' || (!c.isParse && c.category !== 'parse'))
+  const tier1 = children.filter(c =>
+    c.isEvidence || c.category === 'evidence' ||
+    (!c.isParse && c.category !== 'parse' && !c.isEvaluation && c.category !== 'evaluation')
+  )
   const tier2 = children.filter(c => c.isParse || c.category === 'parse')
+  const tier3Active = children.filter(c =>
+    (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded'
+  )
+  const tier3Superseded = children.filter(c =>
+    (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded'
+  )
 
-  // Layout tier 1 at y = 0
+  // Layout tier 1 (evidence + other) at y = 0
   const tier1W = (tier1.length - 1) * stepX
   const tier1StartX = -tier1W / 2
   const positioned = tier1.map((child, i) => ({
@@ -225,9 +236,9 @@ function layoutChildren(children, depthLevel = 1) {
     y: snapToGrid(0, depthLevel),
   }))
 
-  // Layout tier 2 below tier 1 — centered under parent evidence, spread bidirectionally on collision
+  // Layout tier 2 (parse) below tier 1 — centered under parent evidence
+  const tierGap = Math.round(200 / spacing) * spacing
   if (tier2.length > 0) {
-    const tierGap = Math.round(200 / spacing) * spacing
     const occupiedTier2Xs = new Set()
 
     tier2.forEach(pepNode => {
@@ -239,7 +250,6 @@ function layoutChildren(children, depthLevel = 1) {
         preferredX = snapToGrid(0, depthLevel)
       }
 
-      // Find nearest open slot, alternating left/right from preferred position
       let candidateX = preferredX
       if (occupiedTier2Xs.has(candidateX)) {
         let offset = stepX
@@ -261,11 +271,49 @@ function layoutChildren(children, depthLevel = 1) {
     })
   }
 
+  // Helper: check if x collides with a tier1 node column
+  const collidesWithTier1 = (x) => positioned.some(p =>
+    (p.isEvidence || p.category === 'evidence' || (!p.isParse && p.category !== 'parse' && !p.isEvaluation && p.category !== 'evaluation'))
+    && Math.abs(p.x - x) < stepX * 0.5
+  )
+
+  // Layout superseded evals first (higher up, closer to parse)
+  const evalY = tier2.length > 0 ? tierGap * 2 : tierGap
+  if (tier3Superseded.length > 0) {
+    const supW = (tier3Superseded.length - 1) * stepX
+    const supStartX = -supW / 2
+    tier3Superseded.forEach((supNode, i) => {
+      let supX = snapToGrid(supStartX + i * stepX, depthLevel)
+      if (collidesWithTier1(supX)) supX = snapToGrid(supX + stepX, depthLevel)
+      positioned.push({
+        ...supNode,
+        x: supX,
+        y: snapToGrid(evalY, depthLevel),
+      })
+    })
+  }
+
+  // Layout active evals below superseded (or at evalY if no superseded)
+  const activeEvalY = tier3Superseded.length > 0 ? evalY + tierGap : evalY
+  if (tier3Active.length > 0) {
+    const tier3W = (tier3Active.length - 1) * stepX
+    const tier3StartX = -tier3W / 2
+    tier3Active.forEach((evalNode, i) => {
+      let evalX = snapToGrid(tier3StartX + i * stepX, depthLevel)
+      if (collidesWithTier1(evalX)) evalX = snapToGrid(evalX + stepX, depthLevel)
+      positioned.push({
+        ...evalNode,
+        x: evalX,
+        y: snapToGrid(activeEvalY, depthLevel),
+      })
+    })
+  }
+
   return positioned
 }
 
 // FLIP animation: animate element from old rect to new rect
-function flipAnimate(element, fromRect, toRect, duration = 350) {
+function flipAnimate(element, fromRect, toRect, duration = 350, finalScale = null) {
   if (!element || !fromRect || !toRect) return
   const dx = fromRect.left - toRect.left
   const dy = fromRect.top - toRect.top
@@ -277,10 +325,10 @@ function flipAnimate(element, fromRect, toRect, duration = 350) {
   element.style.zIndex = '100'
   element.offsetHeight // force reflow
   element.style.transition = `transform ${duration}ms cubic-bezier(0.22, 1, 0.36, 1)`
-  element.style.transform = 'translate(0, 0) scale(1, 1)'
+  element.style.transform = finalScale ? `scale(${finalScale})` : 'translate(0, 0) scale(1, 1)'
   setTimeout(() => {
     element.style.transition = ''
-    element.style.transform = ''
+    // Don't clear transform — handleSurface step 5 sets the correct scale
     element.style.transformOrigin = ''
     element.style.zIndex = ''
   }, duration + 50)
@@ -305,6 +353,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onAddEvidence,
   onParseEvidence,
   onRunEvaluation,
+  onAmendEval,
   activeParty,
   revealAnim,
 }, ref) {
@@ -401,23 +450,18 @@ const V2Canvas = forwardRef(function V2Canvas({
     const allNodes = [anchorNode, ...childrenWithPos]
 
     const childEdges = []
-    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse).forEach(child => {
-      childEdges.push({
-        id: `edge-anchor-${child.id}`,
-        from: anchorNode.id,
-        to: child.id,
-        sdaType: child.sda?.type || 'full',
-        _vertical: true,
-      })
+    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
+      childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
     })
     childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
-      childEdges.push({
-        id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`,
-        from: pepChild.sourceEvidenceId,
-        to: pepChild.id,
-        sdaType: 'full',
-        _vertical: true,
-      })
+      childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+    })
+    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+      childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
+    })
+    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+      const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
+      childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
     })
 
     setLayerStack(prev => {
@@ -521,7 +565,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (!resolved) return null
     const isDark = document.documentElement.dataset.theme !== 'light'
     const bg = new THREE.Color(isDark ? 0x0a0c10 : 0xe4e0da)
-    const mix = isDark ? 0.004 : 0.15
+    const mix = isDark ? 0.004 : 0.04
     const tinted = new THREE.Color(
       bg.r * (1 - mix) + resolved.r * mix,
       bg.g * (1 - mix) + resolved.g * mix,
@@ -1044,7 +1088,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (!resolved) return
     const isDark = document.documentElement.dataset.theme !== 'light'
     const bg = new THREE.Color(isDark ? 0x0a0c10 : 0xe4e0da)
-    const mix = isDark ? 0.004 : 0.15
+    const mix = isDark ? 0.004 : 0.04
     const tinted = new THREE.Color(
       bg.r * (1 - mix) + resolved.r * mix,
       bg.g * (1 - mix) + resolved.g * mix,
@@ -1427,23 +1471,18 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     // Create edges: anchor → tier 1 children, evidence → PEP parse nodes
     const childEdges = []
-    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse).forEach(child => {
-      childEdges.push({
-        id: `edge-anchor-${child.id}`,
-        from: anchorNode.id,
-        to: child.id,
-        sdaType: child.sda?.type || 'full',
-        _vertical: true,
-      })
+    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
+      childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
     })
     childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
-      childEdges.push({
-        id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`,
-        from: pepChild.sourceEvidenceId,
-        to: pepChild.id,
-        sdaType: 'full',
-        _vertical: true,
-      })
+      childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+    })
+    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+      childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
+    })
+    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+      const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
+      childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
     })
 
     // Compute final camera state BEFORE the transition so React renders
@@ -1687,8 +1726,13 @@ const V2Canvas = forwardRef(function V2Canvas({
       requestAnimationFrame(() => {
         const newAnchorEl = anchorCardId ? overlayRef.current?.querySelector(`[data-card-id="${anchorCardId}"]`) : null
         const toRect = newAnchorEl?.getBoundingClientRect()
-        if (newAnchorEl && fromRect && toRect) {
-          flipAnimate(newAnchorEl, fromRect, toRect, 350)
+        // Fade in anchor card (replaces FLIP animation)
+        if (newAnchorEl) {
+          newAnchorEl.style.transition = 'none'
+          newAnchorEl.style.opacity = '0'
+          newAnchorEl.offsetHeight
+          newAnchorEl.style.transition = 'opacity 250ms ease-out'
+          newAnchorEl.style.opacity = '1'
         }
 
         // Fade in other parent cards — respect chain dimming
@@ -2459,6 +2503,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onAddEvidence={transitioning ? undefined : onAddEvidence}
                 onParseEvidence={transitioning ? undefined : onParseEvidence}
                 onRunEvaluation={transitioning ? undefined : onRunEvaluation}
+                onAmendEval={transitioning ? undefined : onAmendEval}
                 activeParty={activeParty}
                 revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}
               />

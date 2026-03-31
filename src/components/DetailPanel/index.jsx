@@ -24,7 +24,7 @@ if (typeof document !== 'undefined' && !document.getElementById('panel-reveal-ke
   document.head.appendChild(style)
 }
 
-export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab }) {
+export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab, forceExpandSda, onAmendEval, activeParty }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -46,6 +46,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isParse={false}
         isOwner={false}
         onSurface={onSurface}
+        depth={depth}
       >
         <div style={{ padding: '24px 20px' }}>
           {isDeclined ? (
@@ -252,6 +253,8 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isParse={false}
         isEvaluation
         isOwner={isOwner}
+        depth={depth}
+        onAmendEval={onAmendEval}
       >
         <div style={{ padding: '4px 0' }}>
           {/* Header info */}
@@ -344,6 +347,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isEvaluation={false}
         isOwner={isOwner}
         onParseEvidence={onParseEvidence}
+        depth={depth}
       >
         <ParsedFieldsTab fields={fields} isSelective={!!node._isSelective} />
       </PanelShell>
@@ -384,6 +388,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         onParseEvidence={onParseEvidence}
         canEvaluate={canEvaluate}
         onRunEvaluation={onRunEvaluation}
+        depth={depth}
       >
         {ev ? (
           <div>
@@ -447,6 +452,9 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         date: ev.date,
         requirements: ev.requirementSetName || ev.name,
         status: ev.status || 'completed',
+        previousEvalId: ev.previousEvalId || null,
+        evalVersion: ev.evalVersion || 1,
+        requirementSetId: ev.requirementSetId || null,
         creditsUsed: ev.creditsUsed || 0,
         reviewer: ev.evaluator || 'Unknown',
         reviewDate: ev.date,
@@ -572,11 +580,15 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       onDisclose={onDisclose}
       onAddEvidence={onAddEvidence}
       onParseEvidence={onParseEvidence}
-      onRunEvaluation={onRunEvaluation}
+      onRunEvaluation={() => onRunEvaluation && onRunEvaluation(node)}
       canEvaluate={canEvaluate}
+      canAssetEvaluate={!node.isEvidence && !node.isParse && !node.isEvaluation && isOwner}
       isEvidence={!!node.isEvidence}
       isParse={!!node.isParse || node.category === 'parse'}
+      isEvaluation={!!node.isEvaluation}
       isOwner={isOwner}
+      onAmendEval={onAmendEval}
+      depth={depth}
     >
       {/* Conditionally mounted tabs — only render if tab exists in tabs array */}
       <div style={
@@ -602,8 +614,11 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
             isOwner={isOwner}
             isEvidence={!!node.isEvidence}
             attributedClaims={node.attributedClaims}
-            onRunEvaluation={onRunEvaluation}
+            onRunEvaluation={() => onRunEvaluation && onRunEvaluation(node)}
             canEvaluate={canEvaluate}
+            canAssetEvaluate={!node.isEvidence && !node.isParse && node.children?.some(c => c.isParse || c.category === 'parse')}
+            onAmendEval={onAmendEval}
+            activeParty={activeParty}
           />
         </div>
       )}
@@ -614,7 +629,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       )}
       {tabs.some(t => t.id === 'disclosures') && (
         <div style={{ display: tab === 'disclosures' ? 'block' : 'none' }}>
-          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} nodes={nodes} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} onReviseSda={onReviseSda} onViewEvidence={onViewChild ? (evId) => {
+          <DisclosuresTab sdas={node.sdas || []} onDisclose={onDisclose} node={node} nodes={nodes} onManageCascade={onManageCascade} isOwner={isOwner} onSelectAsset={onSelectAsset} onRevokeSda={onRevokeSda} onReviseSda={onReviseSda} forceExpandSda={forceExpandSda} onViewEvidence={onViewChild ? (evId) => {
             const evNode = (node.children || []).find(c => c.id === evId)
               || (nodes || []).flatMap(n => n.children || []).find(c => c.id === evId)
             if (evNode) onViewChild(evNode)

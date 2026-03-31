@@ -50,7 +50,7 @@ function Badge({ text, color, tooltip }) {
   return tooltip ? <Tip text={tooltip} w={220}>{inner}</Tip> : inner
 }
 
-export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClaims }) {
+export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClaims, onAmendEval, activeParty }) {
   const [showModal, setShowModal] = useState(false)
   const sup = ev.status === 'superseded'
   const satCount = ev.claims.filter(c => c.status === 'satisfactory' || c.status === 'verified').length
@@ -63,7 +63,7 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
       borderRadius: 8,
       border: '1px solid var(--border)',
       marginTop: 10,
-      opacity: sup ? 0.4 : 1,
+      opacity: sup ? (open ? 1 : 0.55) : 1,
       transition: 'opacity 200ms',
     }}>
       {/* Header */}
@@ -77,9 +77,17 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
           transition: 'background 150ms',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{ev.org}</span>
           {sup && <Badge text="SUPERSEDED" color="var(--text-tertiary)" tooltip="Replaced by newer evaluation. Preserved for audit." />}
+          {ev.evalVersion && (
+            <span style={{
+              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '1px 5px', borderRadius: 3,
+              background: sup ? 'var(--bg-raised)' : 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+              color: sup ? 'var(--text-dim)' : 'var(--accent-indigo)',
+            }}>v{ev.evalVersion}</span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{ev.date}</span>
@@ -168,6 +176,24 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
           {sup && ev.claims.length === 0 && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 14, fontFamily: 'var(--font-mono)' }}>
               Claims from this evaluation are no longer active.
+            </div>
+          )}
+          {!sup && ev.org === activeParty && onAmendEval && (
+            <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={e => { e.stopPropagation(); onAmendEval(ev) }}
+                style={{
+                  padding: '6px 12px', borderRadius: 5,
+                  border: '1px solid color-mix(in srgb, var(--accent-indigo) 35%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
+                  color: 'var(--accent-indigo)',
+                  fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 150ms',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)'}
+              >&#9670; Amend Evaluation</button>
             </div>
           )}
         </div>
