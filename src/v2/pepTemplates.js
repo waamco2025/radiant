@@ -1,58 +1,74 @@
 // PEP (Parse & Extract Protocol) — Templates and mock data generation
 
-export const PEP_TEMPLATES = [
-  {
-    id: 'pep-electronics',
-    name: 'Electronics Component Profile',
-    description: 'Standard extraction for electronic components — electrical specs, environmental ratings, compliance status.',
-    fieldCount: 10,
-    fields: [
-      { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range' },
-      { id: 'f-power', name: 'Power dissipation', category: 'electrical', type: 'value' },
-      { id: 'f-temp', name: 'Temperature range', category: 'environmental', type: 'range' },
-      { id: 'f-radiation', name: 'Radiation tolerance', category: 'environmental', type: 'value' },
-      { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text' },
-      { id: 'f-rohs', name: 'RoHS status', category: 'compliance', type: 'boolean' },
-      { id: 'f-package', name: 'Package type', category: 'mechanical', type: 'text' },
-      { id: 'f-leads', name: 'Lead count', category: 'mechanical', type: 'number' },
-      { id: 'f-material', name: 'Material composition', category: 'material', type: 'text' },
-      { id: 'f-lot', name: 'Lot number', category: 'identification', type: 'text' },
-    ],
-  },
-  {
-    id: 'pep-mechanical',
-    name: 'Mechanical Assembly Profile',
-    description: 'For machined parts, assemblies, and structural components — dimensions, materials, tolerances.',
-    fieldCount: 8,
-    fields: [
-      { id: 'f-material-spec', name: 'Material specification', category: 'material', type: 'text' },
-      { id: 'f-tensile', name: 'Tensile strength', category: 'mechanical', type: 'value' },
-      { id: 'f-yield', name: 'Yield strength', category: 'mechanical', type: 'value' },
-      { id: 'f-hardness', name: 'Hardness (Rockwell)', category: 'mechanical', type: 'value' },
-      { id: 'f-dimensions', name: 'Critical dimensions', category: 'mechanical', type: 'text' },
-      { id: 'f-tolerance', name: 'Tolerance class', category: 'mechanical', type: 'text' },
-      { id: 'f-surface', name: 'Surface finish', category: 'mechanical', type: 'value' },
-      { id: 'f-heat-treat', name: 'Heat treatment', category: 'process', type: 'text' },
-    ],
-  },
-  {
-    id: 'pep-compliance',
-    name: 'Regulatory Compliance Profile',
-    description: 'Extracts certifications, export controls, and regulatory status from compliance documentation.',
-    fieldCount: 7,
-    fields: [
-      { id: 'f-cert-body', name: 'Certifying body', category: 'compliance', type: 'text' },
-      { id: 'f-cert-id', name: 'Certificate number', category: 'identification', type: 'text' },
-      { id: 'f-issue-date', name: 'Issue date', category: 'identification', type: 'text' },
-      { id: 'f-expiry-date', name: 'Expiry date', category: 'identification', type: 'text' },
-      { id: 'f-export-class', name: 'Export classification', category: 'compliance', type: 'text' },
-      { id: 'f-jurisdiction', name: 'Jurisdiction', category: 'compliance', type: 'text' },
-      { id: 'f-restrictions', name: 'Use restrictions', category: 'compliance', type: 'text' },
-    ],
-  },
-]
+export const DEMO_PEP_TEMPLATES = {
+  'alice-microco': [
+    {
+      id: 'pep-electronics-v1',
+      lineageId: 'lineage-pep-electronics',
+      version: 1,
+      name: 'Electronics Component Profile',
+      description: 'Standard extraction for electronic components — electrical specs, environmental ratings, compliance status.',
+      created: '2026-01-15',
+      fields: [
+        { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range' },
+        { id: 'f-power', name: 'Power dissipation', category: 'electrical', type: 'value' },
+        { id: 'f-temp', name: 'Temperature range', category: 'environmental', type: 'range' },
+        { id: 'f-radiation', name: 'Radiation tolerance', category: 'environmental', type: 'value' },
+        { id: 'f-itar', name: 'ITAR classification', category: 'compliance', type: 'text' },
+        { id: 'f-rohs', name: 'RoHS status', category: 'compliance', type: 'boolean' },
+        { id: 'f-package', name: 'Package type', category: 'mechanical', type: 'text' },
+        { id: 'f-leads', name: 'Lead count', category: 'mechanical', type: 'number' },
+        { id: 'f-material', name: 'Material composition', category: 'material', type: 'text' },
+        { id: 'f-lot', name: 'Lot number', category: 'identification', type: 'text' },
+      ],
+    },
+    {
+      id: 'pep-mechanical-v1',
+      lineageId: 'lineage-pep-mechanical',
+      version: 1,
+      name: 'Mechanical Assembly Profile',
+      description: 'For machined parts, assemblies, and structural components — dimensions, materials, tolerances.',
+      created: '2026-01-20',
+      fields: [
+        { id: 'f-material-spec', name: 'Material specification', category: 'material', type: 'text' },
+        { id: 'f-tensile', name: 'Tensile strength', category: 'mechanical', type: 'value' },
+        { id: 'f-yield', name: 'Yield strength', category: 'mechanical', type: 'value' },
+        { id: 'f-hardness', name: 'Hardness (Rockwell)', category: 'mechanical', type: 'value' },
+        { id: 'f-dimensions', name: 'Critical dimensions', category: 'mechanical', type: 'text' },
+        { id: 'f-tolerance', name: 'Tolerance class', category: 'mechanical', type: 'text' },
+        { id: 'f-surface', name: 'Surface finish', category: 'mechanical', type: 'value' },
+        { id: 'f-heat-treat', name: 'Heat treatment', category: 'process', type: 'text' },
+      ],
+    },
+    {
+      id: 'pep-compliance-v1',
+      lineageId: 'lineage-pep-compliance',
+      version: 1,
+      name: 'Regulatory Compliance Profile',
+      description: 'Extracts certifications, export controls, and regulatory status from compliance documentation.',
+      created: '2026-02-01',
+      fields: [
+        { id: 'f-cert-body', name: 'Certifying body', category: 'compliance', type: 'text' },
+        { id: 'f-cert-id', name: 'Certificate number', category: 'identification', type: 'text' },
+        { id: 'f-issue-date', name: 'Issue date', category: 'identification', type: 'text' },
+        { id: 'f-expiry-date', name: 'Expiry date', category: 'identification', type: 'text' },
+        { id: 'f-export-class', name: 'Export classification', category: 'compliance', type: 'text' },
+        { id: 'f-jurisdiction', name: 'Jurisdiction', category: 'compliance', type: 'text' },
+        { id: 'f-restrictions', name: 'Use restrictions', category: 'compliance', type: 'text' },
+      ],
+    },
+  ],
+  'bob-govco': [],
+}
 
-// Field category colors (for grouping in results)
+export function getPEPTemplatesForRole(roleId) {
+  return DEMO_PEP_TEMPLATES[roleId] || []
+}
+
+// Keep legacy export for backward compatibility
+export const PEP_TEMPLATES = DEMO_PEP_TEMPLATES['alice-microco']
+
+// Field category colors
 export const FIELD_CATEGORIES = {
   electrical: { label: 'Electrical', color: 'var(--accent-blue)' },
   environmental: { label: 'Environmental', color: 'var(--accent-green)' },
@@ -62,6 +78,15 @@ export const FIELD_CATEGORIES = {
   identification: { label: 'Identification', color: 'var(--text-secondary)' },
   process: { label: 'Process', color: 'var(--accent-purple, #a78bfa)' },
 }
+
+// Field type options for the editor
+export const FIELD_TYPES = [
+  { value: 'text', label: 'Text' },
+  { value: 'number', label: 'Number' },
+  { value: 'value', label: 'Value (with unit)' },
+  { value: 'range', label: 'Range' },
+  { value: 'boolean', label: 'Yes/No' },
+]
 
 export function generateMockParsedFields(template, evidenceName) {
   const mockValues = {
@@ -81,7 +106,7 @@ export function generateMockParsedFields(template, evidenceName) {
     'Hardness (Rockwell)': 'HRC 36',
     'Critical dimensions': '±0.005" on all mating surfaces',
     'Tolerance class': 'ISO 2768-m',
-    'Surface finish': 'Ra 0.8 μm',
+    'Surface finish': 'Ra 0.8 \u03BCm',
     'Heat treatment': 'Solution treated + aged per AMS 5664',
     'Certifying body': 'NADCAP',
     'Certificate number': 'NC-2025-08841',
@@ -102,7 +127,7 @@ export function generateMockParsedFields(template, evidenceName) {
 
   return template.fields.map(field => ({
     ...field,
-    value: mockValues[field.name] || 'N/A',
+    value: mockValues[field.name] || `${field.name} value`,
     confidence: confidence(field.name),
   }))
 }

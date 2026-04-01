@@ -13,7 +13,8 @@ function groupFieldsByCategory(fields) {
   return groups
 }
 
-export default function ParseEvidenceModal({ evidenceNode, parentAssetName, activeParty, existingParseTemplateIds, onClose, onComplete, _noBackdrop }) {
+export default function ParseEvidenceModal({ evidenceNode, parentAssetName, activeParty, pepTemplates: pepTemplatesProp, existingParseTemplateIds, onClose, onComplete, _noBackdrop }) {
+  const templates = pepTemplatesProp || PEP_TEMPLATES
   const [step, setStep] = useState(0)
   const [selectedTemplate, setSelectedTemplate] = useState(null)
   const [parsedFields, setParsedFields] = useState([])
@@ -122,7 +123,15 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
                     boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                   }}
                 >
-                  {PEP_TEMPLATES.map(t => {
+                  {(() => {
+                    const latestByLineage = new Map()
+                    templates.forEach(t => {
+                      const key = t.lineageId || t.id
+                      const existing = latestByLineage.get(key)
+                      if (!existing || (t.version || 1) > (existing.version || 1)) latestByLineage.set(key, t)
+                    })
+                    return [...latestByLineage.values()]
+                  })().map(t => {
                     const isSelected = selectedTemplate?.id === t.id
                     const alreadyParsed = parsedIds.has(t.id)
                     return (
@@ -224,12 +233,20 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
               }}>
                 <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Credit cost</span>
                 <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)' }}>
-                  ◇ {selectedTemplate.fieldCount * 2}
+                  ◇ {selectedTemplate.fields.length * 10}
                 </span>
               </div>
             )}
 
-            {PEP_TEMPLATES.every(t => parsedIds.has(t.id)) && (
+            {(() => {
+              const latestByLineage = new Map()
+              templates.forEach(t => {
+                const key = t.lineageId || t.id
+                const existing = latestByLineage.get(key)
+                if (!existing || (t.version || 1) > (existing.version || 1)) latestByLineage.set(key, t)
+              })
+              return [...latestByLineage.values()]
+            })().every(t => parsedIds.has(t.id)) && (
               <div style={{
                 marginTop: 16, padding: '14px 16px', borderRadius: 8,
                 background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
@@ -238,6 +255,12 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
               }}>
                 <strong style={{ color: 'var(--accent-amber)' }}>All available templates have been used</strong> on this evidence.
                 To extract additional data, add a new parsing template to your library or attach new evidence to the parent asset.
+                <div
+                  onClick={() => { onClose(); setTimeout(() => document.dispatchEvent(new CustomEvent('open-pep-library')), 100) }}
+                  style={{ marginTop: 10, fontSize: 11, color: 'var(--accent-purple, #a78bfa)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                >
+                  Open PEP Template Library →
+                </div>
               </div>
             )}
           </ModalBody>
@@ -343,7 +366,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
             }}>
               <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Credit cost</span>
               <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)' }}>
-                ◇ {selectedTemplate.fieldCount * 2}
+                ◇ {selectedTemplate.fields.length * 10}
               </span>
             </div>
           </ModalBody>
@@ -353,7 +376,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
               onComplete({
                 template: selectedTemplate,
                 parsedFields,
-                creditCost: selectedTemplate.fieldCount * 2,
+                creditCost: selectedTemplate.fields.length * 10,
               })
             }} />
           </ModalFooter>

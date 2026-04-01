@@ -5,7 +5,7 @@ import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
 import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin } from './v2Data.js'
-import { PEP_TEMPLATES } from './pepTemplates.js'
+// PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
 import RequestDisclosureModal from '../components/modals/RequestDisclosureModal.jsx'
@@ -16,10 +16,12 @@ import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
 import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
 import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
+import PEPLibraryModal from '../components/modals/PEPLibraryModal.jsx'
 import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
 import ReviseDisclosureModal from '../components/modals/ReviseDisclosureModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
+import { getPEPTemplatesForRole } from './pepTemplates.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
 
@@ -58,7 +60,7 @@ export default function V2App() {
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
   const roleData = useMemo(() => getDataForRole(roleId), [roleId])
   // Per-role dynamic state — persists across role switches
-  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null }
+  const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null, pepTemplates: null }
   const [perRoleState, setPerRoleState] = useState(() => {
     const init = {}
     ROLES.forEach(r => { init[r.id] = { ...emptyRoleState } })
@@ -526,6 +528,12 @@ export default function V2App() {
   const [revocationNotice, setRevocationNotice] = useState(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
+  const [showPEPLibrary, setShowPEPLibrary] = useState(false)
+  useEffect(() => {
+    const handler = () => setShowPEPLibrary(true)
+    document.addEventListener('open-pep-library', handler)
+    return () => document.removeEventListener('open-pep-library', handler)
+  }, [])
   const [evalContext, setEvalContext] = useState(null)
   const [reviseContext, setReviseContext] = useState(null)
   const [showChangelog, setShowChangelog] = useState(false)
@@ -642,6 +650,19 @@ export default function V2App() {
     updateRoleState(roleId, prev => {
       const existing = prev.requirementSets ?? getRequirementSetsForRole(roleId)
       return { ...prev, requirementSets: [...existing, reqSet] }
+    })
+  }, [roleId, updateRoleState])
+
+  // PEP templates — per-role, defaults from demo data
+  const pepTemplates = useMemo(() => {
+    const custom = currentRoleState.pepTemplates
+    return custom ?? getPEPTemplatesForRole(roleId)
+  }, [currentRoleState.pepTemplates, roleId])
+
+  const handleSavePEPTemplate = useCallback((template) => {
+    updateRoleState(roleId, prev => {
+      const existing = prev.pepTemplates ?? getPEPTemplatesForRole(roleId)
+      return { ...prev, pepTemplates: [...existing, template] }
     })
   }, [roleId, updateRoleState])
 
@@ -1118,6 +1139,22 @@ export default function V2App() {
               <line x1="5.5" y1="7" x2="10.5" y2="7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
               <line x1="5.5" y1="9.5" x2="10.5" y2="9.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
               <line x1="5.5" y1="12" x2="8.5" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+          </div>
+
+          {/* PEP Template Library */}
+          <div
+            onClick={() => setShowPEPLibrary(true)}
+            style={iconBtnStyle}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
+            title="PEP Template Library"
+          >
+            <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
+              <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" strokeWidth="1" />
+              <line x1="6" y1="6" x2="6" y2="13" stroke="currentColor" strokeWidth="1" />
+              <line x1="10" y1="6" x2="10" y2="13" stroke="currentColor" strokeWidth="1" />
             </svg>
           </div>
 
@@ -2111,6 +2148,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.6.0', date: '2026-04-01', label: 'Round 10', items: [
+                  'PEP Template Library — two-panel modal with search, versioning, create/edit, CSV import',
+                  'Per-org PEP templates with lineage versioning (parallels Requirements Library)',
+                  'Parse Evidence modal uses per-org templates with lineage dedup',
+                  'Open PEP Library link from all-templates-used warning',
+                  'Credit cost updated to 10 per field',
+                ]},
                 { version: '0.5.0', date: '2026-04-01', label: 'Round 10', items: [
                   'Evaluation lineage gating — blocks duplicate evals per requirement set, auto-supersedes on version upgrade',
                   'Evidence evaluated section on eval node detail panel with resolved filenames',
@@ -2215,11 +2259,12 @@ export default function V2App() {
       )} */}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || evalContext || reviseContext) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || reviseContext) && (
         <Backdrop onClose={() => {
           if (reviseContext) setReviseContext(null)
           else if (evalContext) setEvalContext(null)
           else if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
+          else if (showPEPLibrary) setShowPEPLibrary(false)
           else if (connectNode) setConnectNode(null)
           else if (registerNode) setRegisterNode(null)
           else if (evidenceNode) setEvidenceNode(null)
@@ -3042,6 +3087,7 @@ export default function V2App() {
           evidenceNode={parseContext.evidenceNode}
           parentAssetName={parseContext.parentAssetName}
           activeParty={activeRole.party}
+          pepTemplates={pepTemplates}
           existingParseTemplateIds={(() => {
             const parentAsset = nodeMap[parseContext.parentAssetId]
             if (!parentAsset?.children) return new Set()
@@ -3051,8 +3097,9 @@ export default function V2App() {
             )
             const ids = new Set()
             existingParses.forEach(p => {
-              const matched = PEP_TEMPLATES.find(t => t.name === p.name)
-              if (matched) ids.add(matched.id)
+              pepTemplates.forEach(t => {
+                if (t.name === p.name) ids.add(t.id)
+              })
             })
             return ids
           })()}
@@ -3104,6 +3151,14 @@ export default function V2App() {
           onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
           onSave={handleSaveRequirementSet}
           initialSelectedId={libraryInitialSetId}
+          _noBackdrop
+        />
+      )}
+      {showPEPLibrary && (
+        <PEPLibraryModal
+          pepTemplates={pepTemplates}
+          onClose={() => setShowPEPLibrary(false)}
+          onSave={handleSavePEPTemplate}
           _noBackdrop
         />
       )}
