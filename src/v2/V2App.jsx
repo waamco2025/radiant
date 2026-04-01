@@ -2125,6 +2125,9 @@ export default function V2App() {
                   'Ownership guard on Amend Evaluation button (evaluatorParty check)',
                   'Boot screen login with CAC credentials and lightning animation',
                   'Cross-role evaluation sync with notification badges',
+                  'Multi-evidence preview in eval review — stacked PDF viewers with collapsible headers',
+                  'Parsed fields enriched with source evidence info and grouped by origin',
+                  'Body font-family rule ensures portaled content inherits correct font',
                 ]},
                 { version: '0.4.0', date: '2026-03-31', label: 'Round 9', items: [
                   'Multi-evidence evaluation — run evals from asset level with evidence selection',

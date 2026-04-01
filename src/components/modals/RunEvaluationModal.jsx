@@ -555,6 +555,8 @@ export default function RunEvaluationModal({
   const [selectedSetId, setSelectedSetId] = useState(null)
   const [claims, setClaims] = useState([])
   const [messageIndex, setMessageIndex] = useState(0)
+  const [expandedEvidence, setExpandedEvidence] = useState(new Set())
+  const [evExpandInit, setEvExpandInit] = useState(false)
 
   const selectedSet = requirementSets.find(s => s.id === selectedSetId)
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
@@ -572,34 +574,73 @@ export default function RunEvaluationModal({
   const parsedFields = useMemo(() => {
     if (passedParsedFields && passedParsedFields.length > 0) return passedParsedFields
     if (!assetNode?.children) return []
-    if (showEvidenceStep && selectedEvidenceIds.size > 0) {
-      return assetNode.children
-        .filter(c => (c.isParse || c.category === 'parse') && selectedEvidenceIds.has(c.sourceEvidenceId))
-        .flatMap(pn => pn.parsedFields || [])
+
+    const getFieldsFromParseNodes = (parseNodes) => {
+      return parseNodes.flatMap(pn => {
+        const sourceEv = assetNode.children.find(c => c.isEvidence && c.id === pn.sourceEvidenceId)
+        return (pn.parsedFields || []).map(f => ({
+          ...f,
+          templateName: pn.name,
+          parseNodeId: pn.id,
+          sourceEvidenceId: pn.sourceEvidenceId,
+          sourceEvidenceName: sourceEv?.name || sourceEv?.evidence?.filename || pn.sourceEvidenceId,
+        }))
+      })
     }
-    return assetNode.children
+
+    if (showEvidenceStep && selectedEvidenceIds.size > 0) {
+      const parseNodes = assetNode.children
+        .filter(c => (c.isParse || c.category === 'parse') && selectedEvidenceIds.has(c.sourceEvidenceId))
+      return getFieldsFromParseNodes(parseNodes)
+    }
+    const parseNodes = assetNode.children
       .filter(c => c.isParse || c.category === 'parse')
-      .flatMap(pn => pn.parsedFields || [])
+    return getFieldsFromParseNodes(parseNodes)
   }, [passedParsedFields, assetNode, selectedEvidenceIds, showEvidenceStep])
 
   const isFullDisclosure = disclosureType === 'full'
 
-  // Evidence data from the specific evidence node being evaluated
+  // Evidence data — single node (child layer) or multi-evidence (asset level)
   const evidenceData = useMemo(() => {
-    if (!evidenceNode?.evidence) return []
-    return [{
-      id: evidenceNode.id,
-      filename: evidenceNode.evidence.filename || evidenceNode.name,
-      hash: evidenceNode.evidence.hash,
-      block: evidenceNode.evidence.block,
-      provider: evidenceNode.evidence.provider,
-      retention: evidenceNode.evidence.retention,
-      localPath: evidenceNode.evidence.localPath || null,
-      uri: evidenceNode.evidence.uri || null,
-    }]
-  }, [evidenceNode])
+    // Single evidence entry point (child layer)
+    if (evidenceNode?.evidence) {
+      return [{
+        id: evidenceNode.id,
+        filename: evidenceNode.evidence.filename || evidenceNode.name,
+        hash: evidenceNode.evidence.hash,
+        block: evidenceNode.evidence.block,
+        provider: evidenceNode.evidence.provider,
+        localPath: evidenceNode.evidence.localPath || null,
+        uri: evidenceNode.evidence.uri || null,
+      }]
+    }
+    // Multi-evidence entry point (asset level)
+    if (assetNode?.children && selectedEvidenceIds.size > 0) {
+      return assetNode.children
+        .filter(c => c.isEvidence && selectedEvidenceIds.has(c.id))
+        .map(ev => ({
+          id: ev.id,
+          filename: ev.evidence?.filename || ev.name,
+          hash: ev.evidence?.hash,
+          block: ev.evidence?.block,
+          provider: ev.evidence?.provider,
+          localPath: ev.evidence?.localPath || null,
+          uri: ev.evidence?.uri || null,
+          name: ev.name,
+        }))
+    }
+    return []
+  }, [evidenceNode, assetNode, selectedEvidenceIds])
 
   const showSplitView = parsedFields.length > 0 || (isFullDisclosure && evidenceData.length > 0)
+
+  // Initialize first evidence expanded when entering review step
+  useEffect(() => {
+    if (step === reviewStep && evidenceData.length > 0 && !evExpandInit) {
+      setExpandedEvidence(new Set([evidenceData[0].id]))
+      setEvExpandInit(true)
+    }
+  }, [step, reviewStep, evidenceData, evExpandInit])
 
   // Processing step — cycle messages + auto-advance
   useEffect(() => {
@@ -712,59 +753,179 @@ export default function RunEvaluationModal({
                   color: 'var(--accent-orange)', letterSpacing: '0.06em',
                 }}>EVIDENCE</span>
               </div>
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-                {isFullDisclosure && evidenceData.length > 0 ? (
-                  <>
-                    <span style={{ color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {evidenceData[0]?.uri?.replace(/[^/]+$/, '') || 'provenance://evidence/'}
-                    </span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600, flexShrink: 0 }}>
-                      {evidenceData[0]?.filename}
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ color: 'var(--text-dim)' }}>
-                    {parsedFields.length} field{parsedFields.length !== 1 ? 's' : ''} · {isFullDisclosure ? 'Full' : 'Selective'} access
-                  </span>
-                )}
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                {evidenceData.length > 1
+                  ? `${evidenceData.length} evidence files · ${parsedFields.length} fields · ${isFullDisclosure ? 'Full' : 'Selective'} access`
+                  : evidenceData.length === 1
+                    ? evidenceData[0].filename
+                    : `${parsedFields.length} field${parsedFields.length !== 1 ? 's' : ''} · ${isFullDisclosure ? 'Full' : 'Selective'} access`
+                }
               </div>
             </div>
 
             {/* Left content */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {isFullDisclosure && evidenceData.length > 0 && evidenceData[0]?.localPath ? (
-                <iframe
-                  src={evidenceData[0].localPath}
-                  style={{ flex: 1, width: '100%', border: 'none', background: 'var(--bg-deep)', minHeight: 400 }}
-                  title="Evidence document"
-                />
-              ) : (
-                <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-                  {parsedFields.length > 0 && (
-                    <div>
-                      <div style={{
-                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                        color: 'var(--accent-purple)', letterSpacing: '0.06em', marginBottom: 8,
-                      }}>
-                        {isFullDisclosure ? 'PARSED DATA' : 'DISCLOSED FIELDS'} ({parsedFields.length})
-                      </div>
-                      <div style={{
-                        borderRadius: 6, overflow: 'hidden',
-                        border: '1px solid var(--border)', background: 'var(--bg-deep)',
-                      }}>
-                        {parsedFields.map((f, i) => (
-                          <div key={f.id || i} style={{
-                            display: 'flex', alignItems: 'center', padding: '6px 10px',
-                            borderBottom: i < parsedFields.length - 1 ? '1px solid var(--border)' : 'none',
-                          }}>
-                            <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
-                            <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {isFullDisclosure && evidenceData.length > 0 ? (
+                // Full disclosure — stacked evidence viewers
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {evidenceData.map((ev, ei) => {
+                    const isExpanded = evidenceData.length === 1 || expandedEvidence.has(ev.id)
+                    return (
+                      <div key={ev.id} style={{ borderBottom: ei < evidenceData.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                        {/* Evidence file header — always visible, clickable when multiple */}
+                        {evidenceData.length > 1 && (
+                          <div
+                            onClick={() => setExpandedEvidence(prev => {
+                              const next = new Set(prev)
+                              if (next.has(ev.id)) next.delete(ev.id)
+                              else next.add(ev.id)
+                              return next
+                            })}
+                            style={{
+                              padding: '20px 16px',
+                              background: 'var(--bg-card)',
+                              display: 'flex', alignItems: 'center', gap: 8,
+                              cursor: 'pointer',
+                              borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
+                              transition: 'background 150ms',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card)'}
+                          >
+                            <span style={{
+                              fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                              background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                              color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                            }}>EV</span>
+                            <span style={{
+                              fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                            }}>{ev.filename}</span>
+                            <span style={{
+                              fontSize: 16, color: 'var(--text-tertiary)',
+                              transition: 'transform 180ms ease',
+                              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0)',
+                              display: 'inline-block', flexShrink: 0,
+                            }}>▸</span>
                           </div>
-                        ))}
-                      </div>
+                        )}
+                        {/* Content — collapsible */}
+                        {isExpanded && (
+                          ev.localPath ? (
+                            <iframe
+                              src={ev.localPath}
+                              style={{
+                                width: '100%',
+                                height: evidenceData.length > 1 ? 350 : 400,
+                                border: 'none',
+                                background: 'var(--bg-deep)',
+                              }}
+                              title={`Evidence: ${ev.filename}`}
+                            />
+                          ) : (
+                            // No PDF available — show parsed fields for this evidence
+                            <div style={{ padding: '12px 16px' }}>
+                              {(() => {
+                                const fieldsForEv = parsedFields.filter(f => f.sourceEvidenceId === ev.id)
+                                if (fieldsForEv.length === 0) return (
+                                  <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                                    No parsed data for this evidence.
+                                  </div>
+                                )
+                            return (
+                              <div style={{
+                                borderRadius: 6, overflow: 'hidden',
+                                border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                              }}>
+                                {fieldsForEv.map((f, i) => (
+                                  <div key={f.id || i} style={{
+                                    display: 'flex', alignItems: 'center', padding: '6px 10px',
+                                    borderBottom: i < fieldsForEv.length - 1 ? '1px solid var(--border)' : 'none',
+                                  }}>
+                                    <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
+                                    <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
+                    )}
                     </div>
-                  )}
-                  {parsedFields.length === 0 && (
+                  )
+                  })}
+                </div>
+              ) : (
+                // Selective disclosure — fields grouped by source evidence
+                <div style={{ flex: 1, padding: '12px 16px' }}>
+                  {parsedFields.length > 0 ? (
+                    (() => {
+                      // Group by sourceEvidenceId
+                      const groups = new Map()
+                      parsedFields.forEach(f => {
+                        const key = f.sourceEvidenceId || 'unknown'
+                        if (!groups.has(key)) groups.set(key, { name: f.sourceEvidenceName || f.templateName || key, fields: [] })
+                        groups.get(key).fields.push(f)
+                      })
+                      return [...groups.entries()].map(([evId, group]) => (
+                        <div key={evId} style={{ marginBottom: 16 }}>
+                          {groups.size > 1 && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              marginBottom: 8,
+                            }}>
+                              <span style={{
+                                fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                                background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                                color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                              }}>EV</span>
+                              <span style={{
+                                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                                color: 'var(--text-secondary)',
+                              }}>{group.name}</span>
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                                {group.fields.length} fields
+                              </span>
+                            </div>
+                          )}
+                          {/* Parse template sub-header if fields come from different templates */}
+                          {(() => {
+                            const byTemplate = new Map()
+                            group.fields.forEach(f => {
+                              const tName = f.templateName || 'Fields'
+                              if (!byTemplate.has(tName)) byTemplate.set(tName, [])
+                              byTemplate.get(tName).push(f)
+                            })
+                            return [...byTemplate.entries()].map(([tName, tFields]) => (
+                              <div key={tName} style={{ marginBottom: 12 }}>
+                                <div style={{
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                  color: 'var(--accent-purple)', letterSpacing: '0.06em', marginBottom: 6,
+                                }}>
+                                  {tName} ({tFields.length})
+                                </div>
+                                <div style={{
+                                  borderRadius: 6, overflow: 'hidden',
+                                  border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                                }}>
+                                  {tFields.map((f, i) => (
+                                    <div key={f.id || i} style={{
+                                      display: 'flex', alignItems: 'center', padding: '6px 10px',
+                                      borderBottom: i < tFields.length - 1 ? '1px solid var(--border)' : 'none',
+                                    }}>
+                                      <span style={{ width: 120, flexShrink: 0, fontSize: 10, color: 'var(--text-dim)' }}>{f.name}</span>
+                                      <span style={{ flex: 1, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{f.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          })()}
+                        </div>
+                      ))
+                    })()
+                  ) : (
                     <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 8 }}>
                       No parsed data available.
                     </div>
