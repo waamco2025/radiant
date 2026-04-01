@@ -278,8 +278,8 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
             {/* Body */}
             {o && (
               <div style={{ padding: '6px 14px 16px' }}>
-                <GridRow label="Created" value={sda.created} />
-                <GridRow label="Expires" value={sda.expires || 'Never'} />
+                <GridRow label="Created" value={`${sda.created || '—'}${sda.createdTime ? ` · ${sda.createdTime}` : ''}`} />
+                <GridRow label="Expires" value={sda.expires ? `${sda.expires}${sda.expiresTime ? ` · ${sda.expiresTime}` : ''}` : '—'} />
                 <GridRow label="Disclosure type" value={
                   <Tip text={s.permTip} w={240}>
                     <span style={{
@@ -289,20 +289,6 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                     }}>{s.label}</span>
                   </Tip>
                 } />
-                {sda.selectedEvidenceIds && sda.selectedEvidenceIds.length > 0 && sda.partyLabel !== 'internal' && (
-                  <GridRow label="Evidence" value={
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11, color: 'var(--accent-orange, #fb923c)' }}>
-                      {sda.selectedEvidenceIds.length} document{sda.selectedEvidenceIds.length !== 1 ? 's' : ''}
-                    </span>
-                  } />
-                )}
-                {sda.type === 'selective' && sda.selectedFieldIds && sda.selectedFieldIds.length > 0 && sda.partyLabel !== 'internal' && (
-                  <GridRow label="Fields" value={
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11, color: 'var(--accent-amber)' }}>
-                      {sda.selectedFieldIds.length} field{sda.selectedFieldIds.length !== 1 ? 's' : ''} disclosed
-                    </span>
-                  } />
-                )}
                 {sda.partyLabel !== 'internal' && (
                   <GridRow label="Connected asset" value={
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -328,7 +314,6 @@ export default function DisclosuresTab({ sdas, onDisclose, node, onManageCascade
                     </div>
                   } />
                 )}
-                {sda.pins && <GridRow label="PINs" value={sda.pins.length === 0 ? <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: 11 }}>No assets</span> : `${sda.pins.length} asset${sda.pins.length !== 1 ? 's' : ''}`} />}
 
                 {/* Disclosed evidence */}
                 {sda.selectedEvidenceIds && sda.selectedEvidenceIds.length > 0 && sda.partyLabel !== 'internal' && (

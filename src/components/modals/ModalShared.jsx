@@ -51,7 +51,7 @@ export function Backdrop({ children, onClose }) {
     return () => window.removeEventListener('keydown', handleKey, true)
   }, [handleClose])
 
-  return (
+  return createPortal(
     <div
       onMouseDown={e => {
         mouseDownOnBackdrop.current = (e.target === e.currentTarget)
@@ -73,7 +73,8 @@ export function Backdrop({ children, onClose }) {
     >
       <style>{`@keyframes fade-in{from{opacity:0}to{opacity:1}} @keyframes fade-out{from{opacity:1}to{opacity:0}} @keyframes modal-up{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>
       {children}
-    </div>
+    </div>,
+    document.body
   )
 }
 

@@ -24,6 +24,33 @@ if (typeof document !== 'undefined' && !document.getElementById('panel-reveal-ke
   document.head.appendChild(style)
 }
 
+function EvalClaimsSection({ claims, nodeName }) {
+  const [showModal, setShowModal] = useState(null)
+  return (
+    <>
+      <div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          color: 'var(--text-dim)', letterSpacing: '0.06em', marginBottom: 8,
+        }}>
+          CLAIMS ({claims.length})
+          <TableActions
+            onExpand={() => setShowModal(true)}
+            onDownload={() => claimsToCSV(claims, `${nodeName}-claims.csv`)}
+          />
+        </div>
+        <ClaimsTable claims={claims} />
+      </div>
+      {showModal && (
+        <TableModal title={`${nodeName} — Claims`} onClose={() => setShowModal(false)}>
+          <ClaimsTable claims={claims} maxHeight={9999} />
+        </TableModal>
+      )}
+    </>
+  )
+}
+
 export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab, forceExpandSda, onAmendEval, activeParty }) {
   if (!node) return null
 
@@ -46,6 +73,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isParse={false}
         isOwner={false}
         onSurface={onSurface}
+        activeParty={activeParty}
         depth={depth}
       >
         <div style={{ padding: '24px 20px' }}>
@@ -239,7 +267,10 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
     const miss = claims.filter(c => c.status === 'missing').length
     return (
       <PanelShell
-        node={node}
+        node={{
+          ...node,
+          description: `${(node.claims?.length || 0)} claim${(node.claims?.length || 0) !== 1 ? 's' : ''} evaluated by ${node.evaluatorParty || node.owner} on ${node.date || '—'}${node.dateTime ? ` · ${new Date(node.dateTime).toISOString().slice(11, 16)} UTC` : ''}`,
+        }}
         tabs={[]}
         tab={null}
         setTab={() => {}}
@@ -255,9 +286,10 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isOwner={isOwner}
         depth={depth}
         onAmendEval={onAmendEval}
+        activeParty={activeParty}
       >
         <div style={{ padding: '4px 0' }}>
-          {/* Header info */}
+          {/* Header badges */}
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
               {node.requirementSetVersion && (
@@ -280,9 +312,6 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
                 }}>{node.disclosureType}</span>
               )}
             </div>
-            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-              Evaluated by {node.evaluator || node.owner} · {node.date}
-            </div>
           </div>
 
           {/* Summary bar */}
@@ -298,22 +327,47 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
             <span style={{ color: 'var(--text-dim)' }}>{miss} missing</span>
           </div>
 
+          {/* Evidence used */}
+          {node.selectedEvidenceIds && node.selectedEvidenceIds.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                color: 'var(--accent-orange)', letterSpacing: '0.05em',
+                marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{ fontSize: 12 }}>&#9703;</span>
+                EVIDENCE EVALUATED · {node.selectedEvidenceIds.length}
+              </div>
+              <div style={{
+                borderRadius: 6, overflow: 'hidden',
+                border: '1px solid var(--border)', background: 'var(--bg-deep)',
+              }}>
+                {node.selectedEvidenceIds.map((evId, ei) => {
+                  const evNode = nodes?.flatMap(n => n.children || []).find(c => c.id === evId)
+                  return (
+                    <div key={evId} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '6px 10px',
+                      borderBottom: ei < node.selectedEvidenceIds.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}>
+                      <span style={{
+                        fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                        background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                        color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                      }}>EV</span>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flex: 1 }}>
+                        {evNode?.name || evNode?.evidence?.filename || evId}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Claims table */}
           {claims.length > 0 && (
-            <div>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                color: 'var(--text-dim)', letterSpacing: '0.06em', marginBottom: 8,
-              }}>
-                CLAIMS ({claims.length})
-                <TableActions
-                  onExpand={() => setExpandedTable({ type: 'claims', title: `${node.name} — Claims`, claims })}
-                  onDownload={() => claimsToCSV(claims, `${node.name}-claims.csv`)}
-                />
-              </div>
-              <ClaimsTable claims={claims} />
-            </div>
+            <EvalClaimsSection claims={claims} nodeName={node.name} />
           )}
 
           {/* Credits used */}
@@ -336,7 +390,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         tabs={[]}
         tab={null}
         setTab={() => {}}
-        summary={`${fields.length} parsed field${fields.length !== 1 ? 's' : ''}`}
+        summary={`${fields.length} field${fields.length !== 1 ? 's' : ''} parsed${node.date ? ` on ${node.date}` : ''}${node.dateTime ? ` · ${new Date(node.dateTime).toISOString().slice(11, 16)} UTC` : ''}`}
         onClose={onClose}
         hasStack={false}
         hasParent={isAnchor || depth > 0}
@@ -347,6 +401,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         isEvaluation={false}
         isOwner={isOwner}
         onParseEvidence={onParseEvidence}
+        activeParty={activeParty}
         depth={depth}
       >
         <ParsedFieldsTab fields={fields} isSelective={!!node._isSelective} />
@@ -361,7 +416,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
     if (ev) {
       evidenceRows.push({ label: 'SHA-256', value: ev.hash, copyable: true })
       evidenceRows.push({ label: 'On-chain ref', value: ev.block, copyable: true })
-      evidenceRows.push({ label: 'Retention', value: ev.retention })
+
       if (isOwner) {
         evidenceRows.push({ label: 'Filename', value: ev.filename })
         evidenceRows.push({ label: 'Storage URI', value: ev.uri, copyable: true })
@@ -375,7 +430,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         tabs={[]}
         tab={null}
         setTab={() => {}}
-        summary={isOwner ? ev?.filename : 'Evidence attached'}
+        summary={isOwner ? ev?.filename : `Evidence attached${node.date ? ` on ${node.date}` : ''}${node.dateTime ? ` · ${new Date(node.dateTime).toISOString().slice(11, 16)} UTC` : ''}`}
         onClose={onClose}
         hasStack={false}
         hasParent={isAnchor || depth > 0}
@@ -388,6 +443,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         onParseEvidence={onParseEvidence}
         canEvaluate={canEvaluate}
         onRunEvaluation={onRunEvaluation}
+        activeParty={activeParty}
         depth={depth}
       >
         {ev ? (
@@ -456,8 +512,9 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
         evalVersion: ev.evalVersion || 1,
         requirementSetId: ev.requirementSetId || null,
         creditsUsed: ev.creditsUsed || 0,
-        reviewer: ev.evaluator || 'Unknown',
+        reviewer: ev.evaluatorParty || ev.owner,
         reviewDate: ev.date,
+        dateTime: ev.dateTime || null,
         claims: (ev.claims || []).map(c => ({
           label: c.label || c.requirementId,
           description: c.description,
@@ -588,6 +645,7 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       isEvaluation={!!node.isEvaluation}
       isOwner={isOwner}
       onAmendEval={onAmendEval}
+      activeParty={activeParty}
       depth={depth}
     >
       {/* Conditionally mounted tabs — only render if tab exists in tabs array */}

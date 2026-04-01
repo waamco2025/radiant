@@ -37,7 +37,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
     return node.children
       .filter(c => c.isParse || c.category === 'parse')
       .flatMap(pn => (pn.parsedFields || []).map(f => ({
-        ...f, templateName: pn.name, parseNodeId: pn.id,
+        ...f, templateName: pn.name, parseNodeId: pn.id, parseDate: pn.date || pn.created || null,
         fieldKey: `${pn.id}::${f.id}`,
       })))
   }, [node])

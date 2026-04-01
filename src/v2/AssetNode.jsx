@@ -52,7 +52,7 @@ function PortalTooltip({ text, x, y, anchor = 'right', maxWidth }) {
 
   const style = {
     position: 'fixed',
-    zIndex: 9999,
+    zIndex: 5000,
     padding: '4px 8px',
     background: 'var(--bg-surface)',
     border: '1px solid var(--border)',
@@ -436,7 +436,7 @@ export default function AssetNode({
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
   const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
-  const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && onAmendEval) ? () => onAmendEval?.(node) : undefined
+  const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && node.evaluatorParty === activeParty && onAmendEval) ? () => onAmendEval?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
   const borderColor = isDeclined
@@ -826,7 +826,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
       {showTooltip && createPortal(
         <div style={{
           position: 'fixed',
-          zIndex: 9999,
+          zIndex: 5000,
           left: tooltipPos.x,
           top: tooltipPos.y,
           transform: tooltipPos.anchor === 'left'

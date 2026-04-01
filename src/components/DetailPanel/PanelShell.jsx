@@ -60,7 +60,7 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover, 
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isOwner, onAmendEval, depth,
+  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isOwner, onAmendEval, activeParty, depth,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
@@ -203,7 +203,7 @@ export default function PanelShell({
         }
         if (canAssetEvaluate) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })
         if (isOwner && isEvidence && !isEvaluation) buttons.push({ icon: '⊞', label: 'Parse Evidence', onClick: onParseEvidence, id: 'parse' })
-        if (isActiveEval && onAmendEval) buttons.push({ icon: '◆', label: 'Amend Evaluation', onClick: () => onAmendEval(node), id: 'amend' })
+        if (isActiveEval && onAmendEval && node.evaluatorParty === activeParty) buttons.push({ icon: '◆', label: 'Amend Evaluation', onClick: () => onAmendEval(node), id: 'amend' })
         if (isAnchor) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })
         else if (hasStack) buttons.push({ icon: '⊞', label: 'Expand Stack', onClick: onExpandStack, id: 'layer' })
         else if (hasParent) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })

@@ -132,7 +132,7 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
             ]}
             rows={[
               { label: 'Requirements', value: ev.requirements, color: 'var(--accent-indigo)' },
-              { label: 'Reviewer', value: `${ev.reviewer} · ${ev.reviewDate}`, color: 'var(--accent-green)' },
+              { label: 'Evaluated', value: `${ev.date}${ev.dateTime ? ' · ' + new Date(ev.dateTime).toISOString().slice(11, 16) + ' UTC' : ''}`, color: 'var(--accent-green)' },
               { label: 'Credits', value: String(ev.creditsUsed) },
             ]}
             compact

@@ -96,7 +96,9 @@ const SDA_POWER_REG_TO_GOVCO = {
   party: 'GovCo',
   partyDot: GOVCO_DOT,
   created: '2026-03-01',
+  createdTime: '14:15 UTC',
   expires: '2027-03-01',
+  expiresTime: '14:15 UTC',
   pins: [],
   assetName: null,
   assetPin: null,
@@ -108,7 +110,9 @@ const SDA_VREG_TO_GOVCO = {
   party: 'GovCo',
   partyDot: GOVCO_DOT,
   created: '2026-03-04',
+  createdTime: '16:42 UTC',
   expires: '2027-03-04',
+  expiresTime: '16:42 UTC',
   pins: [],
   assetName: null,
   assetPin: null,
@@ -121,6 +125,7 @@ const SDA_INTERNAL_MICROCO = {
   partyLabel: 'internal',
   partyDot: MICROCO_DOT,
   created: '2025-01-01',
+  createdTime: '09:00 UTC',
   expires: null,
   pins: [],
   assetName: null,
@@ -134,6 +139,7 @@ const SDA_INTERNAL_GOVCO = {
   partyLabel: 'internal',
   partyDot: GOVCO_DOT,
   created: '2025-06-01',
+  createdTime: '13:30 UTC',
   expires: null,
   pins: [],
   assetName: null,
@@ -213,6 +219,8 @@ function makeEvidenceNode(parentId, evidenceMeta, owner, claims = [], uniqueId =
     isEvidence: true,
     lastEval: null,
     attributedClaims: claims,
+    date: new Date().toISOString().slice(0, 10),
+    dateTime: new Date().toISOString(),
   }
 }
 
@@ -254,6 +262,8 @@ function makePepNode(parentAssetId, sourceEvidenceId, templateName, parsedFields
     isEvidence: false,
     isParse: true,
     lastEval: null,
+    date: new Date().toISOString().slice(0, 10),
+    dateTime: new Date().toISOString(),
   }
 }
 
@@ -363,7 +373,9 @@ function buildBobData() {
         party: 'MicroCo',
         partyDot: MICROCO_DOT,
         created: '2026-03-01',
+        createdTime: '14:15 UTC',
         expires: '2027-03-01',
+        expiresTime: '14:15 UTC',
         pins: [],
         assetName: 'Power Regulation Module',
         assetPin: makePin('power-reg'),
@@ -373,7 +385,9 @@ function buildBobData() {
         party: 'MicroCo',
         partyDot: MICROCO_DOT,
         created: '2026-03-04',
+        createdTime: '16:42 UTC',
         expires: '2027-03-04',
+        expiresTime: '16:42 UTC',
         pins: [],
         assetName: 'Voltage Regulator IC',
         assetPin: makePin('vreg-ic'),
@@ -383,13 +397,15 @@ function buildBobData() {
     x: 900, y: 200,
   })
 
-  // Disclosed MicroCo assets
+  // Disclosed MicroCo assets (Bob's copies)
   const powerRegEv = makeEvidenceNode('power-reg',
     makeEvidence('power-reg', 'ASSY-PRM', 'MicroCo Quality Lab', '10 years per MIL-STD-129'),
     'MicroCo', [])
   powerRegEv.evidence.filename = 'powerregulationmodule-datasheet.pdf'
   powerRegEv.evidence.localPath = '/powerregulationmodule-datasheet.pdf'
   powerRegEv.name = 'powerregulationmodule-datasheet.pdf'
+  powerRegEv.date = '2026-02-10'
+  powerRegEv.dateTime = '2026-02-10T14:18:00Z'
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -434,6 +450,7 @@ function buildBobData() {
     evaluator: EVAL_POWER_REG_BOB.reviewer,
     evaluatorParty: 'GovCo',
     date: EVAL_POWER_REG_BOB.reviewDate,
+    dateTime: '2026-03-09T14:32:00Z',
     status: 'completed',
     claims: [
       { requirementId: 'req-001', label: 'Power output stability', description: 'Rated output voltage and tolerance under load', type: 'extraction', aiValue: '3.3V ±0.5% under load', aiConfidence: 0.95, humanValue: '3.3V ±0.5% under load', status: 'satisfactory' },
@@ -443,12 +460,14 @@ function buildBobData() {
       { requirementId: 'req-005', label: 'ITAR classification', description: 'Export control classification under ITAR', type: 'extraction', aiValue: 'Category XV, §121.1', aiConfidence: 0.88, humanValue: 'Category XV, §121.1', status: 'satisfactory' },
     ],
     creditsUsed: 50,
-    description: 'MIL-PRF-55681 Compliance evaluation — 5 claims',
+    description: '5 claims evaluated',
     isCascade: false,
     cascadeVia: null,
     upstreamSda: null,
     lastEval: null,
+    selectedEvidenceIds: [],
   }
+  powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [],
@@ -468,6 +487,8 @@ function buildBobData() {
   vregEv.evidence.filename = 'voltageregulator-datasheet.pdf'
   vregEv.evidence.localPath = '/voltageregulator-datasheet.pdf'
   vregEv.name = 'voltageregulator-datasheet.pdf'
+  vregEv.date = '2026-02-12'
+  vregEv.dateTime = '2026-02-12T16:05:00Z'
 
   const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
     { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
@@ -486,6 +507,12 @@ function buildBobData() {
     children: [vregEv, vregPep],
     x: 1400, y: 400,
   })
+
+  // Set static parse dates for Bob's disclosed copies
+  powerRegPep.date = '2026-02-20'
+  powerRegPep.dateTime = '2026-02-20T15:47:00Z'
+  vregPep.date = '2026-02-25'
+  vregPep.dateTime = '2026-02-25T17:12:00Z'
 
   // Backfill SDA evidence/field IDs on avionics (references created after avionics node)
   avionics.sdas[1].selectedEvidenceIds = [powerRegEv.id]
@@ -531,7 +558,9 @@ function buildAliceData() {
         party: 'MicroCo',
         partyDot: MICROCO_DOT,
         created: '2026-03-01',
+        createdTime: '14:15 UTC',
         expires: '2027-03-01',
+        expiresTime: '14:15 UTC',
         pins: [],
         assetName: 'Power Regulation Module',
         assetPin: makePin('power-reg'),
@@ -541,7 +570,9 @@ function buildAliceData() {
         party: 'MicroCo',
         partyDot: MICROCO_DOT,
         created: '2026-03-04',
+        createdTime: '16:42 UTC',
         expires: '2027-03-04',
+        expiresTime: '16:42 UTC',
         pins: [],
         assetName: 'Voltage Regulator IC',
         assetPin: makePin('vreg-ic'),
@@ -558,6 +589,8 @@ function buildAliceData() {
   powerRegEv.evidence.filename = 'powerregulationmodule-datasheet.pdf'
   powerRegEv.evidence.localPath = '/powerregulationmodule-datasheet.pdf'
   powerRegEv.name = 'powerregulationmodule-datasheet.pdf'
+  powerRegEv.date = '2026-02-10'
+  powerRegEv.dateTime = '2026-02-10T14:18:00Z'
 
   const powerRegPep = makePepNode('power-reg', powerRegEv.id, 'Electronics Component Profile', [
     { id: 'f-voltage', name: 'Operating voltage', category: 'electrical', type: 'range', value: '3.3V ±5%', confidence: 'high' },
@@ -602,6 +635,7 @@ function buildAliceData() {
     evaluator: EVAL_POWER_REG_BOB.reviewer,
     evaluatorParty: 'GovCo',
     date: EVAL_POWER_REG_BOB.reviewDate,
+    dateTime: '2026-03-09T14:32:00Z',
     status: 'completed',
     claims: [
       { requirementId: 'req-001', label: 'Power output stability', description: 'Rated output voltage and tolerance under load', type: 'extraction', aiValue: '3.3V ±0.5% under load', aiConfidence: 0.95, humanValue: '3.3V ±0.5% under load', status: 'satisfactory' },
@@ -611,18 +645,21 @@ function buildAliceData() {
       { requirementId: 'req-005', label: 'ITAR classification', description: 'Export control classification under ITAR', type: 'extraction', aiValue: 'Category XV, §121.1', aiConfidence: 0.88, humanValue: 'Category XV, §121.1', status: 'satisfactory' },
     ],
     creditsUsed: 50,
-    description: 'MIL-PRF-55681 Compliance evaluation — 5 claims',
+    description: '5 claims evaluated',
     isCascade: false,
     cascadeVia: null,
     upstreamSda: null,
     lastEval: null,
+    selectedEvidenceIds: [],
   }
+  powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
   const SDA_RADIANT_POWERREG = {
     type: 'selective',
     party: 'Radiant Network',
     partyDot: RADIANT_NETWORK_DOT,
     created: '2026-02-01',
+    createdTime: '17:08 UTC',
     expires: null,
     pins: [],
     assetName: 'Radiant Network',
@@ -635,6 +672,7 @@ function buildAliceData() {
     party: 'Radiant Network',
     partyDot: RADIANT_NETWORK_DOT,
     created: '2026-02-01',
+    createdTime: '17:22 UTC',
     expires: null,
     pins: [],
     assetName: 'Radiant Network',
@@ -665,6 +703,8 @@ function buildAliceData() {
   vregEv.evidence.filename = 'voltageregulator-datasheet.pdf'
   vregEv.evidence.localPath = '/voltageregulator-datasheet.pdf'
   vregEv.name = 'voltageregulator-datasheet.pdf'
+  vregEv.date = '2026-02-12'
+  vregEv.dateTime = '2026-02-12T16:05:00Z'
 
   const vregPep = makePepNode('vreg-ic', vregEv.id, 'Electronics Component Profile', [
     { id: 'f-vin', name: 'Input voltage range', category: 'electrical', type: 'range', value: '4.5V – 16V', confidence: 'high' },
@@ -704,6 +744,8 @@ function buildAliceData() {
   emiShieldEv.evidence.filename = 'emishielding-datasheet.pdf'
   emiShieldEv.evidence.localPath = '/emishielding-datasheet.pdf'
   emiShieldEv.name = 'emishielding-datasheet.pdf'
+  emiShieldEv.date = '2026-02-08'
+  emiShieldEv.dateTime = '2026-02-08T13:41:00Z'
 
   const emiShieldPep = makePepNode('emi-shield', emiShieldEv.id, 'Mechanical Assembly Profile', [
     { id: 'f-material', name: 'Shield material', category: 'mechanical', type: 'text', value: 'Nickel silver alloy', confidence: 'high' },
@@ -722,6 +764,7 @@ function buildAliceData() {
         party: 'Radiant Network',
         partyDot: RADIANT_NETWORK_DOT,
         created: '2026-02-10',
+        createdTime: '15:30 UTC',
         expires: null,
         pins: [],
         assetName: null,
@@ -741,6 +784,8 @@ function buildAliceData() {
   thermalPadEv.evidence.filename = 'thermalinterfacepad-datasheet.pdf'
   thermalPadEv.evidence.localPath = '/thermalinterfacepad-datasheet.pdf'
   thermalPadEv.name = 'thermalinterfacepad-datasheet.pdf'
+  thermalPadEv.date = '2026-02-22'
+  thermalPadEv.dateTime = '2026-02-22T18:33:00Z'
 
   const thermalPadPep = makePepNode('thermal-pad', thermalPadEv.id, 'Mechanical Assembly Profile', [
     { id: 'f-conductivity', name: 'Thermal conductivity', category: 'thermal', type: 'value', value: '6.0 W/mK', confidence: 'high' },
@@ -765,6 +810,8 @@ function buildAliceData() {
   connectorAssyEv.evidence.filename = 'connectorassembly-datasheet.pdf'
   connectorAssyEv.evidence.localPath = '/connectorassembly-datasheet.pdf'
   connectorAssyEv.name = 'connectorassembly-datasheet.pdf'
+  connectorAssyEv.date = '2026-02-28'
+  connectorAssyEv.dateTime = '2026-02-28T15:10:00Z'
 
   const connectorAssyPep = makePepNode('connector-assy', connectorAssyEv.id, 'Mechanical Assembly Profile', [
     { id: 'f-contacts', name: 'Contact count', category: 'mechanical', type: 'value', value: '24 positions', confidence: 'high' },
@@ -814,6 +861,18 @@ function buildAliceData() {
     description: 'Public asset directory — all published assets are discoverable here.',
     isNetworkNode: true,
   }
+
+  // Set static parse dates for Alice's assets
+  powerRegPep.date = '2026-02-20'
+  powerRegPep.dateTime = '2026-02-20T15:47:00Z'
+  vregPep.date = '2026-02-25'
+  vregPep.dateTime = '2026-02-25T17:12:00Z'
+  emiShieldPep.date = '2026-02-18'
+  emiShieldPep.dateTime = '2026-02-18T14:03:00Z'
+  thermalPadPep.date = '2026-03-01'
+  thermalPadPep.dateTime = '2026-03-01T19:28:00Z'
+  connectorAssyPep.date = '2026-03-05'
+  connectorAssyPep.dateTime = '2026-03-05T16:55:00Z'
 
   const nodes = [microco, avionics, powerReg, vregIc, pcbSub, emiShield, thermalPad, connectorAssy, radiantNetwork]
 
@@ -898,16 +957,18 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
     evaluator: evaluatorUser,
     evaluatorParty,
     date: new Date().toISOString().slice(0, 10),
+    dateTime: new Date().toISOString(),
     status: 'completed',
     claims,
     creditsUsed: claims.length * 10,
-    description: `${requirementSet.name} evaluation — ${claims.length} claims`,
+    description: `${claims.length} claim${claims.length !== 1 ? 's' : ''} evaluated`,
     isCascade: false,
     cascadeVia: null,
     upstreamSda: null,
     lastEval: null,
     previousEvalId,
     evalVersion: previousEvalId ? 2 : 1,
+    selectedEvidenceIds: [],
   }
 }
 

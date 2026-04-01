@@ -445,10 +445,17 @@ export function StepFieldSelection({ pepFields, selectedFields, setSelectedField
               }}>
                 {allInTemplate ? '✓' : someInTemplate ? '–' : ''}
               </span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                {templateName}
-              </span>
-              <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                  {templateName} Parse
+                </span>
+                {fields[0]?.parseDate && (
+                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                    Parsed {fields[0].parseDate}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>
                 {templateKeys.filter(k => selectedFields.has(k)).length}/{templateKeys.length}
               </span>
             </div>
@@ -727,7 +734,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
     return assetNode.children
       .filter(c => c.isParse || c.category === 'parse')
       .flatMap(pn => (pn.parsedFields || []).map(f => ({
-        ...f, templateName: pn.name, parseNodeId: pn.id,
+        ...f, templateName: pn.name, parseNodeId: pn.id, parseDate: pn.date || pn.created || null,
         fieldKey: `${pn.id}::${f.id}`,
       })))
   }, [assetNode])

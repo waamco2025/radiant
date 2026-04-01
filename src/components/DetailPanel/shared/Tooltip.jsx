@@ -26,7 +26,7 @@ export function TT({ text, anchorRef, w }) {
       fontSize: 11,
       fontFamily: 'var(--font-mono)',
       color: 'var(--text-secondary)',
-      zIndex: 999999,
+      zIndex: 9999,
       boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
       pointerEvents: 'none',
       lineHeight: 1.6,

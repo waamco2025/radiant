@@ -11,7 +11,7 @@ const PROCESSING_MESSAGES = [
   'Preparing human review summary…',
 ]
 
-function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId, credits, disclosureType }) {
+function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId, credits, disclosureType, activeEvalsByLineage, activeParty }) {
   // Deduplicate by lineageId — show latest version per lineage
   const deduped = useMemo(() => {
     const map = new Map()
@@ -52,12 +52,21 @@ function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {deduped.map(rs => {
             const active = selectedSetId === rs.id
+            const lineageKey = rs.lineageId || rs.id
+            const existingEval = activeEvalsByLineage?.get(lineageKey)
+            const hasActiveEval = !!existingEval
+            const existingVersion = existingEval?.requirementSetVersion || existingEval?.evalVersion || 1
+            const isNewerVersion = hasActiveEval && (rs.version || 1) > existingVersion
+            const isSameVersion = hasActiveEval && (rs.version || 1) <= existingVersion
+            const isBlocked = isSameVersion && !active
             return (
               <div
                 key={rs.id}
-                onClick={() => setSelectedSetId(rs.id)}
+                onClick={() => !isBlocked && setSelectedSetId(rs.id)}
                 style={{
-                  padding: '14px 16px', borderRadius: 8, cursor: 'pointer',
+                  padding: '14px 16px', borderRadius: 8,
+                  cursor: isBlocked ? 'default' : 'pointer',
+                  opacity: isBlocked ? 0.45 : 1,
                   border: `1.5px solid ${active ? 'var(--accent-indigo)' : 'var(--border)'}`,
                   background: active ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
                   transition: 'all 150ms',
@@ -89,6 +98,26 @@ function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId
                 <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 6, marginLeft: 16 }}>
                   {rs.requirements.length} requirements · {rs.requirements.filter(r => r.type === 'extraction').length} extraction · {rs.requirements.filter(r => r.type === 'inference').length} inference
                 </div>
+                {isSameVersion && (
+                  <div style={{
+                    marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
+                    background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', lineHeight: 1.6,
+                  }}>
+                    Active evaluation exists on this asset — amend the existing evaluation instead.
+                  </div>
+                )}
+                {isNewerVersion && (
+                  <div style={{
+                    marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
+                    background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)', lineHeight: 1.6,
+                  }}>
+                    Will supersede v{existingVersion} evaluation on this asset.
+                  </div>
+                )}
               </div>
             )
           })}
@@ -459,7 +488,7 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
         }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-amber)', marginBottom: 8 }}>No evidence to evaluate</div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            Add evidence files to this asset and parse them before running an evaluation.
+            Additional evidence and parsing is required to evaluate this asset. Evidence provides the data fields that evaluations run against.
           </div>
         </div>
       )}
@@ -472,7 +501,7 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
           border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
           fontSize: 11, color: 'var(--accent-amber)', lineHeight: 1.6,
         }}>
-          All evidence is unparsed. Parse at least one evidence file before evaluation.
+          All evidence is unparsed. Parsed data provides the fields that evaluations run against.
         </div>
       )}
     </div>
@@ -500,6 +529,27 @@ export default function RunEvaluationModal({
   const reviewStep = processingStep + 1
   const confirmStep = reviewStep + 1
   const totalStepCount = confirmStep + 1
+
+  // Scoped to the current evaluator — each party has their own lineage chain
+  const activeEvalsByLineage = useMemo(() => {
+    if (!assetNode?.children) return new Map()
+    const map = new Map()
+    const allChildren = assetNode.children || []
+    allChildren
+      .filter(c =>
+        (c.isEvaluation || c.category === 'evaluation') &&
+        c.status !== 'superseded' &&
+        c.evaluatorParty === activeParty
+      )
+      .forEach(ev => {
+        const lineage = ev.requirementSetLineageId || ev.requirementSetId
+        const existing = map.get(lineage)
+        if (!existing || (ev.evalVersion || 1) > (existing.evalVersion || 1)) {
+          map.set(lineage, ev)
+        }
+      })
+    return map
+  }, [assetNode, activeParty])
 
   const [step, setStep] = useState(showEvidenceStep ? 0 : 0)
   const [selectedSetId, setSelectedSetId] = useState(null)
@@ -897,6 +947,8 @@ export default function RunEvaluationModal({
                 setSelectedSetId={setSelectedSetId}
                 credits={credits}
                 disclosureType={disclosureType}
+                activeEvalsByLineage={activeEvalsByLineage}
+                activeParty={activeParty}
               />
             </div>
           )}

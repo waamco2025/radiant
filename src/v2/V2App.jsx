@@ -248,7 +248,7 @@ export default function V2App() {
       // Step B: Roll up to parent from eval child nodes
       let ok = 0, warn = 0, bad = 0, totalClaims = 0
       if (children) {
-        const evalChildren = children.filter(c => c.isEvaluation || c.category === 'evaluation')
+        const evalChildren = children.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded')
         for (const ev of evalChildren) {
           const h = ev.health || { ok: 0, warn: 0, bad: 0 }
           ok += h.ok
@@ -1181,8 +1181,9 @@ export default function V2App() {
                     const isAcceptance = req.type === 'acceptance'
                     const isDecline = req.type === 'decline'
                     const isRevision = req.type === 'revision'
-                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision ? 'var(--accent-indigo)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : 'REQUEST'
+                    const isEvaluation = req.type === 'evaluation'
+                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation ? 'var(--accent-indigo)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -1236,6 +1237,27 @@ export default function V2App() {
                               }
                             }
                           })
+                        } else if (req.type === 'evaluation') {
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const targetAsset = Object.values(nodeMap).find(n => n.id === req.assetId)
+                          if (targetAsset) {
+                            const alreadyInLayer = layerInfo.depth > 0 && layerInfo.anchorId === req.assetId
+                            if (alreadyInLayer) {
+                              setSel(req.evalId)
+                              setForcePanelTab('evaluations')
+                            } else {
+                              ensureParentLayer(() => {
+                                const freshTarget = nodeMapRef.current[req.assetId]
+                                if (freshTarget) {
+                                  canvasRef.current?.dive(freshTarget)
+                                  setTimeout(() => { setSel(req.evalId); setForcePanelTab('evaluations') }, 600)
+                                }
+                              })
+                            }
+                          }
                         } else {
                           ensureParentLayer(() => {
                             const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -1285,15 +1307,17 @@ export default function V2App() {
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 30 }}>
-                        {isRevision
-                          ? `Revised ${req.disclosureType} disclosure to ${req.asset?.name}`
-                          : isRevocation
-                            ? `Revoked ${req.disclosureType} disclosure to ${req.asset?.name}`
-                            : isAcceptance
-                              ? `Granted ${req.disclosureType} disclosure to ${req.asset?.name}`
-                              : isDecline
-                                ? `Declined disclosure to ${req.asset?.name}`
-                                : req.asset.name
+                        {isEvaluation
+                          ? `${req.isAmend ? 'Amended' : 'Ran'} ${req.evalName} evaluation on ${req.asset?.name}`
+                          : isRevision
+                            ? `Revised ${req.disclosureType} disclosure to ${req.asset?.name}`
+                            : isRevocation
+                              ? `Revoked ${req.disclosureType} disclosure to ${req.asset?.name}`
+                              : isAcceptance
+                                ? `Granted ${req.disclosureType} disclosure to ${req.asset?.name}`
+                                : isDecline
+                                  ? `Declined disclosure to ${req.asset?.name}`
+                                  : req.asset?.name || ''
                         }
                       </div>
                     </div>
@@ -2087,6 +2111,21 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.5.0', date: '2026-04-01', label: 'Round 10', items: [
+                  'Evaluation lineage gating — blocks duplicate evals per requirement set, auto-supersedes on version upgrade',
+                  'Evidence evaluated section on eval node detail panel with resolved filenames',
+                  'UTC timestamps on all node types — evidence, parse, evaluation, and disclosure cards',
+                  'Evaluator org name replaces person name throughout eval panels',
+                  'Eval description moved to PanelShell header with inline timestamp',
+                  'Parse/evidence summaries now include creation date and UTC time',
+                  'Disclosure panels show UTC times on Created/Expires rows',
+                  'Streamlined disclosure cards — removed redundant Evidence, Fields, and PINs rows',
+                  'Self-contained EvalClaimsSection with its own expand-to-modal',
+                  'Backdrop portal fix — modals now render above canvas tooltips',
+                  'Ownership guard on Amend Evaluation button (evaluatorParty check)',
+                  'Boot screen login with CAC credentials and lightning animation',
+                  'Cross-role evaluation sync with notification badges',
+                ]},
                 { version: '0.4.0', date: '2026-03-31', label: 'Round 9', items: [
                   'Multi-evidence evaluation — run evals from asset level with evidence selection',
                   'Evaluation amendment — amend existing evals with new evidence, preserving SAT claims',
@@ -2957,6 +2996,9 @@ export default function V2App() {
             const evUniqueId = `ev-${parentId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
             const evNode = makeEvidenceNode(parentId, evidenceMeta, activeRole.party, [], evUniqueId)
             evNode.name = name || evNode.name
+            if (evidenceMeta.filename) {
+              evNode.evidence.localPath = `/${evidenceMeta.filename}`
+            }
 
             updateRoleState(roleId, prev => {
               const existingChildren = prev.addedChildren?.[parentId] || []
@@ -3077,6 +3119,28 @@ export default function V2App() {
           onComplete={({ requirementSet, claims, creditCost, selectedEvidenceIds: evalEvidenceIds }) => {
             const assetNode = evalContext.assetNode
             const previousEvalId = evalContext.amendingEval?.id || null
+
+            // Auto-supersede: if running a newer version of a lineage that already has an active eval
+            let lineageSupersededId = null
+            if (!previousEvalId) {
+              const lineageKey = requirementSet.lineageId || requirementSet.id
+              const currentRoleState = perRoleState[roleId] || {}
+              const allChildren = [
+                ...(assetNode.children || []),
+                ...(currentRoleState.addedChildren?.[assetNode.id] || []),
+              ]
+              const existingActiveEval = allChildren.find(c =>
+                (c.isEvaluation || c.category === 'evaluation') &&
+                c.status !== 'superseded' &&
+                c.evaluatorParty === activeRole.party &&
+                (c.requirementSetLineageId || c.requirementSetId) === lineageKey
+              )
+              if (existingActiveEval && (requirementSet.version || 1) > (existingActiveEval.requirementSetVersion || 1)) {
+                lineageSupersededId = existingActiveEval.id
+              }
+            }
+
+            const supersededId = previousEvalId || lineageSupersededId
             const evalNode = makeEvalNode(
               assetNode.id,
               requirementSet,
@@ -3084,20 +3148,31 @@ export default function V2App() {
               activeRole.party,
               activeRole.user || activeRole.party,
               evalContext.disclosureType,
-              previousEvalId
+              supersededId
             )
-            if (previousEvalId && evalContext.amendingEval) {
-              evalNode.evalVersion = (evalContext.amendingEval.version || 1) + 1
+            evalNode.selectedEvidenceIds = evalEvidenceIds || []
+            if (supersededId) {
+              if (evalContext.amendingEval) {
+                evalNode.evalVersion = (evalContext.amendingEval.version || 1) + 1
+              } else if (lineageSupersededId) {
+                const currentRoleState = perRoleState[roleId] || {}
+                const allChildren = [
+                  ...(assetNode.children || []),
+                  ...(currentRoleState.addedChildren?.[assetNode.id] || []),
+                ]
+                const oldEval = allChildren.find(c => c.id === lineageSupersededId)
+                evalNode.evalVersion = (oldEval?.evalVersion || 1) + 1
+              }
             }
 
             // Add eval node as child of the asset
             updateRoleState(roleId, prev => {
               const existingChildren = prev.addedChildren?.[assetNode.id] || []
-              // If amending, mark the old eval as superseded
+              // If superseding (amend or lineage upgrade), mark the old eval as superseded
               let updatedChildren = existingChildren
-              if (previousEvalId) {
+              if (supersededId) {
                 updatedChildren = existingChildren.map(c =>
-                  c.id === previousEvalId ? { ...c, status: 'superseded' } : c
+                  c.id === supersededId ? { ...c, status: 'superseded' } : c
                 )
               }
               return {
@@ -3110,12 +3185,69 @@ export default function V2App() {
             })
 
             // Also supersede static eval children on the node itself
-            if (previousEvalId) {
+            if (supersededId) {
               const n = nodeMapRef.current[assetNode.id]
               if (n) {
-                const child = n.children?.find(c => c.id === previousEvalId)
+                const child = n.children?.find(c => c.id === supersededId)
                 if (child) child.status = 'superseded'
               }
+            }
+
+            // Cross-role sync: if this asset belongs to the other party, add the eval to their view
+            const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+            if (otherRoleId && assetNode.owner !== activeRole.party) {
+              updateRoleState(otherRoleId, prev => {
+                const newState = { ...prev }
+                const staticRoleData = getDataForRole(otherRoleId)
+                const isStaticNode = staticRoleData?.nodes?.some(n => n.id === assetNode.id)
+                const isDynamicNode = prev.addedNodes.some(n => n.id === assetNode.id)
+
+                if (isStaticNode) {
+                  const existingAdded = prev.addedChildren?.[assetNode.id] || []
+                  const existingAddedIds = new Set(existingAdded.map(c => c.id))
+                  if (!existingAddedIds.has(evalNode.id)) {
+                    let updatedAdded = [...existingAdded]
+                    if (supersededId) {
+                      updatedAdded = updatedAdded.map(c => c.id === supersededId ? { ...c, status: 'superseded' } : c)
+                    }
+                    updatedAdded.push(evalNode)
+                    newState.addedChildren = { ...(prev.addedChildren || {}), [assetNode.id]: updatedAdded }
+                  }
+                } else if (isDynamicNode) {
+                  const nodeIdx = prev.addedNodes.findIndex(n => n.id === assetNode.id)
+                  if (nodeIdx >= 0) {
+                    const existingNode = prev.addedNodes[nodeIdx]
+                    let children = [...(existingNode.children || [])]
+                    if (supersededId) { children = children.map(c => c.id === supersededId ? { ...c, status: 'superseded' } : c) }
+                    children.push(evalNode)
+                    const updatedNodes = [...prev.addedNodes]
+                    updatedNodes[nodeIdx] = { ...existingNode, children, childCount: children.length, hasStack: true }
+                    newState.addedNodes = updatedNodes
+                  }
+                }
+
+                if (supersededId && isStaticNode) {
+                  const aliceNode = nodeMapRef.current[assetNode.id]
+                  if (aliceNode) {
+                    const child = aliceNode.children?.find(c => c.id === supersededId)
+                    if (child) child.status = 'superseded'
+                  }
+                }
+
+                newState.addedRequests = [...(prev.addedRequests || []), {
+                  id: `eval-notify-${evalNode.id}`,
+                  type: 'evaluation',
+                  from: { name: activeRole.party, dot: activeRole.partyDot },
+                  asset: { name: assetNode.name, pin: assetNode.pin || '' },
+                  evalName: evalNode.name,
+                  evalId: evalNode.id,
+                  assetId: assetNode.id,
+                  date: new Date().toISOString().slice(0, 10),
+                  isAmend: !!supersededId,
+                }]
+
+                return newState
+              })
             }
 
             // Deduct credits
