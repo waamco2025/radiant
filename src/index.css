@@ -397,3 +397,17 @@ body {
   from { opacity: 0; transform: translateX(-50%) translateY(6px); }
   to   { opacity: 0.9; transform: translateX(-50%) translateY(0); }
 }
+
+/* Dark mode date input styling */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+input[type="date"] {
+  color-scheme: dark;
+}
+[data-theme="light"] input[type="date"] {
+  color-scheme: light;
+}

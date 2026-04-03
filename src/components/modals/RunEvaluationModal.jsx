@@ -11,7 +11,7 @@ const PROCESSING_MESSAGES = [
   'Preparing human review summary…',
 ]
 
-function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId, credits, disclosureType, activeEvalsByLineage, activeParty }) {
+function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId, credits, disclosureType, activeEvalsByLineage, activeParty, publishedSets }) {
   // Deduplicate by lineageId — show latest version per lineage
   const deduped = useMemo(() => {
     const map = new Map()
@@ -25,7 +25,20 @@ function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId
     return [...map.values()]
   }, [requirementSets])
 
-  const selectedSet = requirementSets.find(s => s.id === selectedSetId)
+  const dedupedPublished = useMemo(() => {
+    if (!publishedSets || publishedSets.length === 0) return []
+    const map = new Map()
+    publishedSets.forEach(rs => {
+      const key = rs.lineageId || rs.id
+      const existing = map.get(key)
+      if (!existing || (rs.version || 1) > (existing.version || 1)) {
+        map.set(key, rs)
+      }
+    })
+    return [...map.values()]
+  }, [publishedSets])
+
+  const selectedSet = requirementSets.find(s => s.id === selectedSetId) || publishedSets?.find(s => s.id === selectedSetId)
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
   const canAfford = credits >= cost
 
@@ -47,82 +60,125 @@ function StepSetup({ assetNode, requirementSets, selectedSetId, setSelectedSetId
       </div>
 
       {/* Requirement set picker */}
-      <div>
-        <FieldLabel label="Select requirement set" required />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {deduped.map(rs => {
-            const active = selectedSetId === rs.id
-            const lineageKey = rs.lineageId || rs.id
-            const existingEval = activeEvalsByLineage?.get(lineageKey)
-            const hasActiveEval = !!existingEval
-            const existingVersion = existingEval?.requirementSetVersion || existingEval?.evalVersion || 1
-            const isNewerVersion = hasActiveEval && (rs.version || 1) > existingVersion
-            const isSameVersion = hasActiveEval && (rs.version || 1) <= existingVersion
-            const isBlocked = isSameVersion && !active
-            return (
-              <div
-                key={rs.id}
-                onClick={() => !isBlocked && setSelectedSetId(rs.id)}
-                style={{
-                  padding: '14px 16px', borderRadius: 8,
-                  cursor: isBlocked ? 'default' : 'pointer',
-                  opacity: isBlocked ? 0.45 : 1,
-                  border: `1.5px solid ${active ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                  background: active ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
-                  transition: 'all 150ms',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <div style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: active ? 'var(--accent-indigo)' : 'var(--text-dim)',
-                    transition: 'background 150ms',
-                  }} />
+      {(() => {
+        const renderSetCard = (rs) => {
+          const active = selectedSetId === rs.id
+          const lineageKey = rs.lineageId || rs.id
+          const existingEval = activeEvalsByLineage?.get(lineageKey)
+          const hasActiveEval = !!existingEval
+          const existingVersion = existingEval?.requirementSetVersion || existingEval?.evalVersion || 1
+          const isNewerVersion = hasActiveEval && (rs.version || 1) > existingVersion
+          const isSameVersion = hasActiveEval && (rs.version || 1) <= existingVersion
+          const isBlocked = isSameVersion && !active
+          const isPublished = !!rs._published
+          return (
+            <div
+              key={rs.id}
+              onClick={() => !isBlocked && setSelectedSetId(rs.id)}
+              style={{
+                padding: '14px 16px', borderRadius: 8,
+                cursor: isBlocked ? 'default' : 'pointer',
+                opacity: isBlocked ? 0.45 : 1,
+                border: `1.5px solid ${active ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                background: active ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
+                transition: 'all 150ms',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: active ? 'var(--accent-indigo)' : 'var(--text-dim)',
+                  transition: 'background 150ms',
+                }} />
+                <span style={{
+                  fontSize: 13, fontWeight: 600,
+                  color: active ? 'var(--accent-indigo)' : 'var(--text-secondary)',
+                  transition: 'color 150ms',
+                }}>{rs.name}</span>
+                {rs.version && (
                   <span style={{
-                    fontSize: 13, fontWeight: 600,
-                    color: active ? 'var(--accent-indigo)' : 'var(--text-secondary)',
-                    transition: 'color 150ms',
-                  }}>{rs.name}</span>
-                  {rs.version && (
-                    <span style={{
-                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                      padding: '1px 5px', borderRadius: 3,
-                      background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
-                      color: 'var(--accent-indigo)',
-                    }}>v{rs.version}</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, marginLeft: 16 }}>
-                  {rs.description}
-                </div>
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 6, marginLeft: 16 }}>
-                  {rs.requirements.length} requirements · {rs.requirements.filter(r => r.type === 'extraction').length} extraction · {rs.requirements.filter(r => r.type === 'inference').length} inference
-                </div>
-                {isSameVersion && (
-                  <div style={{
-                    marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
-                    background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
-                    border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
-                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', lineHeight: 1.6,
-                  }}>
-                    Active evaluation exists on this asset — amend the existing evaluation instead.
-                  </div>
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '1px 5px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                    color: 'var(--accent-indigo)',
+                  }}>v{rs.version}</span>
                 )}
-                {isNewerVersion && (
-                  <div style={{
-                    marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
-                    background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
-                    border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
-                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)', lineHeight: 1.6,
+                {isPublished && (
+                  <span style={{
+                    fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '1px 5px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-blue) 10%, transparent)',
+                    color: 'var(--accent-blue)',
+                    display: 'flex', alignItems: 'center', gap: 3,
                   }}>
-                    Will supersede v{existingVersion} evaluation on this asset.
-                  </div>
+                    <svg width={9} height={9} viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+                      <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="1" />
+                      <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="1" />
+                    </svg>
+                    {rs._publishedBy}
+                  </span>
                 )}
               </div>
-            )
-          })}
-        </div>
-      </div>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, marginLeft: 16 }}>
+                {rs.description}
+              </div>
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 6, marginLeft: 16 }}>
+                {rs.requirements.length} requirements · {rs.requirements.filter(r => r.type === 'extraction').length} extraction · {rs.requirements.filter(r => r.type === 'inference').length} inference
+              </div>
+              {isSameVersion && (
+                <div style={{
+                  marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
+                  background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+                  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', lineHeight: 1.6,
+                }}>
+                  Active evaluation exists on this asset — amend the existing evaluation instead.
+                </div>
+              )}
+              {isNewerVersion && (
+                <div style={{
+                  marginTop: 8, marginLeft: 16, padding: '6px 10px', borderRadius: 5,
+                  background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
+                  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)', lineHeight: 1.6,
+                }}>
+                  Will supersede v{existingVersion} evaluation on this asset.
+                </div>
+              )}
+            </div>
+          )
+        }
+        return (
+          <div>
+            <FieldLabel label="Select requirement set" required />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {deduped.map(rs => renderSetCard(rs))}
+            </div>
+            {dedupedPublished.length > 0 && (
+              <>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  marginTop: 20, marginBottom: 10,
+                }}>
+                  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                    <circle cx="8" cy="8" r="6" stroke="var(--accent-blue)" strokeWidth="1.2" />
+                    <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="var(--accent-blue)" strokeWidth="0.9" />
+                    <line x1="2" y1="8" x2="14" y2="8" stroke="var(--accent-blue)" strokeWidth="0.9" />
+                  </svg>
+                  <span style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: 'var(--accent-blue)', letterSpacing: '0.06em',
+                  }}>PUBLISHED STANDARDS</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {dedupedPublished.map(rs => renderSetCard(rs))}
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Cost estimate */}
       {selectedSet && (
@@ -177,7 +233,7 @@ function StepProcessing({ messageIndex }) {
   )
 }
 
-function ClaimCard({ claim, onUpdateClaim }) {
+function ClaimCard({ claim, onUpdateClaim, disclosureType }) {
   const isExtraction = claim.type === 'extraction'
 
   return (
@@ -206,11 +262,13 @@ function ClaimCard({ claim, onUpdateClaim }) {
           }}>PRESERVED</span>
         )}
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', flex: 1 }}>{claim.label}</span>
-        <span style={{
-          fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-        }}>
-          {Math.round(claim.aiConfidence * 100)}% conf.
-        </span>
+        {disclosureType !== 'proofonly' && (
+          <span style={{
+            fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+          }}>
+            {Math.round(claim.aiConfidence * 100)}% conf.
+          </span>
+        )}
       </div>
 
       {/* Description */}
@@ -509,7 +567,7 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
 }
 
 export default function RunEvaluationModal({
-  assetNode, evidenceNode, disclosureType, requirementSets, activeParty, activeUser,
+  assetNode, evidenceNode, disclosureType, requirementSets, publishedSets, activeParty, activeUser,
   credits, onClose, onComplete, parsedFields: passedParsedFields, _noBackdrop, amendingEval,
 }) {
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
@@ -558,7 +616,7 @@ export default function RunEvaluationModal({
   const [expandedEvidence, setExpandedEvidence] = useState(new Set())
   const [evExpandInit, setEvExpandInit] = useState(false)
 
-  const selectedSet = requirementSets.find(s => s.id === selectedSetId)
+  const selectedSet = requirementSets.find(s => s.id === selectedSetId) || publishedSets?.find(s => s.id === selectedSetId)
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
   const canAfford = credits >= cost
 
@@ -661,6 +719,13 @@ export default function RunEvaluationModal({
             return claim
           })
         }
+        // Pre-select satisfactory for high-confidence claims
+        results = results.map(claim => {
+          if (!claim._carriedForward && claim.aiConfidence >= 0.90 && claim.status === null) {
+            return { ...claim, status: 'satisfactory', humanValue: claim.humanValue ?? claim.aiValue }
+          }
+          return claim
+        })
         setClaims(results)
       }
       setStep(reviewStep)
@@ -946,8 +1011,18 @@ export default function RunEvaluationModal({
                   color: 'var(--accent-indigo)', letterSpacing: '0.06em',
                 }}>EVALUATION</span>
               </div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
-                {selectedSet?.name || 'Evaluation'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {selectedSet?.name || 'Evaluation'}
+                </span>
+                {selectedSet?.version && (
+                  <span style={{
+                    fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '1px 4px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                    color: 'var(--accent-indigo)',
+                  }}>v{selectedSet.version}</span>
+                )}
               </div>
             </div>
 
@@ -1000,9 +1075,11 @@ export default function RunEvaluationModal({
                           }}>PRESERVED</span>
                         )}
                         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{claim.label}</span>
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-                          {Math.round(claim.aiConfidence * 100)}% conf.
-                        </span>
+                        {disclosureType !== 'proofonly' && (
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                            {Math.round(claim.aiConfidence * 100)}% conf.
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: 12, opacity: 0.85 }}>
                         {claim.description}
@@ -1104,6 +1181,7 @@ export default function RunEvaluationModal({
               <StepSetup
                 assetNode={assetNode}
                 requirementSets={requirementSets}
+                publishedSets={publishedSets}
                 selectedSetId={selectedSetId}
                 setSelectedSetId={setSelectedSetId}
                 credits={credits}
@@ -1117,7 +1195,7 @@ export default function RunEvaluationModal({
           {step === reviewStep && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {claims.map(claim => (
-                <ClaimCard key={claim.requirementId} claim={claim} onUpdateClaim={(updated) => {
+                <ClaimCard key={claim.requirementId} claim={claim} disclosureType={disclosureType} onUpdateClaim={(updated) => {
                   setClaims(prev => prev.map(c => c.requirementId === updated.requirementId ? updated : c))
                 }} />
               ))}

@@ -685,6 +685,18 @@ export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initial
     onClose()
   }, [mode, onClose])
 
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        handleModalClose()
+      }
+    }
+    window.addEventListener('keydown', handleEsc, true)
+    return () => window.removeEventListener('keydown', handleEsc, true)
+  }, [handleModalClose])
+
   const handleSelect = (id) => {
     setSelectedId(id)
     setMode('view')

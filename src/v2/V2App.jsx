@@ -529,6 +529,7 @@ export default function V2App() {
   const [showLibrary, setShowLibrary] = useState(false)
   const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
   const [showPEPLibrary, setShowPEPLibrary] = useState(false)
+  const [publishedRequirementSets, setPublishedRequirementSets] = useState([])
   useEffect(() => {
     const handler = () => setShowPEPLibrary(true)
     document.addEventListener('open-pep-library', handler)
@@ -652,6 +653,37 @@ export default function V2App() {
       return { ...prev, requirementSets: [...existing, reqSet] }
     })
   }, [roleId, updateRoleState])
+
+  const handlePublishRequirementSet = useCallback((reqSet) => {
+    setPublishedRequirementSets(prev => {
+      if (prev.some(s => s.id === reqSet.id)) return prev
+      return [...prev, {
+        ...reqSet,
+        _published: true,
+        _publishedBy: activeRole.party,
+        _publishedByRoleId: roleId,
+        _publishedDate: new Date().toISOString().slice(0, 10),
+      }]
+    })
+    const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
+    if (otherRoleId) {
+      updateRoleState(otherRoleId, prev => ({
+        ...prev,
+        addedRequests: [...(prev.addedRequests || []), {
+          id: `pub-reqset-${reqSet.id}-${Date.now().toString(36)}`,
+          type: 'published_standard',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          standardName: reqSet.name,
+          standardVersion: reqSet.version || 1,
+          date: new Date().toISOString().slice(0, 10),
+        }],
+      }))
+    }
+  }, [activeRole, roleId, updateRoleState])
+
+  const visiblePublishedSets = useMemo(() => {
+    return publishedRequirementSets.filter(s => s._publishedByRoleId !== roleId)
+  }, [publishedRequirementSets, roleId])
 
   // PEP templates — per-role, defaults from demo data
   const pepTemplates = useMemo(() => {
@@ -1219,8 +1251,9 @@ export default function V2App() {
                     const isDecline = req.type === 'decline'
                     const isRevision = req.type === 'revision'
                     const isEvaluation = req.type === 'evaluation'
-                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation ? 'var(--accent-indigo)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : 'REQUEST'
+                    const isPublishedStandard = req.type === 'published_standard'
+                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -1295,6 +1328,13 @@ export default function V2App() {
                               })
                             }
                           }
+                        } else if (req.type === 'published_standard') {
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          setLibraryInitialSetId(null)
+                          setShowLibrary(true)
                         } else {
                           ensureParentLayer(() => {
                             const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -1354,7 +1394,9 @@ export default function V2App() {
                                 ? `Granted ${req.disclosureType} disclosure to ${req.asset?.name}`
                                 : isDecline
                                   ? `Declined disclosure to ${req.asset?.name}`
-                                  : req.asset?.name || ''
+                                  : isPublishedStandard
+                                    ? `Published ${req.standardName} v${req.standardVersion} to the Radiant Network`
+                                    : req.asset?.name || ''
                         }
                       </div>
                     </div>
@@ -2148,6 +2190,23 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.7.0', date: '2026-04-02', label: 'Round 11', items: [
+                  'Requirements set publishing — publish standards to Radiant Network with confirmation flow',
+                  'Published standards visible to connected parties in Requirements Library + Run Evaluation',
+                  'Two-section eval picker: Your Standards + Published Standards with globe badges',
+                  'Published standards panel anchored to bottom of library left panel with expand/collapse',
+                  'Red border on cards with unsatisfactory claims (displayHealth.bad > 0)',
+                  'NEW badge on recently created nodes in detail panel header',
+                  'Pre-select satisfactory for high-confidence (>=90%) claims in eval review',
+                  'Confidence percentage hidden for proof-only disclosure evaluations',
+                  'Amend Evaluation hidden for proof-only evals',
+                  'Version badge on eval review right panel header',
+                  'Dimmed card opacity raised from 0.18 to 0.35 for legibility',
+                  'Edge draw animation starts 50ms after creation (overlaps with pan)',
+                  'Boot screen lightning: slower bolts, 500ms fade-in, 800ms hold, gentler rhythm',
+                  'Dark mode date input styling (inverted calendar icon + color-scheme)',
+                  'Escape key handling in Requirements + PEP Library modals (capture phase)',
+                ]},
                 { version: '0.6.0', date: '2026-04-01', label: 'Round 10', items: [
                   'PEP Template Library — two-panel modal with search, versioning, create/edit, CSV import',
                   'Per-org PEP templates with lineage versioning (parallels Requirements Library)',
@@ -3150,6 +3209,8 @@ export default function V2App() {
           requirementSets={requirementSets}
           onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
           onSave={handleSaveRequirementSet}
+          onPublish={handlePublishRequirementSet}
+          publishedSets={publishedRequirementSets}
           initialSelectedId={libraryInitialSetId}
           _noBackdrop
         />
@@ -3169,6 +3230,7 @@ export default function V2App() {
           disclosureType={evalContext.disclosureType}
           parsedFields={evalContext.parsedFields}
           requirementSets={requirementSets}
+          publishedSets={visiblePublishedSets}
           activeParty={activeRole.party}
           activeUser={activeRole.user || activeRole.party}
           credits={credits}

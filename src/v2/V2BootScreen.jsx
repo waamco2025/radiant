@@ -138,9 +138,9 @@ export default function V2BootScreen({ onComplete, skipLogin }) {
     // Lightning system
     const activeBolts = []
     let lastBoltTime = 0
-    const BOLT_INTERVAL = 900
-    const BOLT_SPEED = 6
-    const BOLT_FADE = 1600
+    const BOLT_INTERVAL = 1200
+    const BOLT_SPEED = 4
+    const BOLT_FADE = 2200
 
     function spawnBolt(now) {
       const originRow = Math.floor(Math.random() * Math.max(1, maxRow * 0.3))
@@ -199,17 +199,26 @@ export default function V2BootScreen({ onComplete, skipLogin }) {
         activeBolts.forEach(bolt => {
           bolt.revealedCount = Math.min(bolt.path.length, Math.floor((now - bolt.spawnTime) / 1000 * BOLT_SPEED))
         })
-        // Fade dots
+        // Reset fading dots
         dots.forEach(d => {
-          if (d.brightness > 0 && now - d.fadeStart > 0) {
+          if (d.fadeStart && now > d.fadeStart) {
             d.brightness = Math.max(0, 1 - (now - d.fadeStart) / BOLT_FADE)
           }
         })
-        // Light revealed dots
+
+        // Light up revealed dots with fade-in
         activeBolts.forEach(bolt => {
           for (let i = 0; i < bolt.revealedCount; i++) {
-            const dot = dots[bolt.path[i]]
-            if (dot) { dot.brightness = 1; dot.fadeStart = now + 200 }
+            const dotIdx = bolt.path[i]
+            const dot = dots[dotIdx]
+            if (!dot) continue
+            const dotRevealTime = bolt.spawnTime + (i / BOLT_SPEED) * 1000
+            const age = now - dotRevealTime
+            const fadeIn = Math.min(1, age / 500)
+            if (fadeIn > dot.brightness) {
+              dot.brightness = fadeIn
+              dot.fadeStart = dotRevealTime + 800
+            }
           }
         })
         // Cleanup finished bolts

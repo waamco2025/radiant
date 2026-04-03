@@ -64,7 +64,7 @@ function VersionItem({ v, isSelected, onSelect }) {
 }
 
 /* ─── Left Panel: Set List (grouped by lineage, nested cards) ─── */
-function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineages, toggleLineage }) {
+function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineages, toggleLineage, publishedSets, pubExpanded, setPubExpanded }) {
   // Group by lineage, newest version first
   const lineageGroups = useMemo(() => {
     const map = new Map()
@@ -179,6 +179,13 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   <HighlightMatch text={latest.name} query={search} />
                 </div>
+                {publishedSets?.some(s => (s.lineageId || s.id) === g.lineageId) && (
+                  <svg width={11} height={11} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                    <circle cx="8" cy="8" r="6" stroke="var(--accent-blue)" strokeWidth="1.2" />
+                    <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="var(--accent-blue)" strokeWidth="0.9" />
+                    <line x1="2" y1="8" x2="14" y2="8" stroke="var(--accent-blue)" strokeWidth="0.9" />
+                  </svg>
+                )}
                 <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
                   {latest.requirements.length} req{latest.requirements.length !== 1 ? 's' : ''}
                 </span>
@@ -230,12 +237,85 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
           )
         })}
       </div>
+
+      {/* Published standards — anchored to bottom */}
+      {publishedSets && (() => {
+        const externalSets = publishedSets.filter(s => !sets.some(own => own.id === s.id))
+        if (externalSets.length === 0) return null
+
+        return (
+          <div style={{
+            borderTop: '1px solid var(--border)',
+            flexShrink: 0,
+          }}>
+            <div
+              onClick={() => setPubExpanded(prev => !prev)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '12px 14px', cursor: 'pointer',
+                transition: 'background 100ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6" stroke="var(--accent-blue)" strokeWidth="1.2" />
+                <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="var(--accent-blue)" strokeWidth="0.9" />
+                <line x1="2" y1="8" x2="14" y2="8" stroke="var(--accent-blue)" strokeWidth="0.9" />
+              </svg>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-blue)', letterSpacing: '0.06em', flex: 1 }}>
+                PUBLISHED STANDARDS · {externalSets.length}
+              </span>
+              <span style={{
+                fontSize: 16, color: 'var(--text-dim)',
+                transform: pubExpanded ? 'rotate(90deg)' : 'rotate(0)',
+                transition: 'transform 180ms', display: 'inline-block',
+              }}>▸</span>
+            </div>
+            {pubExpanded && (
+              <div style={{ maxHeight: 200, overflowY: 'auto', padding: '0 14px 12px' }}>
+                {externalSets.map(s => (
+                  <div key={s.id} style={{
+                    padding: '8px 10px', marginBottom: 4, borderRadius: 6,
+                    border: `1px solid ${selectedId === s.id ? 'var(--accent-blue)' : 'var(--border)'}`,
+                    background: selectedId === s.id ? 'color-mix(in srgb, var(--accent-blue) 5%, transparent)' : 'transparent',
+                    cursor: 'pointer', transition: 'all 100ms',
+                  }}
+                  onClick={() => onSelect(s.id)}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{s.name}</div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', display: 'flex', gap: 6 }}>
+                      <span>{s._publishedBy}</span>
+                      <span>v{s.version || 1}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
 
 /* ─── Right Panel: View Details ─── */
-function ViewDetails({ rs, onNewVersion, allSets, searchQuery }) {
+function ViewDetails({ rs, onNewVersion, allSets, searchQuery, onPublish, publishedSets }) {
+  const isPublished = useMemo(() => {
+    if (!publishedSets) return false
+    const lineage = rs.lineageId || rs.id
+    return publishedSets.some(s => (s.lineageId || s.id) === lineage)
+  }, [rs, publishedSets])
+
+  const publishedVersion = useMemo(() => {
+    if (!publishedSets) return null
+    const lineage = rs.lineageId || rs.id
+    const match = publishedSets.find(s => (s.lineageId || s.id) === lineage)
+    return match?.version || null
+  }, [rs, publishedSets])
+
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false)
+
   const newerExists = useMemo(() => {
     if (!rs.lineageId) return false
     return allSets.some(s => s.lineageId === rs.lineageId && (s.version || 1) > (rs.version || 1))
@@ -263,8 +343,49 @@ function ViewDetails({ rs, onNewVersion, allSets, searchQuery }) {
           onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >New Version</span>
+        {onPublish && !isPublished && (
+          <span
+            onClick={() => setShowPublishConfirm(true)}
+            style={{
+              fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)',
+              cursor: 'pointer', padding: '5px 10px', borderRadius: 4, flexShrink: 0,
+              border: '1px solid color-mix(in srgb, var(--accent-blue) 25%, transparent)',
+              transition: 'background 100ms',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-blue) 8%, transparent)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <svg width={12} height={12} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+            </svg>
+            Publish
+          </span>
+        )}
+        {isPublished && (
+          <span style={{
+            fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+            color: 'var(--accent-blue)', padding: '3px 8px', borderRadius: 4,
+            background: 'color-mix(in srgb, var(--accent-blue) 8%, transparent)',
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+          }}>
+            <svg width={11} height={11} viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+            </svg>
+            PUBLISHED{publishedVersion && publishedVersion !== (rs.version || 1) ? ` (v${publishedVersion})` : ''}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 4 }}>Created {rs.created}</div>
+      {rs._published && (
+        <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', marginTop: 2 }}>
+          Published by {rs._publishedBy} · {rs._publishedDate}
+        </div>
+      )}
       <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginTop: 10 }}>{rs.description}</div>
 
       {/* Newer version notice */}
@@ -276,6 +397,43 @@ function ViewDetails({ rs, onNewVersion, allSets, searchQuery }) {
           fontSize: 11, color: 'var(--accent-amber)', lineHeight: 1.5,
         }}>
           A newer version of this set exists. You are viewing v{rs.version || 1}.
+        </div>
+      )}
+      {isPublished && (
+        <div style={{
+          marginTop: 12, padding: '8px 12px', borderRadius: 6,
+          background: 'color-mix(in srgb, var(--accent-blue) 6%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-blue) 15%, transparent)',
+          fontSize: 11, color: 'var(--accent-blue)', lineHeight: 1.5,
+        }}>
+          This standard is published to the Radiant Network. Connected parties can evaluate against it.
+        </div>
+      )}
+      {showPublishConfirm && (
+        <div style={{
+          marginTop: 12, padding: '14px 16px', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-amber)', marginBottom: 8 }}>
+            Confirm Publication
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.7, marginBottom: 12 }}>
+            Publishing this standard to the Radiant Network will make it visible to all connected parties. They will be able to evaluate their assets against it. This action cannot be undone — published standards remain available even if you create newer versions.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setShowPublishConfirm(false)} style={{
+              padding: '6px 14px', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)',
+              border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}>Cancel</button>
+            <button onClick={() => { onPublish(rs); setShowPublishConfirm(false) }} style={{
+              padding: '6px 14px', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+              border: '1px solid color-mix(in srgb, var(--accent-blue) 40%, transparent)',
+              background: 'color-mix(in srgb, var(--accent-blue) 10%, transparent)',
+              color: 'var(--accent-blue)', cursor: 'pointer',
+            }}>Publish to Network</button>
+          </div>
         </div>
       )}
 
@@ -672,11 +830,12 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — Requirements Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, _noBackdrop }) {
+export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, onPublish, publishedSets, _noBackdrop }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')        // 'view' | 'create' | 'newversion'
   const [search, setSearch] = useState('')
   const [expandedLineages, setExpandedLineages] = useState({})
+  const [pubExpanded, setPubExpanded] = useState(false)
 
   // Edit form state
   const [editName, setEditName] = useState('')
@@ -700,7 +859,7 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     }
   }, [initialSelectedId])
 
-  const selectedSet = useMemo(() => requirementSets.find(s => s.id === selectedId), [requirementSets, selectedId])
+  const selectedSet = useMemo(() => requirementSets.find(s => s.id === selectedId) || publishedSets?.find(s => s.id === selectedId), [requirementSets, publishedSets, selectedId])
 
   const toggleLineage = useCallback((lid) => {
     setExpandedLineages(prev => ({ ...prev, [lid]: !prev[lid] }))
@@ -718,6 +877,18 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     }
     onClose()
   }, [mode, onClose])
+
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        handleModalClose()
+      }
+    }
+    window.addEventListener('keydown', handleEsc, true)
+    return () => window.removeEventListener('keydown', handleEsc, true)
+  }, [handleModalClose])
 
   const handleSelect = (id) => {
     setSelectedId(id)
@@ -803,6 +974,8 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
         onNewVersion={handleNewVersion}
         allSets={requirementSets}
         searchQuery={search}
+        onPublish={onPublish}
+        publishedSets={publishedSets}
       />
     )
   } else {
@@ -882,6 +1055,9 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
           setSearch={setSearch}
           expandedLineages={expandedLineages}
           toggleLineage={toggleLineage}
+          publishedSets={publishedSets}
+          pubExpanded={pubExpanded}
+          setPubExpanded={setPubExpanded}
         />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {rightContent}

@@ -1741,7 +1741,7 @@ const V2Canvas = forwardRef(function V2Canvas({
           if (card.dataset.cardId !== anchorCardId) {
             const cardId = card.dataset.cardId
             const inChain = !chainNodeIds || chainNodeIds.has(cardId)
-            const targetOpacity = inChain ? '1' : '0.18'
+            const targetOpacity = inChain ? '1' : '0.35'
             card.style.transition = 'none'
             card.style.opacity = '0'
             card.offsetHeight
@@ -1775,7 +1775,7 @@ const V2Canvas = forwardRef(function V2Canvas({
             card.style.transform = `scale(${z})`
             const cardId = card.getAttribute('data-card-id')
             const inChain = !chain || chain.has(cardId)
-            card.style.opacity = inChain ? '1' : '0.18'
+            card.style.opacity = inChain ? '1' : '0.35'
           })
           requestAnimationFrame(() => {
             cards.forEach(card => { card.style.transition = 'opacity 200ms ease' })
@@ -1923,7 +1923,7 @@ const V2Canvas = forwardRef(function V2Canvas({
           }
         }
         requestAnimationFrame(tick)
-      }, 400)
+      }, 50)
     }
 
     // Re-apply chain dimming after edge build
@@ -2356,7 +2356,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     transform: `scale(${zoom})`,
     transformOrigin: 'center center',
     pointerEvents: transitioning ? 'none' : 'auto',
-    opacity: chainNodeIds && !chainNodeIds.has(sp.id) ? 0.18 : 1,
+    opacity: chainNodeIds && !chainNodeIds.has(sp.id) ? 0.35 : 1,
     transition: 'opacity 200ms ease',
   })
 
@@ -2440,7 +2440,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 left: sp.x - 8,
                 top: sp.y - 8,
                 pointerEvents: transitioning ? 'none' : 'auto',
-                opacity: chainNodeIds && !chainNodeIds.has(node.id) ? 0.18 : 1,
+                opacity: chainNodeIds && !chainNodeIds.has(node.id) ? 0.35 : 1,
                 transition: 'opacity 200ms ease',
                 ...((isDiveTarget || isAnchor) && transitioning ? { viewTransitionName: 'dive-target' } : {}),
               }}>
@@ -2478,7 +2478,7 @@ const V2Canvas = forwardRef(function V2Canvas({
             if (unfurlSettle) {
               // Edges have drawn — fade in at final position
               const staggerDelay = Math.min(index * 80, 400)
-              cardStyle.opacity = chainNodeIds && !chainNodeIds.has(sp.id) ? 0.18 : 1
+              cardStyle.opacity = chainNodeIds && !chainNodeIds.has(sp.id) ? 0.35 : 1
               cardStyle.transition = `opacity 250ms ease ${staggerDelay}ms`
             } else {
               // Pre-settle: invisible while edges are drawing

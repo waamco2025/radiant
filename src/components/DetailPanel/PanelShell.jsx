@@ -118,6 +118,14 @@ export default function PanelShell({
         {/* Name + PIN */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{node.name}</span>
+          {node._isNew && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 3,
+              background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+              color: 'var(--accent-green)', flexShrink: 0,
+            }}>NEW</span>
+          )}
           <CopyBadge value={node.pin} truncated />
         </div>
 

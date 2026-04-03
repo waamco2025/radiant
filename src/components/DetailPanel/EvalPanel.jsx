@@ -178,7 +178,7 @@ export default function EvalPanel({ ev, open, onToggle, claimsOpen, onToggleClai
               Claims from this evaluation are no longer active.
             </div>
           )}
-          {!sup && ev.org === activeParty && onAmendEval && (
+          {!sup && ev.org === activeParty && ev.disclosureType !== 'proofonly' && onAmendEval && (
             <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
               <button
                 onClick={e => { e.stopPropagation(); onAmendEval(ev) }}

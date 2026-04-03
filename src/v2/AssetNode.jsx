@@ -436,16 +436,20 @@ export default function AssetNode({
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
   const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
-  const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && node.evaluatorParty === activeParty && onAmendEval) ? () => onAmendEval?.(node) : undefined
+  const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && node.evaluatorParty === activeParty && node.disclosureType !== 'proofonly' && onAmendEval) ? () => onAmendEval?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
+  const h = node.displayHealth || node.health
+  const hasBadHealth = h && h.bad > 0
   const borderColor = isDeclined
     ? 'var(--accent-red)'
     : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
       ? cat.color
-      : `color-mix(in srgb, ${cat.color} 27%, transparent)`
+      : hasBadHealth
+        ? 'var(--accent-red)'
+        : `color-mix(in srgb, ${cat.color} 27%, transparent)`
 
   const showActionBar = isSelected || hovered
 
