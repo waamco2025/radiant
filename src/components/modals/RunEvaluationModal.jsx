@@ -567,26 +567,50 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
 }
 
 export default function RunEvaluationModal({
-  assetNode, evidenceNode, disclosureType, requirementSets, publishedSets, activeParty, activeUser,
+  assetNode, evidenceNode, claimNode, claimReqSet, disclosureType, requirementSets, publishedSets, activeParty, activeUser,
   credits, onClose, onComplete, parsedFields: passedParsedFields, _noBackdrop, amendingEval,
 }) {
-  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
+  const isAmend = !!amendingEval
+  const isClaimScoped = !!claimNode
+  const showEvidenceStep = !evidenceNode && !isClaimScoped
+
+  const claimEvidenceIds = isClaimScoped ? (claimNode.referencedEvidenceIds || []) : null
+  const claimReqSetId = isClaimScoped ? claimNode.requirementSetId : null
+
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(() =>
+    isClaimScoped ? new Set(claimEvidenceIds) : new Set()
+  )
 
   const hasMultipleEvidence = useMemo(() => {
     if (!assetNode?.children) return false
     return assetNode.children.filter(c => c.isEvidence).length > 0
   }, [assetNode])
 
-  const isAmend = !!amendingEval
-  const showEvidenceStep = !evidenceNode
   const evidenceStep = showEvidenceStep ? 0 : -1
-  const setupStep = !isAmend ? (showEvidenceStep ? 1 : 0) : -1
-  const processingStep = isAmend
-    ? (showEvidenceStep ? 1 : 0)
-    : (showEvidenceStep ? 2 : 1)
+  const setupStep = (!isAmend && !isClaimScoped) ? (showEvidenceStep ? 1 : 0) : -1
+  const processingStep = isClaimScoped
+    ? 0
+    : isAmend
+      ? (showEvidenceStep ? 1 : 0)
+      : (showEvidenceStep ? 2 : 1)
   const reviewStep = processingStep + 1
   const confirmStep = reviewStep + 1
   const totalStepCount = confirmStep + 1
+
+  // Parse-before-eval gating for claim-scoped
+  const unparsedEvidence = useMemo(() => {
+    if (!isClaimScoped || !assetNode?.children) return []
+    return (claimEvidenceIds || []).map(evId => {
+      const evNode = assetNode.children.find(c => c.id === evId)
+      if (!evNode) return null
+      const hasParse = assetNode.children.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === evId)
+      return hasParse ? null : evNode
+    }).filter(Boolean)
+  }, [isClaimScoped, claimEvidenceIds, assetNode])
+
+  const claimHasNoEvidence = isClaimScoped && (!claimEvidenceIds || claimEvidenceIds.length === 0)
+  const claimNeedsParsing = isClaimScoped && unparsedEvidence.length > 0
+  const claimBlocked = claimHasNoEvidence || claimNeedsParsing
 
   // Scoped to the current evaluator — each party has their own lineage chain
   const activeEvalsByLineage = useMemo(() => {
@@ -610,13 +634,15 @@ export default function RunEvaluationModal({
   }, [assetNode, activeParty])
 
   const [step, setStep] = useState(showEvidenceStep ? 0 : 0)
-  const [selectedSetId, setSelectedSetId] = useState(null)
+  const [selectedSetId, setSelectedSetId] = useState(isClaimScoped ? claimReqSetId : null)
   const [claims, setClaims] = useState([])
   const [messageIndex, setMessageIndex] = useState(0)
   const [expandedEvidence, setExpandedEvidence] = useState(new Set())
   const [evExpandInit, setEvExpandInit] = useState(false)
 
-  const selectedSet = requirementSets.find(s => s.id === selectedSetId) || publishedSets?.find(s => s.id === selectedSetId)
+  const selectedSet = isClaimScoped && claimReqSet
+    ? claimReqSet
+    : (requirementSets.find(s => s.id === selectedSetId) || publishedSets?.find(s => s.id === selectedSetId))
   const cost = selectedSet ? calculateEvalCost(selectedSet) : 0
   const canAfford = credits >= cost
 
@@ -703,6 +729,7 @@ export default function RunEvaluationModal({
   // Processing step — cycle messages + auto-advance
   useEffect(() => {
     if (step !== processingStep) return
+    if (isClaimScoped && claimBlocked) return
     const msgInterval = setInterval(() => {
       setMessageIndex(prev => prev + 1)
     }, 1200)
@@ -765,7 +792,8 @@ export default function RunEvaluationModal({
     <Modal width={step === reviewStep ? (showSplitView ? 1100 : 760) : 680}>
       <ModalHeader
         title={amendingEval ? 'Amend Evaluation' : 'Run Evaluation'}
-        subtitle={step === evidenceStep && showEvidenceStep ? 'Select evidence to evaluate against.'
+        subtitle={isClaimScoped ? `Evaluating claim: ${claimNode.name}`
+          : step === evidenceStep && showEvidenceStep ? 'Select evidence to evaluate against.'
           : step === setupStep ? (amendingEval ? `Amending v${amendingEval.version} · ${assetNode.name}` : 'Select a requirement set to evaluate this asset against.')
           : step === reviewStep ? `${assetNode.name} — Review AI findings`
           : undefined}
@@ -1191,7 +1219,59 @@ export default function RunEvaluationModal({
               />
             </div>
           )}
-          {step === processingStep && <StepProcessing messageIndex={messageIndex} />}
+          {step === processingStep && isClaimScoped && claimBlocked && (
+            <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%',
+                background: 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+                border: '2px solid var(--accent-amber)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 14px', fontSize: 20, color: 'var(--accent-amber)',
+              }}>{'\u26A0'}</div>
+              {claimHasNoEvidence ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                    No Evidence Referenced
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                    This claim has no referenced evidence. Add evidence to the claim before running an evaluation.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                    Evidence Needs Parsing
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: 14 }}>
+                    Referenced evidence must be parsed before evaluation. Parse the following evidence to continue:
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left', maxWidth: 400, margin: '0 auto' }}>
+                    {unparsedEvidence.map(ev => (
+                      <div key={ev.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 12px', borderRadius: 6,
+                        background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                      }}>
+                        <span style={{
+                          fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                          background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                          color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                        }}>EV</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flex: 1 }}>
+                          {ev.name || ev.evidence?.filename || ev.id}
+                        </span>
+                        <span style={{
+                          fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                          background: 'var(--bg-raised)', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                        }}>UNPARSED</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {step === processingStep && !(isClaimScoped && claimBlocked) && <StepProcessing messageIndex={messageIndex} />}
           {step === reviewStep && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {claims.map(claim => (
@@ -1217,6 +1297,9 @@ export default function RunEvaluationModal({
           <StepDots current={step} total={totalSteps} />
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          {step === processingStep && isClaimScoped && claimBlocked && (
+            <Btn label="Close" onClick={onClose} />
+          )}
           {step === evidenceStep && showEvidenceStep && (() => {
             const hasParsedSelected = assetNode?.children && [...selectedEvidenceIds].some(evId =>
               assetNode.children.some(c => (c.isParse || c.category === 'parse') && c.sourceEvidenceId === evId)

@@ -267,6 +267,63 @@ function makePepNode(parentAssetId, sourceEvidenceId, templateName, parsedFields
   }
 }
 
+// ── Claim Node builder ──
+
+function makeClaimNode(parentAssetId, requirementSet, referencedEvidenceIds, owner) {
+  const lineageId = requirementSet.lineageId || requirementSet.id
+  const id = `claim-${parentAssetId}-${lineageId}`
+  const pin = makePin(id)
+  const dot = owner ? makeDot(owner) : makeDot(id)
+
+  const claimDefs = (requirementSet.claims || []).map(c => ({
+    ...c,
+    status: 'pending',
+  }))
+
+  return {
+    id,
+    pin,
+    dot,
+    name: requirementSet.name,
+    category: 'claim',
+    owner,
+    parentId: parentAssetId,
+    children: [],
+    health: { ok: 0, warn: 0, bad: 0 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 0, warn: 0, bad: 0 },
+    claimCount: 0,
+    displayClaimCount: 0,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: 0,
+    y: 0,
+    parentOwner: owner,
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    isEvidence: false,
+    isParse: false,
+    isEvaluation: false,
+    isClaim: true,
+    isTerminalNode: false,
+    requirementSetId: requirementSet.id,
+    requirementSetName: requirementSet.name,
+    requirementSetVersion: requirementSet.version || 1,
+    requirementSetLineageId: lineageId,
+    referencedEvidenceIds: referencedEvidenceIds || [],
+    claims: claimDefs,
+    date: new Date().toISOString().slice(0, 10),
+    dateTime: new Date().toISOString(),
+    lastEval: null,
+  }
+}
+
 // ── Node builder ──
 
 function makeNode(id, name, category, owner, opts = {}) {
@@ -469,6 +526,19 @@ function buildBobData() {
   }
   powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
+  const powerRegClaim = makeClaimNode('power-reg', {
+    id: EVAL_POWER_REG_BOB.id,
+    name: EVAL_POWER_REG_BOB.requirements,
+    lineageId: 'lineage-mil-prf-55681',
+    version: 1,
+    claims: [],
+  }, [powerRegEv.id], 'MicroCo')
+  powerRegClaim.date = '2026-03-01'
+  powerRegClaim.dateTime = '2026-03-01T10:00:00Z'
+
+  powerRegEval.parentId = powerRegClaim.id
+  powerRegEval.claimId = powerRegClaim.id
+
   const powerReg = makeNode('power-reg', 'Power Regulation Module', 'product', 'MicroCo', {
     evaluations: [],
     sdas: [{
@@ -476,7 +546,7 @@ function buildBobData() {
       selectedEvidenceIds: [powerRegEv.id],
       selectedFieldIds: [`${powerRegPep.id}::f-voltage`, `${powerRegPep.id}::f-power`, `${powerRegPep.id}::f-temp`, `${powerRegPep.id}::f-radiation`, `${powerRegPep.id}::f-itar`],
     }],
-    children: [powerRegEv, powerRegPep, powerRegEval],
+    children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 1400, y: 0,
   })
 
@@ -654,6 +724,19 @@ function buildAliceData() {
   }
   powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
+  const powerRegClaim = makeClaimNode('power-reg', {
+    id: EVAL_POWER_REG_BOB.id,
+    name: EVAL_POWER_REG_BOB.requirements,
+    lineageId: 'lineage-mil-prf-55681',
+    version: 1,
+    claims: [],
+  }, [powerRegEv.id], 'MicroCo')
+  powerRegClaim.date = '2026-03-01'
+  powerRegClaim.dateTime = '2026-03-01T10:00:00Z'
+
+  powerRegEval.parentId = powerRegClaim.id
+  powerRegEval.claimId = powerRegClaim.id
+
   const SDA_RADIANT_POWERREG = {
     type: 'selective',
     party: 'Radiant Network',
@@ -692,7 +775,7 @@ function buildAliceData() {
       { ...SDA_INTERNAL_MICROCO, pins: [] },
       SDA_RADIANT_POWERREG,
     ],
-    children: [powerRegEv, powerRegPep, powerRegEval],
+    children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 500, y: -300,
   })
 
@@ -917,7 +1000,7 @@ function resolvePin(pin) {
   return null
 }
 
-function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, evaluatorUser, disclosureType, previousEvalId = null) {
+function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, evaluatorUser, disclosureType, previousEvalId = null, claimId = null) {
   const id = `eval-${parentAssetId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   const pin = makePin(id)
   const dot = makeDot(evaluatorParty)
@@ -930,6 +1013,7 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
     category: 'evaluation',
     owner: evaluatorParty,
     parentId: parentAssetId,
+    claimId: claimId || parentAssetId,
     children: [],
     health: { ok: 0, warn: 0, bad: 0 },
     childHealth: null,
@@ -973,7 +1057,7 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
 }
 
 
-export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin }
+export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin }
 
 export function getDataForRole(roleId) {
   if (roleId === 'alice-microco') return buildAliceData()

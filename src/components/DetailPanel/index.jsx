@@ -51,7 +51,7 @@ function EvalClaimsSection({ claims, nodeName }) {
   )
 }
 
-export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab, forceExpandSda, onAmendEval, activeParty }) {
+export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpandStack, onSurface, isAnchor, depth = 0, onDisclose, onConnect, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, onManageCascade, isOwner, onViewChild, onSelectAsset, onCancelRequest, onDismissDeclined, onRevokeSda, onReviseSda, onOpenLibrary, revealPhase, forceTab, forceExpandSda, onAmendEval, activeParty, onCreateClaim }) {
   if (!node) return null
 
   // Provisional nodes get a minimal panel with request context
@@ -497,6 +497,159 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
     )
   }
 
+  // Claim nodes get a specialized panel — tabless
+  if (node.isClaim || node.category === 'claim') {
+    const claimEvals = (nodes || []).flatMap(n => n.children || []).filter(c =>
+      (c.isEvaluation || c.category === 'evaluation') && c.claimId === node.id
+    )
+    const activeEvals = claimEvals.filter(e => e.status !== 'superseded')
+    const referencedEvidence = (node.referencedEvidenceIds || []).map(evId => {
+      return (nodes || []).flatMap(n => n.children || []).find(c => c.id === evId)
+    }).filter(Boolean)
+
+    return (
+      <PanelShell
+        node={{
+          ...node,
+          description: `Claim created${node.date ? ` on ${node.date}` : ''}${node.dateTime ? ` · ${new Date(node.dateTime).toISOString().slice(11, 16)} UTC` : ''}`,
+        }}
+        tabs={[]}
+        tab={null}
+        setTab={() => {}}
+        summary={null}
+        onClose={onClose}
+        hasStack={false}
+        hasParent={isAnchor || depth > 0}
+        onViewChain={onViewChain}
+        onSurface={onSurface}
+        isEvidence={false}
+        isParse={false}
+        isEvaluation={false}
+        isClaim
+        isOwner={isOwner}
+        onAddEvidence={onAddEvidence}
+        onRunEvaluation={() => onRunEvaluation && onRunEvaluation(node)}
+        canAssetEvaluate={true}
+        activeParty={activeParty}
+        depth={depth}
+      >
+        <div style={{ padding: '4px 0' }}>
+          {/* Requirement set badge */}
+          <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {node.requirementSetVersion && (
+              <span style={{
+                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '1px 5px', borderRadius: 3,
+                background: 'color-mix(in srgb, var(--accent-teal) 10%, transparent)',
+                color: 'var(--accent-teal)',
+              }}>v{node.requirementSetVersion}</span>
+            )}
+            {node.requirementSetName && (
+              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                {node.requirementSetName}
+              </span>
+            )}
+          </div>
+
+          {/* Referenced evidence */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{
+              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: 'var(--accent-orange)', letterSpacing: '0.05em',
+              marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{ fontSize: 12 }}>&#9703;</span>
+              REFERENCED EVIDENCE · {referencedEvidence.length}
+            </div>
+            {referencedEvidence.length > 0 ? (
+              <div style={{
+                borderRadius: 6, overflow: 'hidden',
+                border: '1px solid var(--border)', background: 'var(--bg-deep)',
+              }}>
+                {referencedEvidence.map((ev, ei) => (
+                  <div key={ev.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px',
+                    borderBottom: ei < referencedEvidence.length - 1 ? '1px solid var(--border)' : 'none',
+                  }}>
+                    <span style={{
+                      fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                      background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                      color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                    }}>EV</span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', flex: 1 }}>
+                      {ev.name || ev.evidence?.filename || ev.id}
+                    </span>
+                    <span style={{
+                      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                      background: ev._isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)',
+                      color: ev._isParsed ? 'var(--accent-green)' : 'var(--text-dim)',
+                      fontFamily: 'var(--font-mono)',
+                    }}>{ev._isParsed ? 'PARSED' : 'UNPARSED'}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{
+                padding: '12px 14px', borderRadius: 6,
+                background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic',
+              }}>
+                No evidence referenced
+              </div>
+            )}
+          </div>
+
+          {/* Evaluations */}
+          {activeEvals.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                color: 'var(--accent-indigo)', letterSpacing: '0.05em',
+                marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{ fontSize: 12 }}>{'\u2726'}</span>
+                EVALUATIONS · {activeEvals.length}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {activeEvals.map(ev => {
+                  const sat = (ev.claims || []).filter(c => c.status === 'satisfactory').length
+                  const unsat = (ev.claims || []).filter(c => c.status === 'unsatisfactory').length
+                  return (
+                    <div key={ev.id} style={{
+                      padding: '10px 12px', borderRadius: 6,
+                      background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{ev.name}</span>
+                        {ev.requirementSetVersion && (
+                          <span style={{
+                            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '1px 4px', borderRadius: 3,
+                            background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                            color: 'var(--accent-indigo)',
+                          }}>v{ev.requirementSetVersion}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                        {ev.evaluatorParty || ev.owner} · {sat} sat · {unsat} unsat
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Claims from requirement set */}
+          {node.claims && node.claims.length > 0 && (
+            <EvalClaimsSection claims={node.claims} nodeName={node.name} />
+          )}
+        </div>
+      </PanelShell>
+    )
+  }
+
   // Build evals from child eval nodes
   const evals = useMemo(() => {
     return (node.children || [])
@@ -528,14 +681,23 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       }))
   }, [node])
 
+  const claimChildren = useMemo(() => {
+    return (node.children || []).filter(c => c.isClaim || c.category === 'claim')
+  }, [node])
+
   // Decide which tabs to show based on populated fields
   const tabs = useMemo(() => {
     const t = []
-    const hasEvals = evals.length > 0
-    const hasEvidenceChildren = node.children?.some(c => c.isEvidence)
-    const showEvalTab = hasEvals || hasEvidenceChildren || isOwner
-    if (showEvalTab)
-      t.push({ id: 'evaluations', label: `Evaluations · ${evals.length}` })
+    const hasClaims = claimChildren.length > 0
+    if (hasClaims) {
+      t.push({ id: 'claims', label: `Claims · ${claimChildren.length}` })
+    } else {
+      const hasEvals = evals.length > 0
+      const hasEvidenceChildren = node.children?.some(c => c.isEvidence)
+      const showEvalTab = hasEvals || hasEvidenceChildren || isOwner
+      if (showEvalTab)
+        t.push({ id: 'evaluations', label: `Evaluations · ${evals.length}` })
+    }
     if (node.children?.length)
       t.push({ id: 'children', label: `Children · ${node.children.length}` })
     if (node.sdas?.length && !node.isEvidence)
@@ -643,8 +805,10 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
       isEvidence={!!node.isEvidence}
       isParse={!!node.isParse || node.category === 'parse'}
       isEvaluation={!!node.isEvaluation}
+      isClaim={false}
       isOwner={isOwner}
       onAmendEval={onAmendEval}
+      onCreateClaim={onCreateClaim}
       activeParty={activeParty}
       depth={depth}
     >
@@ -678,6 +842,72 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
             onAmendEval={onAmendEval}
             activeParty={activeParty}
           />
+        </div>
+      )}
+      {tabs.some(t => t.id === 'claims') && (
+        <div style={{ display: tab === 'claims' ? 'block' : 'none' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {claimChildren.map(claim => {
+              const h = claim.displayHealth || claim.health || { ok: 0, warn: 0, bad: 0 }
+              const totalClaims = h.ok + (h.warn || 0) + h.bad
+              const evCount = (claim.referencedEvidenceIds || []).length
+              return (
+                <div
+                  key={claim.id}
+                  onClick={() => onViewChild?.(claim)}
+                  style={{
+                    padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+                    background: 'var(--bg-deep)',
+                    border: '1px solid var(--border)',
+                    transition: 'border-color 150ms',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent-teal)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: 'var(--accent-teal)', fontFamily: 'var(--font-mono)' }}>{'\u25C7'}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{claim.name}</span>
+                    {claim.requirementSetVersion && (
+                      <span style={{
+                        fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        padding: '1px 5px', borderRadius: 3,
+                        background: 'color-mix(in srgb, var(--accent-teal) 10%, transparent)',
+                        color: 'var(--accent-teal)',
+                      }}>v{claim.requirementSetVersion}</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                    <span>{evCount} evidence</span>
+                    {totalClaims > 0 && <span>{h.ok} sat · {h.bad} unsat</span>}
+                    {totalClaims === 0 && <span>No evaluations</span>}
+                  </div>
+                  {totalClaims > 0 && (
+                    <div style={{ marginTop: 6, height: 3, borderRadius: 1.5, background: 'var(--border)', display: 'flex', gap: 1, overflow: 'hidden' }}>
+                      {h.ok > 0 && <div style={{ width: `${(h.ok / totalClaims) * 100}%`, background: 'var(--accent-green)', borderRadius: 1.5 }} />}
+                      {h.bad > 0 && <div style={{ width: `${(h.bad / totalClaims) * 100}%`, background: 'var(--accent-red)', borderRadius: 1.5 }} />}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {isOwner && onCreateClaim && (
+              <button
+                onClick={() => onCreateClaim(node)}
+                style={{
+                  width: '100%', padding: '10px 0', borderRadius: 6, cursor: 'pointer',
+                  border: '1px dashed var(--border)',
+                  background: 'transparent', color: 'var(--text-tertiary)',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  transition: 'border-color 150ms, color 150ms',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-teal)'; e.currentTarget.style.color = 'var(--accent-teal)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-tertiary)' }}
+              >
+                <span>{'\u25C7'}</span> Create Claim
+              </button>
+            )}
+          </div>
         </div>
       )}
       {tabs.some(t => t.id === 'children') && (

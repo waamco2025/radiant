@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
-import AssetNode, { AssetNodeDot, CARD_W, CARD_H, CATEGORY_CONFIG } from './AssetNode.jsx'
+import AssetNode, { AssetNodeDot, AssetNodeMini, CARD_W, CARD_H, MINI_CARD_W, MINI_CARD_H, CATEGORY_CONFIG } from './AssetNode.jsx'
 import LayerBorder from './LayerBorder.jsx'
 import LayerPill from './LayerPill.jsx'
 // LayerTransitionOverlay kept as file but no longer used — View Transitions API replaces it
@@ -13,7 +13,8 @@ const MIN_ZOOM = 0.20
 const MAX_ZOOM = 1.50
 const DECAY = 0.92
 const VEL_STOP = 0.5
-const LOD_THRESHOLD = 0.66
+const LOD_THRESHOLD = 0.79
+const MID_LOD_THRESHOLD = 0.43
 
 // SDA edge type visual config
 const SDA_EDGE_CONFIG = {
@@ -213,100 +214,168 @@ function layoutChildren(children, depthLevel = 1) {
   let stepUnits = Math.ceil(300 / spacing)
   if (stepUnits % 2 !== 0) stepUnits++
   const stepX = stepUnits * spacing
+  const tierGap = Math.round(200 / spacing) * spacing
 
-  // Separate children by tier
-  const tier1 = children.filter(c =>
-    c.isEvidence || c.category === 'evidence' ||
-    (!c.isParse && c.category !== 'parse' && !c.isEvaluation && c.category !== 'evaluation')
-  )
-  const tier2 = children.filter(c => c.isParse || c.category === 'parse')
-  const tier3Active = children.filter(c =>
+  const positioned = []
+
+  // Classify children
+  const claims = children.filter(c => c.isClaim || c.category === 'claim')
+  const evidence = children.filter(c => c.isEvidence || c.category === 'evidence')
+  const parses = children.filter(c => c.isParse || c.category === 'parse')
+  const evalsActive = children.filter(c =>
     (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded'
   )
-  const tier3Superseded = children.filter(c =>
+  const evalsSuperseded = children.filter(c =>
     (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded'
   )
 
-  // Layout tier 1 (evidence + other) at y = 0
-  const tier1W = (tier1.length - 1) * stepX
-  const tier1StartX = -tier1W / 2
-  const positioned = tier1.map((child, i) => ({
-    ...child,
-    x: snapToGrid(tier1StartX + i * stepX, depthLevel),
-    y: snapToGrid(0, depthLevel),
-  }))
+  const hasClaims = claims.length > 0
 
-  // Layout tier 2 (parse) below tier 1 — centered under parent evidence
-  const tierGap = Math.round(200 / spacing) * spacing
-  if (tier2.length > 0) {
-    const occupiedTier2Xs = new Set()
+  if (hasClaims) {
+    // ── Claims-aware layout ──
 
-    tier2.forEach(pepNode => {
+    // Tier 1 (y=0): Claims
+    const claimsW = (claims.length - 1) * stepX
+    const claimsStartX = -claimsW / 2
+    claims.forEach((claim, i) => {
+      positioned.push({
+        ...claim,
+        x: snapToGrid(claimsStartX + i * stepX, depthLevel),
+        y: snapToGrid(0, depthLevel),
+      })
+    })
+
+    // Tier 2: Evals — grouped below their parent claim
+    const claimPositions = {}
+    positioned.filter(p => p.isClaim || p.category === 'claim').forEach(p => {
+      claimPositions[p.id] = { x: p.x, evalCount: 0 }
+    })
+
+    // Superseded evals: one tierGap below claims
+    const evalSupY = tierGap
+    const occupiedSupXs = new Set()
+    evalsSuperseded.forEach(supNode => {
+      const claimPos = claimPositions[supNode.claimId]
+      let preferredX = claimPos ? claimPos.x : snapToGrid(0, depthLevel)
+      let candidateX = snapToGrid(preferredX, depthLevel)
+      while (occupiedSupXs.has(candidateX)) {
+        candidateX = snapToGrid(candidateX + stepX, depthLevel)
+      }
+      occupiedSupXs.add(candidateX)
+      positioned.push({ ...supNode, x: candidateX, y: snapToGrid(evalSupY, depthLevel) })
+    })
+
+    // Active evals: below superseded (or at tierGap if no superseded)
+    const evalActiveY = evalsSuperseded.length > 0 ? tierGap * 2 : tierGap
+    const occupiedEvalXs = new Set()
+    evalsActive.forEach(evalNode => {
+      const claimPos = claimPositions[evalNode.claimId]
+      let preferredX = claimPos ? claimPos.x : snapToGrid(0, depthLevel)
+      let candidateX = snapToGrid(preferredX, depthLevel)
+      while (occupiedEvalXs.has(candidateX)) {
+        candidateX = snapToGrid(candidateX + stepX, depthLevel)
+      }
+      occupiedEvalXs.add(candidateX)
+      positioned.push({ ...evalNode, x: candidateX, y: snapToGrid(evalActiveY, depthLevel) })
+    })
+
+    // Tier 3: Evidence — below evals
+    const evBaseY = evalsActive.length > 0 || evalsSuperseded.length > 0
+      ? (evalsSuperseded.length > 0 ? tierGap * 3 : tierGap * 2)
+      : tierGap
+    const evW = (evidence.length - 1) * stepX
+    const evStartX = -evW / 2
+    evidence.forEach((ev, i) => {
+      positioned.push({
+        ...ev,
+        x: snapToGrid(evStartX + i * stepX, depthLevel),
+        y: snapToGrid(evBaseY, depthLevel),
+      })
+    })
+
+    // Tier 4: Parse — below source evidence
+    const parseY = evBaseY + tierGap
+    const occupiedParseXs = new Set()
+    parses.forEach(pepNode => {
       const sourceEvNode = positioned.find(p => p.id === pepNode.sourceEvidenceId)
-      let preferredX
-      if (sourceEvNode) {
-        preferredX = snapToGrid(sourceEvNode.x, depthLevel)
-      } else {
-        preferredX = snapToGrid(0, depthLevel)
+      let preferredX = sourceEvNode ? sourceEvNode.x : snapToGrid(0, depthLevel)
+      let candidateX = snapToGrid(preferredX, depthLevel)
+      while (occupiedParseXs.has(candidateX)) {
+        candidateX = snapToGrid(candidateX + stepX, depthLevel)
       }
+      occupiedParseXs.add(candidateX)
+      positioned.push({ ...pepNode, x: candidateX, y: snapToGrid(parseY, depthLevel) })
+    })
 
-      let candidateX = preferredX
-      if (occupiedTier2Xs.has(candidateX)) {
-        let offset = stepX
-        while (true) {
-          const rightX = snapToGrid(preferredX + offset, depthLevel)
-          if (!occupiedTier2Xs.has(rightX)) { candidateX = rightX; break }
-          const leftX = snapToGrid(preferredX - offset, depthLevel)
-          if (!occupiedTier2Xs.has(leftX)) { candidateX = leftX; break }
-          offset += stepX
+  } else {
+    // ── Legacy layout (no claims) ──
+
+    // Tier 1 (y=0): Evidence + other non-parse, non-eval nodes
+    const tier1 = children.filter(c =>
+      c.isEvidence || c.category === 'evidence' ||
+      (!c.isParse && c.category !== 'parse' && !c.isEvaluation && c.category !== 'evaluation' && !c.isClaim && c.category !== 'claim')
+    )
+    const tier1W = (tier1.length - 1) * stepX
+    const tier1StartX = -tier1W / 2
+    tier1.forEach((child, i) => {
+      positioned.push({
+        ...child,
+        x: snapToGrid(tier1StartX + i * stepX, depthLevel),
+        y: snapToGrid(0, depthLevel),
+      })
+    })
+
+    // Tier 2: Parse below source evidence
+    if (parses.length > 0) {
+      const occupiedTier2Xs = new Set()
+      parses.forEach(pepNode => {
+        const sourceEvNode = positioned.find(p => p.id === pepNode.sourceEvidenceId)
+        let preferredX = sourceEvNode ? snapToGrid(sourceEvNode.x, depthLevel) : snapToGrid(0, depthLevel)
+        let candidateX = preferredX
+        if (occupiedTier2Xs.has(candidateX)) {
+          let offset = stepX
+          while (true) {
+            const rightX = snapToGrid(preferredX + offset, depthLevel)
+            if (!occupiedTier2Xs.has(rightX)) { candidateX = rightX; break }
+            const leftX = snapToGrid(preferredX - offset, depthLevel)
+            if (!occupiedTier2Xs.has(leftX)) { candidateX = leftX; break }
+            offset += stepX
+          }
         }
-      }
-
-      occupiedTier2Xs.add(candidateX)
-      positioned.push({
-        ...pepNode,
-        x: candidateX,
-        y: snapToGrid(tierGap, depthLevel),
+        occupiedTier2Xs.add(candidateX)
+        positioned.push({ ...pepNode, x: candidateX, y: snapToGrid(tierGap, depthLevel) })
       })
-    })
-  }
+    }
 
-  // Helper: check if x collides with a tier1 node column
-  const collidesWithTier1 = (x) => positioned.some(p =>
-    (p.isEvidence || p.category === 'evidence' || (!p.isParse && p.category !== 'parse' && !p.isEvaluation && p.category !== 'evaluation'))
-    && Math.abs(p.x - x) < stepX * 0.5
-  )
+    // Helper: check tier1 collision
+    const collidesWithTier1 = (x) => positioned.some(p =>
+      (p.isEvidence || p.category === 'evidence' || (!p.isParse && p.category !== 'parse' && !p.isEvaluation && p.category !== 'evaluation'))
+      && Math.abs(p.x - x) < stepX * 0.5
+    )
 
-  // Layout superseded evals first (higher up, closer to parse)
-  const evalY = tier2.length > 0 ? tierGap * 2 : tierGap
-  if (tier3Superseded.length > 0) {
-    const supW = (tier3Superseded.length - 1) * stepX
-    const supStartX = -supW / 2
-    tier3Superseded.forEach((supNode, i) => {
-      let supX = snapToGrid(supStartX + i * stepX, depthLevel)
-      if (collidesWithTier1(supX)) supX = snapToGrid(supX + stepX, depthLevel)
-      positioned.push({
-        ...supNode,
-        x: supX,
-        y: snapToGrid(evalY, depthLevel),
+    // Tier 3: Superseded evals
+    const evalY = parses.length > 0 ? tierGap * 2 : tierGap
+    if (evalsSuperseded.length > 0) {
+      const supW = (evalsSuperseded.length - 1) * stepX
+      const supStartX = -supW / 2
+      evalsSuperseded.forEach((supNode, i) => {
+        let supX = snapToGrid(supStartX + i * stepX, depthLevel)
+        if (collidesWithTier1(supX)) supX = snapToGrid(supX + stepX, depthLevel)
+        positioned.push({ ...supNode, x: supX, y: snapToGrid(evalY, depthLevel) })
       })
-    })
-  }
+    }
 
-  // Layout active evals below superseded (or at evalY if no superseded)
-  const activeEvalY = tier3Superseded.length > 0 ? evalY + tierGap : evalY
-  if (tier3Active.length > 0) {
-    const tier3W = (tier3Active.length - 1) * stepX
-    const tier3StartX = -tier3W / 2
-    tier3Active.forEach((evalNode, i) => {
-      let evalX = snapToGrid(tier3StartX + i * stepX, depthLevel)
-      if (collidesWithTier1(evalX)) evalX = snapToGrid(evalX + stepX, depthLevel)
-      positioned.push({
-        ...evalNode,
-        x: evalX,
-        y: snapToGrid(activeEvalY, depthLevel),
+    // Tier 3/4: Active evals
+    const activeEvalY = evalsSuperseded.length > 0 ? evalY + tierGap : evalY
+    if (evalsActive.length > 0) {
+      const tier3W = (evalsActive.length - 1) * stepX
+      const tier3StartX = -tier3W / 2
+      evalsActive.forEach((evalNode, i) => {
+        let evalX = snapToGrid(tier3StartX + i * stepX, depthLevel)
+        if (collidesWithTier1(evalX)) evalX = snapToGrid(evalX + stepX, depthLevel)
+        positioned.push({ ...evalNode, x: evalX, y: snapToGrid(activeEvalY, depthLevel) })
       })
-    })
+    }
   }
 
   return positioned
@@ -354,6 +423,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   onParseEvidence,
   onRunEvaluation,
   onAmendEval,
+  onCreateClaim,
   activeParty,
   revealAnim,
 }, ref) {
@@ -450,19 +520,54 @@ const V2Canvas = forwardRef(function V2Canvas({
     const allNodes = [anchorNode, ...childrenWithPos]
 
     const childEdges = []
-    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
-      childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
-      childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
-      childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
-      const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
-      childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
-    })
+    const hasClaims = childrenWithPos.some(c => c.isClaim || c.category === 'claim')
+
+    if (hasClaims) {
+      childrenWithPos.filter(c => c.isClaim || c.category === 'claim').forEach(claim => {
+        childEdges.push({ id: `edge-anchor-${claim.id}`, from: anchorNode.id, to: claim.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isEvidence || c.category === 'evidence').forEach(ev => {
+        childEdges.push({ id: `edge-anchor-${ev.id}`, from: anchorNode.id, to: ev.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+        childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+        const predecessor = childrenWithPos.find(s =>
+          (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id
+        )
+        const parentId = predecessor ? predecessor.id : (evalChild.claimId || anchorNode.id)
+        childEdges.push({ id: `edge-eval-${evalChild.id}`, from: parentId, to: evalChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+        const parentId = supChild.claimId || anchorNode.id
+        childEdges.push({ id: `edge-sup-${supChild.id}`, from: parentId, to: supChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isClaim || c.category === 'claim').forEach(claim => {
+        if (claim.referencedEvidenceIds && claim.referencedEvidenceIds.length > 0) {
+          claim.referencedEvidenceIds.forEach(evId => {
+            const evNode = childrenWithPos.find(p => p.id === evId)
+            if (evNode) {
+              childEdges.push({ id: `edge-ref-${claim.id}-${evId}`, from: claim.id, to: evId, sdaType: 'full', _reference: true })
+            }
+          })
+        }
+      })
+    } else {
+      childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
+        childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+        childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+        childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+        const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
+        childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
+      })
+    }
 
     setLayerStack(prev => {
       if (prev.length <= 1) return prev  // safety: don't update if we've already surfaced
@@ -668,16 +773,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       if (!fromNode || !toNode || fromNode.x === undefined || toNode.x === undefined) return
 
       let x1, y1, x2, y2
-      if (edge._vertical) {
-        // Vertical edge: bottom-center of parent → top-center of child
+      if (lodMode) {
+        // LOD mode: connect to node center (both horizontal and vertical)
+        x1 = fromNode.x; y1 = fromNode.y
+        x2 = toNode.x; y2 = toNode.y
+      } else if (edge._vertical) {
+        // Vertical edge (card mode): bottom-center of parent → top-center of child
         x1 = fromNode.x
         y1 = fromNode.y + halfH
         x2 = toNode.x
         y2 = toNode.y - halfH
-      } else if (lodMode) {
-        // LOD mode: connect to node center
-        x1 = fromNode.x; y1 = fromNode.y
-        x2 = toNode.x; y2 = toNode.y
       } else {
         // Card mode: exit/enter from the side facing the other node
         const dx = toNode.x - fromNode.x
@@ -755,7 +860,15 @@ const V2Canvas = forwardRef(function V2Canvas({
       const geometry = new LineGeometry()
       geometry.setPositions(positions)
 
-      const isDashed = sdaCfg.dash > 0
+      let isDashed = sdaCfg.dash > 0
+      let dashSize = sdaCfg.dash
+      let gapSize = sdaCfg.gap
+      // Reference edges: dashed style to distinguish from ownership edges
+      if (edge._reference) {
+        isDashed = true
+        dashSize = 6
+        gapSize = 4
+      }
       let material
       if (isDashed) {
         // Dashed lines: need transparent for gaps
@@ -767,8 +880,8 @@ const V2Canvas = forwardRef(function V2Canvas({
           depthWrite: false,
           resolution: new THREE.Vector2(resX, resY),
           dashed: true,
-          dashSize: sdaCfg.dash,
-          gapSize: sdaCfg.gap,
+          dashSize,
+          gapSize,
           dashScale: 1,
         })
       } else {
@@ -1469,21 +1582,56 @@ const V2Canvas = forwardRef(function V2Canvas({
     const anchorNode = { ...node, _isAnchor: true, x: 0, y: anchorY }
     const allNodes = [anchorNode, ...childrenWithPos]
 
-    // Create edges: anchor → tier 1 children, evidence → PEP parse nodes
+    // Create edges: claims-aware or legacy
     const childEdges = []
-    childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
-      childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
-      childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
-      childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
-    })
-    childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
-      const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
-      childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
-    })
+    const hasClaims = childrenWithPos.some(c => c.isClaim || c.category === 'claim')
+
+    if (hasClaims) {
+      childrenWithPos.filter(c => c.isClaim || c.category === 'claim').forEach(claim => {
+        childEdges.push({ id: `edge-anchor-${claim.id}`, from: anchorNode.id, to: claim.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isEvidence || c.category === 'evidence').forEach(ev => {
+        childEdges.push({ id: `edge-anchor-${ev.id}`, from: anchorNode.id, to: ev.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+        childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+        const predecessor = childrenWithPos.find(s =>
+          (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id
+        )
+        const parentId = predecessor ? predecessor.id : (evalChild.claimId || anchorNode.id)
+        childEdges.push({ id: `edge-eval-${evalChild.id}`, from: parentId, to: evalChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+        const parentId = supChild.claimId || anchorNode.id
+        childEdges.push({ id: `edge-sup-${supChild.id}`, from: parentId, to: supChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isClaim || c.category === 'claim').forEach(claim => {
+        if (claim.referencedEvidenceIds && claim.referencedEvidenceIds.length > 0) {
+          claim.referencedEvidenceIds.forEach(evId => {
+            const evNode = childrenWithPos.find(p => p.id === evId)
+            if (evNode) {
+              childEdges.push({ id: `edge-ref-${claim.id}-${evId}`, from: claim.id, to: evId, sdaType: 'full', _reference: true })
+            }
+          })
+        }
+      })
+    } else {
+      childrenWithPos.filter(c => c.category !== 'parse' && !c.isParse && !c.isEvaluation && c.category !== 'evaluation').forEach(child => {
+        childEdges.push({ id: `edge-anchor-${child.id}`, from: anchorNode.id, to: child.id, sdaType: child.sda?.type || 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => c.isParse || c.category === 'parse').forEach(pepChild => {
+        childEdges.push({ id: `edge-${pepChild.sourceEvidenceId}-${pepChild.id}`, from: pepChild.sourceEvidenceId, to: pepChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status === 'superseded').forEach(supChild => {
+        childEdges.push({ id: `edge-anchor-sup-${supChild.id}`, from: anchorNode.id, to: supChild.id, sdaType: 'full', _vertical: true })
+      })
+      childrenWithPos.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded').forEach(evalChild => {
+        const predecessor = childrenWithPos.find(s => (s.isEvaluation || s.category === 'evaluation') && s.status === 'superseded' && evalChild.previousEvalId === s.id)
+        childEdges.push({ id: `edge-eval-${evalChild.id}`, from: predecessor ? predecessor.id : anchorNode.id, to: evalChild.id, sdaType: 'full', _vertical: true })
+      })
+    }
 
     // Compute final camera state BEFORE the transition so React renders
     // child cards at correct screen positions during the snapshot
@@ -2345,7 +2493,9 @@ const V2Canvas = forwardRef(function V2Canvas({
     }
   }, [hoveredEdge])
 
-  const isLOD = zoom < LOD_THRESHOLD
+  const isDot = zoom < MID_LOD_THRESHOLD
+  const isMidLOD = zoom >= MID_LOD_THRESHOLD && zoom < LOD_THRESHOLD
+  const isLOD = isDot || isMidLOD
   const zoomPct = Math.round(((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 90 + 10) + '%'
 
   // Card wrapper styles — View Transitions API handles departure/arrival animation
@@ -2404,7 +2554,38 @@ const V2Canvas = forwardRef(function V2Canvas({
           const isAnchor = !!node._isAnchor
           const isDiveTarget = diveTargetId === node.id
 
-          if (isLOD && !transitioning) {
+          if (isMidLOD && !transitioning) {
+            return (
+              <div key={isAnchor ? `${node.id}-anchor` : node.id} data-card-id={node.id} style={{
+                position: 'absolute',
+                left: sp.x - MINI_CARD_W / 2,
+                top: sp.y - MINI_CARD_H / 2,
+                transform: `scale(${zoom})`,
+                transformOrigin: 'center center',
+                pointerEvents: transitioning ? 'none' : 'auto',
+                opacity: chainNodeIds && !chainNodeIds.has(sp.id) ? 0.35 : 1,
+                transition: 'opacity 200ms ease',
+                ...((isDiveTarget || isAnchor) && transitioning ? { viewTransitionName: 'dive-target' } : {}),
+              }}>
+                <AssetNodeMini
+                  node={node}
+                  isSelected={selectedId === node.id}
+                  onSelect={onSelect}
+                  onDive={isAnchor ? undefined : handleDive}
+                  onOpenSubgraph={(node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
+                  onConnect={transitioning ? undefined : onConnect}
+                  onDisclose={transitioning ? undefined : onDisclose}
+                  onAddEvidence={transitioning ? undefined : onAddEvidence}
+                  onParseEvidence={transitioning ? undefined : onParseEvidence}
+                  onRunEvaluation={transitioning ? undefined : onRunEvaluation}
+                  onCreateClaim={transitioning ? undefined : onCreateClaim}
+                  activeParty={activeParty}
+                />
+              </div>
+            )
+          }
+
+          if (isDot && !transitioning) {
             // Concentric rings for nodes with children
             const childRings = (() => {
               const kids = node.children
@@ -2435,7 +2616,7 @@ const V2Canvas = forwardRef(function V2Canvas({
             })()
 
             return (
-              <div key={isAnchor ? `${node.id}-anchor` : node.id} style={{
+              <div key={isAnchor ? `${node.id}-anchor` : node.id} data-card-id={node.id} style={{
                 position: 'absolute',
                 left: sp.x - 8,
                 top: sp.y - 8,
@@ -2456,6 +2637,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onAddEvidence={transitioning ? undefined : onAddEvidence}
                   onParseEvidence={transitioning ? undefined : onParseEvidence}
                   onRunEvaluation={transitioning ? undefined : onRunEvaluation}
+                  onCreateClaim={transitioning ? undefined : onCreateClaim}
                   activeParty={activeParty}
                 />
               </div>
@@ -2504,6 +2686,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onParseEvidence={transitioning ? undefined : onParseEvidence}
                 onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                 onAmendEval={transitioning ? undefined : onAmendEval}
+                onCreateClaim={transitioning ? undefined : onCreateClaim}
                 activeParty={activeParty}
                 revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}
               />

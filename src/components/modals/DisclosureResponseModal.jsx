@@ -756,6 +756,17 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
     return assetNode.children.filter(c => c.isEvaluation || c.category === 'evaluation')
   }, [assetNode])
 
+  const claimNodes = useMemo(() => {
+    if (!assetNode?.children) return []
+    return assetNode.children.filter(c => c.isClaim || c.category === 'claim')
+  }, [assetNode])
+
+  const hasClaims = claimNodes.length > 0
+
+  const [selectedClaimIds, setSelectedClaimIds] = useState(() =>
+    new Set(claimNodes.map(c => c.id))
+  )
+
   useEffect(() => {
     if (evalNodes.length > 0) {
       setSelectedEvalIds(new Set(evalNodes.map(e => e.id)))
@@ -809,14 +820,16 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   const showFieldStep = decision !== 'decline' && level === 'selective' && filteredPepFields.length > 0
   const showCascadeStep = decision !== 'decline' && hasCascadableAssets && cascadePolicy === 'open'
 
-  const evidenceStepIdx = showEvidenceStep ? 2 : -1
-  const evalStepIdx = showEvalStep ? 2 : -1
-  const fieldStepIdx = showFieldStep ? (showEvidenceStep ? 3 : 2) : -1
+  const claimOffset = hasClaims ? 1 : 0
+  const claimStepIdx = hasClaims ? 2 : -1
+  const evidenceStepIdx = showEvidenceStep ? (2 + claimOffset) : -1
+  const evalStepIdx = showEvalStep ? (2 + claimOffset) : -1
+  const fieldStepIdx = showFieldStep ? ((showEvidenceStep ? 3 : 2) + claimOffset) : -1
   const cascadeStepIdx = showCascadeStep
-    ? ((fieldStepIdx >= 0 ? fieldStepIdx : evalStepIdx >= 0 ? evalStepIdx : evidenceStepIdx >= 0 ? evidenceStepIdx : 1) + 1)
+    ? ((fieldStepIdx >= 0 ? fieldStepIdx : evalStepIdx >= 0 ? evalStepIdx : evidenceStepIdx >= 0 ? evidenceStepIdx : (1 + claimOffset)) + 1)
     : -1
 
-  const totalSteps = decision === 'decline' ? 2 : (2 + (showEvidenceStep ? 1 : 0) + (showEvalStep ? 1 : 0) + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
+  const totalSteps = decision === 'decline' ? 2 : (2 + claimOffset + (showEvidenceStep ? 1 : 0) + (showEvalStep ? 1 : 0) + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
   const effectiveLevel = level
 
   if (completed) {
@@ -910,6 +923,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
                 level === 'selective' && filteredPepFields.length > 0 ? [...selectedFields] : null,
                 level !== 'proofonly' && evidenceNodes.length > 0 ? [...selectedEvidenceIds] : null,
                 level === 'proofonly' && selectedEvalIds.size > 0 ? [...selectedEvalIds] : null,
+                hasClaims ? [...selectedClaimIds] : null,
               )
             } else if (onClose) {
               onClose()
@@ -949,6 +963,84 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
             hasCascadableAssets={hasCascadableAssets}
             hasPepFields={pepFields.length > 0}
           />
+        )}
+        {step === claimStepIdx && decision !== 'decline' && hasClaims && (
+          <div>
+            <div style={{
+              padding: '14px 16px',
+              background: 'color-mix(in srgb, var(--accent-teal) 6%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-teal) 25%, transparent)',
+              borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+            }}>
+              Select which claims to include in this disclosure. The recipient will only see the claims you select and their associated evaluations.
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {selectedClaimIds.size} of {claimNodes.length} claim{claimNodes.length !== 1 ? 's' : ''} selected
+              </span>
+              <span
+                onClick={() => {
+                  if (selectedClaimIds.size === claimNodes.length) setSelectedClaimIds(new Set())
+                  else setSelectedClaimIds(new Set(claimNodes.map(c => c.id)))
+                }}
+                style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-teal)', cursor: 'pointer' }}
+              >
+                {selectedClaimIds.size === claimNodes.length ? 'Deselect All' : 'Select All'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {claimNodes.map(claim => {
+                const checked = selectedClaimIds.has(claim.id)
+                const h = claim.displayHealth || claim.health || { ok: 0, warn: 0, bad: 0 }
+                const evCount = (claim.referencedEvidenceIds || []).length
+                return (
+                  <div
+                    key={claim.id}
+                    onClick={() => setSelectedClaimIds(prev => {
+                      const next = new Set(prev)
+                      if (next.has(claim.id)) next.delete(claim.id)
+                      else next.add(claim.id)
+                      return next
+                    })}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+                      border: `1.5px solid ${checked ? 'var(--accent-teal)' : 'var(--border)'}`,
+                      background: checked ? 'color-mix(in srgb, var(--accent-teal) 4%, transparent)' : 'var(--bg-card)',
+                      transition: 'all 150ms',
+                    }}
+                  >
+                    <span style={{
+                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                      border: `2px solid ${checked ? 'var(--accent-teal)' : 'var(--border)'}`,
+                      background: checked ? 'var(--accent-teal)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 150ms',
+                    }}>
+                      {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 10, color: 'var(--accent-teal)' }}>{'\u25C7'}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{claim.name}</span>
+                        {claim.requirementSetVersion && (
+                          <span style={{
+                            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '1px 4px', borderRadius: 3,
+                            background: 'color-mix(in srgb, var(--accent-teal) 10%, transparent)',
+                            color: 'var(--accent-teal)',
+                          }}>v{claim.requirementSetVersion}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                        {evCount} evidence · {h.ok + (h.warn || 0) + h.bad > 0 ? `${h.ok} sat · ${h.bad} unsat` : 'No evaluations'}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         )}
         {step === evidenceStepIdx && decision !== 'decline' && showEvidenceStep && (
           <StepEvidenceSelection
@@ -993,15 +1085,30 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
         {step === 0 && !decision && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a response above</div>}
         {step === 0 && decision && <Btn label={decision === 'decline' ? 'Next →' : 'Set Terms →'} accent onClick={() => setStep(1)} />}
         {step === 1 && decision === 'decline' && <Btn label="Decline Request" danger onClick={() => setCompleted(true)} />}
-        {step === 1 && decision !== 'decline' && (() => {
+        {step === 1 && decision !== 'decline' && hasClaims && (() => {
           const selectiveBlocked = level === 'selective' && pepFields.length === 0
           const proofBlocked = level === 'proofonly' && !hasProofEval
           if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
           if (proofBlocked) return <Btn label="No Evaluation Available" disabled />
-          if (showEvalStep) return <Btn label="Select Evaluations →" accent onClick={() => setStep(evalStepIdx)} />
-          if (showEvidenceStep) return <Btn label="Select Evidence →" accent onClick={() => setStep(2)} />
-          if (showFieldStep) return <Btn label="Select Fields →" accent onClick={() => setStep(fieldStepIdx)} />
-          if (showCascadeStep) return <Btn label="Next — Cascade Assets →" accent onClick={() => setStep(cascadeStepIdx)} />
+          return <Btn label="Select Claims \u2192" accent onClick={() => setStep(claimStepIdx)} />
+        })()}
+        {step === claimStepIdx && decision !== 'decline' && hasClaims && (() => {
+          if (selectedClaimIds.size === 0) return <Btn label="Select at least one claim" disabled />
+          if (showEvalStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Evaluations \u2192`} accent onClick={() => setStep(evalStepIdx)} />
+          if (showEvidenceStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Evidence \u2192`} accent onClick={() => setStep(evidenceStepIdx)} />
+          if (showFieldStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Fields \u2192`} accent onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Cascade \u2192`} accent onClick={() => setStep(cascadeStepIdx)} />
+          return <Btn label={`Create Disclosure (${selectedClaimIds.size} claims)`} accent onClick={() => setCompleted(true)} />
+        })()}
+        {step === 1 && decision !== 'decline' && !hasClaims && (() => {
+          const selectiveBlocked = level === 'selective' && pepFields.length === 0
+          const proofBlocked = level === 'proofonly' && !hasProofEval
+          if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
+          if (proofBlocked) return <Btn label="No Evaluation Available" disabled />
+          if (showEvalStep) return <Btn label="Select Evaluations \u2192" accent onClick={() => setStep(evalStepIdx)} />
+          if (showEvidenceStep) return <Btn label="Select Evidence \u2192" accent onClick={() => setStep(evidenceStepIdx)} />
+          if (showFieldStep) return <Btn label="Select Fields \u2192" accent onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label="Next \u2014 Cascade Assets \u2192" accent onClick={() => setStep(cascadeStepIdx)} />
           return <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
         })()}
         {step === evalStepIdx && decision !== 'decline' && showEvalStep && (() => {

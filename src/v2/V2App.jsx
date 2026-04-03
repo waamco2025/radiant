@@ -4,7 +4,7 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeEvalNode, resolvePin } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin } from './v2Data.js'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -18,6 +18,7 @@ import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.js
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
 import PEPLibraryModal from '../components/modals/PEPLibraryModal.jsx'
 import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
+import CreateClaimModal from '../components/modals/CreateClaimModal.jsx'
 import ReviseDisclosureModal from '../components/modals/ReviseDisclosureModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
@@ -216,41 +217,81 @@ export default function V2App() {
       return { ...n, children: updatedChildren }
     })
 
-    // Unified health computation: eval child health, evidence cleanup, parent rollup
+    // Unified health computation: eval → claim → parent rollup
     data.nodes = data.nodes.map(n => {
-      // Step A: Compute health on eval child nodes from their claims + zero evidence health
       let children = n.children
-      if (children && children.length > 0) {
+      if (!children || children.length === 0) return n
+
+      // Step A: Compute health on eval child nodes from their claims + zero evidence health
+      children = children.map(c => {
+        if ((c.isEvaluation || c.category === 'evaluation') && c.claims && c.claims.length > 0) {
+          const ok = c.claims.filter(cl => cl.status === 'satisfactory').length
+          const bad = c.claims.filter(cl => cl.status === 'unsatisfactory').length
+          const warn = c.claims.filter(cl => cl.status === 'missing').length
+          return {
+            ...c,
+            health: { ok, warn, bad },
+            displayHealth: { ok, warn, bad },
+            claimCount: c.claims.length,
+            displayClaimCount: c.claims.length,
+          }
+        }
+        if (c.isEvidence) {
+          return {
+            ...c,
+            health: { ok: 0, warn: 0, bad: 0 },
+            displayHealth: { ok: 0, warn: 0, bad: 0 },
+            claimCount: 0,
+            displayClaimCount: 0,
+          }
+        }
+        return c
+      })
+
+      // Step B: Roll up eval health into parent claim nodes
+      const claimChildren = children.filter(c => c.isClaim || c.category === 'claim')
+      if (claimChildren.length > 0) {
         children = children.map(c => {
-          if ((c.isEvaluation || c.category === 'evaluation') && c.claims && c.claims.length > 0) {
-            const ok = c.claims.filter(cl => cl.status === 'satisfactory').length
-            const bad = c.claims.filter(cl => cl.status === 'unsatisfactory').length
-            const warn = c.claims.filter(cl => cl.status === 'missing').length
-            return {
-              ...c,
-              health: { ok, warn, bad },
-              displayHealth: { ok, warn, bad },
-              claimCount: c.claims.length,
-              displayClaimCount: c.claims.length,
-            }
+          if (!(c.isClaim || c.category === 'claim')) return c
+          const claimEvals = children.filter(e =>
+            (e.isEvaluation || e.category === 'evaluation') &&
+            e.claimId === c.id &&
+            e.status !== 'superseded'
+          )
+          let ok = 0, warn = 0, bad = 0, totalClaims = 0
+          for (const ev of claimEvals) {
+            const h = ev.health || { ok: 0, warn: 0, bad: 0 }
+            ok += h.ok
+            warn += (h.warn || 0)
+            bad += h.bad
+            totalClaims += (ev.claimCount || 0)
           }
-          if (c.isEvidence) {
-            return {
-              ...c,
-              health: { ok: 0, warn: 0, bad: 0 },
-              displayHealth: { ok: 0, warn: 0, bad: 0 },
-              claimCount: 0,
-              displayClaimCount: 0,
-            }
+          const claimHealth = { ok, warn, bad }
+          return {
+            ...c,
+            health: claimHealth,
+            displayHealth: claimHealth,
+            claimCount: totalClaims,
+            displayClaimCount: totalClaims,
           }
-          return c
         })
       }
 
-      // Step B: Roll up to parent from eval child nodes
+      // Step C: Roll up to parent from claim nodes (if any) or eval nodes (legacy fallback)
       let ok = 0, warn = 0, bad = 0, totalClaims = 0
-      if (children) {
-        const evalChildren = children.filter(c => (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded')
+      if (claimChildren.length > 0) {
+        const updatedClaims = children.filter(c => c.isClaim || c.category === 'claim')
+        for (const cl of updatedClaims) {
+          const h = cl.displayHealth || cl.health || { ok: 0, warn: 0, bad: 0 }
+          ok += h.ok
+          warn += (h.warn || 0)
+          bad += h.bad
+          totalClaims += (cl.claimCount || 0)
+        }
+      } else {
+        const evalChildren = children.filter(c =>
+          (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded'
+        )
         for (const ev of evalChildren) {
           const h = ev.health || { ok: 0, warn: 0, bad: 0 }
           ok += h.ok
@@ -298,6 +339,24 @@ export default function V2App() {
         }
       })
       return { ...n, children: filteredChildren, _isSelective: true }
+    })
+
+    // Filter disclosed children by selectedClaimIds (non-owned nodes only)
+    data.nodes = data.nodes.map(n => {
+      if (n.owner === activeRole.party) return n
+      if (!n.children || n.children.length === 0) return n
+      const sda = (n.sdas || []).find(s => s.party === activeRole.party && s.selectedClaimIds)
+      if (!sda || !sda.selectedClaimIds) return n
+      const disclosedClaimSet = new Set(sda.selectedClaimIds)
+      const filteredChildren = n.children.filter(c => {
+        if (c.isClaim || c.category === 'claim') return disclosedClaimSet.has(c.id)
+        if (c.isEvaluation || c.category === 'evaluation') {
+          if (c.claimId) return disclosedClaimSet.has(c.claimId)
+          return true
+        }
+        return true
+      })
+      return { ...n, children: filteredChildren }
     })
 
     // Rebuild nodeMap
@@ -536,6 +595,7 @@ export default function V2App() {
     return () => document.removeEventListener('open-pep-library', handler)
   }, [])
   const [evalContext, setEvalContext] = useState(null)
+  const [claimContext, setClaimContext] = useState(null)
   const [reviseContext, setReviseContext] = useState(null)
   const [showChangelog, setShowChangelog] = useState(false)
 
@@ -1633,7 +1693,14 @@ export default function V2App() {
           onLayerChange={setLayerInfo}
           onConnect={(node) => setConnectNode(node)}
           onDisclose={(node) => setPublishNode(node)}
-          onAddEvidence={(node) => setEvidenceNode(node)}
+          onAddEvidence={(node) => {
+            if (node.isClaim || node.category === 'claim') {
+              const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
+              if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: node })
+            } else {
+              setEvidenceNode(node)
+            }
+          }}
           onParseEvidence={(evidenceNodeArg) => {
             const parentAsset = nodes.find(n => n.children?.some(c => c.id === evidenceNodeArg.id))
             setParseContext({
@@ -1644,6 +1711,18 @@ export default function V2App() {
           }}
           onRunEvaluation={(node) => {
             if (!node) return
+            if (node.isClaim || node.category === 'claim') {
+              const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
+              if (!parentAsset) return
+              const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+              const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
+              const claimReqSet = requirementSets.find(rs => rs.id === node.requirementSetId)
+                || requirementSets.find(rs => (rs.lineageId || rs.id) === node.requirementSetLineageId)
+                || publishedRequirementSets.find(rs => rs.id === node.requirementSetId)
+                || publishedRequirementSets.find(rs => (rs.lineageId || rs.id) === node.requirementSetLineageId)
+              setEvalContext({ assetNode: parentAsset, claimNode: node, disclosureType, claimReqSet: claimReqSet || null })
+              return
+            }
             if (node.isEvidence) {
               const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
               if (!parentAsset) return
@@ -1681,6 +1760,7 @@ export default function V2App() {
               },
             })
           }}
+          onCreateClaim={(node) => setClaimContext({ parentNode: node })}
           activeParty={activeRole.party}
           revealAnim={revealAnim}
         />
@@ -1745,7 +1825,20 @@ export default function V2App() {
               depth={layerInfo.depth}
               onDisclose={() => sel && nodeMap[sel] && setPublishNode(nodeMap[sel])}
               onConnect={() => sel && nodeMap[sel] && setConnectNode(nodeMap[sel])}
-              onAddEvidence={() => sel && nodeMap[sel] && setEvidenceNode(nodeMap[sel])}
+              onAddEvidence={() => {
+                const target = sel && nodeMap[sel]
+                if (!target) return
+                if (target.isClaim || target.category === 'claim') {
+                  const parentAsset = nodes.find(n => n.children?.some(c => c.id === target.id))
+                  if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: target })
+                } else {
+                  setEvidenceNode(target)
+                }
+              }}
+              onCreateClaim={(node) => {
+                const target = node || (sel && nodeMap[sel])
+                if (target) setClaimContext({ parentNode: target })
+              }}
               onParseEvidence={() => {
                 if (!sel || !nodeMap[sel]) return
                 const evNode = nodeMap[sel]
@@ -1760,6 +1853,18 @@ export default function V2App() {
               onRunEvaluation={(targetNode) => {
                 const n = targetNode || nodeMap[sel]
                 if (!n) return
+                if (n.isClaim || n.category === 'claim') {
+                  const parentAsset = nodes.find(pn => pn.children?.some(c => c.id === n.id))
+                  if (!parentAsset) return
+                  const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+                  const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
+                  const claimReqSet = requirementSets.find(rs => rs.id === n.requirementSetId)
+                    || requirementSets.find(rs => (rs.lineageId || rs.id) === n.requirementSetLineageId)
+                    || publishedRequirementSets.find(rs => rs.id === n.requirementSetId)
+                    || publishedRequirementSets.find(rs => (rs.lineageId || rs.id) === n.requirementSetLineageId)
+                  setEvalContext({ assetNode: parentAsset, claimNode: n, disclosureType, claimReqSet: claimReqSet || null })
+                  return
+                }
                 if (n.isEvidence) {
                   const parentAsset = nodes.find(p => p.children?.some(c => c.id === n.id))
                   if (!parentAsset) return
@@ -2318,9 +2423,10 @@ export default function V2App() {
       )} */}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || reviseContext) && (
+      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || claimContext || reviseContext) && (
         <Backdrop onClose={() => {
           if (reviseContext) setReviseContext(null)
+          else if (claimContext) setClaimContext(null)
           else if (evalContext) setEvalContext(null)
           else if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
           else if (showPEPLibrary) setShowPEPLibrary(false)
@@ -2674,7 +2780,7 @@ export default function V2App() {
           request={responseRequest}
           assetNode={nodeMap[responseRequest.node?.id]}
           onClose={() => setResponseRequest(null)}
-          onComplete={(disclosureType, selectedFieldIds, selectedEvidenceIds, selectedEvalIds) => {
+          onComplete={(disclosureType, selectedFieldIds, selectedEvidenceIds, selectedEvalIds, selectedClaimIds) => {
             const req = responseRequest
             const reqNodeId = req.node?.id
             const today = new Date().toISOString().slice(0, 10)
@@ -2721,6 +2827,7 @@ export default function V2App() {
                 assetPin: req.connectTo?.pin || null,
                 selectedFieldIds: selectedFieldIds || null,
                 selectedEvidenceIds: selectedEvidenceIds || null,
+                selectedClaimIds: selectedClaimIds || null,
                 selectedEvals: proofOnlyEvals,
                 _isGrantor: true,
               }
@@ -3227,6 +3334,8 @@ export default function V2App() {
         <RunEvaluationModal
           assetNode={evalContext.assetNode}
           evidenceNode={evalContext.evidenceNode}
+          claimNode={evalContext.claimNode || null}
+          claimReqSet={evalContext.claimReqSet || null}
           disclosureType={evalContext.disclosureType}
           parsedFields={evalContext.parsedFields}
           requirementSets={requirementSets}
@@ -3271,6 +3380,11 @@ export default function V2App() {
               supersededId
             )
             evalNode.selectedEvidenceIds = evalEvidenceIds || []
+            // Set claimId if eval was triggered from a claim
+            if (evalContext.claimNode) {
+              evalNode.claimId = evalContext.claimNode.id
+              evalNode.parentId = evalContext.claimNode.id
+            }
             if (supersededId) {
               if (evalContext.amendingEval) {
                 evalNode.evalVersion = (evalContext.amendingEval.version || 1) + 1
@@ -3392,12 +3506,86 @@ export default function V2App() {
           _noBackdrop
         />
       )}
+      {claimContext && (
+        <CreateClaimModal
+          parentNode={claimContext.parentNode}
+          editingClaim={claimContext.editingClaim || null}
+          requirementSets={requirementSets}
+          publishedSets={visiblePublishedSets}
+          activeParty={activeRole.party}
+          onClose={() => setClaimContext(null)}
+          onComplete={({ title, requirementSet, referencedEvidenceIds }) => {
+            const parentNode = claimContext.parentNode
+
+            if (claimContext.editingClaim) {
+              const claimId = claimContext.editingClaim.id
+              updateRoleState(roleId, prev => {
+                const existingChildren = prev.addedChildren?.[parentNode.id] || []
+                const dynamicIdx = existingChildren.findIndex(c => c.id === claimId)
+                if (dynamicIdx >= 0) {
+                  const updated = [...existingChildren]
+                  updated[dynamicIdx] = { ...updated[dynamicIdx], referencedEvidenceIds }
+                  return { ...prev, addedChildren: { ...(prev.addedChildren || {}), [parentNode.id]: updated } }
+                }
+                const staticNode = parentNode.children?.find(c => c.id === claimId)
+                if (staticNode) {
+                  return {
+                    ...prev,
+                    addedChildren: {
+                      ...(prev.addedChildren || {}),
+                      [parentNode.id]: [...existingChildren, { ...staticNode, referencedEvidenceIds }],
+                    },
+                  }
+                }
+                return prev
+              })
+              setClaimContext(null)
+              return
+            }
+
+            const claimNode = makeClaimNode(
+              parentNode.id,
+              { ...requirementSet, name: title || requirementSet.name },
+              referencedEvidenceIds,
+              activeRole.party
+            )
+
+            updateRoleState(roleId, prev => {
+              const existingChildren = prev.addedChildren?.[parentNode.id] || []
+              return {
+                ...prev,
+                addedChildren: {
+                  ...(prev.addedChildren || {}),
+                  [parentNode.id]: [...existingChildren, claimNode],
+                },
+              }
+            })
+
+            setClaimContext(null)
+
+            if (layerInfo.depth > 0 && layerInfo.anchorId === parentNode.id) {
+              setTimeout(() => setSel(claimNode.id), 200)
+            } else {
+              setTimeout(() => {
+                if (canvasRef.current) {
+                  const updatedParent = nodeMapRef.current[parentNode.id]
+                  if (updatedParent) {
+                    canvasRef.current.dive(updatedParent)
+                    setTimeout(() => setSel(claimNode.id), 600)
+                  }
+                }
+              }, 100)
+            }
+          }}
+          _noBackdrop
+        />
+      )}
       {reviseContext && (
         <ReviseDisclosureModal
           sda={reviseContext.sda}
           node={reviseContext.node}
           onClose={() => setReviseContext(null)}
-          onComplete={({ selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }) => {
+          onComplete={({ selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds }) => {
             const { sda, node: targetNode } = reviseContext
             const today = new Date().toISOString().slice(0, 10)
             const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
@@ -3411,14 +3599,14 @@ export default function V2App() {
               )
               if (sdaIdx >= 0) {
                 const updated = [...existingSDAs]
-                updated[sdaIdx] = { ...updated[sdaIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                updated[sdaIdx] = { ...updated[sdaIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                 return { ...prev, addedSDAs: { ...prev.addedSDAs, [nodeId]: updated } }
               }
               return {
                 ...prev,
                 addedSDAs: {
                   ...prev.addedSDAs,
-                  [nodeId]: [...existingSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }],
+                  [nodeId]: [...existingSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }],
                 },
                 removedSDAs: [...(prev.removedSDAs || []), { nodeId, party: sda.party, type: sda.type, created: sda.created }],
               }
@@ -3467,7 +3655,7 @@ export default function V2App() {
                   // Update SDAs on the disclosed node itself
                   const updatedSDAs = (updatedNodes[existingIdx].sdas || []).map(s => {
                     if (s.type === sda.type && (s.party === sda.party || s.assetPin === targetNode.pin || s.assetName === targetNode.name)) {
-                      return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                      return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                     }
                     return s
                   })
@@ -3519,7 +3707,7 @@ export default function V2App() {
                   )
                   if (matchIdx >= 0) {
                     const updated = [...staticSDAs]
-                    updated[matchIdx] = { ...updated[matchIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                    updated[matchIdx] = { ...updated[matchIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                     newState.addedSDAs = {
                       ...(newState.addedSDAs || prev.addedSDAs || {}),
                       [disclosedNodeId]: updated,
@@ -3527,7 +3715,7 @@ export default function V2App() {
                   } else {
                     newState.addedSDAs = {
                       ...(newState.addedSDAs || prev.addedSDAs || {}),
-                      [disclosedNodeId]: [...staticSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, party: activeRole.party }],
+                      [disclosedNodeId]: [...staticSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null, party: activeRole.party }],
                     }
                   }
                 }
@@ -3539,7 +3727,7 @@ export default function V2App() {
                     ...(newState.addedSDAs || prev.addedSDAs),
                     [disclosedNodeId]: otherSDAs.map(s => {
                       if (s.type === sda.type && (s.assetPin === targetNode.pin || s.assetName === targetNode.name)) {
-                        return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                        return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                       }
                       return s
                     }),
@@ -3557,7 +3745,7 @@ export default function V2App() {
                         ...(newState.addedSDAs || prev.addedSDAs),
                         [connectToNode.id]: ctSDAs.map(s => {
                           if (s.assetPin === targetNode.pin || s.assetName === targetNode.name) {
-                            return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                            return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                           }
                           return s
                         }),
@@ -3568,7 +3756,7 @@ export default function V2App() {
                       const ctNode = (newState.addedNodes || prev.addedNodes)[ctNodeIdx]
                       const updatedCtSDAs = (ctNode.sdas || []).map(s => {
                         if (s.assetPin === targetNode.pin || s.assetName === targetNode.name) {
-                          return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds }
+                          return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
                         }
                         return s
                       })

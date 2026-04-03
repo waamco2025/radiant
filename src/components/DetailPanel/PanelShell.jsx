@@ -60,7 +60,7 @@ function FooterBtn({ icon, label, onClick, disabled, btnId, hoveredId, onHover, 
 export default function PanelShell({
   node, tabs, tab, setTab, summary, onClose,
   onClipClick, hasStack, hasParent, children,
-  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isOwner, onAmendEval, activeParty, depth,
+  onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isClaim, isOwner, onAmendEval, onCreateClaim, activeParty, depth,
 }) {
   const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
@@ -204,9 +204,13 @@ export default function PanelShell({
         const isChildLayer = isAnchor || depth > 0
         const isActiveEval = isEvaluation && node.status !== 'superseded'
         const buttons = []
-        if (isOwner && !isEvidence && !isParse && !isEvaluation) {
+        if (isOwner && !isEvidence && !isParse && !isEvaluation && !isClaim) {
           buttons.push({ icon: '+', label: 'Connect Asset', onClick: onConnect, id: 'connect' })
           buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>, label: 'Publish', onClick: onDisclose, id: 'disclose' })
+          buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
+          if (onCreateClaim) buttons.push({ icon: '◇', label: 'Create Claim', onClick: onCreateClaim, id: 'claim' })
+        }
+        if (isOwner && isClaim) {
           buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
         }
         if (canAssetEvaluate) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })

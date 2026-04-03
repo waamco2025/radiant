@@ -31,10 +31,13 @@ const CATEGORY_CONFIG = {
   evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' },
   parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
   evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
+  claim:      { icon: '◇', color: 'var(--accent-teal, #2dd4bf)', label: 'CLAIM' },
 }
 
 const CARD_W = 210
 const CARD_H = 86
+const MINI_CARD_W = 160
+const MINI_CARD_H = 32
 const CLICK_DELAY = 250
 const ACTION_BAR_W = 34 // 6px gap + 24px button + 4px breathing
 
@@ -268,7 +271,7 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   )
 }
 
-function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onAmendEval, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
+function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence, onRunEvaluation, onAmendEval, onCreateClaim, onDive, onOpenSubgraph, onSurface, hasChildren, isAnchor, isChild, categoryColor, isParty }) {
   const buttons = []
   if (onCreateAsset) buttons.push({ icon: '+', tooltip: 'Connect Asset', onClick: onCreateAsset })
   if (onCreateSDA && !isParty) buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}>
@@ -277,6 +280,7 @@ function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence,
     <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
   </svg>, tooltip: 'Publish this Asset', onClick: onCreateSDA })
   if (onAddEvidence) buttons.push({ icon: '◧', tooltip: 'Add Evidence', onClick: onAddEvidence })
+  if (onCreateClaim) buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: onCreateClaim })
   if (onParseEvidence) buttons.push({ icon: '⊞', tooltip: 'Parse Evidence (PEP)', onClick: onParseEvidence })
   if (onRunEvaluation) buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: onRunEvaluation })
   if (onAmendEval) buttons.push({ icon: '◆', tooltip: 'Amend Evaluation', onClick: onAmendEval })
@@ -378,6 +382,7 @@ export default function AssetNode({
   onParseEvidence,
   onRunEvaluation,
   onAmendEval,
+  onCreateClaim,
   activeParty,
   revealPhase,
 }) {
@@ -437,6 +442,9 @@ export default function AssetNode({
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
   const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
   const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && node.evaluatorParty === activeParty && node.disclosureType !== 'proofonly' && onAmendEval) ? () => onAmendEval?.(node) : undefined
+  const handleCreateClaim = (node.isClaim || node.category === 'claim') ? undefined
+    : (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser && node.category !== 'party' && onCreateClaim)
+      ? () => onCreateClaim?.(node) : undefined
   const handleDive = isProvisional ? undefined : () => onDive?.(node)
 
   const h = node.displayHealth || node.health
@@ -729,6 +737,7 @@ export default function AssetNode({
           onParseEvidence={handleParseEvidence}
           onRunEvaluation={handleRunEvaluation}
           onAmendEval={handleAmendEval}
+          onCreateClaim={handleCreateClaim}
           onDive={handleDive}
           onOpenSubgraph={onOpenSubgraph ? () => onOpenSubgraph(node) : undefined}
           onSurface={onSurface}
@@ -745,7 +754,7 @@ export default function AssetNode({
 
 // LOD dot: shown when zoom < LOD_THRESHOLD
 // Hover shows full AssetNode card as tooltip via portal
-export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, activeParty }) {
+export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const dotRef = useRef(null)
@@ -853,6 +862,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             onAddEvidence={isSelected ? onAddEvidence : undefined}
             onParseEvidence={isSelected ? onParseEvidence : undefined}
             onRunEvaluation={isSelected ? onRunEvaluation : undefined}
+            onCreateClaim={isSelected ? onCreateClaim : undefined}
             activeParty={activeParty}
           />
         </div>,
@@ -862,4 +872,172 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
   )
 }
 
-export { CARD_W, CARD_H, CATEGORY_CONFIG }
+// ─── Mid-LOD Mini Card ───
+export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, activeParty }) {
+  const [hovered, setHovered] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState(null)
+  const miniRef = useRef(null)
+  const clickTimerRef = useRef(null)
+  const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
+  const hasChildren = node.children && node.children.length > 0
+
+  const isProvisional = !!node.provisional || !!node._showAsProvisional
+  const isDeclined = !!node._isDeclined
+  const h = node.displayHealth || node.health
+  const hasBadHealth = h && h.bad > 0
+  const borderColor = isDeclined
+    ? 'var(--accent-red)'
+    : isProvisional
+    ? 'var(--text-dim)'
+    : (hovered || isSelected)
+      ? cat.color
+      : hasBadHealth
+        ? 'var(--accent-red)'
+        : `color-mix(in srgb, ${cat.color} 27%, transparent)`
+
+  const handleClick = useCallback((e) => {
+    e.stopPropagation()
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+      if (hasChildren) {
+        onDive?.(node)
+      } else {
+        onOpenSubgraph?.(node)
+      }
+      return
+    }
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null
+      onSelect?.(node)
+    }, CLICK_DELAY)
+  }, [node, onSelect, onOpenSubgraph, onDive, hasChildren])
+
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
+    }
+  }, [])
+
+  const computeTooltipPos = useCallback((rect) => {
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    }
+  }, [])
+
+  const handleMouseEnter = (e) => {
+    setHovered(true)
+    setTooltipPos(computeTooltipPos(e.currentTarget.getBoundingClientRect()))
+  }
+
+  useEffect(() => {
+    if (!isSelected || !miniRef.current) return
+    let rafId
+    const track = () => {
+      if (miniRef.current) {
+        setTooltipPos(computeTooltipPos(miniRef.current.getBoundingClientRect()))
+      }
+      rafId = requestAnimationFrame(track)
+    }
+    rafId = requestAnimationFrame(track)
+    return () => cancelAnimationFrame(rafId)
+  }, [isSelected, computeTooltipPos])
+
+  useEffect(() => {
+    return () => {
+      setHovered(false)
+      setTooltipPos(null)
+    }
+  }, [])
+
+  const showTooltip = (hovered || isSelected) && tooltipPos
+
+  return (
+    <div
+      ref={miniRef}
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => { setHovered(false); if (!isSelected) setTooltipPos(null) }}
+      style={{
+        width: MINI_CARD_W,
+        height: MINI_CARD_H,
+        position: 'relative',
+        cursor: 'pointer',
+      }}
+    >
+      {isSelected && (
+        <div style={{
+          position: 'absolute',
+          top: -3, left: -3,
+          width: MINI_CARD_W + 6,
+          height: MINI_CARD_H + 6,
+          borderRadius: 9,
+          border: `2px solid ${isProvisional ? 'var(--text-dim)' : cat.color}`,
+          pointerEvents: 'none',
+          zIndex: 0,
+        }} />
+      )}
+      <div style={{
+        width: MINI_CARD_W,
+        height: MINI_CARD_H,
+        background: hovered
+          ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
+          : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
+        border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
+        opacity: isProvisional ? 0.6 : 1,
+        borderRadius: 6,
+        padding: '0 8px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
+        transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
+        ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        position: 'relative',
+        zIndex: 1,
+      }}>
+        <span style={{ fontSize: 8, color: cat.color, flexShrink: 0 }}>{cat.icon}</span>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          fontFamily: 'var(--font-display)',
+        }}>{node.name}</span>
+      </div>
+      {showTooltip && createPortal(
+        <div style={{
+          position: 'fixed',
+          zIndex: 5000,
+          left: tooltipPos.x,
+          top: tooltipPos.y,
+          transform: 'translate(-50%, -50%) scale(0.85)',
+          transformOrigin: 'center center',
+          pointerEvents: isSelected ? 'auto' : 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          borderRadius: 8,
+        }}>
+          <AssetNode
+            node={node}
+            isSelected={isSelected}
+            zoom={1}
+            scale={1}
+            onDive={isSelected ? onDive : undefined}
+            onOpenSubgraph={isSelected ? onOpenSubgraph : undefined}
+            onConnect={isSelected ? onConnect : undefined}
+            onDisclose={isSelected ? onDisclose : undefined}
+            onAddEvidence={isSelected ? onAddEvidence : undefined}
+            onParseEvidence={isSelected ? onParseEvidence : undefined}
+            onRunEvaluation={isSelected ? onRunEvaluation : undefined}
+            onCreateClaim={isSelected ? onCreateClaim : undefined}
+            activeParty={activeParty}
+          />
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+export { CARD_W, CARD_H, MINI_CARD_W, MINI_CARD_H, CATEGORY_CONFIG }
