@@ -567,11 +567,18 @@ export default function DetailPanel({ node, nodes, onClose, onViewChain, onExpan
                 border: '1px solid var(--border)', background: 'var(--bg-deep)',
               }}>
                 {referencedEvidence.map((ev, ei) => (
-                  <div key={ev.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 10px',
-                    borderBottom: ei < referencedEvidence.length - 1 ? '1px solid var(--border)' : 'none',
-                  }}>
+                  <div key={ev.id}
+                    onClick={() => onViewChild?.(ev)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '6px 10px',
+                      borderBottom: ei < referencedEvidence.length - 1 ? '1px solid var(--border)' : 'none',
+                      cursor: onViewChild ? 'pointer' : 'default',
+                      transition: 'background 120ms',
+                    }}
+                    onMouseEnter={e => { if (onViewChild) e.currentTarget.style.background = 'var(--bg-raised)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = '' }}
+                  >
                     <span style={{
                       fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
                       background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',

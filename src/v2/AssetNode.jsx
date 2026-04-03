@@ -37,7 +37,7 @@ const CATEGORY_CONFIG = {
 const CARD_W = 210
 const CARD_H = 86
 const MINI_CARD_W = 160
-const MINI_CARD_H = 32
+const MINI_CARD_H = 48
 const CLICK_DELAY = 250
 const ACTION_BAR_W = 34 // 6px gap + 24px button + 4px breathing
 
@@ -435,8 +435,8 @@ export default function AssetNode({
     }
     if (!revealPhase) setFlipMidpoint(false)
   }, [revealPhase])
-  const handleCreateAsset = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
-  const handleCreateSDA = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
+  const handleCreateAsset = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
+  const handleCreateSDA = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
   const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
@@ -987,10 +987,11 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
         opacity: isProvisional ? 0.6 : 1,
         borderRadius: 6,
-        padding: '0 8px',
+        padding: '4px 8px',
         display: 'flex',
-        alignItems: 'center',
-        gap: 4,
+        flexDirection: 'column',
+        justifyContent: 'stretch',
+        gap: 0,
         boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
         transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
         ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
@@ -999,12 +1000,37 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         position: 'relative',
         zIndex: 1,
       }}>
-        <span style={{ fontSize: 8, color: cat.color, flexShrink: 0 }}>{cat.icon}</span>
-        <span style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          fontFamily: 'var(--font-display)',
-        }}>{node.name}</span>
+        {/* Top half: title */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 8, color: cat.color, flexShrink: 0 }}>{cat.icon}</span>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            fontFamily: 'var(--font-display)',
+            lineHeight: 1.2,
+          }}>{node.name}</span>
+        </div>
+        {/* Bottom half: minibar or empty space */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', paddingTop: 1 }}>
+          {(() => {
+            if (node.isEvidence || node.isParse || node.category === 'parse') return null
+            const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+            const total = dh.ok + (dh.warn || 0) + dh.bad
+            if (total === 0) return null
+            const okPct = (dh.ok / total) * 100
+            const badPct = (dh.bad / total) * 100
+            return (
+              <div style={{
+                height: 2, borderRadius: 1, width: '100%',
+                background: 'var(--border)',
+                display: 'flex', gap: 1, overflow: 'hidden',
+              }}>
+                {okPct > 0 && <div style={{ width: `${okPct}%`, background: 'var(--accent-green, #22c55e)', borderRadius: 1 }} />}
+                {badPct > 0 && <div style={{ width: `${badPct}%`, minWidth: 2, background: 'var(--accent-red, #ef4444)', borderRadius: 1 }} />}
+              </div>
+            )
+          })()}
+        </div>
       </div>
       {showTooltip && createPortal(
         <div style={{

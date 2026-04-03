@@ -140,7 +140,13 @@ export default function CreateClaimModal({
 
   const content = (
     <Modal width={640}>
-      <ModalHeader title={isEditing ? 'Edit Claim Evidence' : 'Create Claim'} subtitle={parentNode?.name} onClose={onClose} />
+      <ModalHeader
+        title={isEditing ? 'Edit Claim Evidence' : 'Create Claim'}
+        subtitle={parentNode?.name}
+        step={isEditing ? 1 : step + 1}
+        totalSteps={isEditing ? 1 : 3}
+        onClose={onClose}
+      />
       <ModalBody>
         {step === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -211,7 +217,7 @@ export default function CreateClaimModal({
                 Reference Evidence (Optional)
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-                Select evidence from this asset to reference in the claim. You can add evidence later.
+                Select evidence from this asset to reference in the claim. You can skip this step or add evidence later.
               </div>
             </div>
 
@@ -369,7 +375,7 @@ export default function CreateClaimModal({
             <Btn label="Back" onClick={() => setStep(s => s - 1)} />
           )}
           {step === 0 && !isEditing && (
-            <Btn label="Select Evidence \u2192" disabled={!selectedReqSet} onClick={() => setStep(1)}
+            <Btn label={"Select Evidence \u2192"} disabled={!selectedReqSet} onClick={() => setStep(1)}
               style={selectedReqSet ? { background: 'var(--accent-teal, #2dd4bf)', color: '#fff', border: 'none' } : undefined}
             />
           )}
@@ -379,7 +385,7 @@ export default function CreateClaimModal({
             />
           )}
           {step === 1 && !isEditing && (
-            <Btn label="Review \u2192" onClick={() => setStep(2)}
+            <Btn label={"Review \u2192"} onClick={() => setStep(2)}
               style={{ background: 'var(--accent-teal, #2dd4bf)', color: '#fff', border: 'none' }}
             />
           )}

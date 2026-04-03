@@ -233,10 +233,12 @@ function layoutChildren(children, depthLevel = 1) {
 
   if (hasClaims) {
     // ── Claims-aware layout ──
+    const hasEvidence = evidence.length > 0
+    const horizontalOffset = (hasEvidence && claims.length > 0) ? Math.round(stepX * 0.75) : 0
 
-    // Tier 1 (y=0): Claims
+    // Tier 1 (y=0): Claims — offset left when evidence exists
     const claimsW = (claims.length - 1) * stepX
-    const claimsStartX = -claimsW / 2
+    const claimsStartX = -claimsW / 2 - horizontalOffset
     claims.forEach((claim, i) => {
       positioned.push({
         ...claim,
@@ -279,12 +281,12 @@ function layoutChildren(children, depthLevel = 1) {
       positioned.push({ ...evalNode, x: candidateX, y: snapToGrid(evalActiveY, depthLevel) })
     })
 
-    // Tier 3: Evidence — below evals
+    // Tier 3: Evidence — below evals, offset right when claims exist
     const evBaseY = evalsActive.length > 0 || evalsSuperseded.length > 0
       ? (evalsSuperseded.length > 0 ? tierGap * 3 : tierGap * 2)
       : tierGap
     const evW = (evidence.length - 1) * stepX
-    const evStartX = -evW / 2
+    const evStartX = -evW / 2 + horizontalOffset
     evidence.forEach((ev, i) => {
       positioned.push({
         ...ev,
@@ -863,12 +865,6 @@ const V2Canvas = forwardRef(function V2Canvas({
       let isDashed = sdaCfg.dash > 0
       let dashSize = sdaCfg.dash
       let gapSize = sdaCfg.gap
-      // Reference edges: dashed style to distinguish from ownership edges
-      if (edge._reference) {
-        isDashed = true
-        dashSize = 6
-        gapSize = 4
-      }
       let material
       if (isDashed) {
         // Dashed lines: need transparent for gaps
@@ -1927,6 +1923,7 @@ const V2Canvas = forwardRef(function V2Canvas({
           })
           requestAnimationFrame(() => {
             cards.forEach(card => { card.style.transition = 'opacity 200ms ease' })
+            dirtyRef.current = true
           })
         }
       })

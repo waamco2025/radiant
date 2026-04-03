@@ -42,20 +42,27 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
   const hasClaims = claimNodes.length > 0
 
   const currentClaimIds = useMemo(() => {
-    if (sda.selectedClaimIds && sda.selectedClaimIds.length > 0) return new Set(sda.selectedClaimIds)
+    if (sda.selectedClaimIds && sda.selectedClaimIds.length > 0) {
+      const claimIdSet = new Set(claimNodes.map(c => c.id))
+      return new Set(sda.selectedClaimIds.filter(id => claimIdSet.has(id)))
+    }
     return new Set()
-  }, [sda])
+  }, [sda, claimNodes])
 
   const lockedClaimIds = useMemo(() => {
-    if (sda.selectedClaimIds && sda.selectedClaimIds.length > 0) return new Set(sda.selectedClaimIds)
+    if (sda.selectedClaimIds && sda.selectedClaimIds.length > 0) {
+      const claimIdSet = new Set(claimNodes.map(c => c.id))
+      return new Set(sda.selectedClaimIds.filter(id => claimIdSet.has(id)))
+    }
     return new Set()
-  }, [sda])
+  }, [sda, claimNodes])
 
-  const [selectedClaimIds, setSelectedClaimIds] = useState(() =>
-    new Set(sda.selectedClaimIds && sda.selectedClaimIds.length > 0
-      ? sda.selectedClaimIds
-      : [])
-  )
+  const [selectedClaimIds, setSelectedClaimIds] = useState(() => {
+    if (sda.selectedClaimIds && sda.selectedClaimIds.length > 0) {
+      return new Set(sda.selectedClaimIds)
+    }
+    return new Set()
+  })
 
   const addedClaimCount = [...selectedClaimIds].filter(id => !currentClaimIds.has(id)).length
 
@@ -332,7 +339,9 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
         </div>
         {step === 0 && !showFieldStep && (
           <Btn
-            label={canComplete ? `Amend Disclosure (+${addedCount} evidence)` : 'Select New Evidence'}
+            label={canComplete
+              ? `Amend Disclosure${addedClaimCount > 0 ? ` (+${addedClaimCount} claim${addedClaimCount !== 1 ? 's' : ''})` : ''}${addedCount > 0 ? ` (+${addedCount} evidence)` : ''}`
+              : (hasClaims ? 'Select New Claims or Evidence' : 'Select New Evidence')}
             accent={canComplete}
             disabled={!canComplete}
             onClick={handleComplete}
