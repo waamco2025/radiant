@@ -815,7 +815,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   }, [node, request.from.name])
 
   const hasCascadableAssets = upstreamAssets.some(a => a.cascadePolicy === 'open')
-  const showEvidenceStep = decision !== 'decline' && level !== 'proofonly' && evidenceNodes.length > 0
+  const showEvidenceStep = false  // Evidence is now implicit from selected claims
   const showEvalStep = decision !== 'decline' && level === 'proofonly' && evalNodes.length > 0
   const showFieldStep = decision !== 'decline' && level === 'selective' && filteredPepFields.length > 0
   const showCascadeStep = decision !== 'decline' && hasCascadableAssets && cascadePolicy === 'open'
@@ -918,10 +918,20 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
           )}
           <Btn label="Done" accent onClick={() => {
             if (onComplete) {
+              const derivedEvidenceIds = (() => {
+                if (level === 'proofonly') return null
+                if (!hasClaims) return evidenceNodes.length > 0 ? evidenceNodes.map(e => e.id) : null
+                const evIds = new Set()
+                claimNodes
+                  .filter(c => selectedClaimIds.has(c.id))
+                  .forEach(c => (c.referencedEvidenceIds || []).forEach(id => evIds.add(id)))
+                return evIds.size > 0 ? [...evIds] : null
+              })()
+
               onComplete(
                 decision === 'decline' ? null : level,
                 level === 'selective' && filteredPepFields.length > 0 ? [...selectedFields] : null,
-                level !== 'proofonly' && evidenceNodes.length > 0 ? [...selectedEvidenceIds] : null,
+                derivedEvidenceIds,
                 level === 'proofonly' && selectedEvalIds.size > 0 ? [...selectedEvalIds] : null,
                 hasClaims ? [...selectedClaimIds] : null,
               )
@@ -1090,14 +1100,13 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
           const proofBlocked = level === 'proofonly' && !hasProofEval
           if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
           if (proofBlocked) return <Btn label="No Evaluation Available" disabled />
-          return <Btn label="Select Claims \u2192" accent onClick={() => setStep(claimStepIdx)} />
+          return <Btn label={"Select Claims \u2192"} accent onClick={() => setStep(claimStepIdx)} />
         })()}
         {step === claimStepIdx && decision !== 'decline' && hasClaims && (() => {
           if (selectedClaimIds.size === 0) return <Btn label="Select at least one claim" disabled />
-          if (showEvalStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Evaluations \u2192`} accent onClick={() => setStep(evalStepIdx)} />
-          if (showEvidenceStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Evidence \u2192`} accent onClick={() => setStep(evidenceStepIdx)} />
-          if (showFieldStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Select Fields \u2192`} accent onClick={() => setStep(fieldStepIdx)} />
-          if (showCascadeStep) return <Btn label={`${selectedClaimIds.size} Claims \u2014 Cascade \u2192`} accent onClick={() => setStep(cascadeStepIdx)} />
+          if (showEvalStep) return <Btn label={`${selectedClaimIds.size} Claims — Select Evaluations →`} accent onClick={() => setStep(evalStepIdx)} />
+          if (showFieldStep) return <Btn label={`${selectedClaimIds.size} Claims — Select Fields →`} accent onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label={`${selectedClaimIds.size} Claims — Cascade →`} accent onClick={() => setStep(cascadeStepIdx)} />
           return <Btn label={`Create Disclosure (${selectedClaimIds.size} claims)`} accent onClick={() => setCompleted(true)} />
         })()}
         {step === 1 && decision !== 'decline' && !hasClaims && (() => {
@@ -1105,10 +1114,9 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
           const proofBlocked = level === 'proofonly' && !hasProofEval
           if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
           if (proofBlocked) return <Btn label="No Evaluation Available" disabled />
-          if (showEvalStep) return <Btn label="Select Evaluations \u2192" accent onClick={() => setStep(evalStepIdx)} />
-          if (showEvidenceStep) return <Btn label="Select Evidence \u2192" accent onClick={() => setStep(evidenceStepIdx)} />
-          if (showFieldStep) return <Btn label="Select Fields \u2192" accent onClick={() => setStep(fieldStepIdx)} />
-          if (showCascadeStep) return <Btn label="Next \u2014 Cascade Assets \u2192" accent onClick={() => setStep(cascadeStepIdx)} />
+          if (showEvalStep) return <Btn label={"Select Evaluations \u2192"} accent onClick={() => setStep(evalStepIdx)} />
+          if (showFieldStep) return <Btn label={"Select Fields \u2192"} accent onClick={() => setStep(fieldStepIdx)} />
+          if (showCascadeStep) return <Btn label={"Next \u2014 Cascade Assets \u2192"} accent onClick={() => setStep(cascadeStepIdx)} />
           return <Btn label="Create Disclosure" accent onClick={() => setCompleted(true)} />
         })()}
         {step === evalStepIdx && decision !== 'decline' && showEvalStep && (() => {

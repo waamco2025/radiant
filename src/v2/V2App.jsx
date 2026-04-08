@@ -25,6 +25,7 @@ import { getRequirementSetsForRole } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
+const CREDITS_PER_CLAIM = 25
 
 function findClearY(targetX, idealY, allNodes, spacingY = 300, toleranceX = 150) {
   const occupiedYs = allNodes
@@ -190,14 +191,25 @@ export default function V2App() {
     if (Object.keys(addedChildren).length > 0) {
       data.nodes = data.nodes.map(n => {
         const added = addedChildren[n.id]
-        if (!added) return n
-        const newChildren = [...(n.children || []), ...added]
+        if (!added || added.length === 0) return n
+        // Deduplicate: added children with same ID as existing children replace them
+        const existingIds = new Set((n.children || []).map(c => c.id))
+        const replacements = new Map()
+        const genuinelyNew = []
+        added.forEach(c => {
+          if (existingIds.has(c.id)) {
+            replacements.set(c.id, c)
+          } else {
+            genuinelyNew.push(c)
+          }
+        })
+        const mergedChildren = (n.children || []).map(c => replacements.has(c.id) ? replacements.get(c.id) : c)
+        const allChildren = [...mergedChildren, ...genuinelyNew]
         return {
           ...n,
-          children: newChildren,
-          hasStack: true,
-          childCount: newChildren.length,
-          hasEvidence: newChildren.some(c => c.isEvidence) || n.hasEvidence,
+          children: allChildren,
+          hasStack: allChildren.length > 0,
+          childCount: allChildren.length,
         }
       })
     }
@@ -804,6 +816,9 @@ export default function V2App() {
   const handleBootComplete = useCallback(() => {
     setBooted(true)
     sessionStorage.setItem(SESSION_KEY, '1')
+    setTimeout(() => {
+      canvasRef.current?.playNetworkBuild?.()
+    }, 100)
   }, [])
 
   const handleSelect = useCallback((node) => {
@@ -1158,7 +1173,12 @@ export default function V2App() {
       overflow: 'hidden',
     }}>
       {/* Boot screen */}
-      {!booted && <V2BootScreen onComplete={handleBootComplete} />}
+      {!booted && (
+        <V2BootScreen
+          onComplete={handleBootComplete}
+          onFading={() => canvasRef.current?.prepNetworkBuild?.()}
+        />
+      )}
 
       {/* Top bar */}
       <div style={{
@@ -1527,6 +1547,19 @@ export default function V2App() {
                   >
                     + Add 100 Credits
                   </button>
+                  <button
+                    onClick={() => setCredits(0)}
+                    style={{
+                      width: '100%', padding: '6px 10px', borderRadius: 4,
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                      cursor: 'pointer', transition: 'all 150ms', marginTop: 4,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-red)'; e.currentTarget.style.color = 'var(--accent-red)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-dim)' }}
+                  >
+                    Reset to 0
+                  </button>
                 </div>
               </div>
             )}
@@ -1697,8 +1730,6 @@ export default function V2App() {
             if (node.isClaim || node.category === 'claim') {
               const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
               if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: node })
-            } else {
-              setEvidenceNode(node)
             }
           }}
           onParseEvidence={(evidenceNodeArg) => {
@@ -1746,19 +1777,44 @@ export default function V2App() {
             const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
             if (!parentAsset) return
             const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
-            const disclosureType = sda?.type || 'full'
-            setEvalContext({
-              assetNode: parentAsset,
-              evidenceNode: null,
-              disclosureType,
-              amendingEval: {
-                id: node.id,
-                requirementSetId: node.requirementSetId,
-                requirementSetName: node.requirementSetName || node.name,
-                claims: (node.claims || []).map(c => ({ ...c })),
-                version: node.evalVersion || 1,
-              },
-            })
+            const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
+
+            const claimNode = node.claimId ? (parentAsset.children || []).find(c => c.id === node.claimId) : null
+
+            if (claimNode) {
+              const claimReqSet = requirementSets.find(rs => rs.id === claimNode.requirementSetId)
+                || requirementSets.find(rs => (rs.lineageId || rs.id) === claimNode.requirementSetLineageId)
+                || publishedRequirementSets.find(rs => rs.id === claimNode.requirementSetId)
+                || null
+              setEvalContext({
+                assetNode: parentAsset,
+                claimNode,
+                disclosureType,
+                claimReqSet,
+                amendingEval: {
+                  id: node.id,
+                  requirementSetId: node.requirementSetId,
+                  requirementSetName: node.requirementSetName || node.name,
+                  claims: (node.claims || []).map(c => ({ ...c })),
+                  version: node.evalVersion || 1,
+                  selectedEvidenceIds: node.selectedEvidenceIds || [],
+                },
+              })
+            } else {
+              setEvalContext({
+                assetNode: parentAsset,
+                evidenceNode: null,
+                disclosureType,
+                amendingEval: {
+                  id: node.id,
+                  requirementSetId: node.requirementSetId,
+                  requirementSetName: node.requirementSetName || node.name,
+                  claims: (node.claims || []).map(c => ({ ...c })),
+                  version: node.evalVersion || 1,
+                  selectedEvidenceIds: node.selectedEvidenceIds || [],
+                },
+              })
+            }
           }}
           onCreateClaim={(node) => setClaimContext({ parentNode: node })}
           activeParty={activeRole.party}
@@ -1831,8 +1887,6 @@ export default function V2App() {
                 if (target.isClaim || target.category === 'claim') {
                   const parentAsset = nodes.find(n => n.children?.some(c => c.id === target.id))
                   if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: target })
-                } else {
-                  setEvidenceNode(target)
                 }
               }}
               onCreateClaim={(node) => {
@@ -1940,23 +1994,49 @@ export default function V2App() {
               }}
               activeParty={activeRole.party}
               onAmendEval={(ev) => {
-                const assetNode = nodeMap[sel]
-                if (!assetNode) return
-                const sda = (assetNode.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
-                const dt = sda?.type || 'full'
-                const evalChild = (assetNode.children || []).find(c => c.id === ev.id)
-                setEvalContext({
-                  assetNode,
-                  evidenceNode: null,
-                  disclosureType: dt,
-                  amendingEval: {
-                    id: evalChild?.id || ev.id,
-                    requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
-                    requirementSetName: evalChild?.requirementSetName || ev.requirements,
-                    claims: ev.claims || [],
-                    version: evalChild?.evalVersion || 1,
-                  },
-                })
+                const parentAsset = nodes.find(n => n.children?.some(c => c.id === ev.id))
+                if (!parentAsset) return
+                const evalChild = (parentAsset.children || []).find(c => c.id === ev.id)
+                const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
+                const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
+
+                const claimId = evalChild?.claimId || ev.claimId
+                const claimNode = claimId ? (parentAsset.children || []).find(c => c.id === claimId) : null
+
+                if (claimNode) {
+                  const claimReqSet = requirementSets.find(rs => rs.id === claimNode.requirementSetId)
+                    || requirementSets.find(rs => (rs.lineageId || rs.id) === claimNode.requirementSetLineageId)
+                    || publishedRequirementSets.find(rs => rs.id === claimNode.requirementSetId)
+                    || null
+                  setEvalContext({
+                    assetNode: parentAsset,
+                    claimNode,
+                    disclosureType,
+                    claimReqSet,
+                    amendingEval: {
+                      id: evalChild?.id || ev.id,
+                      requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
+                      requirementSetName: evalChild?.requirementSetName || ev.requirements,
+                      claims: ev.claims || [],
+                      version: evalChild?.evalVersion || 1,
+                      selectedEvidenceIds: evalChild?.selectedEvidenceIds || ev.selectedEvidenceIds || [],
+                    },
+                  })
+                } else {
+                  setEvalContext({
+                    assetNode: parentAsset,
+                    evidenceNode: null,
+                    disclosureType,
+                    amendingEval: {
+                      id: evalChild?.id || ev.id,
+                      requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
+                      requirementSetName: evalChild?.requirementSetName || ev.requirements,
+                      claims: ev.claims || [],
+                      version: evalChild?.evalVersion || 1,
+                      selectedEvidenceIds: evalChild?.selectedEvidenceIds || ev.selectedEvidenceIds || [],
+                    },
+                  })
+                }
               }}
               onReviseSda={({ sda, nodeId }) => {
                 const targetNode = nodeMap[nodeId]
@@ -2849,7 +2929,21 @@ export default function V2App() {
                   category: req.connectTo.category || 'product',
                   owner: req.connectTo.owner || req.from.name,
                   parentId: null,
-                  children: [],
+                  children: (() => {
+                    const sourceNode = nodeMap[reqNodeId]
+                    if (!sourceNode?.children) return []
+                    const claimSet = selectedClaimIds ? new Set(selectedClaimIds) : null
+                    return sourceNode.children.filter(c => {
+                      if (c.isClaim || c.category === 'claim') return !claimSet || claimSet.has(c.id)
+                      if (c.isEvidence || c.category === 'evidence') return true
+                      if (c.isParse || c.category === 'parse') return true
+                      if (c.isEvaluation || c.category === 'evaluation') {
+                        if (c.claimId && claimSet) return claimSet.has(c.claimId)
+                        return true
+                      }
+                      return true
+                    }).map(c => ({ ...c }))
+                  })(),
                   health: { ok: 0, warn: 0, bad: 0 },
                   childHealth: null,
                   totalHealth: null,
@@ -2857,7 +2951,7 @@ export default function V2App() {
                   claimCount: 0,
                   displayClaimCount: 0,
                   hasEvidence: false,
-                  hasStack: false,
+                  hasStack: true,
                   childCount: 0,
                   evidence: null,
                   evaluations: [],
@@ -3111,6 +3205,34 @@ export default function V2App() {
                       _isNew: true,
                       _createdAt: Date.now(),
                     }]
+                  }
+
+                  // Push disclosed children for existing static/dynamic nodes
+                  const sourceNode = nodeMap[reqNodeId]
+                  if (sourceNode?.children?.length > 0) {
+                    const claimSet = selectedClaimIds ? new Set(selectedClaimIds) : null
+                    const childrenToPush = sourceNode.children.filter(c => {
+                      if (c.isClaim || c.category === 'claim') return !claimSet || claimSet.has(c.id)
+                      if (c.isEvidence || c.category === 'evidence') return disclosureType !== 'proofonly'
+                      if (c.isParse || c.category === 'parse') return disclosureType !== 'proofonly'
+                      if (c.isEvaluation || c.category === 'evaluation') {
+                        if (c.claimId && claimSet) return claimSet.has(c.claimId)
+                        return true
+                      }
+                      return true
+                    }).map(c => ({ ...c }))
+
+                    if (childrenToPush.length > 0) {
+                      const existingAdded = newState.addedChildren?.[reqNodeId] || prev.addedChildren?.[reqNodeId] || []
+                      const existingAddedIds = new Set(existingAdded.map(c => c.id))
+                      const newChildrenToAdd = childrenToPush.filter(c => !existingAddedIds.has(c.id))
+                      if (newChildrenToAdd.length > 0) {
+                        newState.addedChildren = {
+                          ...(newState.addedChildren || prev.addedChildren || {}),
+                          [reqNodeId]: [...existingAdded, ...newChildrenToAdd],
+                        }
+                      }
+                    }
                   }
 
                   // Add acceptance notification to the other role's inbox
@@ -3513,9 +3635,43 @@ export default function V2App() {
           requirementSets={requirementSets}
           publishedSets={visiblePublishedSets}
           activeParty={activeRole.party}
+          credits={credits}
           onClose={() => setClaimContext(null)}
-          onComplete={({ title, requirementSet, referencedEvidenceIds }) => {
+          onComplete={({ title, requirementSet, referencedEvidenceIds, creditCost, newEvidence }) => {
             const parentNode = claimContext.parentNode
+
+            // If new evidence was uploaded, create it on the asset first
+            let newEvidenceId = null
+            if (newEvidence && newEvidence.name && newEvidence.filename) {
+              const evidenceMeta = makeEvidence(
+                parentNode.id + '-' + Date.now().toString(36),
+                newEvidence.name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
+                activeRole.party + ' Lab',
+                '10 years'
+              )
+              evidenceMeta.filename = newEvidence.filename
+              const evUniqueId = `ev-${parentNode.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+              const evNode = makeEvidenceNode(parentNode.id, evidenceMeta, activeRole.party, [], evUniqueId)
+              evNode.name = newEvidence.name
+              if (newEvidence.filename) {
+                evNode.evidence.localPath = `/${newEvidence.filename}`
+              }
+              updateRoleState(roleId, prev => {
+                const existingChildren = prev.addedChildren?.[parentNode.id] || []
+                return {
+                  ...prev,
+                  addedChildren: {
+                    ...(prev.addedChildren || {}),
+                    [parentNode.id]: [...existingChildren, evNode],
+                  },
+                }
+              })
+              newEvidenceId = evNode.id
+            }
+
+            const finalEvidenceIds = newEvidenceId
+              ? [...referencedEvidenceIds, newEvidenceId]
+              : referencedEvidenceIds
 
             if (claimContext.editingClaim) {
               const claimId = claimContext.editingClaim.id
@@ -3524,7 +3680,7 @@ export default function V2App() {
                 const dynamicIdx = existingChildren.findIndex(c => c.id === claimId)
                 if (dynamicIdx >= 0) {
                   const updated = [...existingChildren]
-                  updated[dynamicIdx] = { ...updated[dynamicIdx], referencedEvidenceIds }
+                  updated[dynamicIdx] = { ...updated[dynamicIdx], referencedEvidenceIds: finalEvidenceIds }
                   return { ...prev, addedChildren: { ...(prev.addedChildren || {}), [parentNode.id]: updated } }
                 }
                 const staticNode = parentNode.children?.find(c => c.id === claimId)
@@ -3533,7 +3689,7 @@ export default function V2App() {
                     ...prev,
                     addedChildren: {
                       ...(prev.addedChildren || {}),
-                      [parentNode.id]: [...existingChildren, { ...staticNode, referencedEvidenceIds }],
+                      [parentNode.id]: [...existingChildren, { ...staticNode, referencedEvidenceIds: finalEvidenceIds }],
                     },
                   }
                 }
@@ -3546,7 +3702,7 @@ export default function V2App() {
             const claimNode = makeClaimNode(
               parentNode.id,
               { ...requirementSet, name: title || requirementSet.name },
-              referencedEvidenceIds,
+              finalEvidenceIds,
               activeRole.party
             )
 
@@ -3561,6 +3717,7 @@ export default function V2App() {
               }
             })
 
+            setCredits(c => c - CREDITS_PER_CLAIM)
             setClaimContext(null)
 
             if (layerInfo.depth > 0 && layerInfo.anchorId === parentNode.id) {

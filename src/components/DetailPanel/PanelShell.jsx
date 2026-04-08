@@ -207,13 +207,12 @@ export default function PanelShell({
         if (isOwner && !isEvidence && !isParse && !isEvaluation && !isClaim) {
           buttons.push({ icon: '+', label: 'Connect Asset', onClick: onConnect, id: 'connect' })
           buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>, label: 'Publish', onClick: onDisclose, id: 'disclose' })
-          buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
           if (onCreateClaim) buttons.push({ icon: '◇', label: 'Create Claim', onClick: onCreateClaim, id: 'claim' })
         }
         if (isOwner && isClaim) {
           buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
         }
-        if (canAssetEvaluate) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })
+        if (canAssetEvaluate && isClaim) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })
         if (isOwner && isEvidence && !isEvaluation) buttons.push({ icon: '⊞', label: 'Parse Evidence', onClick: onParseEvidence, id: 'parse' })
         if (isActiveEval && onAmendEval && node.evaluatorParty === activeParty) buttons.push({ icon: '◆', label: 'Amend Evaluation', onClick: () => onAmendEval(node), id: 'amend' })
         if (isAnchor) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })

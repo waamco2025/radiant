@@ -443,8 +443,8 @@ const V2Canvas = forwardRef(function V2Canvas({
 
   // Camera state
   const camPosRef = useRef({ x: 0, y: 0 })
-  const zoomRef = useRef(0.7)
-  const [zoom, setZoom] = useState(0.7)
+  const zoomRef = useRef(0.80)
+  const [zoom, setZoom] = useState(0.80)
   const [threeReady, setThreeReady] = useState(false)
   const chainNodeIdsRef = useRef(null)
   const dirtyRef = useRef(true)
@@ -510,7 +510,16 @@ const V2Canvas = forwardRef(function V2Canvas({
 
     const currentChildCount = childLayer.nodes.filter(n => !n._isAnchor).length
     const latestChildCount = latestParent.children.length
-    if (latestChildCount === currentChildCount) return
+
+    // Also check if reference edges changed (claim evidence additions don't change child count)
+    const latestRefEdgeCount = latestParent.children
+      .filter(c => c.isClaim || c.category === 'claim')
+      .reduce((sum, c) => sum + (c.referencedEvidenceIds?.length || 0), 0)
+    const currentRefEdgeCount = childLayer.nodes
+      .filter(n => !n._isAnchor && (n.isClaim || n.category === 'claim'))
+      .reduce((sum, n) => sum + (n.referencedEvidenceIds?.length || 0), 0)
+
+    if (latestChildCount === currentChildCount && latestRefEdgeCount === currentRefEdgeCount) return
 
     const targetDepth = stack.length - 1
     const childrenWithPos = layoutChildren(latestParent.children, targetDepth)
@@ -1985,7 +1994,151 @@ const V2Canvas = forwardRef(function V2Canvas({
         }, duration + 50)
       })
     },
-  }), [handleDive, handleSurface, animateDotStreaks, animateLateralStreaks, fitToNodes, updateCamera, animatedPanToWithZoom, animateNewEdges])
+    prepNetworkBuild: () => {
+      const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
+      if (cards) {
+        cards.forEach(card => {
+          card.style.transition = 'none'
+          card.style.opacity = '0'
+        })
+        overlayRef.current?.offsetHeight
+      }
+      clearGroup(edgeGroupRef.current)
+      dirtyRef.current = true
+      // Shift camera right so party node appears on left, showing more of the network
+      camPosRef.current = { x: camPosRef.current.x + 500, y: camPosRef.current.y }
+      updateCamera()
+      dirtyRef.current = true
+    },
+    playNetworkBuild: () => {
+      const layer = layerStack[layerStack.length - 1]
+      if (!layer?.nodes || !layer.edges) return
+
+      const nodes = layer.nodes
+      const edges = layer.edges
+      const rootNode = nodes.find(n => n.category === 'party') || nodes[0]
+      if (!rootNode) return
+
+      // BFS distance from root
+      const adj = {}
+      edges.forEach(e => {
+        if (!adj[e.from]) adj[e.from] = []
+        if (!adj[e.to]) adj[e.to] = []
+        adj[e.from].push(e.to)
+        adj[e.to].push(e.from)
+      })
+      const distances = {}
+      const queue = [rootNode.id]
+      distances[rootNode.id] = 0
+      while (queue.length > 0) {
+        const cur = queue.shift()
+        for (const neighbor of (adj[cur] || [])) {
+          if (distances[neighbor] === undefined) {
+            distances[neighbor] = distances[cur] + 1
+            queue.push(neighbor)
+          }
+        }
+      }
+      const maxDist = Math.max(0, ...Object.values(distances))
+      nodes.forEach(n => {
+        if (distances[n.id] === undefined) distances[n.id] = maxDist + 1
+      })
+
+      const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
+      if (!cards || cards.length === 0) return
+
+      // Ensure cards are hidden (prep should have done this, but safety check)
+      cards.forEach(card => {
+        card.style.transition = 'none'
+        card.style.opacity = '0'
+      })
+      overlayRef.current?.offsetHeight
+
+      // ── Timing ──
+      const perLayerDelay = Math.min(180, 1200 / ((maxDist + 2) + 1))
+      const phase1Start = 50
+
+      // Shell overlays — appended to document.body so they're unaffected by card opacity
+      const shells = []
+
+      // ── PHASE 1: White-bordered shells fan out ──
+      cards.forEach(card => {
+        const cardId = card.getAttribute('data-card-id')
+        const dist = distances[cardId] ?? maxDist + 1
+        const delay = phase1Start + dist * perLayerDelay
+
+        setTimeout(() => {
+          card.style.transition = 'opacity 400ms ease-out'
+          card.style.opacity = '0.02'
+          card.style.filter = 'contrast(0) brightness(2)'
+
+          const rect = card.getBoundingClientRect()
+          const z = zoomRef.current
+          const shell = document.createElement('div')
+          shell.className = '_netbuild-shell'
+          shell.style.cssText = `
+            position: fixed;
+            left: ${rect.left}px;
+            top: ${rect.top}px;
+            width: ${CARD_W * z}px;
+            height: ${CARD_H * z}px;
+            border: 1.5px solid rgba(255, 255, 255, 0.6);
+            border-radius: ${8 * z}px;
+            pointer-events: none;
+            z-index: 5000;
+            box-sizing: border-box;
+            opacity: 0;
+            transition: opacity 400ms ease-out;
+          `
+          document.body.appendChild(shell)
+          shells.push(shell)
+          requestAnimationFrame(() => { shell.style.opacity = '1' })
+        }, delay)
+      })
+
+      // ── PHASE 2: Edges draw in ──
+      const phase2Start = phase1Start + (maxDist + 1) * perLayerDelay + 200
+      setTimeout(() => {
+        const nMap = {}
+        layer.nodes.forEach(n => { nMap[n.id] = n })
+        const lodMode = zoomRef.current < LOD_THRESHOLD
+        buildEdges(edgeGroupRef.current, layer.edges, nMap, 0.5, 1.0, lodMode)
+        animateEdgeDraw(edgeGroupRef.current, 500, 200)
+      }, phase2Start)
+
+      // ── PHASE 3: Fade out shells, fill cards with color ──
+      const phase3Start = phase2Start + 400
+      setTimeout(() => {
+        shells.forEach(shell => {
+          shell.style.transition = 'opacity 300ms ease-out'
+          shell.style.opacity = '0'
+        })
+      }, phase3Start)
+
+      cards.forEach(card => {
+        const cardId = card.getAttribute('data-card-id')
+        const dist = distances[cardId] ?? maxDist + 1
+        const delay = phase3Start + 100 + dist * (perLayerDelay * 0.5)
+
+        setTimeout(() => {
+          card.style.transition = 'opacity 350ms ease-out, filter 450ms ease-out'
+          card.style.opacity = '1'
+          card.style.filter = 'none'
+        }, delay)
+      })
+
+      // ── CLEANUP ──
+      const cleanupDelay = phase3Start + 100 + (maxDist + 1) * (perLayerDelay * 0.5) + 600
+      setTimeout(() => {
+        shells.forEach(shell => shell.remove())
+        cards.forEach(card => {
+          card.style.filter = ''
+          card.style.transition = ''
+          card.style.opacity = ''
+        })
+      }, cleanupDelay)
+    },
+  }), [handleDive, handleSurface, animateDotStreaks, animateLateralStreaks, fitToNodes, updateCamera, animatedPanToWithZoom, animateNewEdges, clearGroup, buildEdges, animateEdgeDraw, layerStack])
 
   // Report layer changes to parent
   useEffect(() => {

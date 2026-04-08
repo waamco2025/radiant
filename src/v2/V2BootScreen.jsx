@@ -8,7 +8,7 @@ const RIPPLE_START = 400
 const RIPPLE_DURATION = 1200
 const WAVE_GAP = 200
 
-export default function V2BootScreen({ onComplete, skipLogin }) {
+export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
   const radiantCanvasRef = useRef(null)
   const dotCanvasRef = useRef(null)
   const [phase, setPhase] = useState(skipLogin ? 'boot' : 'login')
@@ -24,9 +24,19 @@ export default function V2BootScreen({ onComplete, skipLogin }) {
     if (phase !== 'boot') return
     const t1 = setTimeout(() => setBootText('Loading supply chain graph...'), 1200)
     const t2 = setTimeout(() => setBootText('Establishing network connection...'), 2400)
-    const t3 = setTimeout(() => setPhase('fading'), BOOT_DURATION)
-    const t4 = setTimeout(() => { setPhase('done'); onComplete() }, BOOT_DURATION + FADE_DURATION)
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4) }
+    const t3 = setTimeout(() => { onFading?.(); setPhase('fading') }, BOOT_DURATION)
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
+  }, [phase])
+
+  // Separate effect for onComplete — triggers when phase becomes 'fading',
+  // waits for fade to finish, then calls onComplete
+  useEffect(() => {
+    if (phase !== 'fading') return
+    const t = setTimeout(() => {
+      setPhase('done')
+      onComplete()
+    }, FADE_DURATION)
+    return () => clearTimeout(t)
   }, [phase, onComplete])
 
   // PrimeRadiant Three.js scene

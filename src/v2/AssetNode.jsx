@@ -437,10 +437,10 @@ export default function AssetNode({
   }, [revealPhase])
   const handleCreateAsset = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
   const handleCreateSDA = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
-  const handleAddEvidence = (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
+  const handleAddEvidence = ((node.isClaim || node.category === 'claim') && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
   const hasPepChildren = node.children?.some(c => c.isParse || c.category === 'parse')
-  const handleRunEvaluation = (!node.isEvidence && !isTerminalNode && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
+  const handleRunEvaluation = ((node.isClaim || node.category === 'claim') && !isProvisional && node.category !== 'party' && onRunEvaluation) ? () => onRunEvaluation?.(node) : undefined
   const handleAmendEval = (node.isEvaluation && node.status !== 'superseded' && node.evaluatorParty === activeParty && node.disclosureType !== 'proofonly' && onAmendEval) ? () => onAmendEval?.(node) : undefined
   const handleCreateClaim = (node.isClaim || node.category === 'claim') ? undefined
     : (!node.isEvidence && !isTerminalNode && !isProvisional && isOwnedByUser && node.category !== 'party' && onCreateClaim)

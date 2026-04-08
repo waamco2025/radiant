@@ -114,11 +114,16 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
     ? [...selectedFields].filter(fk => !currentFieldIds.has(fk)).length
     : 0
 
-  const canComplete = addedCount > 0 || addedFieldCount > 0 || addedClaimCount > 0
+  const canComplete = addedClaimCount > 0 || addedFieldCount > 0
 
   const handleComplete = () => {
+    const derivedEvIds = new Set()
+    claimNodes
+      .filter(c => selectedClaimIds.has(c.id))
+      .forEach(c => (c.referencedEvidenceIds || []).forEach(id => derivedEvIds.add(id)))
+
     onComplete({
-      selectedEvidenceIds: [...selectedEvidenceIds],
+      selectedEvidenceIds: [...derivedEvIds],
       selectedFieldIds: isSelective ? [...selectedFields] : null,
       selectedClaimIds: hasClaims ? [...selectedClaimIds] : null,
     })
@@ -142,7 +147,7 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
               border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
               borderRadius: 8, marginBottom: 20, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
             }}>
-              Amend this disclosure by adding evidence or claims. Currently disclosed items cannot be removed — revoke the entire disclosure to remove access.
+              Amend this disclosure by adding claims. Currently disclosed claims cannot be removed — revoke the entire disclosure to remove access.
             </div>
 
             {hasClaims && (
@@ -216,92 +221,14 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
               </div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                {selectedEvidenceIds.size} evidence document{selectedEvidenceIds.size !== 1 ? 's' : ''} selected
-                {addedCount > 0 && (
-                  <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 11, marginLeft: 8 }}>
-                    +{addedCount} new
-                  </span>
-                )}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {evidenceNodes.map(ev => {
-                const checked = selectedEvidenceIds.has(ev.id)
-                const locked = lockedEvidenceIds.has(ev.id)
-                return (
-                  <div
-                    key={ev.id}
-                    onClick={() => {
-                      if (locked) return
-                      setSelectedEvidenceIds(prev => {
-                        const next = new Set(prev)
-                        if (next.has(ev.id)) next.delete(ev.id)
-                        else next.add(ev.id)
-                        return next
-                      })
-                    }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '12px 14px', borderRadius: 8,
-                      cursor: locked ? 'default' : 'pointer',
-                      opacity: locked ? 0.7 : 1,
-                      border: `1.5px solid ${checked ? (locked ? 'var(--border)' : 'var(--accent-orange)') : 'var(--border)'}`,
-                      background: checked
-                        ? (locked ? 'color-mix(in srgb, var(--text-dim) 3%, transparent)' : 'color-mix(in srgb, var(--accent-orange) 4%, transparent)')
-                        : 'var(--bg-card)',
-                      transition: 'all 150ms',
-                    }}
-                  >
-                    <span style={{
-                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                      border: `2px solid ${checked ? (locked ? 'var(--text-dim)' : 'var(--accent-orange)') : 'var(--border)'}`,
-                      background: checked ? (locked ? 'var(--text-dim)' : 'var(--accent-orange)') : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 150ms',
-                    }}>
-                      {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
-                    </span>
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                      background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-orange)' }}>EV</span>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{ev.name}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-                        {ev.evidence?.filename && (
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{ev.evidence.filename}</span>
-                        )}
-                        <span style={{
-                          fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                          background: ev._isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)',
-                          color: ev._isParsed ? 'var(--accent-green)' : 'var(--text-dim)',
-                        }}>{ev._isParsed ? 'PARSED' : 'UNPARSED'}</span>
-                      </div>
-                    </div>
-                    {locked && (
-                      <span style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                        color: 'var(--text-dim)', padding: '2px 6px', borderRadius: 3,
-                        background: 'var(--bg-raised)',
-                      }}>DISCLOSED</span>
-                    )}
-                    {!locked && checked && (
-                      <span style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                        color: 'var(--accent-green)', padding: '2px 6px', borderRadius: 3,
-                        background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
-                      }}>NEW</span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            {!hasClaims && (
+              <div style={{
+                padding: '24px 16px', textAlign: 'center',
+                fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic',
+              }}>
+                No claims available. Create claims on this asset before amending the disclosure.
+              </div>
+            )}
           </div>
         )}
         {step === 1 && isSelective && (
@@ -340,8 +267,8 @@ export default function ReviseDisclosureModal({ sda, node, onClose, onComplete, 
         {step === 0 && !showFieldStep && (
           <Btn
             label={canComplete
-              ? `Amend Disclosure${addedClaimCount > 0 ? ` (+${addedClaimCount} claim${addedClaimCount !== 1 ? 's' : ''})` : ''}${addedCount > 0 ? ` (+${addedCount} evidence)` : ''}`
-              : (hasClaims ? 'Select New Claims or Evidence' : 'Select New Evidence')}
+              ? `Amend Disclosure (+${addedClaimCount} claim${addedClaimCount !== 1 ? 's' : ''})`
+              : 'Select New Claims'}
             accent={canComplete}
             disabled={!canComplete}
             onClick={handleComplete}

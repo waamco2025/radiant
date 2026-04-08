@@ -1,14 +1,18 @@
 import { useState, useMemo, useRef } from 'react'
 import { Modal, ModalHeader, ModalBody, ModalFooter, Btn, StepDots, FieldLabel } from './ModalShared.jsx'
 
+const CREDITS_PER_CLAIM = 25
+
 export default function CreateClaimModal({
   parentNode,
   editingClaim,
   requirementSets,
   publishedSets,
   activeParty,
+  credits,
   onClose,
   onComplete,
+  onUploadEvidence,
   _noBackdrop,
 }) {
   const isEditing = !!editingClaim
@@ -22,10 +26,23 @@ export default function CreateClaimModal({
   )
   const [reqSetSearch, setReqSetSearch] = useState('')
   const prevReqSetNameRef = useRef('')
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploadName, setUploadName] = useState('')
+  const [uploadFilename, setUploadFilename] = useState('')
 
   const evidenceNodes = useMemo(() => {
     if (!parentNode?.children) return []
     return parentNode.children.filter(c => c.isEvidence || c.category === 'evidence')
+  }, [parentNode])
+
+  const existingClaimLineages = useMemo(() => {
+    if (!parentNode?.children) return new Set()
+    return new Set(
+      parentNode.children
+        .filter(c => c.isClaim || c.category === 'claim')
+        .map(c => c.requirementSetLineageId || c.requirementSetId)
+        .filter(Boolean)
+    )
   }, [parentNode])
 
   // Dedup requirement sets by lineage
@@ -68,9 +85,11 @@ export default function CreateClaimModal({
 
   const handleComplete = () => {
     onComplete({
-      title: title || selectedReqSet.name,
-      requirementSet: selectedReqSet,
+      title: title || (isEditing ? editingClaim.name : selectedReqSet?.name),
+      requirementSet: isEditing ? { id: editingClaim.requirementSetId, name: editingClaim.requirementSetName, version: editingClaim.requirementSetVersion, lineageId: editingClaim.requirementSetLineageId } : selectedReqSet,
       referencedEvidenceIds: [...selectedEvidenceIds],
+      creditCost: isEditing ? 0 : CREDITS_PER_CLAIM,
+      newEvidence: uploadName && uploadFilename ? { name: uploadName, filename: uploadFilename } : null,
     })
   }
 
@@ -79,12 +98,16 @@ export default function CreateClaimModal({
   const renderReqSetCard = (rs) => {
     const active = selectedReqSet?.id === rs.id
     const isPublished = !!rs._published
+    const lineageKey = rs.lineageId || rs.id
+    const isDuplicate = !isEditing && existingClaimLineages.has(lineageKey)
     return (
       <div
         key={rs.id}
-        onClick={() => handleSelectReqSet(rs)}
+        onClick={() => !isDuplicate && handleSelectReqSet(rs)}
         style={{
-          padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+          padding: '12px 14px', borderRadius: 8,
+          cursor: isDuplicate ? 'default' : 'pointer',
+          opacity: isDuplicate ? 0.45 : 1,
           border: `1.5px solid ${active ? 'var(--accent-teal, #2dd4bf)' : 'var(--border)'}`,
           background: active ? 'color-mix(in srgb, var(--accent-teal, #2dd4bf) 5%, transparent)' : 'var(--bg-card)',
           transition: 'all 150ms',
@@ -134,6 +157,16 @@ export default function CreateClaimModal({
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 4, marginLeft: 16 }}>
           {rs.requirements?.length || 0} requirements
         </div>
+        {isDuplicate && (
+          <div style={{
+            marginTop: 6, marginLeft: 16, padding: '4px 8px', borderRadius: 4,
+            background: 'color-mix(in srgb, var(--accent-amber) 6%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+            fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)',
+          }}>
+            A claim using this requirement set already exists on this asset.
+          </div>
+        )}
       </div>
     )
   }
@@ -301,6 +334,83 @@ export default function CreateClaimModal({
                 </div>
               )}
             </div>
+
+            {/* Divider */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              margin: '16px 0 12px',
+            }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>OR</span>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            </div>
+
+            {/* Upload new evidence */}
+            {!showUpload ? (
+              <button
+                onClick={() => setShowUpload(true)}
+                style={{
+                  width: '100%', padding: '10px 0', borderRadius: 6, cursor: 'pointer',
+                  border: '1px dashed var(--border)',
+                  background: 'transparent', color: 'var(--text-tertiary)',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  transition: 'border-color 150ms, color 150ms',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-orange)'; e.currentTarget.style.color = 'var(--accent-orange)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-tertiary)' }}
+              >
+                <span>{'\u25E7'}</span> Upload New Evidence
+              </button>
+            ) : (
+              <div style={{
+                padding: '12px 14px', borderRadius: 8,
+                border: '1.5px solid var(--accent-orange)',
+                background: 'color-mix(in srgb, var(--accent-orange) 4%, transparent)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                    color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                  }}>NEW</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Upload New Evidence</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input
+                    value={uploadName}
+                    onChange={e => setUploadName(e.target.value)}
+                    placeholder="Evidence name (e.g., Datasheet)"
+                    style={{
+                      width: '100%', padding: '7px 10px', borderRadius: 6,
+                      border: '1px solid var(--border)', background: 'var(--bg-card)',
+                      color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 12,
+                      outline: 'none',
+                    }}
+                  />
+                  <input
+                    value={uploadFilename}
+                    onChange={e => setUploadFilename(e.target.value)}
+                    placeholder="Filename (e.g., datasheet.pdf)"
+                    style={{
+                      width: '100%', padding: '7px 10px', borderRadius: 6,
+                      border: '1px solid var(--border)', background: 'var(--bg-card)',
+                      color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 12,
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={() => { setShowUpload(false); setUploadName(''); setUploadFilename('') }}
+                  style={{
+                    marginTop: 8, padding: '4px 8px', borderRadius: 4,
+                    border: 'none', background: 'transparent',
+                    color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                    cursor: 'pointer',
+                  }}
+                >Cancel</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -335,9 +445,12 @@ export default function CreateClaimModal({
                 )}
               </div>
               <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginBottom: 8 }}>
-                {selectedEvidenceIds.size > 0
-                  ? `${selectedEvidenceIds.size} evidence file${selectedEvidenceIds.size !== 1 ? 's' : ''} referenced`
-                  : 'No evidence referenced'}
+                {(() => {
+                  const totalEv = selectedEvidenceIds.size + (uploadName && uploadFilename ? 1 : 0)
+                  return totalEv > 0
+                    ? `${totalEv} evidence file${totalEv !== 1 ? 's' : ''} referenced`
+                    : 'No evidence referenced'
+                })()}
               </div>
               {selectedEvidenceIds.size > 0 && (
                 <div style={{
@@ -364,6 +477,36 @@ export default function CreateClaimModal({
                   })}
                 </div>
               )}
+              {uploadName && uploadFilename && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                  marginTop: selectedEvidenceIds.size > 0 ? 0 : undefined,
+                  borderRadius: selectedEvidenceIds.size === 0 ? 6 : 0,
+                  border: selectedEvidenceIds.size === 0 ? '1px solid var(--border)' : 'none',
+                  borderTop: selectedEvidenceIds.size > 0 ? '1px solid var(--border)' : undefined,
+                  background: 'var(--bg-deep)',
+                }}>
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                    color: 'var(--accent-orange)', fontFamily: 'var(--font-mono)',
+                  }}>NEW</span>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                    {uploadName} ({uploadFilename})
+                  </span>
+                </div>
+              )}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginTop: 12, paddingTop: 12,
+              borderTop: '1px solid var(--border)',
+              fontSize: 11, fontFamily: 'var(--font-mono)',
+            }}>
+              <span style={{ color: 'var(--text-dim)' }}>Credit cost</span>
+              <span style={{ color: credits >= CREDITS_PER_CLAIM ? 'var(--accent-teal)' : 'var(--accent-red)', fontWeight: 600 }}>
+                {CREDITS_PER_CLAIM} credits
+              </span>
+            </div>
             </div>
           </div>
         )}
@@ -390,7 +533,9 @@ export default function CreateClaimModal({
             />
           )}
           {step === 2 && (
-            <Btn label="Create Claim" onClick={handleComplete}
+            <Btn label={credits >= CREDITS_PER_CLAIM ? 'Create Claim' : 'Insufficient Credits'}
+              onClick={handleComplete}
+              disabled={credits < CREDITS_PER_CLAIM}
               style={{ background: 'var(--accent-teal, #2dd4bf)', color: '#fff', border: 'none' }}
             />
           )}

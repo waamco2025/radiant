@@ -450,13 +450,14 @@ function StepConfirmation({ assetNode, selectedSet, claims, creditCost, amending
 }
 
 /* ─── Step: Evidence Selection for Multi-Evidence Eval ─── */
-function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenceIds }) {
+function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenceIds, lockedEvidenceIds = new Set() }) {
   const evidenceNodes = useMemo(() => {
     if (!assetNode?.children) return []
     return assetNode.children.filter(c => c.isEvidence)
   }, [assetNode])
 
   const toggleEvidence = (evId) => {
+    if (lockedEvidenceIds.has(evId)) return
     setSelectedEvidenceIds(prev => {
       const next = new Set(prev)
       if (next.has(evId)) next.delete(evId)
@@ -466,7 +467,7 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
   }
 
   const toggleAll = () => {
-    if (selectedEvidenceIds.size === evidenceNodes.length) setSelectedEvidenceIds(new Set())
+    if (selectedEvidenceIds.size === evidenceNodes.length) setSelectedEvidenceIds(new Set(lockedEvidenceIds))
     else setSelectedEvidenceIds(new Set(evidenceNodes.map(e => e.id)))
   }
 
@@ -501,15 +502,16 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
           return (
             <div key={ev.id} onClick={() => toggleEvidence(ev.id)} style={{
               display: 'flex', alignItems: 'center', gap: 12,
-              padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-              border: `1.5px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
-              background: checked ? 'color-mix(in srgb, var(--accent-orange) 4%, transparent)' : 'var(--bg-card)',
-              transition: 'all 150ms', opacity: isParsed ? 1 : 0.5,
+              padding: '12px 14px', borderRadius: 8,
+              cursor: lockedEvidenceIds.has(ev.id) ? 'default' : 'pointer',
+              border: `1.5px solid ${checked ? (lockedEvidenceIds.has(ev.id) ? 'var(--border)' : 'var(--accent-orange)') : 'var(--border)'}`,
+              background: checked ? (lockedEvidenceIds.has(ev.id) ? 'color-mix(in srgb, var(--text-dim) 3%, transparent)' : 'color-mix(in srgb, var(--accent-orange) 4%, transparent)') : 'var(--bg-card)',
+              transition: 'all 150ms', opacity: lockedEvidenceIds.has(ev.id) ? 0.7 : (isParsed ? 1 : 0.5),
             }}>
               <span style={{
                 width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                border: `2px solid ${checked ? 'var(--accent-orange)' : 'var(--border)'}`,
-                background: checked ? 'var(--accent-orange)' : 'transparent',
+                border: `2px solid ${checked ? (lockedEvidenceIds.has(ev.id) ? 'var(--text-dim)' : 'var(--accent-orange)') : 'var(--border)'}`,
+                background: checked ? (lockedEvidenceIds.has(ev.id) ? 'var(--text-dim)' : 'var(--accent-orange)') : 'transparent',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {checked && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>&#10003;</span>}
@@ -532,6 +534,13 @@ function StepEvidenceSelect({ assetNode, selectedEvidenceIds, setSelectedEvidenc
                     background: isParsed ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)' : 'var(--bg-raised)',
                     color: isParsed ? 'var(--accent-green)' : 'var(--text-dim)',
                   }}>{isParsed ? `PARSED \u00b7 ${fieldCount} fields` : 'UNPARSED'}</span>
+                  {lockedEvidenceIds.has(ev.id) && (
+                    <span style={{
+                      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                      background: 'var(--bg-raised)', color: 'var(--text-dim)',
+                      fontFamily: 'var(--font-mono)',
+                    }}>PREVIOUS</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -578,8 +587,17 @@ export default function RunEvaluationModal({
   const claimReqSetId = isClaimScoped ? claimNode.requirementSetId : null
 
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(() =>
-    isClaimScoped ? new Set(claimEvidenceIds) : new Set()
+    isClaimScoped ? new Set(claimEvidenceIds)
+    : (isAmend && amendingEval?.selectedEvidenceIds?.length > 0) ? new Set(amendingEval.selectedEvidenceIds)
+    : new Set()
   )
+
+  const lockedEvidenceIds = useMemo(() => {
+    if (isAmend && amendingEval?.selectedEvidenceIds?.length > 0) {
+      return new Set(amendingEval.selectedEvidenceIds)
+    }
+    return new Set()
+  }, [isAmend, amendingEval])
 
   const hasMultipleEvidence = useMemo(() => {
     if (!assetNode?.children) return false
@@ -611,6 +629,7 @@ export default function RunEvaluationModal({
   const claimHasNoEvidence = isClaimScoped && (!claimEvidenceIds || claimEvidenceIds.length === 0)
   const claimNeedsParsing = isClaimScoped && unparsedEvidence.length > 0
   const claimBlocked = claimHasNoEvidence || claimNeedsParsing
+  const isProofOnlyRecipient = isClaimScoped && disclosureType === 'proofonly'
 
   // Scoped to the current evaluator — each party has their own lineage chain
   const activeEvalsByLineage = useMemo(() => {
@@ -730,6 +749,7 @@ export default function RunEvaluationModal({
   useEffect(() => {
     if (step !== processingStep) return
     if (isClaimScoped && claimBlocked) return
+    if (isProofOnlyRecipient) return
     const msgInterval = setInterval(() => {
       setMessageIndex(prev => prev + 1)
     }, 1200)
@@ -1192,6 +1212,7 @@ export default function RunEvaluationModal({
               assetNode={assetNode}
               selectedEvidenceIds={selectedEvidenceIds}
               setSelectedEvidenceIds={setSelectedEvidenceIds}
+              lockedEvidenceIds={lockedEvidenceIds}
             />
           )}
           {step === setupStep && (
@@ -1271,7 +1292,24 @@ export default function RunEvaluationModal({
               )}
             </div>
           )}
-          {step === processingStep && !(isClaimScoped && claimBlocked) && <StepProcessing messageIndex={messageIndex} />}
+          {step === processingStep && isClaimScoped && isProofOnlyRecipient && (
+            <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%',
+                background: 'color-mix(in srgb, var(--accent-green) 10%, transparent)',
+                border: '2px solid var(--accent-green)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 14px', fontSize: 20, color: 'var(--accent-green)',
+              }}>{'\u2298'}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                Proof-Only Disclosure
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                You can view evaluation results on this claim but cannot run your own evaluation. Request full or selective disclosure from the asset owner to evaluate this claim.
+              </div>
+            </div>
+          )}
+          {step === processingStep && !(isClaimScoped && claimBlocked) && !isProofOnlyRecipient && <StepProcessing messageIndex={messageIndex} />}
           {step === reviewStep && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {claims.map(claim => (
@@ -1298,6 +1336,9 @@ export default function RunEvaluationModal({
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {step === processingStep && isClaimScoped && claimBlocked && (
+            <Btn label="Close" onClick={onClose} />
+          )}
+          {step === processingStep && isClaimScoped && isProofOnlyRecipient && (
             <Btn label="Close" onClick={onClose} />
           )}
           {step === evidenceStep && showEvidenceStep && (() => {
