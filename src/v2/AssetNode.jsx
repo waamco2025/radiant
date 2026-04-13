@@ -126,14 +126,12 @@ function StackBadge({ count, categoryColor }) {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
       style={{
-        minWidth: 20,
+        minWidth: 24,
         height: 20,
         padding: '0 6px',
         borderRadius: 6,
         background: hovered ? 'var(--bg-surface)' : 'var(--bg-surface)',
-        border: hovered
-          ? `1px solid ${categoryColor}`
-          : '1px solid var(--border)',
+        border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -144,7 +142,7 @@ function StackBadge({ count, categoryColor }) {
       <span style={{
         fontFamily: 'var(--font-mono)',
         fontSize: 9,
-        color: hovered ? categoryColor : 'var(--text-secondary)',
+        color: hovered ? 'var(--text-secondary)' : 'var(--text-secondary)',
         fontWeight: 600,
         transition: 'color 120ms',
         lineHeight: 1,
@@ -246,14 +244,10 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
         style={{
           width: 24, height: 24,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: hovered
-            ? (categoryColor ? `color-mix(in srgb, ${categoryColor} 15%, var(--bg-surface))` : 'var(--bg-hover, var(--bg-surface))')
-            : 'var(--bg-surface)',
-          border: hovered && categoryColor
-            ? `1px solid color-mix(in srgb, ${categoryColor} 50%, var(--border))`
-            : '1px solid var(--border)',
+          background: hovered ? 'var(--bg-raised)' : 'var(--bg-surface)',
+          border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
           borderRadius: 4,
-          color: hovered ? (categoryColor || 'var(--text-primary)') : 'var(--text-secondary)',
+          color: hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
           fontSize: 12,
           cursor: 'pointer',
           padding: 0,
@@ -332,9 +326,7 @@ function StackPeeks({ count, isHovered, categoryColor }) {
           width: CARD_W,
           height: CARD_H,
           background: 'var(--bg-deep)',
-          border: `1px solid ${isHovered
-            ? `color-mix(in srgb, ${categoryColor} 30%, var(--border))`
-            : 'color-mix(in srgb, var(--border) 80%, transparent)'}`,
+          border: `1px solid ${isHovered ? 'var(--border-hover)' : 'color-mix(in srgb, var(--border) 80%, transparent)'}`,
           borderRadius: 8,
           top: isHovered ? 14 : 10,
           left: isHovered ? 12 : 8,
@@ -350,9 +342,7 @@ function StackPeeks({ count, isHovered, categoryColor }) {
         width: CARD_W,
         height: CARD_H,
         background: 'var(--bg-deep)',
-        border: `1px solid ${isHovered
-          ? `color-mix(in srgb, ${categoryColor} 50%, var(--border))`
-          : 'color-mix(in srgb, var(--border) 60%, transparent)'}`,
+        border: `1px solid ${isHovered ? 'var(--border-hover)' : 'color-mix(in srgb, var(--border) 60%, transparent)'}`,
         borderRadius: 8,
         top: isHovered ? 7 : 5,
         left: isHovered ? 6 : 4,
@@ -454,10 +444,10 @@ export default function AssetNode({
     : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
-      ? cat.color
+      ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
-        : `color-mix(in srgb, ${cat.color} 27%, transparent)`
+        : 'var(--border)'
 
   const showActionBar = isSelected || hovered
 
@@ -473,7 +463,7 @@ export default function AssetNode({
       }}
     >
       {hasChildren && !isAnchor && !isProvisional && (
-        <StackPeeks count={childCount} isHovered={hovered} categoryColor={cat.color} />
+        <StackPeeks count={childCount} isHovered={hovered} categoryColor={'var(--border-hover)'} />
       )}
 
       {/* NEW badge */}
@@ -534,7 +524,7 @@ export default function AssetNode({
           width: CARD_W * scale + 6,
           height: CARD_H * scale + 6,
           borderRadius: (8 * scale) + 3,
-          border: `2px solid ${showAsProvisional ? 'var(--text-dim)' : cat.color}`,
+          border: `2px solid ${showAsProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)'}`,
           transition: 'border-color 600ms ease',
           pointerEvents: 'none',
           zIndex: 0,
@@ -549,10 +539,10 @@ export default function AssetNode({
           background: showAsProvisional
             ? 'var(--bg-deep)'
             : isNew
-              ? `color-mix(in srgb, var(--bg-card) 85%, ${cat.color})`
+              ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
               : hovered
-                ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
-                : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
+                ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+                : 'var(--bg-card)',
           border: `1px ${showAsProvisional ? 'dashed' : 'solid'} ${borderColor}`,
           opacity: showAsProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,
@@ -578,85 +568,15 @@ export default function AssetNode({
         }}
       >
         <div style={isFlipping ? { animation: 'revealContentFade 700ms ease-in-out forwards' } : undefined}>
-        {/* Row 1: category + stack badge */}
+        {/* Row 1: name + status badges + stack badge */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 4,
           marginBottom: 4,
         }}>
           <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 9,
-            color: cat.color,
-            letterSpacing: '0.06em',
-          }}>
-            <span style={{
-              position: 'relative',
-              top: -1,
-              fontSize: 8,
-            }}>{cat.icon}</span>
-            {cat.label}
-            {showAsProvisional && !isDeclined && (
-              <span style={{
-                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                padding: '2px 6px', borderRadius: 4,
-                letterSpacing: '0.04em',
-                color: 'var(--text-dim)',
-                background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
-              }}>
-                PROVISIONAL
-              </span>
-            )}
-            {node.isEvaluation && node.status === 'superseded' && (
-              <span style={{
-                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                padding: '2px 6px', borderRadius: 4,
-                letterSpacing: '0.04em',
-                color: 'var(--text-dim)',
-                background: 'var(--bg-raised)',
-              }}>
-                SUPERSEDED
-              </span>
-            )}
-            {isDeclined && (
-              <span style={{
-                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                padding: '2px 6px', borderRadius: 4,
-                letterSpacing: '0.04em',
-                color: 'var(--accent-red)',
-                background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-              }}>
-                DECLINED
-              </span>
-            )}
-            {node.isEvidence && (
-              <span style={{
-                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                padding: '2px 6px', borderRadius: 4,
-                letterSpacing: '0.04em',
-                color: node._isParsed ? 'var(--accent-purple, #a78bfa)' : 'var(--accent-amber)',
-                background: node._isParsed
-                  ? 'color-mix(in srgb, var(--accent-purple, #a78bfa) 10%, transparent)'
-                  : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
-              }}>
-                {node._isParsed ? 'PARSED' : 'UNPARSED'}
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {node.hasEvidence && <EvidenceClip />}
-            {(node.sdas || []).some(s => s.party === 'Radiant Network') && <GlobeBadge />}
-            {!isAnchor && <StackBadge count={childCount} categoryColor={cat.color} />}
-          </div>
-        </div>
-
-        {/* Row 2: name — wrapper protects descenders from overflow:hidden clipping */}
-        <div style={{ paddingBottom: 2 }}>
-          <div style={{
+            flex: 1,
             fontFamily: 'var(--font-display)',
             fontSize: 13,
             fontWeight: 600,
@@ -668,64 +588,75 @@ export default function AssetNode({
           }}>
             {node.name}
           </div>
+          {showAsProvisional && !isDeclined && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+              color: 'var(--text-dim)',
+              background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
+              flexShrink: 0,
+            }}>PROVISIONAL</span>
+          )}
+          {node.isEvaluation && node.status === 'superseded' && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+              color: 'var(--text-dim)', background: 'var(--bg-raised)',
+              flexShrink: 0,
+            }}>SUPERSEDED</span>
+          )}
+          {isDeclined && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+              color: 'var(--accent-red)',
+              background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+              flexShrink: 0,
+            }}>DECLINED</span>
+          )}
+          {!isAnchor && <StackBadge count={childCount} categoryColor={'var(--accent-amber)'} />}
         </div>
 
-        {/* Row 3: owner */}
+        {/* Row 2: owner + globe */}
         {(node.isEvaluation ? node.evaluatorParty : node.owner) && (
           <div style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 11,
-            color: 'var(--text-tertiary)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            lineHeight: 1.2,
-            marginBottom: 0,
+            display: 'flex', alignItems: 'center', gap: 4,
           }}>
-            {node.isEvaluation ? node.evaluatorParty : node.owner}
+            <span style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 11,
+              color: 'var(--text-tertiary)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              flex: 1,
+            }}>
+              {node.isEvaluation ? node.evaluatorParty : node.owner}
+            </span>
+            {(node.sdas || []).some(s => s.party === 'Radiant Network') && <GlobeBadge />}
           </div>
         )}
 
-        {/* Row 4: health bar + claim count (or provisional message) */}
+        {/* Row 3: health minibar (or provisional message) */}
         {showAsProvisional ? (
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
             color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
             fontStyle: 'italic',
+            marginTop: 2,
           }}>
             {isDeclined ? 'Disclosure declined' : 'Awaiting disclosure from owner'}
           </div>
-        ) : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}>
-            <HealthBar health={node.displayHealth || node.health} />
-            <span style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 9,
-              color: 'var(--text-tertiary)',
-              whiteSpace: 'nowrap',
-            }}>
-              {(() => {
-                if (node.isEvidence) return null
-                if (node.isParse || node.category === 'parse') {
-                  const fc = node.parsedFields?.length || 0
-                  return `${fc} fields`
-                }
-                const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
-                const dc = dh.ok + (dh.warn || 0) + dh.bad
-                return dh.bad > 0
-                  ? `${dh.ok} · ${dh.bad}`
-                  : dc > 0
-                    ? `${dc} claims`
-                    : null
-              })()}
-            </span>
-          </div>
-        )}
+        ) : (() => {
+          if (node.isEvidence || node.isParse || node.category === 'parse') return null
+          const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+          const total = dh.ok + (dh.warn || 0) + dh.bad
+          if (total === 0) return null
+          return (
+            <div style={{ display: 'flex', marginTop: 12 }}>
+              <HealthBar health={dh} />
+            </div>
+          )
+        })()}
         </div>
       </div>
 
@@ -744,7 +675,7 @@ export default function AssetNode({
           hasChildren={hasChildren}
           isAnchor={isAnchor}
           isChild={isChild}
-          categoryColor={cat.color}
+          categoryColor={'var(--border-hover)'}
           isParty={node.category === 'party'}
         />
       )}
@@ -818,7 +749,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
         width: 8,
         height: 8,
         borderRadius: '50%',
-        background: cat.color,
+        background: 'var(--text-tertiary)',
         margin: 4,
         position: 'relative',
       }}>
@@ -828,8 +759,8 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             width: 20,
             height: 20,
             borderRadius: '50%',
-            background: `color-mix(in srgb, ${cat.color} 18%, transparent)`,
-            border: `1.5px solid ${cat.color}`,
+            background: 'color-mix(in srgb, var(--accent-amber, #C49A45) 18%, transparent)',
+            border: '1.5px solid var(--accent-amber, #C49A45)',
             boxSizing: 'border-box',
             top: -6,
             left: -6,
@@ -890,10 +821,10 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
     : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
-      ? cat.color
+      ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
-        : `color-mix(in srgb, ${cat.color} 27%, transparent)`
+        : 'var(--border)'
 
   const handleClick = useCallback((e) => {
     e.stopPropagation()
@@ -973,7 +904,7 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
           width: MINI_CARD_W + 6,
           height: MINI_CARD_H + 6,
           borderRadius: 9,
-          border: `2px solid ${isProvisional ? 'var(--text-dim)' : cat.color}`,
+          border: `2px solid ${isProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)'}`,
           pointerEvents: 'none',
           zIndex: 0,
         }} />
@@ -982,8 +913,8 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         width: MINI_CARD_W,
         height: MINI_CARD_H,
         background: hovered
-          ? `color-mix(in srgb, var(--bg-card) 90%, ${cat.color})`
-          : `color-mix(in srgb, var(--bg-card) 95%, ${cat.color})`,
+          ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+          : 'var(--bg-card)',
         border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
         opacity: isProvisional ? 0.6 : 1,
         borderRadius: 6,
@@ -1002,7 +933,6 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
       }}>
         {/* Top half: title */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 8, color: cat.color, flexShrink: 0 }}>{cat.icon}</span>
           <span style={{
             fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

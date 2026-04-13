@@ -1,146 +1,224 @@
-# Radiant by Provenance — V3 Prototype
+# Radiant by Provenance — V2.1 Prototype
 
 Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS variables from `index.css`. Run `npm run dev` for development, `npm run build` to verify. Build must pass clean before any batch is complete.
 
-## Active Development: V3 Prototype
+## Active Development: V2.1 (Claims Migration)
 
-V3 lives at `/v3.html`. V2 at `/v2.html` (archived). V1 at `/index.html` (archived). Shared: `tokens.js`, `index.css`.
+V2.1 modifies `src/v2/` in place (project backup taken before migration). Entry point: `/v2.html`. V3 at `/v3.html` (archived — reference for UI patterns). V1 at `/index.html` (archived). Shared: `tokens.js`, `index.css`.
 
-**All new work targets V3 unless explicitly stated.**
+**All V2.1 work happens in `src/v2/` and `src/components/`. No new directory.**
+
+**V2.1 applies the Claims model + V3 UI improvements to the V2 codebase.**
 
 ---
 
-## Core Data Model — Actor + Object
+## Core Concept: RICE Framework
 
-The network has exactly two node types. No categories, no type flags, no ontological hierarchy.
+The platform implements the RICE trust system:
 
-### Actor
-- A person, organization, or autonomous agent
-- Has a DOT (transferable ownership title)
-- Can enact processes on objects
+| Letter | Concept | Implementation |
+|--------|---------|----------------|
+| **R** | Requirements | Requirement sets — what buyers demand from sellers |
+| **I** | Incentives | Premiums/penalties for compliance (future feature) |
+| **C** | Claims | Primary canvas nodes — seller assertions backed by evidence |
+| **E** | Evidence | Files in qualified storage, referenced by Claims |
 
-### Object
-- Anything — a label and a URI referencing an artifact in qualified storage
-- Has a PIN (immutable identifier) and a DOT (ownership title)
-- The platform does not know what the object represents
-- All objects are structurally identical
+---
 
-### Artifacts
-- Every object references exactly one artifact (a file in qualified storage)
-- User-uploaded: PDFs, datasheets, certificates, any file
-- Parse output: JSON with predictable schema (extracted fields)
-- Evaluation output: JSON with predictable schema (requirements + SAT/UNSAT results)
-- Disclosure agreement: JSON with terms, scope, parties
-- Artifacts are hashed at registration; mismatch = invalidated
-- The app interprets artifact content by schema recognition, not node type
+## Data Model
 
-### Identity
-- **PIN** — Immutable object identifier. Full: `PIN-0x[64 hex chars]`. Displayed truncated.
-- **DOT** — Transferable ownership title.
+### Claims (Primary Canvas Nodes)
+- A Claim is an assertion about a product, component, or capability
+- Every Claim references ≥1 evidence file (no empty Claims)
+- Claims are what get disclosed to other parties
+- Claims are what get evaluated
+- Claims carry the minibar (health rollup from all evaluations)
+- Claim artifact is JSON in owner's qualified storage with a URI and hash
+- Previously called "assets" or "containers" in V2
+
+### Evidence (File References)
+- Raw files in qualified storage: PDFs, datasheets, certificates, sensor data, photos
+- Referenced by Claims, never disclosed independently
+- Appear as child nodes in the child layer
+- Displayed by URI + file metadata (filename, size, MIME type)
+- NOT labeled as "Evidence" in the UI — shown as artifact references
+- NOT labeled with category types (PRODUCT, PROCESS, etc.)
+
+### Process Outputs (Children of Claims)
+- Parse results: JSON with extracted fields + confidence scores
+- Evaluation results: JSON with requirement assessments (SAT/UNSAT/MISSING)
+- Appear as child nodes in the child layer
+- Minibar on parent Claim rolls up from evaluation outputs
+
+### Disclosure Agreements (Edges)
+- Every edge on the canvas = a disclosure agreement
+- JSON in both parties' qualified storage
+- Defines: type (Full/Selective/Proof-Only), scope, terms, parties
+- Network topology IS the trust graph
+
+---
+
+## Node Cards — Uniform Styling
+
+All node cards use identical styling. No category labels, no category icons, no schema-based color tints.
+
+**Full card shows:** Name, owner org, minibar (if applicable)
+**Mini card shows:** Name, minibar bar (if applicable)
+**Dot shows:** Colored dot only
+
+Do NOT add category badges (PRODUCT, PARSE, EVALUATION, etc.) to node cards. The node type is determined by artifact schema, visible in the Detail Panel — not on the card.
+
+---
+
+## Detail Panel — Two Tabs
+
+### Tab 1: Overview
+Single scrollable view with four sections:
+
+**Identity**
+- PIN (click-to-copy)
+- DOT
+- Owner
+
+**Provenance**
+- Derived from: org name for root Claims, parent name (clickable → navigates) for children
+- Process: "Claim Created" for Claims, "parse" / "evaluate" for outputs
+- Timestamp
+
+**Connections**
+- Clickable list of connected nodes with directional arrows (→ / ←) and SDA type badges
+- Clicking navigates + pans to the connected node
+
+**Children**
+- Minimalist clickable list with schema type label
+- Clicking navigates + pans to the child
+
+### Tab 2: Artifact
+- Artifact URI in mono box
+- Schema-specific content:
+  - **Claim:** Evidence refs list, claim metadata
+  - **Parse output:** Template name + owner, Results table, field count
+  - **Eval output:** Template name + owner, Results table, SAT/MISSING/UNSAT summary
+  - **Disclosure:** Type badge, parties, scope, terms
+  - **Raw file:** Filename, size, MIME type
+- Expand button (outward-arrow icon, no label) → modal with Results tab + JSON tab
+- Parse and eval Results tables use identical row component (ArtifactRow)
+- Parse rows: field name + value + confidence badge
+- Eval rows: requirement name + value + status badge (SAT/UNSAT/MISSING) + criterion
+
+### Pending Nodes
+- Show restricted "Awaiting Disclosure" view instead of tabs
+- Request details: asset name, owner, status, requested via, date, requirement sets, message
+- No action buttons, no minibar
+- "Cancel Request" link
 
 ---
 
 ## Three Processes
 
-| Process | Enacted By | On | Output |
-|---------|-----------|-----|--------|
-| **Parse** | Any actor with access | Any object | Parse result artifact (JSON → new object) |
-| **Evaluate** | Any actor with access | Any object | Evaluation result artifact (JSON → new object) |
-| **Disclose** | Object owner only | Any object to another actor | Disclosure agreement artifact (JSON → edge + new object) |
+| Process | Enacted By | Output |
+|---------|-----------|--------|
+| **Parse** | Any actor with access | Parse result (JSON → child of Claim) |
+| **Evaluate** | Any actor with access | Evaluation result (JSON → child of Claim) |
+| **Disclose** | Claim owner | Disclosure agreement (JSON → edge between Claims) |
 
-Any object can be parsed, evaluated, or disclosed. No process affinity enforcement. The platform allows nonsensical operations (evaluate an evaluation, parse a disclosure agreement).
+### Process Flow Layout
+- Parse + Evaluate: vertical — parent node (top) → process panel (center) → output node (bottom)
+- Disclose: horizontal — source node (left) → process panel (center) → recipient node (right)
+- Panel widens to 1100px for split-panel review stage (evidence viewer left, review form right)
+- Other stages use 620px panel width
 
----
-
-## Relationships
-
-### Edges = Disclosures
-Every edge on the graph represents a disclosure agreement. Network topology IS the trust graph.
-
-### Provenance (Structural Relationships)
-Stored in artifact metadata, not in platform schema:
-```json
-{
-  "provenance": {
-    "derivedFrom": "PIN-0x...",
-    "process": "parse | evaluate",
-    "template": "...",
-    "timestamp": "..."
-  }
-}
-```
-
-The app reads provenance to render parent-child trees. Supply chain structure is emergent from what users put in their artifacts.
-
-### Children
-An object's "children" = other objects whose artifacts reference it via provenance. Discovered by traversal, not by schema.
+### Evaluation States
+Four states: **SAT** (green) → **UNSAT** (red) → **MISSING** (grey) → **N/A** (muted)
+- N/A excluded from output artifact (not counted in minibar)
+- MISSING maps to sat:false in output (evidence gap, not satisfactory)
+- Cycle via chevron buttons (◂ ▸) or clicking the status badge
 
 ---
 
 ## Disclosure Model
 
+### Requester's Role (Connect Asset)
+- Provides: PIN of target asset, evaluation intent (requirement sets), message
+- Does NOT set disclosure type, scope, or terms
+
+### Responder's Role (Accept/Decline)
+- Sets: disclosure type (Full/Selective/Proof-Only), scope (which evidence, include derivatives), terms (duration, expiry)
+- Acceptance transitions provisional node → active node (reveal animation)
+
 ### Three Types
-| Type | Recipient Sees |
-|------|---------------|
-| **Full** | Object's artifact (raw file), all derived objects |
-| **Selective** | Selected fields from parse output artifacts |
-| **Proof-only** | SAT/UNSAT results from eval output artifacts only |
-
-### Enforcement
-Disclosure agreement artifact (JSON) specifies scope. App reads it to determine visibility. Both parties store the agreement artifact.
+| Type | Recipient Sees | Edge Style |
+|------|---------------|------------|
+| **Full** | All evidence + all derivatives | Solid |
+| **Selective** | Selected fields only | Dashed |
+| **Proof-Only** | SAT/UNSAT results only | Dotted |
+| **Pending** | Nothing (awaiting response) | Grey dashed |
 
 ---
 
-## Detail Panel
+## Templates + Requirement Sets
 
-Two tabs for any object:
-| Tab | Contents |
-|-----|----------|
-| **Children** | Objects referencing this one via provenance |
-| **Disclosures** | Disclosure agreements involving this object |
+### Enriched Schema
+Every field/requirement stores:
+- `id`, `name`, `instruction`, `format`, `category`, `required`
+- Requirement sets additionally: `criterion` per requirement
+- Templates additionally: `context` (document type hints)
 
-Health minibars: derived by scanning children for evaluation-schema artifacts and aggregating SAT/UNSAT.
-
----
-
-## Templates and Standards
-- **Parse templates (PEP):** Define fields to extract. Per-actor, publishable.
-- **Requirement sets (REP):** Define what to evaluate against. Per-actor, publishable.
-- Both referenced by output artifacts but are not objects themselves.
+### Library Modal
+- Three tabs: Parse Templates, Requirement Sets, Published Standards
+- Two-panel: item list (left) + detail/editor (right)
+- Lineage grouping with version expansion
+- Create, version, publish flows
+- Published standards: read-only, from public directory (OSHA, NIST, ISO demo data)
 
 ---
 
-## V3 Key Conventions
+## Health System
+
+### Minibar
+Three segments: green (SAT), grey (MISSING), red (UNSAT)
+- Stats: `N · N` (two-state) or `N · N · N` (three-state when missing > 0)
+- Rolls up from evaluation output children
+- Eval output nodes show own health (from their artifact)
+- Parent Claims show aggregated health from all eval children
+- Perspective-dependent: Alice sees all parties' evals, Bob sees only his own
+
+### _pending Flag
+- Suppresses minibar display
+- Suppresses child visibility (BFS doesn't traverse through pending nodes)
+- Shows "PROVISIONAL" label on node card
+- Shows restricted Detail Panel view
+
+---
+
+## Key Conventions
+
+### No Category Labels
+No PRODUCT, PROCESS, PLACE, PERSON, PARTY on node cards. No colored icons. All cards identical.
 
 ### No Emojis
-All icons are SVG. No emoji characters. Unicode symbols (✓, ×, ⚠, ▸, ■, ◆, ◇, ◧) acceptable.
+All icons are SVG. Unicode symbols (✓, ×, ▸, ◂, ■, ◆, ◇) acceptable.
 
 ### CSS Variables
 All components use CSS variables. Never hardcode colors. Use `color-mix()` for alpha.
 
 ### Timestamps
-All objects use `date` + `dateTime` fields. Display: `YYYY-MM-DD · HH:MM UTC`.
+`date` + `dateTime` fields. Display: `YYYY-MM-DD · HH:MM UTC`.
 
-### No Type Flags
-No `isEvidence`, `isParse`, `isEvaluation`, `isClaim`. Objects are objects. Artifact schema determines rendering hints.
+### Escape Key
+Input/textarea focused → blur only. Editor mode → exit to view. Nothing focused → close modal.
+
+### Click-to-Copy
+All PIN displays should support click-to-copy with visual feedback.
 
 ---
 
-## Carried Forward from V2
+## Demo Users
 
-### Reusable
-- Three.js canvas (dot grid, edges, camera, LOD, pan/zoom, animations)
-- Boot sequence (CAC login, golden ripple, network build)
-- CSS theme system (dark/light)
-- Modal shared components
-- LOD system (full cards, mini cards, dots)
-- Edge rendering (Line2, disclosure type styles)
+- **Bob Donloe** @ GovCo (buyer) — DOT: DONLOE.BOB.J.1384297560
+- **Alice Nakamura** @ MicroCo (supplier)
+- Role switching via user menu (does NOT replay boot animation)
 
-### Rebuilt
-- Node rendering → universal ObjectNode (artifact-aware)
-- Detail panel → two tabs, content from artifact inspection
-- Action system → three actions on any object
-- Data layer → Actor + Object + Edge
-- Health display → derived from artifact content
-- Disclosure flow → artifact-aware
-- Layout → provenance-based tree
+## Boot Sequence
+CAC login → Prime Radiant 3D → golden ripple → network build animation
+Session storage key: `radiant-v2-booted`

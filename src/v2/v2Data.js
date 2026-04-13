@@ -341,6 +341,8 @@ function makeNode(id, name, category, owner, opts = {}) {
     upstreamSda = null,
     upstreamAssets = null,
     isEvidence = false,
+    artifactUri = null,
+    evidenceRefs = [],
   } = opts
 
   const health = { ok: 0, warn: 0, bad: 0 }
@@ -391,6 +393,8 @@ function makeNode(id, name, category, owner, opts = {}) {
     upstreamSda,
     upstreamAssets,
     isEvidence,
+    artifactUri,
+    evidenceRefs,
     lastEval: evaluations.filter(e => e.status !== 'superseded').length > 0
       ? evaluations.filter(e => e.status !== 'superseded').sort((a, b) => b.date.localeCompare(a.date))[0].date
       : null,
@@ -402,29 +406,47 @@ function makeNode(id, name, category, owner, opts = {}) {
 function buildBobData() {
   const govco = makeNode('govco', 'GovCo', 'party', null, {
     evaluations: [],
-    sdas: [{ ...SDA_INTERNAL_GOVCO, pins: [] }],
+    sdas: [{ ...SDA_INTERNAL_GOVCO, pins: [], assetName: 'Sentinel-4 Program', assetPin: makePin('sentinel-4') }],
     children: [],
     x: 0, y: 0,
   })
 
   const sentinel4 = makeNode('sentinel-4', 'Sentinel-4 Program', 'product', 'GovCo', {
     evaluations: [],
-    sdas: [{ ...SDA_INTERNAL_GOVCO, pins: [] }],
+    sdas: [
+      { ...SDA_INTERNAL_GOVCO, pins: [] },
+      { ...SDA_INTERNAL_GOVCO, pins: [], assetName: 'Propulsion System', assetPin: makePin('propulsion') },
+      { ...SDA_INTERNAL_GOVCO, pins: [], assetName: 'Avionics Module', assetPin: makePin('avionics') },
+    ],
     children: [],
     x: 400, y: 0,
+    artifactUri: 'provenance://claims/sentinel-4',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/sentinel-4-spec-001', filename: 'sentinel-4-system-specification.pdf', size: 2456789, mimeType: 'application/pdf', label: 'System Specification' },
+      { uri: 'provenance://evidence/sentinel-4-reqs-001', filename: 'sentinel-4-requirements-matrix.xlsx', size: 890123, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', label: 'Requirements Matrix' },
+    ],
   })
 
   const propulsion = makeNode('propulsion', 'Propulsion System', 'product', 'GovCo', {
     evaluations: [],
-    sdas: [{ ...SDA_INTERNAL_GOVCO, pins: [] }],
+    sdas: [
+      { ...SDA_INTERNAL_GOVCO, pins: [] },
+      { ...SDA_INTERNAL_GOVCO, pins: [], assetName: 'Sentinel-4 Program', assetPin: makePin('sentinel-4') },
+    ],
     children: [],
     x: 900, y: -200,
+    artifactUri: 'provenance://claims/propulsion',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/propulsion-thrust-001', filename: 'thrust-test-report.pdf', size: 3145728, mimeType: 'application/pdf', label: 'Thrust Test Report' },
+      { uri: 'provenance://evidence/propulsion-safety-001', filename: 'propellant-safety-datasheet.pdf', size: 1572864, mimeType: 'application/pdf', label: 'Propellant Safety Datasheet' },
+    ],
   })
 
   const avionics = makeNode('avionics', 'Avionics Module', 'product', 'GovCo', {
     evaluations: [],
     sdas: [
       { ...SDA_INTERNAL_GOVCO, pins: [] },
+      { ...SDA_INTERNAL_GOVCO, pins: [], assetName: 'Sentinel-4 Program', assetPin: makePin('sentinel-4') },
       {
         type: 'selective',
         party: 'MicroCo',
@@ -452,6 +474,11 @@ function buildBobData() {
     ],
     children: [],
     x: 900, y: 200,
+    artifactUri: 'provenance://claims/avionics',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/avionics-spec-001', filename: 'avionics-integration-spec.pdf', size: 4718592, mimeType: 'application/pdf', label: 'Integration Specification' },
+      { uri: 'provenance://evidence/avionics-emc-001', filename: 'emc-test-report.pdf', size: 2097152, mimeType: 'application/pdf', label: 'EMC Test Report' },
+    ],
   })
 
   // Disclosed MicroCo assets (Bob's copies)
@@ -548,6 +575,7 @@ function buildBobData() {
     }],
     children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 1400, y: 0,
+    artifactUri: 'provenance://claims/power-reg',
   })
 
   // VReg IC: fully disclosed from MicroCo, no evaluations yet (Bob hasn't run one)
@@ -576,6 +604,7 @@ function buildBobData() {
     }],
     children: [vregEv, vregPep],
     x: 1400, y: 400,
+    artifactUri: 'provenance://claims/vreg-ic',
   })
 
   // Set static parse dates for Bob's disclosed copies
@@ -777,6 +806,7 @@ function buildAliceData() {
     ],
     children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 500, y: -300,
+    artifactUri: 'provenance://claims/power-reg',
   })
 
   // VReg IC: has evidence, fully disclosed to GovCo, no evaluations yet
@@ -810,6 +840,7 @@ function buildAliceData() {
     ],
     children: [vregEv, vregPep],
     x: 500, y: 0,
+    artifactUri: 'provenance://claims/vreg-ic',
   })
 
   // PCB Substrate: shell, no evidence yet
@@ -818,6 +849,10 @@ function buildAliceData() {
     sdas: [{ ...SDA_INTERNAL_MICROCO, pins: [] }],
     children: [],
     x: 500, y: 300,
+    artifactUri: 'provenance://claims/pcb-sub',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/pcb-spec-001', filename: 'pcb-substrate-specification.pdf', size: 1048576, mimeType: 'application/pdf', label: 'PCB Specification' },
+    ],
   })
 
   // EMI Shield: evidence + parse + published to directory
@@ -858,6 +893,7 @@ function buildAliceData() {
     children: [emiShieldEv, emiShieldPep],
     x: 500, y: 600,
     description: 'Board-level EMI shielding assembly for high-frequency noise suppression.',
+    artifactUri: 'provenance://claims/emi-shield',
   })
 
   // Thermal Interface Pad: has evidence + parse
@@ -884,6 +920,7 @@ function buildAliceData() {
     children: [thermalPadEv, thermalPadPep],
     x: 500, y: 900,
     description: 'Thermally conductive gap filler pad for heat dissipation between components and heatsinks.',
+    artifactUri: 'provenance://claims/thermal-pad',
   })
 
   // Connector Assembly: has evidence + parse
@@ -910,6 +947,7 @@ function buildAliceData() {
     children: [connectorAssyEv, connectorAssyPep],
     x: 500, y: 1200,
     description: 'Board-to-board connector assembly for inter-module signal and power routing.',
+    artifactUri: 'provenance://claims/connector-assy',
   })
 
   const radiantNetwork = {
@@ -1056,6 +1094,59 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
   }
 }
 
+
+export function makeRootClaim(name, evidenceFiles, owner, opts = {}) {
+  const ts = Date.now()
+  const id = `claim-root-${hashStr(name + '-' + ts).toString(16).padStart(8, '0')}`
+  const pin = makePin(id)
+  const dot = owner ? makeDot(owner) : makeDot(id)
+
+  return {
+    id,
+    pin,
+    dot,
+    name,
+    category: 'claim',
+    owner,
+    parentId: null,
+    children: [],
+    health: { ok: 0, warn: 0, bad: 0 },
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: { ok: 0, warn: 0, bad: 0 },
+    claimCount: 0,
+    displayClaimCount: 0,
+    hasEvidence: true,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x: opts.x || 0,
+    y: opts.y || 0,
+    parentOwner: owner,
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    isEvidence: false,
+    isParse: false,
+    isEvaluation: false,
+    isClaim: true,
+    isTerminalNode: false,
+    evidenceRefs: evidenceFiles.map(f => ({
+      uri: f.uri || f.path,
+      filename: f.filename || f.name,
+      size: f.size || null,
+      mimeType: f.mimeType || null,
+      label: f.label || f.filename || f.name,
+      hash: f.hash || null,
+    })),
+    referencedEvidenceIds: [],
+    date: new Date().toISOString().slice(0, 10),
+    dateTime: new Date().toISOString(),
+    lastEval: null,
+  }
+}
 
 export { makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin }
 

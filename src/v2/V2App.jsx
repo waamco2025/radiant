@@ -4,14 +4,13 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin, makeRootClaim } from './v2Data.js'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
 import RequestDisclosureModal from '../components/modals/RequestDisclosureModal.jsx'
 import DisclosureResponseModal from '../components/modals/DisclosureResponseModal.jsx'
 import CascadeModal from '../components/modals/CascadeModal.jsx'
-import RegisterAssetModal from '../components/modals/RegisterAssetModal.jsx'
 import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
 import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
 import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
@@ -1727,10 +1726,7 @@ export default function V2App() {
           onConnect={(node) => setConnectNode(node)}
           onDisclose={(node) => setPublishNode(node)}
           onAddEvidence={(node) => {
-            if (node.isClaim || node.category === 'claim') {
-              const parentAsset = nodes.find(n => n.children?.some(c => c.id === node.id))
-              if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: node })
-            }
+            setEvidenceNode(node)
           }}
           onParseEvidence={(evidenceNodeArg) => {
             const parentAsset = nodes.find(n => n.children?.some(c => c.id === evidenceNodeArg.id))
@@ -1816,7 +1812,7 @@ export default function V2App() {
               })
             }
           }}
-          onCreateClaim={(node) => setClaimContext({ parentNode: node })}
+          onCreateClaim={(node) => setClaimContext(node ? { initiatingNode: node } : true)}
           activeParty={activeRole.party}
           revealAnim={revealAnim}
         />
@@ -1883,15 +1879,11 @@ export default function V2App() {
               onConnect={() => sel && nodeMap[sel] && setConnectNode(nodeMap[sel])}
               onAddEvidence={() => {
                 const target = sel && nodeMap[sel]
-                if (!target) return
-                if (target.isClaim || target.category === 'claim') {
-                  const parentAsset = nodes.find(n => n.children?.some(c => c.id === target.id))
-                  if (parentAsset) setClaimContext({ parentNode: parentAsset, editingClaim: target })
-                }
+                if (target) setEvidenceNode(target)
               }}
-              onCreateClaim={(node) => {
-                const target = node || (sel && nodeMap[sel])
-                if (target) setClaimContext({ parentNode: target })
+              onCreateClaim={() => {
+                const target = sel && nodeMap[sel]
+                setClaimContext(target ? { initiatingNode: target } : true)
               }}
               onParseEvidence={() => {
                 if (!sel || !nodeMap[sel]) return
@@ -2375,6 +2367,20 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.8.0', date: '2026-04-12', label: 'Round 12', items: [
+                  'V2.1 Claims Migration — nodes are now Claims backed by evidence, replacing the old asset/container model',
+                  'Category-free node cards — removed category icons, labels, and color tinting from all LOD levels',
+                  'Unified two-tab Detail Panel (Overview + Artifact) replacing five separate rendering branches',
+                  'Overview tab: Provenance, Disclosures, and Children sections with clickable navigation',
+                  'Artifact tab: schema-specific content with evidence refs, parsed fields, eval claims, and artifact URIs',
+                  'Create Claim modal — name + evidence from Qualified Storage picker, replaces Register Asset',
+                  'New Claims connect to initiating node with full disclosure edge and reciprocal SDAs',
+                  'Disclosure rows navigate to connected nodes — click any disclosure to select + pan',
+                  'Minibar redesign — full-width health bar, no tallies, improved spacing',
+                  'Ownership-based footer actions — owner sees Create Claim, Parse, Evaluate, Disclose; non-owner sees Evaluate only',
+                  'Static data enrichment — artifact URIs, evidence file references, complete SDA wiring on all demo nodes',
+                  'Connect Asset modal "Register New Asset" renamed to "Create Claim" with updated copy',
+                ]},
                 { version: '0.7.0', date: '2026-04-02', label: 'Round 11', items: [
                   'Requirements set publishing — publish standards to Radiant Network with confirmation flow',
                   'Published standards visible to connected parties in Requirements Library + Run Evaluation',
@@ -2467,7 +2473,7 @@ export default function V2App() {
                   'AI-powered evaluation with human review',
                   'PEP parse with template selection',
                   'Requirements Library with search and versioning',
-                  'Register Assets (single + bulk CSV)',
+                  'Create Claims (single + bulk CSV)',
                   'Role switching between Bob@GovCo and Alice@MicroCo',
                 ]},
               ].map(release => (
@@ -2503,7 +2509,7 @@ export default function V2App() {
       )} */}
 
       {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || registerNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || claimContext || reviseContext) && (
+      {(publishNode || connectNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || claimContext || reviseContext) && (
         <Backdrop onClose={() => {
           if (reviseContext) setReviseContext(null)
           else if (claimContext) setClaimContext(null)
@@ -2511,7 +2517,6 @@ export default function V2App() {
           else if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
           else if (showPEPLibrary) setShowPEPLibrary(false)
           else if (connectNode) setConnectNode(null)
-          else if (registerNode) setRegisterNode(null)
           else if (evidenceNode) setEvidenceNode(null)
           else if (parseContext) setParseContext(null)
           else if (responseRequest) setResponseRequest(null)
@@ -2634,224 +2639,12 @@ export default function V2App() {
           publicListings={publicListings}
           onClose={() => setConnectNode(null)}
           onRegisterAsset={() => {
-            const node = connectNode
+            const ctxNode = connectNode
             setConnectNode(null)
-            setRegisterNode(node)
+            setClaimContext(ctxNode ? { initiatingNode: ctxNode } : true)
           }}
           onSubmitRequest={handleSubmitRequest}
           onValidatePins={handleValidatePins}
-          _noBackdrop
-        />
-      )}
-      {registerNode && (
-        <RegisterAssetModal
-          parentNode={registerNode}
-          activeParty={activeRole.party}
-          nodeMap={nodeMap}
-          onClose={() => setRegisterNode(null)}
-          onBack={() => {
-            const node = registerNode
-            setRegisterNode(null)
-            setConnectNode(node)
-          }}
-          onComplete={(result) => {
-            if (result.bulk) {
-              // Bulk import: create multiple nodes + edges
-              const today = new Date().toISOString().slice(0, 10)
-              const newNodes = []
-              const newEdges = []
-              let firstNodeId = null
-
-              result.assets.forEach((asset, index) => {
-                const slug = asset.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
-                const nodeId = `${slug}-${Date.now().toString(36)}-${index}`
-                if (!firstNodeId) firstNodeId = nodeId
-
-                const parentId = Object.values(nodeMap).find(n => n.pin === asset.parentPin)?.id || registerNode.id
-                const parentNodeRef = nodeMap[parentId] || registerNode
-
-                const connectedEdgesForParent = edges.filter(e => e.from === parentId)
-                const connectedNodesForParent = connectedEdgesForParent.map(e => nodeMap[e.to]).filter(Boolean)
-                const batchSiblings = newNodes.filter(n => newEdges.some(e => e.from === parentId && e.to === n.id))
-                const allSiblings = [...connectedNodesForParent, ...batchSiblings]
-
-                let newX, newY
-                if (allSiblings.length > 0) {
-                  newX = allSiblings[0].x
-                  newY = parentNodeRef.y || 0
-                } else {
-                  newX = (parentNodeRef.x || 0) + 500
-                  newY = parentNodeRef.y || 0
-                }
-
-                // Collision check against all existing + batch-created nodes
-                newY = findClearY(newX, newY, [...nodes, ...newNodes])
-
-                const newNode = {
-                  id: nodeId,
-                  pin: makePin(nodeId),
-                  dot: makeDot(activeRole.party),
-                  name: asset.name,
-                  category: asset.category,
-                  owner: activeRole.party,
-                  parentId: null,
-                  children: [],
-                  health: { ok: 0, warn: 0, bad: 0 },
-                  childHealth: null,
-                  totalHealth: null,
-                  displayHealth: { ok: 0, warn: 0, bad: 0 },
-                  claimCount: 0,
-                  displayClaimCount: 0,
-                  hasEvidence: !!asset.evidenceUri,
-                  hasStack: !!asset.evidenceUri,
-                  childCount: asset.evidenceUri ? 1 : 0,
-                  evidence: null,
-                  evaluations: [],
-                  sdas: [{
-                    type: 'full',
-                    party: activeRole.party,
-                    partyLabel: 'internal',
-                    partyDot: activeRole.partyDot,
-                    created: today,
-                    expires: null,
-                    pins: [],
-                    assetName: null,
-                    assetPin: null,
-                  }],
-                  x: newX,
-                  y: newY,
-                  parentOwner: activeRole.party,
-                  isCascade: false,
-                  cascadeVia: null,
-                  upstreamSda: null,
-                  upstreamAssets: null,
-                  isEvidence: false,
-                  lastEval: null,
-                  description: null,
-                  _isNew: true,
-                }
-
-                if (asset.evidenceUri) {
-                  const evMeta = makeEvidence(
-                    nodeId,
-                    asset.name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
-                    activeRole.party + ' Lab',
-                    '10 years'
-                  )
-                  const uriFilename = asset.evidenceUri.split('/').pop() || 'evidence.pdf'
-                  evMeta.filename = uriFilename
-                  evMeta.uri = asset.evidenceUri
-
-                  const evUniqueId = `ev-${nodeId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-                  const evNode = makeEvidenceNode(nodeId, evMeta, activeRole.party, [], evUniqueId)
-                  newNode.children = [evNode]
-                  newNode.hasStack = true
-                  newNode.childCount = 1
-                  newNode.hasEvidence = true
-                }
-
-                newNodes.push(newNode)
-                newEdges.push({
-                  id: `e-${parentId}-${nodeId}`,
-                  from: parentId,
-                  to: nodeId,
-                  sdaType: 'full',
-                })
-              })
-
-              updateRoleState(roleId, prev => ({
-                ...prev,
-                addedNodes: [...prev.addedNodes, ...newNodes],
-                addedEdges: [...prev.addedEdges, ...newEdges],
-              }))
-
-              setRegisterNode(null)
-              if (firstNodeId) {
-                setTimeout(() => setSel(firstNodeId), 100)
-              }
-            } else {
-              // Single registration
-              const { name, category, description } = result
-              const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
-              const nodeId = `${slug}-${Date.now().toString(36)}`
-              const today = new Date().toISOString().slice(0, 10)
-
-              const connectedEdges = edges.filter(e => e.from === registerNode.id)
-              const connectedNodes = connectedEdges
-                .map(e => nodeMap[e.to])
-                .filter(Boolean)
-
-              let newX, newY
-              if (connectedNodes.length > 0) {
-                newX = connectedNodes[0].x
-                newY = registerNode.y || 0
-              } else {
-                newX = (registerNode.x || 0) + 500
-                newY = registerNode.y || 0
-              }
-
-              // Collision check against all nodes on the graph
-              newY = findClearY(newX, newY, nodes)
-
-              const newNode = {
-                id: nodeId,
-                pin: makePin(nodeId),
-                dot: makeDot(activeRole.party),
-                name,
-                category,
-                owner: activeRole.party,
-                parentId: null,
-                children: [],
-                health: { ok: 0, warn: 0, bad: 0 },
-                childHealth: null,
-                totalHealth: null,
-                displayHealth: { ok: 0, warn: 0, bad: 0 },
-                claimCount: 0,
-                displayClaimCount: 0,
-                hasEvidence: false,
-                hasStack: false,
-                childCount: 0,
-                evidence: null,
-                evaluations: [],
-                sdas: [{
-                  type: 'full',
-                  party: activeRole.party,
-                  partyLabel: 'internal',
-                  partyDot: activeRole.partyDot,
-                  created: today,
-                  expires: null,
-                  pins: [],
-                  assetName: null,
-                  assetPin: null,
-                }],
-                x: newX,
-                y: newY,
-                parentOwner: activeRole.party,
-                isCascade: false,
-                cascadeVia: null,
-                upstreamSda: null,
-                upstreamAssets: null,
-                isEvidence: false,
-                lastEval: null,
-                description: description || null,
-                _isNew: true,
-              }
-
-              updateRoleState(roleId, prev => ({
-                ...prev,
-                addedNodes: [...prev.addedNodes, newNode],
-                addedEdges: [...prev.addedEdges, {
-                  id: `e-${registerNode.id}-${nodeId}`,
-                  from: registerNode.id,
-                  to: nodeId,
-                  sdaType: 'full',
-                }],
-              }))
-
-              setRegisterNode(null)
-              setTimeout(() => setSel(nodeId), 100)
-            }
-          }}
           _noBackdrop
         />
       )}
@@ -3630,109 +3423,104 @@ export default function V2App() {
       )}
       {claimContext && (
         <CreateClaimModal
-          parentNode={claimContext.parentNode}
-          editingClaim={claimContext.editingClaim || null}
-          requirementSets={requirementSets}
-          publishedSets={visiblePublishedSets}
           activeParty={activeRole.party}
           credits={credits}
           onClose={() => setClaimContext(null)}
-          onComplete={({ title, requirementSet, referencedEvidenceIds, creditCost, newEvidence }) => {
-            const parentNode = claimContext.parentNode
+          onComplete={({ name, evidenceFiles, creditCost }) => {
+            const initiatingNode = claimContext && claimContext.initiatingNode ? nodeMap[claimContext.initiatingNode.id] || claimContext.initiatingNode : null
+            const today = new Date().toISOString().slice(0, 10)
+            const nowTime = new Date().toISOString().slice(11, 16) + ' UTC'
+            const GRID = 100 // matches V2Canvas BASE_GRID_SPACING
+            const COLUMN_OFFSET = 500 // matches existing column spacing in demo data
 
-            // If new evidence was uploaded, create it on the asset first
-            let newEvidenceId = null
-            if (newEvidence && newEvidence.name && newEvidence.filename) {
-              const evidenceMeta = makeEvidence(
-                parentNode.id + '-' + Date.now().toString(36),
-                newEvidence.name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
-                activeRole.party + ' Lab',
-                '10 years'
-              )
-              evidenceMeta.filename = newEvidence.filename
-              const evUniqueId = `ev-${parentNode.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-              const evNode = makeEvidenceNode(parentNode.id, evidenceMeta, activeRole.party, [], evUniqueId)
-              evNode.name = newEvidence.name
-              if (newEvidence.filename) {
-                evNode.evidence.localPath = `/${newEvidence.filename}`
+            // Position near initiating node, grid-snapped
+            let newX, newY
+            if (initiatingNode) {
+              newX = Math.round(((initiatingNode.x || 0) + COLUMN_OFFSET) / GRID) * GRID
+              newY = Math.round((initiatingNode.y || 0) / GRID) * GRID
+              newY = findClearY(newX, newY, nodes)
+            } else {
+              // Fallback if no context — place near owned nodes
+              const ownedNodes = nodes.filter(n => n.owner === activeRole.party)
+              const avgX = ownedNodes.length > 0 ? ownedNodes.reduce((s, n) => s + (n.x || 0), 0) / ownedNodes.length : 0
+              const maxY = ownedNodes.length > 0 ? Math.max(...ownedNodes.map(n => n.y || 0)) : 0
+              newX = Math.round(avgX / GRID) * GRID
+              newY = findClearY(newX, Math.round((maxY + 300) / GRID) * GRID, nodes)
+            }
+
+            const newNode = makeRootClaim(name, evidenceFiles, activeRole.party, { x: newX, y: newY })
+            newNode._isNew = true
+
+            // Self-disclosure SDA (no assetPin — filtered from Disclosures list)
+            newNode.sdas = [{
+              type: 'full',
+              party: activeRole.party,
+              partyLabel: 'internal',
+              partyDot: activeRole.partyDot,
+              created: today,
+              createdTime: nowTime,
+              expires: null,
+              pins: [newNode.pin],
+              assetName: null,
+              assetPin: null,
+            }]
+
+            const newEdges = []
+
+            // If initiated from a node, create edge + reciprocal SDAs
+            if (initiatingNode) {
+              // SDA on new node pointing to initiating node (has assetPin, so visible in Disclosures)
+              newNode.sdas.push({
+                type: 'full',
+                party: activeRole.party,
+                partyDot: activeRole.partyDot,
+                created: today,
+                createdTime: nowTime,
+                expires: null,
+                pins: [initiatingNode.pin],
+                assetName: initiatingNode.name,
+                assetPin: initiatingNode.pin,
+              })
+
+              newEdges.push({
+                id: `e-${initiatingNode.id}-${newNode.id}`,
+                from: initiatingNode.id,
+                to: newNode.id,
+                sdaType: 'full',
+              })
+
+              // Reciprocal SDA on initiating node pointing to new node (has assetPin, so visible)
+              const reciprocalSda = {
+                type: 'full',
+                party: activeRole.party,
+                partyDot: activeRole.partyDot,
+                created: today,
+                createdTime: nowTime,
+                expires: null,
+                pins: [newNode.pin],
+                assetName: newNode.name,
+                assetPin: newNode.pin,
               }
-              updateRoleState(roleId, prev => {
-                const existingChildren = prev.addedChildren?.[parentNode.id] || []
-                return {
-                  ...prev,
-                  addedChildren: {
-                    ...(prev.addedChildren || {}),
-                    [parentNode.id]: [...existingChildren, evNode],
-                  },
-                }
-              })
-              newEvidenceId = evNode.id
-            }
-
-            const finalEvidenceIds = newEvidenceId
-              ? [...referencedEvidenceIds, newEvidenceId]
-              : referencedEvidenceIds
-
-            if (claimContext.editingClaim) {
-              const claimId = claimContext.editingClaim.id
-              updateRoleState(roleId, prev => {
-                const existingChildren = prev.addedChildren?.[parentNode.id] || []
-                const dynamicIdx = existingChildren.findIndex(c => c.id === claimId)
-                if (dynamicIdx >= 0) {
-                  const updated = [...existingChildren]
-                  updated[dynamicIdx] = { ...updated[dynamicIdx], referencedEvidenceIds: finalEvidenceIds }
-                  return { ...prev, addedChildren: { ...(prev.addedChildren || {}), [parentNode.id]: updated } }
-                }
-                const staticNode = parentNode.children?.find(c => c.id === claimId)
-                if (staticNode) {
-                  return {
-                    ...prev,
-                    addedChildren: {
-                      ...(prev.addedChildren || {}),
-                      [parentNode.id]: [...existingChildren, { ...staticNode, referencedEvidenceIds: finalEvidenceIds }],
-                    },
-                  }
-                }
-                return prev
-              })
-              setClaimContext(null)
-              return
-            }
-
-            const claimNode = makeClaimNode(
-              parentNode.id,
-              { ...requirementSet, name: title || requirementSet.name },
-              finalEvidenceIds,
-              activeRole.party
-            )
-
-            updateRoleState(roleId, prev => {
-              const existingChildren = prev.addedChildren?.[parentNode.id] || []
-              return {
+              updateRoleState(roleId, prev => ({
                 ...prev,
-                addedChildren: {
-                  ...(prev.addedChildren || {}),
-                  [parentNode.id]: [...existingChildren, claimNode],
+                addedSDAs: {
+                  ...(prev.addedSDAs || {}),
+                  [initiatingNode.id]: [...(prev.addedSDAs?.[initiatingNode.id] || []), reciprocalSda],
                 },
-              }
-            })
+              }))
+            }
 
-            setCredits(c => c - CREDITS_PER_CLAIM)
+            updateRoleState(roleId, prev => ({
+              ...prev,
+              addedNodes: [...prev.addedNodes, newNode],
+              addedEdges: [...prev.addedEdges, ...newEdges],
+            }))
+
+            setCredits(c => c - creditCost)
             setClaimContext(null)
 
-            if (layerInfo.depth > 0 && layerInfo.anchorId === parentNode.id) {
-              setTimeout(() => setSel(claimNode.id), 200)
-            } else {
-              setTimeout(() => {
-                if (canvasRef.current) {
-                  const updatedParent = nodeMapRef.current[parentNode.id]
-                  if (updatedParent) {
-                    canvasRef.current.dive(updatedParent)
-                    setTimeout(() => setSel(claimNode.id), 600)
-                  }
-                }
-              }, 100)
-            }
+            // Select and pan to new node
+            setTimeout(() => setSel(newNode.id), 100)
           }}
           _noBackdrop
         />

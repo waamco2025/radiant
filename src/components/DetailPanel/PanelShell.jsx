@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PANEL_W, GUTTER, BTN_H, CATEGORY_CONFIG } from './constants'
+import { PANEL_W, GUTTER, BTN_H } from './constants'
 import HealthBar from './shared/HealthBar'
 import CopyBadge from './shared/CopyBadge'
 import { Tip } from './shared/Tooltip'
@@ -62,7 +62,6 @@ export default function PanelShell({
   onClipClick, hasStack, hasParent, children,
   onViewChain, onExpandStack, onSurface, isAnchor, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, canEvaluate, canAssetEvaluate, isEvidence, isParse, isEvaluation, isClaim, isOwner, onAmendEval, onCreateClaim, activeParty, depth,
 }) {
-  const cat = CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product
   const [descExpanded, setDescExpanded] = useState(false)
   const [hoveredFooterBtn, setHoveredFooterBtn] = useState(null)
   useEffect(() => { setDescExpanded(false) }, [node.id])
@@ -80,44 +79,9 @@ export default function PanelShell({
     }}>
       {/* Header */}
       <div style={{ padding: `${GUTTER}px ${GUTTER}px 16px`, flexShrink: 0 }}>
-        {/* Category row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-          <span style={{ fontSize: 13, color: cat.color }}>{cat.icon}</span>
-          <span style={{
-            fontSize: 10.5, fontFamily: 'var(--font-mono)', fontWeight: 700,
-            color: cat.color, letterSpacing: '0.08em',
-          }}>{node.category.toUpperCase()}</span>
-          <div style={{ flex: 1 }} />
-          {node.hasEvidence && onClipClick && (
-            <Tip text="View evidence details">
-              <span
-                onClick={onClipClick}
-                style={{
-                  cursor: 'pointer', display: 'inline-flex', padding: '2px 4px',
-                  borderRadius: 4, transition: 'background 150ms',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <ClipIcon s={14} c="var(--text-secondary)" />
-              </span>
-            </Tip>
-          )}
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none', border: 'none', fontSize: 15,
-              color: 'var(--text-tertiary)', cursor: 'pointer',
-              padding: '2px 4px', borderRadius: 4, transition: 'color 150ms',
-            }}
-            onMouseEnter={e => e.target.style.color = 'var(--text-primary)'}
-            onMouseLeave={e => e.target.style.color = 'var(--text-tertiary)'}
-          >✕</button>
-        </div>
-
-        {/* Name + PIN */}
+        {/* Name + PIN + close */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{node.name}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', flex: 1 }}>{node.name}</span>
           {node._isNew && (
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
@@ -127,6 +91,17 @@ export default function PanelShell({
             }}>NEW</span>
           )}
           <CopyBadge value={node.pin} truncated />
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', fontSize: 15,
+              color: 'var(--text-tertiary)', cursor: 'pointer',
+              padding: '2px 4px', borderRadius: 4, transition: 'color 150ms',
+              flexShrink: 0, marginLeft: 'auto',
+            }}
+            onMouseEnter={e => e.target.style.color = 'var(--text-primary)'}
+            onMouseLeave={e => e.target.style.color = 'var(--text-tertiary)'}
+          >✕</button>
         </div>
 
         {/* Description */}
@@ -144,10 +119,9 @@ export default function PanelShell({
           </div>
         )}
 
-        {/* Owner + DOT */}
+        {/* Owner */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{node.owner}</span>
-          <CopyBadge value={node.dot} />
         </div>
 
         {/* Health bar */}
@@ -202,19 +176,20 @@ export default function PanelShell({
       {/* Footer */}
       {(() => {
         const isChildLayer = isAnchor || depth > 0
-        const isActiveEval = isEvaluation && node.status !== 'superseded'
         const buttons = []
-        if (isOwner && !isEvidence && !isParse && !isEvaluation && !isClaim) {
-          buttons.push({ icon: '+', label: 'Connect Asset', onClick: onConnect, id: 'connect' })
-          buttons.push({ icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>, label: 'Publish', onClick: onDisclose, id: 'disclose' })
-          if (onCreateClaim) buttons.push({ icon: '◇', label: 'Create Claim', onClick: onCreateClaim, id: 'claim' })
+        if (isOwner) {
+          if (onCreateClaim) buttons.push({ icon: '+', label: 'Create Claim', onClick: onCreateClaim, id: 'claim' })
+          if (onParseEvidence) buttons.push({ icon: '⊞', label: 'Parse', onClick: onParseEvidence, id: 'parse' })
+          if (onRunEvaluation) buttons.push({ icon: '◆', label: 'Evaluate', onClick: onRunEvaluation, id: 'evaluate' })
+          if (onDisclose) buttons.push({
+            icon: <svg width={13} height={13} viewBox="0 0 16 16" fill="none" style={{ display: 'block' }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" /><ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" /><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" /></svg>,
+            label: 'Disclose',
+            onClick: onDisclose,
+            id: 'disclose',
+          })
+        } else {
+          if (onRunEvaluation) buttons.push({ icon: '◆', label: 'Evaluate', onClick: onRunEvaluation, id: 'evaluate' })
         }
-        if (isOwner && isClaim) {
-          buttons.push({ icon: '◧', label: 'Add Evidence', onClick: onAddEvidence, id: 'evidence' })
-        }
-        if (canAssetEvaluate && isClaim) buttons.push({ icon: '◆', label: 'Run Evaluation', onClick: onRunEvaluation, id: 'evaluate' })
-        if (isOwner && isEvidence && !isEvaluation) buttons.push({ icon: '⊞', label: 'Parse Evidence', onClick: onParseEvidence, id: 'parse' })
-        if (isActiveEval && onAmendEval && node.evaluatorParty === activeParty) buttons.push({ icon: '◆', label: 'Amend Evaluation', onClick: () => onAmendEval(node), id: 'amend' })
         if (isAnchor) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })
         else if (hasStack) buttons.push({ icon: '⊞', label: 'Expand Stack', onClick: onExpandStack, id: 'layer' })
         else if (hasParent) buttons.push({ icon: '⊟', label: 'Exit Layer', onClick: onSurface, id: 'layer' })

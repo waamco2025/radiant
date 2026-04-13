@@ -11,10 +11,10 @@ function StepPath({ onSelectPath, onRegisterAsset, onSelectDirectory }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20, lineHeight: 1.7 }}>
-        Choose how you'd like to connect assets to your network. Register a new asset, enter PINs shared with you off-platform, or browse the public asset directory.
+        Choose how you'd like to connect assets to your network. Create a new claim, enter PINs shared with you off-platform, or browse the public asset directory.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Register New Asset — enabled */}
+        {/* Create Claim — enabled */}
         <div
           onClick={() => onRegisterAsset?.()}
           onMouseEnter={() => setHov('register')}
@@ -36,11 +36,11 @@ function StepPath({ onSelectPath, onRegisterAsset, onSelectDirectory }) {
               <span style={{ fontSize: 18, color: 'var(--accent-green)', fontWeight: 700 }}>+</span>
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, color: hov === 'register' ? 'var(--text-primary)' : 'var(--text-secondary)', transition: 'color 150ms' }}>
-              Register New Asset
+              Create Claim
             </div>
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, paddingLeft: 46 }}>
-            Create a new asset on your network. You can attach evidence and run evaluations after registration.
+            Create a new claim — an assertion about a product or component backed by evidence files from your qualified storage.
           </div>
         </div>
 
