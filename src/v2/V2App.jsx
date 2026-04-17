@@ -5,6 +5,7 @@ import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
 import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin, makeRootClaim } from './v2Data.js'
+import { V2_2_ENABLED } from './v2_2Data.js'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -969,21 +970,35 @@ export default function V2App() {
   const handleValidatePins = useCallback((pinList) => {
     return pinList.map(pin => {
       if (!pin.startsWith('PIN-0x')) {
-        return { pin, status: 'error', error: 'Invalid PIN format' }
+        return { pin, status: 'error', error: 'Invalid PIN format.', errorCode: 'ERR-00' }
       }
       const resolved = resolvePin(pin)
       if (!resolved) {
-        return { pin, status: 'error', error: 'PIN not found on the network' }
+        return { pin, status: 'error', error: 'PIN not found. Verify the PIN and try again.', errorCode: 'ERR-05' }
       }
+      // Block child-layer nodes (evidence, parse, eval) — only parent-layer nodes are disclosable
+      const isChildNode = resolved.isEvidence
+        || resolved.isParse || resolved.category === 'parse'
+        || resolved.isEvaluation || resolved.category === 'evaluation'
+        || (resolved.parentId && !resolved.isClaim && resolved.category !== 'claim')
+      if (isChildNode) {
+        return { pin, status: 'error', error: 'This PIN does not reference a disclosable asset. Only claims and assets can be disclosed.', errorCode: 'ERR-01' }
+      }
+      // Self-owned node
+      if (resolved.owner === activeRole.party) {
+        return { pin, status: 'error', error: 'This asset is already on your network.', errorCode: 'ERR-02' }
+      }
+      // Already on network
       if (nodeMap[resolved.id]) {
-        return { pin, status: 'error', error: 'Asset already on your network' }
+        return { pin, status: 'error', error: 'This asset is already on your network via an existing disclosure.', errorCode: 'ERR-03' }
       }
+      // Pending request
       const provId = `provisional-${resolved.id}`
       if (nodeMap[provId] || addedNodes.some(n => n.id === provId)) {
-        return { pin, status: 'error', error: 'Disclosure already requested' }
+        return { pin, status: 'error', error: 'A disclosure request for this asset is already pending.', errorCode: 'ERR-04' }
       }
       if (pendingRequests.some(r => r.asset?.pin === resolved.pin && r.from?.name === activeRole.party)) {
-        return { pin, status: 'error', error: 'Disclosure already requested' }
+        return { pin, status: 'error', error: 'A disclosure request for this asset is already pending.', errorCode: 'ERR-04' }
       }
       return { pin, status: 'valid', resolved }
     })
@@ -1000,6 +1015,11 @@ export default function V2App() {
       if (!pin.startsWith('PIN-0x')) return
       const resolved = resolvePin(pin)
       if (!resolved) return
+      // Block child nodes
+      if (resolved.isEvidence || resolved.isParse || resolved.category === 'parse' || resolved.isEvaluation || resolved.category === 'evaluation') return
+      if (resolved.parentId && !resolved.isClaim && resolved.category !== 'claim') return
+      // Block self-owned
+      if (resolved.owner === activeRole.party) return
       if (nodeMap[resolved.id]) return
       const provId = `provisional-${resolved.id}`
       if (nodeMap[provId]) return
@@ -1704,6 +1724,41 @@ export default function V2App() {
           </div>
         </div>
       </div>
+
+      {/* V2.2 mode banner — Phase 1 placeholder. Only visible when V2_2_ENABLED is true. */}
+      {V2_2_ENABLED && (
+        <div
+          role="status"
+          aria-label="V2.2 mode active"
+          style={{
+            flexShrink: 0,
+            padding: '6px 16px',
+            borderBottom: '1px solid var(--border)',
+            background: 'color-mix(in srgb, var(--accent-indigo) 12%, var(--bg-surface))',
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: 'var(--accent-indigo)',
+            boxShadow: '0 0 6px var(--accent-indigo)',
+          }} />
+          <span>V2.2 mode active</span>
+          <span style={{ opacity: 0.6, textTransform: 'none', letterSpacing: 'normal' }}>
+            — architecture migration in progress (see v2.2-architecture-migration-spec.md)
+          </span>
+        </div>
+      )}
 
       {/* Canvas area */}
       <div style={{ flex: 1, position: 'relative' }}>
@@ -2653,7 +2708,8 @@ export default function V2App() {
           request={responseRequest}
           assetNode={nodeMap[responseRequest.node?.id]}
           onClose={() => setResponseRequest(null)}
-          onComplete={(disclosureType, selectedFieldIds, selectedEvidenceIds, selectedEvalIds, selectedClaimIds) => {
+          onComplete={(disclosureType, selectedFieldIds, selectedEvidenceIds, selectedEvalIds, selectedClaimIds, opts = {}) => {
+            const declineReason = opts.declineReason || null
             const req = responseRequest
             const reqNodeId = req.node?.id
             const today = new Date().toISOString().slice(0, 10)
@@ -3060,7 +3116,9 @@ export default function V2App() {
                   return {
                     ...prev,
                     addedNodes: prev.addedNodes.map(n =>
-                      n.id === provId ? { ...n, _isDeclined: true, _isNew: false } : n
+                      n.id === provId
+                        ? { ...n, _isDeclined: true, _isNew: false, _declineReason: declineReason }
+                        : n
                     ),
                     addedRequests: [...(prev.addedRequests || []), {
                       id: `decline-${reqNodeId}-${Date.now().toString(36)}`,
@@ -3071,6 +3129,7 @@ export default function V2App() {
                         pin: req.node?.pin || '',
                       },
                       date: today,
+                      declineReason: declineReason,
                     }],
                   }
                 })
