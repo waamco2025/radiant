@@ -1,9 +1,10 @@
 // Evaluation helpers — claim statuses, cost calculator, mock AI result generator
 
 export const CLAIM_STATUS = {
-  satisfactory: { label: 'Satisfactory', color: 'var(--accent-green)', short: 'SAT', icon: '✓' },
-  unsatisfactory: { label: 'Unsatisfactory', color: 'var(--accent-red)', short: 'UNSAT', icon: '✕' },
+  satisfactory: { label: 'Satisfactory', color: 'var(--accent-green)', short: 'SAT', icon: '\u2713' },
+  unsatisfactory: { label: 'Unsatisfactory', color: 'var(--accent-red)', short: 'UNSAT', icon: '\u2715' },
   missing: { label: 'Missing', color: 'var(--text-dim)', short: 'MISS', icon: '?' },
+  na: { label: 'N/A', color: 'var(--text-muted, var(--text-dim))', short: 'N/A', icon: '\u2014' },
 }
 
 export const EVAL_STATUS = {

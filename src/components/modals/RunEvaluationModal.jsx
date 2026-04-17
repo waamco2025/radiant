@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Modal, ModalHeader, ModalBody, ModalFooter, Btn, FieldLabel, InfoRow, CopyBadge, StepDots } from './ModalShared.jsx'
+import { Modal, ModalHeader, ModalBody, ModalFooter, Btn, FieldLabel, InfoRow, CopyBadge, StepDots, ConfidenceBadge } from './ModalShared.jsx'
 import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
 import { CLAIM_STATUS, CREDITS_PER_REQUIREMENT, calculateEvalCost, generateMockAIResults } from '../../v2/evaluationHelpers.js'
 
@@ -358,11 +358,12 @@ function ClaimCard({ claim, onUpdateClaim, disclosureType }) {
 
 function StepConfirmation({ assetNode, selectedSet, claims, creditCost, amendingEval }) {
   const summary = useMemo(() => {
-    const s = { ok: 0, bad: 0, miss: 0 }
+    const s = { ok: 0, bad: 0, miss: 0, na: 0 }
     claims.forEach(c => {
       if (c.status === 'satisfactory') s.ok++
       else if (c.status === 'unsatisfactory') s.bad++
       else if (c.status === 'missing') s.miss++
+      else if (c.status === 'na') s.na++
     })
     return s
   }, [claims])
@@ -787,11 +788,12 @@ export default function RunEvaluationModal({
 
   // Compute summary tallies for fixed bar in step 2
   const reviewSummary = useMemo(() => {
-    const s = { sat: 0, unsat: 0, miss: 0 }
+    const s = { sat: 0, unsat: 0, miss: 0, na: 0 }
     claims.forEach(c => {
       if (c.status === 'satisfactory') s.sat++
       else if (c.status === 'unsatisfactory') s.unsat++
       else if (c.status === 'missing') s.miss++
+      else if (c.status === 'na') s.na++
     })
     return s
   }, [claims])
@@ -804,7 +806,7 @@ export default function RunEvaluationModal({
     } else if (step === reviewStep && allReviewed) {
       setStep(confirmStep)
     } else if (step === confirmStep) {
-      onComplete({ requirementSet: selectedSet, claims, creditCost: cost, selectedEvidenceIds: [...selectedEvidenceIds] })
+      onComplete({ requirementSet: selectedSet, claims: claims.filter(c => c.status !== 'na'), creditCost: cost, selectedEvidenceIds: [...selectedEvidenceIds] })
     }
   }
 
@@ -839,6 +841,7 @@ export default function RunEvaluationModal({
             <span style={{ color: 'var(--accent-green)' }}>{reviewSummary.sat} satisfactory</span>
             <span style={{ color: 'var(--accent-red)' }}>{reviewSummary.unsat} unsatisfactory</span>
             <span style={{ color: 'var(--text-dim)' }}>{reviewSummary.miss} missing</span>
+            {reviewSummary.na > 0 && <span style={{ color: 'var(--text-muted, var(--text-dim))' }}>{reviewSummary.na} N/A</span>}
             {unreviewedCount > 0 && <span style={{ color: 'var(--accent-amber)' }}>{unreviewedCount} unreviewed</span>}
             {claims.some(c => c._carriedForward) && (
               <span style={{ color: 'var(--accent-green)' }}>{claims.filter(c => c._carriedForward).length} preserved</span>
@@ -1123,80 +1126,62 @@ export default function RunEvaluationModal({
                           }}>PRESERVED</span>
                         )}
                         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{claim.label}</span>
-                        {disclosureType !== 'proofonly' && (
-                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-                            {Math.round(claim.aiConfidence * 100)}% conf.
-                          </span>
+                        {disclosureType !== 'proofonly' && claim.aiConfidence != null && (
+                          <ConfidenceBadge level={claim.aiConfidence >= 0.9 ? 'high' : claim.aiConfidence >= 0.75 ? 'medium' : 'low'} />
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: 12, opacity: 0.85 }}>
-                        {claim.description}
+                      {claim.description && (
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 8, lineHeight: 1.5 }}>
+                          {claim.description}
+                        </div>
+                      )}
+                      <div style={{ marginBottom: 8 }}>
+                        <input
+                          value={claim.humanValue ?? claim.aiValue ?? ''}
+                          onChange={e => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: e.target.value } : c))}
+                          onKeyDown={e => { if (e.key === 'Escape') e.target.blur() }}
+                          placeholder="Enter assessed value..."
+                          style={{
+                            width: '100%', padding: '6px 10px', borderRadius: 4,
+                            border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-mono)', fontSize: 11, outline: 'none',
+                          }}
+                        />
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)', width: 60, flexShrink: 0 }}>AI value</span>
-                        <span style={{
-                          fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
-                          padding: '4px 8px', borderRadius: 4,
-                          background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                        }}>{claim.aiValue}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)', width: 60, flexShrink: 0 }}>Your value</span>
-                        {claim.type === 'extraction' ? (
-                          <input
-                            value={claim.humanValue === null ? '' : claim.humanValue}
-                            onChange={e => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: e.target.value } : c))}
-                            onFocus={() => {
-                              if (claim.humanValue === null && claim.aiValue) {
-                                setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: claim.aiValue } : c))
-                              }
-                            }}
-                            placeholder={claim.aiValue}
-                            style={{
-                              flex: 1, height: 32, padding: '0 10px', borderRadius: 5,
-                              border: '1px solid var(--border)', background: 'var(--bg-surface)',
-                              color: claim.humanValue === null ? 'var(--text-dim)' : 'var(--text-primary)',
-                              fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none',
-                            }}
-                          />
-                        ) : (
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {['Yes', 'No'].map(v => {
-                              const active = claim.humanValue === v
-                              return (
-                                <button key={v} onClick={() => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, humanValue: v } : c))}
-                                  style={{
-                                    padding: '5px 14px', borderRadius: 5, fontSize: 12,
-                                    fontFamily: 'var(--font-mono)', fontWeight: 600,
-                                    border: `1px solid ${active ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                                    background: active ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)' : 'transparent',
-                                    color: active ? 'var(--accent-indigo)' : 'var(--text-tertiary)',
-                                    cursor: 'pointer', transition: 'all 150ms',
-                                  }}
-                                >{v}</button>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {Object.entries(CLAIM_STATUS).map(([key, cfg]) => {
-                          const active = claim.status === key
+                      {/* Status cycling: ◂ [BADGE] ▸ */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {(() => {
+                          const STATUS_CYCLE = ['satisfactory', 'unsatisfactory', 'missing', 'na']
+                          const currentIdx = STATUS_CYCLE.indexOf(claim.status || 'satisfactory')
+                          const cfg = CLAIM_STATUS[claim.status || 'satisfactory'] || CLAIM_STATUS.satisfactory
+                          const cycleStatus = (dir) => {
+                            const nextIdx = (currentIdx + dir + STATUS_CYCLE.length) % STATUS_CYCLE.length
+                            setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, status: STATUS_CYCLE[nextIdx] } : c))
+                          }
                           return (
-                            <button key={key} onClick={() => setClaims(prev => prev.map(c => c.requirementId === claim.requirementId ? { ...c, status: key } : c))}
-                              style={{
-                                flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11,
-                                fontFamily: 'var(--font-mono)', fontWeight: 600,
-                                border: `1px solid ${active ? cfg.color : 'var(--border)'}`,
-                                background: active ? `color-mix(in srgb, ${cfg.color} 8%, transparent)` : 'transparent',
-                                color: active ? cfg.color : 'var(--text-dim)',
-                                cursor: 'pointer', transition: 'all 150ms',
-                              }}
-                            >
-                              {cfg.icon} {cfg.label}
-                            </button>
+                            <>
+                              <button onClick={() => cycleStatus(-1)} style={{
+                                width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: 'none', border: '1px solid var(--border)', borderRadius: 3,
+                                color: 'var(--text-dim)', fontSize: 10, cursor: 'pointer',
+                              }}>{'\u25C2'}</button>
+                              <span onClick={() => cycleStatus(1)} style={{
+                                fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+                                padding: '3px 8px', borderRadius: 3, color: cfg.color,
+                                background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
+                                border: `1px solid color-mix(in srgb, ${cfg.color} 25%, transparent)`,
+                                display: 'flex', alignItems: 'center', gap: 3,
+                                cursor: 'pointer', userSelect: 'none', minWidth: 52, justifyContent: 'center',
+                              }}>{cfg.icon} {cfg.short || cfg.label}</span>
+                              <button onClick={() => cycleStatus(1)} style={{
+                                width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: 'none', border: '1px solid var(--border)', borderRadius: 3,
+                                color: 'var(--text-dim)', fontSize: 10, cursor: 'pointer',
+                              }}>{'\u25B8'}</button>
+                            </>
                           )
-                        })}
+                        })()}
                       </div>
                     </div>
                   </div>

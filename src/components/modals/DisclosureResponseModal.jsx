@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel, InfoRow, CopyBadge,
@@ -95,9 +95,49 @@ function ReqSetCard({ rs }) {
   )
 }
 
-/* ─── Step 1: Review request + decide ─── */
-function StepReview({ request, decision, setDecision }) {
+/* ─── ResponseCard — unified card for type selection + decline ─── */
+function ResponseCard({ label, color, edgeStyle, description, active, onClick, disabled }) {
+  const edgeStroke = edgeStyle === 'solid' ? '2' : edgeStyle === 'dashed' ? '2' : edgeStyle === 'dotted' ? '2' : null
+  const edgeDashArray = edgeStyle === 'dashed' ? '4 3' : edgeStyle === 'dotted' ? '1 3' : undefined
+  return (
+    <div
+      onClick={disabled ? undefined : onClick}
+      style={{
+        padding: '12px 14px', borderRadius: 8,
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        border: `1.5px solid ${active ? color : 'var(--border)'}`,
+        background: active ? `color-mix(in srgb, ${color} 6%, transparent)` : 'var(--bg-card)',
+        transition: 'all 150ms',
+        display: 'flex', flexDirection: 'column', gap: 8,
+        minHeight: 128,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          letterSpacing: '0.06em', color: active ? color : 'var(--text-secondary)',
+        }}>{label}</span>
+      </div>
+      {edgeStroke && (
+        <svg width="100%" height="4" style={{ display: 'block' }}>
+          <line x1="0" y1="2" x2="100%" y2="2" stroke={active ? color : 'var(--border)'} strokeWidth={edgeStroke} strokeDasharray={edgeDashArray} />
+        </svg>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, flex: 1 }}>
+        {description}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Step 1: Review request + 4-option response (type or decline) ─── */
+function StepReview({ request, decision, setDecision, setLevel, declineReason, setDeclineReason, expiry, setExpiry, customDate, setCustomDate, hasProofEval, hasPepFields }) {
   const reqs = request.requirements || []
+  const typeSelected = decision && decision !== 'decline'
+  const level = typeSelected ? decision : null
+  const selectiveBlocked = decision === 'selective' && !hasPepFields
+  const proofBlocked = decision === 'proofonly' && !hasProofEval
   return (
     <div>
       <div style={{ padding: 18, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 18 }}>
@@ -151,20 +191,116 @@ function StepReview({ request, decision, setDecision }) {
       )}
 
       <FieldLabel label="Your response" />
-      <div style={{ display: 'flex', gap: 10 }}>
-        <DecisionCard
-          id="accept" label="Accept"
-          desc="Grant disclosure access to this asset"
-          color="var(--accent-green)" icon="✓"
-          active={decision === 'accept'} onClick={() => setDecision('accept')}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 10, marginBottom: 4,
+      }}>
+        <ResponseCard
+          label="FULL"
+          color="#6b8aff"
+          edgeStyle="solid"
+          description="Evaluators can extract data fields and run inference requirements against your evidence."
+          active={decision === 'full'}
+          onClick={() => { setDecision('full'); if (setLevel) setLevel('full') }}
         />
-        <DecisionCard
-          id="decline" label="Decline"
-          desc="Reject this disclosure request"
-          color="var(--accent-red)" icon="✕"
-          active={decision === 'decline'} onClick={() => setDecision('decline')}
+        <ResponseCard
+          label="SELECTIVE"
+          color="#f59e0b"
+          edgeStyle="dashed"
+          description="Evaluators can run inference requirements but cannot extract raw data from your evidence."
+          active={decision === 'selective'}
+          onClick={() => { setDecision('selective'); if (setLevel) setLevel('selective') }}
+        />
+        <ResponseCard
+          label="PROOF-ONLY"
+          color="#22c55e"
+          edgeStyle="dotted"
+          description="Shares the pass/fail result of a prior evaluation. No access to evidence is granted."
+          active={decision === 'proofonly'}
+          onClick={() => { setDecision('proofonly'); if (setLevel) setLevel('proofonly') }}
+        />
+        <ResponseCard
+          label="DECLINE"
+          color="var(--accent-red)"
+          edgeStyle={null}
+          description="Reject this disclosure request. You can provide an optional reason."
+          active={decision === 'decline'}
+          onClick={() => setDecision('decline')}
         />
       </div>
+
+      {decision === 'decline' && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{
+            marginBottom: 16, padding: '10px 14px', borderRadius: 6,
+            background: 'color-mix(in srgb, var(--accent-red) 6%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent-red) 15%, transparent)',
+            fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+          }}>
+            <strong style={{ color: 'var(--accent-red)' }}>Declining</strong> will notify {request.from.name} that their request was rejected. This is recorded on-chain but does not prevent them from sending future requests.
+          </div>
+          <FieldLabel label="Reason (optional)" />
+          <textarea
+            value={declineReason || ''}
+            onChange={e => setDeclineReason(e.target.value)}
+            placeholder="Optionally provide a reason for declining..."
+            rows={4}
+            style={{
+              width: '100%', padding: '12px 14px', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'var(--bg-card)',
+              color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 13,
+              resize: 'vertical', outline: 'none', lineHeight: 1.6,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Expiration + summary (only when a non-Decline type is chosen and not blocked) */}
+      {typeSelected && !selectiveBlocked && !proofBlocked && (
+        <div style={{ marginTop: 20 }}>
+          <FieldLabel label="Set expiration" />
+          <ExpiryPicker expiry={expiry} setExpiry={setExpiry} customDate={customDate} setCustomDate={setCustomDate} />
+
+          <FieldLabel label="Disclosure summary" />
+          <div style={{ padding: '16px 18px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <InfoRow label="Asset" value={request.asset.name} />
+            <InfoRow label="PIN" value={<CopyBadge value={request.asset.pin} truncated />} />
+            <InfoRow label="To" value={request.from.name} />
+            <InfoRow label="Disclosure type" value={
+              <span style={{ color: SDA_TYPES[level]?.c, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
+                {SDA_TYPES[level]?.short}
+              </span>
+            } />
+            <InfoRow label="Expires" value={expiryLabel(expiry, customDate)} />
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              This creates a bilateral disclosure recorded on-chain. {request.from.name} will be able to {level === 'full' ? 'access all data fields and run evaluations' : level === 'selective' ? 'access selected data fields and run evaluations on those fields' : 'see pass/fail results from your evaluations only'}.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Blocked state messages */}
+      {selectiveBlocked && (
+        <div style={{
+          marginTop: 20, padding: '12px 16px', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 12, color: 'var(--accent-amber)', lineHeight: 1.7,
+        }}>
+          This asset has no PEP-parsed data yet. Selective disclosure requires parsed evidence fields. Run a PEP parse on the asset's evidence before creating a selective disclosure, or choose Full or Proof-only.
+        </div>
+      )}
+      {proofBlocked && (
+        <div style={{
+          marginTop: 20, padding: '12px 16px', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-amber) 15%, transparent)',
+          fontSize: 12, color: 'var(--accent-amber)', lineHeight: 1.7,
+        }}>
+          Proof-only disclosure requires a completed evaluation on this asset. Run an evaluation before creating a proof-only disclosure, or choose Full or Selective.
+        </div>
+      )}
     </div>
   )
 }
@@ -722,6 +858,21 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   const [cascadePolicy, setCascadePolicy] = useState('closed')
   const [cascadeSelected, setCascadeSelected] = useState([])
   const [completed, setCompleted] = useState(false)
+  const modalBodyRef = useRef(null)
+
+  // Auto-scroll to reveal content below type cards on any selection
+  useEffect(() => {
+    if (decision && modalBodyRef.current) {
+      requestAnimationFrame(() => {
+        if (modalBodyRef.current) {
+          modalBodyRef.current.scrollTo({
+            top: modalBodyRef.current.scrollHeight,
+            behavior: 'smooth',
+          })
+        }
+      })
+    }
+  }, [decision])
   const [selectedFields, setSelectedFields] = useState(new Set())
   const [allFieldsSelected, setAllFieldsSelected] = useState(true)
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState(new Set())
@@ -740,8 +891,18 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   }, [assetNode])
 
   const evidenceNodes = useMemo(() => {
-    if (!assetNode?.children) return []
-    return assetNode.children.filter(c => c.isEvidence)
+    const children = assetNode?.children || []
+    const evChildren = children.filter(c => c.isEvidence || c.category === 'evidence')
+    if (evChildren.length > 0) return evChildren
+    // Fallback: build pseudo-evidence nodes from evidenceRefs (for root assets without child evidence nodes)
+    const refs = assetNode?.evidenceRefs || []
+    return refs.map((ref, i) => ({
+      id: `ev-ref-${i}`,
+      name: ref.label || ref.filename,
+      evidence: { filename: ref.filename, uri: ref.uri, size: ref.size },
+      isEvidence: true,
+      artifactUri: ref.uri,
+    }))
   }, [assetNode])
 
   // Initialize all evidence selected
@@ -815,7 +976,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
   }, [node, request.from.name])
 
   const hasCascadableAssets = upstreamAssets.some(a => a.cascadePolicy === 'open')
-  const showEvidenceStep = false  // Evidence is now implicit from selected claims
+  const showEvidenceStep = decision !== 'decline' && level === 'full' && evidenceNodes.length > 0 && !hasClaims
   const showEvalStep = decision !== 'decline' && level === 'proofonly' && evalNodes.length > 0
   const showFieldStep = decision !== 'decline' && level === 'selective' && filteredPepFields.length > 0
   const showCascadeStep = decision !== 'decline' && hasCascadableAssets && cascadePolicy === 'open'
@@ -829,7 +990,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
     ? ((fieldStepIdx >= 0 ? fieldStepIdx : evalStepIdx >= 0 ? evalStepIdx : evidenceStepIdx >= 0 ? evidenceStepIdx : (1 + claimOffset)) + 1)
     : -1
 
-  const totalSteps = decision === 'decline' ? 2 : (2 + claimOffset + (showEvidenceStep ? 1 : 0) + (showEvalStep ? 1 : 0) + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
+  const totalSteps = decision === 'decline' ? 1 : (2 + claimOffset + (showEvidenceStep ? 1 : 0) + (showEvalStep ? 1 : 0) + (showFieldStep ? 1 : 0) + (showCascadeStep ? 1 : 0))
   const effectiveLevel = level
 
   if (completed) {
@@ -934,6 +1095,7 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
                 derivedEvidenceIds,
                 level === 'proofonly' && selectedEvalIds.size > 0 ? [...selectedEvalIds] : null,
                 hasClaims ? [...selectedClaimIds] : null,
+                { declineReason: decision === 'decline' ? (declineReason?.trim() || null) : null },
               )
             } else if (onClose) {
               onClose()
@@ -947,7 +1109,6 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
 
   const currentStepNum = () => {
     if (step === 0) return 1
-    if (decision === 'decline') return 2
     return step + 1
   }
 
@@ -960,9 +1121,23 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
         totalSteps={totalSteps}
         onClose={onClose}
       />
-      <ModalBody>
-        {step === 0 && <StepReview request={request} decision={decision} setDecision={setDecision} />}
-        {step === 1 && decision === 'decline' && <StepDecline reason={declineReason} setReason={setDeclineReason} request={request} />}
+      <ModalBody ref={modalBodyRef}>
+        {step === 0 && (
+          <StepReview
+            request={request}
+            decision={decision}
+            setDecision={setDecision}
+            setLevel={setLevel}
+            declineReason={declineReason}
+            setDeclineReason={setDeclineReason}
+            expiry={expiry}
+            setExpiry={setExpiry}
+            customDate={customDate}
+            setCustomDate={setCustomDate}
+            hasProofEval={hasProofEval}
+            hasPepFields={pepFields.length > 0}
+          />
+        )}
         {step === 1 && decision !== 'decline' && (
           <StepTerms
             level={level} setLevel={setLevel}
@@ -1093,7 +1268,32 @@ export default function DisclosureResponseModal({ request, assetNode, onClose, o
           <StepDots current={currentStepNum() - 1} total={totalSteps} />
         </div>
         {step === 0 && !decision && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a response above</div>}
-        {step === 0 && decision && <Btn label={decision === 'decline' ? 'Next →' : 'Set Terms →'} accent onClick={() => setStep(1)} />}
+        {step === 0 && decision === 'decline' && <Btn label="Decline Request" danger onClick={() => setCompleted(true)} />}
+        {step === 0 && decision && decision !== 'decline' && (() => {
+          const selectiveBlocked = decision === 'selective' && pepFields.length === 0
+          const proofBlocked = decision === 'proofonly' && !hasProofEval
+          if (selectiveBlocked) return <Btn label="No PEP Data Available" disabled />
+          if (proofBlocked) return <Btn label="Evaluation Required" disabled />
+          // Proof-Only completes directly from step 1 (no scope step)
+          if (decision === 'proofonly' && !hasClaims && !showEvalStep) {
+            return <Btn label="Accept Disclosure" accent onClick={() => setCompleted(true)} />
+          }
+          // Full → evidence scope or claims; Selective → fields scope
+          if (hasClaims) {
+            return <Btn label={"Select Claims \u2192"} accent onClick={() => setStep(claimStepIdx)} />
+          }
+          if (decision === 'full' && showEvidenceStep) {
+            return <Btn label={"Select Evidence \u2192"} accent onClick={() => setStep(evidenceStepIdx)} />
+          }
+          if (decision === 'selective' && showFieldStep) {
+            return <Btn label={"Select Fields \u2192"} accent onClick={() => setStep(fieldStepIdx)} />
+          }
+          if (decision === 'proofonly' && showEvalStep) {
+            return <Btn label={"Select Evaluations \u2192"} accent onClick={() => setStep(evalStepIdx)} />
+          }
+          // Fallback: accept directly
+          return <Btn label="Accept Disclosure" accent onClick={() => setCompleted(true)} />
+        })()}
         {step === 1 && decision === 'decline' && <Btn label="Decline Request" danger onClick={() => setCompleted(true)} />}
         {step === 1 && decision !== 'decline' && hasClaims && (() => {
           const selectiveBlocked = level === 'selective' && pepFields.length === 0

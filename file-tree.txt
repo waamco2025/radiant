@@ -1,0 +1,154 @@
+radiant-ui/
+├── CLAUDE.md
+├── README.md
+├── eslint.config.js
+├── handoff.md
+├── index.html                          # V1 entry point (archived)
+├── package.json
+├── package-lock.json
+├── v2.html                             # V2 entry point (archived)
+├── v3.html                             # V3 entry point (active)
+├── vite.config.js
+│
+└── src/
+    ├── index.css                        # Global CSS variables (dark + light themes)
+    ├── main.jsx                         # V1 React mount
+    ├── ia-map-entry.jsx
+    ├── App.jsx                          # V1 app
+    ├── App.css
+    │
+    ├── assets/
+    │   └── react.svg
+    │
+    ├── reference/
+    │   └── monolith.jsx                 # Legacy reference file
+    │
+    ├── data/                            # V1 shared data layer
+    │   ├── dataset.js
+    │   ├── generateAutoCo.js
+    │   ├── generateDataset.js
+    │   ├── generateEvents.js
+    │   ├── generateFastCo.js
+    │   ├── generateGovCo.js
+    │   ├── generateMicroCo.js
+    │   ├── mkhash.js
+    │   ├── platformAssets.js
+    │   ├── tokens.js                    # TT/CS token system (CSS variable refs)
+    │   └── verticals.js
+    │
+    ├── components/                      # V1 + shared components
+    │   ├── AssetDirectoryModal.jsx
+    │   ├── AssetRegistrationModal.jsx
+    │   ├── AssetRegistrationStandaloneModal.jsx
+    │   ├── AttestationCard.jsx
+    │   ├── AttestationTestPanel.jsx
+    │   ├── ClaimsTab.jsx
+    │   ├── ClaimTimeline.jsx
+    │   ├── CreditsModal.jsx
+    │   ├── DetailPanel.jsx
+    │   ├── detailPanelUtils.jsx
+    │   ├── EvalsTab.jsx
+    │   ├── EvaluationModal.jsx
+    │   ├── EvidenceModal.jsx
+    │   ├── Footer.jsx
+    │   ├── Header.jsx
+    │   ├── HealthDot.jsx
+    │   ├── InvitationDetailPanel.jsx
+    │   ├── InvitationModal.jsx
+    │   ├── InviteSupplierModal.jsx
+    │   ├── NetGraph.jsx
+    │   ├── NetworkEventsNotification.jsx
+    │   ├── NodeIcon.jsx
+    │   ├── OrgNodeContent.jsx
+    │   ├── OverviewTab.jsx
+    │   ├── RadiantLogo.jsx
+    │   ├── RequirementsLibraryModal.jsx
+    │   ├── RiskMatrix.jsx
+    │   ├── SDACreationModal.jsx
+    │   ├── SearchResultsModal.jsx
+    │   ├── Sidebar.jsx
+    │   ├── SubgraphModal.jsx
+    │   ├── SupplierAssetSection.jsx
+    │   ├── SupplierDashboard.jsx
+    │   ├── SupplierNetGraph.jsx
+    │   ├── SupplierSidebar.jsx
+    │   ├── SvgMark.jsx
+    │   ├── SystemCreationModal.jsx
+    │   ├── TimelineTab.jsx
+    │   ├── WorldMap.jsx
+    │   │
+    │   ├── DetailPanel/                 # V2 detail panel (modular)
+    │   │   ├── index.jsx
+    │   │   ├── PanelShell.jsx
+    │   │   ├── ChildrenTab.jsx
+    │   │   ├── ClaimsTable.jsx
+    │   │   ├── constants.js
+    │   │   ├── DisclosuresTab.jsx
+    │   │   ├── EvalPanel.jsx
+    │   │   ├── EvaluationsTab.jsx
+    │   │   ├── EvidenceBlock.jsx
+    │   │   ├── ParsedFieldsTab.jsx
+    │   │   │
+    │   │   └── shared/
+    │   │       ├── ChildHealthBar.jsx
+    │   │       ├── ClaimsTable.jsx
+    │   │       ├── CopyBadge.jsx
+    │   │       ├── DataTable.jsx
+    │   │       ├── GridRow.jsx
+    │   │       ├── HealthBar.jsx
+    │   │       ├── SDABadge.jsx
+    │   │       ├── StatPills.jsx
+    │   │       ├── TableActions.jsx
+    │   │       ├── TableModal.jsx
+    │   │       └── Tooltip.jsx
+    │   │
+    │   └── modals/                      # V2 modal components
+    │       ├── AddEvidenceModal.jsx
+    │       ├── CascadeModal.jsx
+    │       ├── CreateClaimModal.jsx
+    │       ├── DisclosureResponseModal.jsx
+    │       ├── ModalShared.jsx
+    │       ├── ParseEvidenceModal.jsx
+    │       ├── PEPLibraryModal.jsx
+    │       ├── PublishModal.jsx
+    │       ├── QualifiedStoragePicker.jsx
+    │       ├── RegisterAssetModal.jsx
+    │       ├── RequestDisclosureModal.jsx
+    │       ├── RequirementsLibraryModal.jsx
+    │       ├── ReviseDisclosureModal.jsx
+    │       ├── RevocationNoticeModal.jsx
+    │       ├── RunEvaluationModal.jsx
+    │       └── UpstreamPicker.jsx
+    │
+    ├── v2/                              # V2 prototype (archived)
+    │   ├── main.jsx
+    │   ├── V2App.jsx
+    │   ├── V2BootScreen.jsx
+    │   ├── V2Canvas.jsx
+    │   ├── V2SubgraphModal.jsx
+    │   ├── AssetNode.jsx
+    │   ├── LayerBorder.jsx
+    │   ├── LayerPill.jsx
+    │   ├── LayerTransitionOverlay.jsx
+    │   ├── PrimeRadiant.jsx
+    │   ├── v2Data.js
+    │   ├── demoData.js
+    │   ├── evaluationHelpers.js
+    │   ├── pepTemplates.js
+    │   └── requirementSets.js
+    │
+    └── v3/                              # V3 prototype (active)
+        ├── main.jsx                     # React mount → #v3-root
+        ├── V3App.jsx                    # App shell: role, phase, theme, selection, process flows
+        ├── V3BootScreen.jsx             # CAC login → Prime Radiant 3D → golden ripple → network build
+        ├── V3Canvas.jsx                 # Three.js canvas: dot grid, edges, pan/zoom, LOD, chain highlighting
+        ├── ObjectNode.jsx               # Universal node card: full, mini, dot (with provisional styling)
+        ├── DetailPanel.jsx              # Detail panel: Overview + Artifact tabs, pending node view, expanded modal
+        ├── ParseFlow.jsx                # Parse process flow: template select → spinner → split results → confirm
+        ├── EvalFlow.jsx                 # Evaluate process flow: req set select → spinner → split review → confirm
+        ├── DiscloseFlow.jsx             # Disclosure request flow: horizontal PIN → req sets → message → send
+        ├── LibraryModal.jsx             # Unified library: templates, req sets, published standards
+        ├── parseTemplates.js            # Parse templates per actor (with instruction, format, required)
+        ├── requirementSets.js           # Requirement sets per actor (with instruction, criterion)
+        ├── publishedStandards.js        # Published standards demo data (OSHA, NIST, ISO)
+        └── v3Data.js                    # Data layer: actors, objects, edges, dynamic state, visibility helpers

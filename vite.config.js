@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         v2: resolve(__dirname, 'v2.html'),
+        v3: resolve(__dirname, 'v3.html'),
       },
     },
   },

@@ -1,0 +1,66 @@
+export const PUBLISHED_STANDARDS = [
+  {
+    id: 'pub-osha-general-v1',
+    lineageId: 'lineage-pub-osha-general',
+    version: 1,
+    type: 'requirement-set',
+    name: 'OSHA General Industry Standards',
+    description: 'Core OSHA compliance requirements for general industry facilities — hazard communication, PPE, emergency action plans, and recordkeeping.',
+    context: 'Evaluate facility documentation, safety programs, and inspection records against 29 CFR 1910 requirements.',
+    created: '2025-11-01',
+    publisher: 'OSHA',
+    publisherOrg: 'Occupational Safety and Health Administration',
+    visibility: 'public',
+    artifactUri: 'qs://osha/standards/general-industry-v1.json',
+    requirements: [
+      { id: 'osha-001', name: 'Hazard Communication Program', instruction: 'Verify existence of a written hazard communication program per 29 CFR 1910.1200.', criterion: 'Written HazCom program must be current, accessible, and include SDS inventory.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'osha-002', name: 'PPE Assessment', instruction: 'Check for documented PPE hazard assessment per 29 CFR 1910.132(d).', criterion: 'Certified PPE hazard assessment must be on file and reviewed annually.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'osha-003', name: 'Emergency Action Plan', instruction: 'Verify emergency action plan exists and covers evacuation, reporting, and accountability per 29 CFR 1910.38.', criterion: 'EAP must be written, communicated to all employees, and drilled at least annually.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'osha-004', name: 'Injury/Illness Recordkeeping', instruction: 'Check OSHA 300 log and 301 forms for completeness and accuracy per 29 CFR 1904.', criterion: 'OSHA 300 log must be current, posted annually (Feb-Apr), and retained for 5 years.', format: 'boolean', category: 'compliance', required: true },
+    ],
+  },
+  {
+    id: 'pub-nist-800-171-v1',
+    lineageId: 'lineage-pub-nist-800-171',
+    version: 1,
+    type: 'requirement-set',
+    name: 'NIST SP 800-171 Rev 2',
+    description: 'Protecting Controlled Unclassified Information (CUI) in nonfederal systems — 110 security requirements across 14 families.',
+    context: 'Evaluate information system documentation, security plans, and assessment reports against NIST SP 800-171 requirements.',
+    created: '2025-09-15',
+    publisher: 'NIST',
+    publisherOrg: 'National Institute of Standards and Technology',
+    visibility: 'public',
+    artifactUri: 'qs://nist/standards/800-171-rev2.json',
+    requirements: [
+      { id: 'nist-3.1.1', name: 'Access Control Policy', instruction: 'Verify that access control policies and procedures are documented and cover all system components.', criterion: 'Documented access control policy must exist, be reviewed annually, and define authorized users and access levels.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'nist-3.1.2', name: 'Transaction Control', instruction: 'Check that information system access is limited to authorized transactions and functions.', criterion: 'Access controls must enforce least privilege and separation of duties.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'nist-3.3.1', name: 'Audit Events', instruction: 'Verify that the system creates and retains audit records for defined events.', criterion: 'Audit logs must capture user activity, system events, and access attempts with timestamps.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'nist-3.5.1', name: 'User Identification', instruction: 'Check that individual users are uniquely identified and authenticated before access.', criterion: 'All users must have unique IDs. Shared/group accounts must be documented and justified.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'nist-3.13.1', name: 'Boundary Protection', instruction: 'Verify that communications at system boundaries are monitored and controlled.', criterion: 'Boundary protection devices (firewalls, proxies) must be deployed and configured per policy.', format: 'boolean', category: 'compliance', required: true },
+    ],
+  },
+  {
+    id: 'pub-iso9001-v1',
+    lineageId: 'lineage-pub-iso9001',
+    version: 1,
+    type: 'requirement-set',
+    name: 'ISO 9001:2015 QMS Audit',
+    description: 'Quality management system audit requirements — leadership, planning, support, operation, performance evaluation, and improvement.',
+    context: 'Audit quality management documentation, process records, and management review outputs against ISO 9001:2015 clauses.',
+    created: '2025-10-20',
+    publisher: 'ISO',
+    publisherOrg: 'International Organization for Standardization',
+    visibility: 'public',
+    artifactUri: 'qs://iso/standards/9001-2015-audit.json',
+    requirements: [
+      { id: 'iso-5.1', name: 'Leadership Commitment', instruction: 'Assess evidence of top management commitment to the QMS per Clause 5.1.', criterion: 'Top management must demonstrate commitment through policy, objectives, resources, and management reviews.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'iso-6.1', name: 'Risk-Based Thinking', instruction: 'Check that risks and opportunities are identified and addressed per Clause 6.1.', criterion: 'Documented risk assessment must identify QMS risks and planned mitigation actions.', format: 'boolean', category: 'compliance', required: true },
+      { id: 'iso-8.4', name: 'Control of External Providers', instruction: 'Verify that criteria for selection, evaluation, and re-evaluation of external providers are established per Clause 8.4.', criterion: 'Supplier evaluation records must be current, with approved supplier list maintained.', format: 'boolean', category: 'compliance', required: true },
+    ],
+  },
+]
+
+export function getPublishedStandards() {
+  return PUBLISHED_STANDARDS
+}

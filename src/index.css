@@ -138,6 +138,17 @@ body {
   --font-display: 'DM Sans','Segoe UI',system-ui,sans-serif;
   --font-mono: 'JetBrains Mono',monospace;
   --font-mono-plain: monospace;
+
+  /* V3 tokens */
+  --gold: #C49A45;
+  --gold-dim: color-mix(in srgb, var(--gold) 50%, transparent);
+  --sat-green: #4CAF50;
+  --unsat-red: #E53935;
+  --bg-primary: #0A0A0C;
+  --bg-secondary: #141418;
+  --bg-tertiary: #1C1C22;
+  --border-primary: #2A2A32;
+  --border-hover: #3A3A44;
 }
 
 /* ═══ Light Theme ═══ */
@@ -255,6 +266,13 @@ body {
   --cs-pending-bg: #f0ece6;
 
   /* Fonts — same as dark mode for now */
+
+  /* V3 tokens — light mode */
+  --bg-primary: #F5F3EF;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #EAE8E3;
+  --border-primary: #D5D3CE;
+  --border-hover: #C0BEB9;
 }
 
 /* ═══ View Transitions — V2 Canvas Layer Dive/Surface ═══ */

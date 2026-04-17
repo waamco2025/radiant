@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Modal, ModalHeader, ModalBody, ModalFooter, Btn, StepDots, FieldLabel } from './ModalShared.jsx'
+import { Modal, ModalHeader, ModalBody, ModalFooter, Btn, StepDots, FieldLabel, ConfidenceBadge } from './ModalShared.jsx'
 import { PEP_TEMPLATES, FIELD_CATEGORIES, generateMockParsedFields } from '../../v2/pepTemplates.js'
 import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
 
@@ -18,6 +18,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
   const [step, setStep] = useState(0)
   const [selectedTemplate, setSelectedTemplate] = useState(null)
   const [parsedFields, setParsedFields] = useState([])
+  const [editedValues, setEditedValues] = useState({})
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownTriggerRef = useRef(null)
   const dropdownPanelRef = useRef(null)
@@ -43,7 +44,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
   }
 
   const content = (
-    <Modal width={620}>
+    <Modal width={step === 2 ? 1100 : 620}>
       {step === 0 && (
         <>
           <ModalHeader
@@ -58,9 +59,8 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
               border: '1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 15%, transparent)',
               fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
             }}>
-              PEP (Parse & Extract Protocol) reads your evidence file and extracts structured metadata fields
-              using a template. This is the only process that accesses raw evidence — all evaluations and
-              disclosures operate on the parsed output. This action costs credits.
+              Parsing extracts structured fields from evidence files, enabling Selective Disclosure — where specific
+              fields can be shared without revealing the full document. This action costs credits.
             </div>
 
             <FieldLabel label="Select parsing template" required />
@@ -86,7 +86,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
                       {selectedTemplate.name}
                     </div>
                     <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>
-                      {selectedTemplate.fieldCount} fields · {selectedTemplate.fields.map(f => f.category).filter((v, i, a) => a.indexOf(v) === i).length} categories
+                      {selectedTemplate.fields.length} fields · {selectedTemplate.fields.map(f => f.category).filter((v, i, a) => a.indexOf(v) === i).length} categories
                     </div>
                   </>
                 ) : (
@@ -176,7 +176,7 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
                         }}>
                           {alreadyParsed
                             ? 'This template has already been run on this evidence'
-                            : `${t.fieldCount} fields · ${t.description.slice(0, 60)}...`
+                            : `${t.fields.length} fields${t.fields.filter(f => f.required).length ? ` · ${t.fields.filter(f => f.required).length} required` : ''}`
                           }
                         </div>
                       </div>
@@ -207,16 +207,25 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
                     const catConfig = FIELD_CATEGORIES[f.category] || { label: f.category, color: 'var(--text-secondary)' }
                     return (
                       <div key={f.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 14px',
+                        padding: '8px 14px',
                         borderTop: i === 0 ? '1px solid var(--border)' : 'none',
                         borderBottom: i < selectedTemplate.fields.length - 1 ? '1px solid var(--border)' : 'none',
                       }}>
-                        <span style={{
-                          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                          color: catConfig.color, minWidth: 70,
-                        }}>{catConfig.label}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{f.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                            color: catConfig.color, minWidth: 70,
+                          }}>{catConfig.label}</span>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>
+                            {f.name}
+                            {f.required && <span style={{ color: 'var(--accent-red)', marginLeft: 2 }}>*</span>}
+                          </span>
+                        </div>
+                        {f.instruction && (
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2, marginLeft: 78, lineHeight: 1.4 }}>
+                            {f.instruction}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -306,76 +315,106 @@ export default function ParseEvidenceModal({ evidenceNode, parentAssetName, acti
         <>
           <ModalHeader title="Parse Evidence" subtitle="Review extracted data" step={3} totalSteps={3} onClose={onClose} />
           <ModalBody>
-            {/* Summary */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
-              padding: '12px 16px', borderRadius: 8,
-              background: 'color-mix(in srgb, var(--accent-purple, #a78bfa) 6%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 20%, transparent)',
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple, #a78bfa)' }}>
-                {parsedFields.length} fields extracted
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                using {selectedTemplate.name}
-              </span>
-            </div>
-
-            {/* Fields grouped by category */}
-            {Object.entries(groupFieldsByCategory(parsedFields)).map(([catKey, fields]) => {
-              const catConfig = FIELD_CATEGORIES[catKey] || { label: catKey, color: 'var(--text-secondary)' }
-              return (
-                <div key={catKey} style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 20, minHeight: 400 }}>
+              {/* Left panel: evidence viewer */}
+              <div style={{ width: '45%', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+                <div style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                  letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8,
+                }}>Evidence</div>
+                {evidenceNode.evidence?.localPath && evidenceNode.evidence.filename?.toLowerCase().endsWith('.pdf') ? (
                   <div style={{
-                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                    color: catConfig.color, letterSpacing: '0.06em', marginBottom: 8,
+                    flex: 1, borderRadius: 6, overflow: 'hidden',
+                    border: '1px solid var(--border)', minHeight: 360,
                   }}>
-                    {catConfig.label.toUpperCase()}
+                    <iframe
+                      src={evidenceNode.evidence.localPath}
+                      style={{ width: '100%', height: '100%', border: 'none', background: 'var(--bg-deep)' }}
+                      title={evidenceNode.evidence.filename}
+                    />
                   </div>
-                  {fields.map((f, i) => (
-                    <div key={f.id} style={{
-                      display: 'flex', alignItems: 'center',
-                      padding: '8px 0',
-                      borderBottom: i < fields.length - 1 ? '1px solid var(--border)' : 'none',
-                    }}>
-                      <span style={{ width: 160, flexShrink: 0, fontSize: 12, color: 'var(--text-dim)' }}>{f.name}</span>
-                      <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{f.value}</span>
-                      <span style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                        padding: '2px 6px', borderRadius: 4,
-                        color: f.confidence === 'high' ? 'var(--accent-green)' : f.confidence === 'medium' ? 'var(--accent-amber)' : 'var(--accent-red)',
-                        background: f.confidence === 'high'
-                          ? 'color-mix(in srgb, var(--accent-green) 10%, transparent)'
-                          : f.confidence === 'medium'
-                            ? 'color-mix(in srgb, var(--accent-amber) 10%, transparent)'
-                            : 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-                      }}>
-                        {f.confidence.toUpperCase()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
+                ) : (
+                  <div style={{
+                    flex: 1, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                    fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic',
+                  }}>
+                    {evidenceNode.name || 'File preview not available'}
+                  </div>
+                )}
+              </div>
 
-            {/* Credit cost */}
-            <div style={{
-              marginTop: 8, padding: '14px 16px',
-              background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Credit cost</span>
-              <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)' }}>
-                ◇ {selectedTemplate.fields.length * 10}
-              </span>
+              {/* Right panel: editable fields */}
+              <div style={{ flex: 1, overflow: 'auto' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14,
+                  padding: '10px 14px', borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--accent-purple, #a78bfa) 6%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 20%, transparent)',
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple, #a78bfa)' }}>
+                    {parsedFields.length} fields extracted
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                    using {selectedTemplate.name}
+                  </span>
+                </div>
+
+                {parsedFields.map((f, i) => (
+                  <div key={f.id} style={{
+                    padding: '12px 0',
+                    borderBottom: i < parsedFields.length - 1 ? '1px solid var(--border)' : 'none',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {f.name}
+                        {f.required && <span style={{ color: 'var(--accent-red)', marginLeft: 2 }}>*</span>}
+                      </span>
+                      <ConfidenceBadge level={f.confidence || 'medium'} />
+                    </div>
+                    {f.instruction && (
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, lineHeight: 1.5 }}>
+                        {f.instruction}
+                      </div>
+                    )}
+                    <input
+                      value={editedValues[f.id] ?? f.value ?? ''}
+                      onChange={e => setEditedValues(prev => ({ ...prev, [f.id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Escape') e.target.blur() }}
+                      style={{
+                        width: '100%', padding: '6px 10px', borderRadius: 4,
+                        border: '1px solid var(--border)', background: 'var(--bg-deep)',
+                        color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                ))}
+
+                {/* Credit cost */}
+                <div style={{
+                  marginTop: 14, padding: '12px 14px',
+                  background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Credit cost</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)' }}>
+                    {'\u25C7'} {selectedTemplate.fields.length * 10}
+                  </span>
+                </div>
+              </div>
             </div>
           </ModalBody>
           <ModalFooter>
-            <Btn label="← Back" onClick={() => setStep(0)} />
+            <Btn label={"\u2190 Back"} onClick={() => { setStep(0); setEditedValues({}) }} />
             <Btn label="Confirm Parse" purple onClick={() => {
+              const finalFields = parsedFields.map(f => ({
+                ...f,
+                value: editedValues[f.id] ?? f.value,
+              }))
               onComplete({
                 template: selectedTemplate,
-                parsedFields,
+                parsedFields: finalFields,
                 creditCost: selectedTemplate.fields.length * 10,
               })
             }} />

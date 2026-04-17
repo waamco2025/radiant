@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -125,9 +125,9 @@ export function ModalHeader({ title, subtitle, step, totalSteps, onClose }) {
   )
 }
 
-export function ModalBody({ children }) {
-  return <div style={{ flex: 1, overflow: 'auto', padding: '22px 28px' }}>{children}</div>
-}
+export const ModalBody = React.forwardRef(function ModalBody({ children }, ref) {
+  return <div ref={ref} style={{ flex: 1, overflow: 'auto', padding: '22px 28px' }}>{children}</div>
+})
 
 export function ModalFooter({ children }) {
   return (
@@ -465,4 +465,23 @@ export function ToggleCard({ selected, onClick, label, desc }) {
 export function getEffectiveLevel(upstream, downstream) {
   const order = ['proofonly', 'selective', 'full']
   return order[Math.min(order.indexOf(upstream), order.indexOf(downstream))]
+}
+
+export function ConfidenceBadge({ level }) {
+  const config = {
+    high: { color: 'var(--accent-green)', label: 'HIGH' },
+    medium: { color: 'var(--accent-amber)', label: 'MED' },
+    low: { color: 'var(--accent-red)', label: 'LOW' },
+  }
+  const cfg = config[level] || config.medium
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+      padding: '2px 6px', borderRadius: 3, color: cfg.color,
+      background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
+      border: `1px solid color-mix(in srgb, ${cfg.color} 25%, transparent)`,
+    }}>
+      {cfg.label}
+    </span>
+  )
 }

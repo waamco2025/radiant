@@ -338,9 +338,9 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
   const [pinRows, setPinRows] = useState([''])
   const [message, setMessage] = useState('')
   const [selectedReqSets, setSelectedReqSets] = useState([])
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState(1)
   const [submitted, setSubmitted] = useState(false)
-  const [path, setPath] = useState(null) // null, 'pins', 'directory'
+  const [path, setPath] = useState('pins') // 'pins', 'directory'
   const [selectedDirAsset, setSelectedDirAsset] = useState(null) // single asset
   const inputRefs = useRef([])
 
@@ -404,6 +404,7 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
               next[r.pin] = {
                 status: r.status,
                 error: r.error,
+                errorCode: r.errorCode,
                 resolved: r.resolved,
               }
             }
@@ -545,9 +546,8 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
 
   const formContent = (
     <Modal width={680}>
-      <ModalHeader title="Connect Asset" subtitle="Find and request disclosure of an asset to connect it to your network." step={step + 1} totalSteps={3} onClose={onClose} />
+      <ModalHeader title="Request Disclosure" subtitle="Request access to another party's claim or asset." step={step} totalSteps={2} onClose={onClose} />
       <ModalBody>
-        {step === 0 && <StepPath onSelectPath={() => { setPath('pins'); setStep(1) }} onRegisterAsset={onRegisterAsset} onSelectDirectory={() => { setPath('directory'); setStep(1) }} />}
         {step === 1 && path === 'pins' && (
           <div>
             <FieldLabel label="Asset PIN(s)" required />
@@ -619,8 +619,16 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
                         outline: 'none', minWidth: 0,
                       }}
                     />
-                    {/* Inline validation status */}
-                    <span style={{ flexShrink: 0, padding: '0 10px 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {/* Inline validation status — allow error messages to wrap */}
+                    <span style={{
+                      flexShrink: rv?.status === 'error' ? 1 : 0,
+                      flex: rv?.status === 'error' ? '1 1 0' : undefined,
+                      minWidth: 0,
+                      padding: '0 10px 0 14px',
+                      display: 'flex',
+                      alignItems: rv?.status === 'error' ? 'flex-start' : 'center',
+                      gap: 6,
+                    }}>
                       {isDuplicate && (
                         <span style={{ fontSize: 10, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
                           Duplicate — ignored
@@ -646,9 +654,21 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
                         </span>
                       )}
                       {!isDuplicate && rv?.status === 'error' && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-red)' }}>✕</span>
-                          <span style={{ fontSize: 10, color: 'var(--accent-red)' }}>{rv.error}</span>
+                        <span style={{ display: 'flex', alignItems: 'flex-start', gap: 4, minWidth: 0, flex: 1 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-red)', flexShrink: 0, lineHeight: 1.5 }}>{'\u2715'}</span>
+                          <span style={{
+                            fontSize: 10, color: 'var(--accent-red)',
+                            lineHeight: 1.5, flex: 1, minWidth: 0,
+                            whiteSpace: 'normal', wordWrap: 'break-word',
+                          }}>
+                            {rv.error}
+                            {rv.errorCode && (
+                              <span style={{
+                                fontSize: 9, fontFamily: 'var(--font-mono)',
+                                color: 'var(--text-dim)', marginLeft: 6,
+                              }}>{rv.errorCode}</span>
+                            )}
+                          </span>
                         </span>
                       )}
                     </span>
@@ -701,6 +721,89 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
               borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
             }}>
               The asset owner will determine the disclosure type and terms when they respond to your request.
+            </div>
+
+            {/* Inline requirement sets + message (merged from old step 2) */}
+            <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <FieldLabel label="Evaluation Intent" />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.5 }}>
+                Select which requirement sets you intend to evaluate against. This helps the asset owner prepare their disclosure.
+              </div>
+              {requirementSets && requirementSets.length > 0 && (() => {
+                const byLineage = {}
+                requirementSets.forEach(rs => {
+                  const lid = rs.lineageId || rs.id
+                  if (!byLineage[lid] || (rs.version || 1) > (byLineage[lid].version || 1)) byLineage[lid] = rs
+                })
+                const latestSets = Object.values(byLineage)
+                return (
+                  <div style={{
+                    borderRadius: 6, border: '1px solid var(--border)',
+                    overflow: 'hidden', marginBottom: 14, maxHeight: 160, overflowY: 'auto',
+                  }}>
+                    {latestSets.map((rs, i) => {
+                      const isSelected = selectedReqSets.includes(rs.id)
+                      return (
+                        <div key={rs.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '8px 12px', cursor: 'pointer',
+                          borderBottom: i < latestSets.length - 1 ? '1px solid var(--border)' : 'none',
+                          background: isSelected ? 'color-mix(in srgb, var(--accent-indigo) 4%, transparent)' : 'transparent',
+                        }} onClick={() => setSelectedReqSets(prev =>
+                          prev.includes(rs.id) ? prev.filter(id => id !== rs.id) : [...prev, rs.id]
+                        )}>
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                            border: `1.5px solid ${isSelected ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                            background: isSelected ? 'var(--accent-indigo)' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {isSelected && <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>{'\u2713'}</span>}
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-primary)', flex: 1 }}>{rs.name}</span>
+                          {rs.version && (
+                            <span style={{
+                              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              padding: '1px 5px', borderRadius: 3,
+                              background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                              color: 'var(--accent-indigo)',
+                            }}>v{rs.version}</span>
+                          )}
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                            {rs.requirements?.length || 0} reqs
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
+              <FieldLabel label="Message to Owner" />
+              <textarea
+                value={message} onChange={e => setMessage(e.target.value)}
+                placeholder="Optional message explaining your disclosure request..."
+                rows={3}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 6,
+                  border: '1px solid var(--border)', background: 'var(--bg-card)',
+                  color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 12,
+                  resize: 'vertical', outline: 'none', lineHeight: 1.6,
+                }}
+              />
+            </div>
+
+            {/* Secondary options */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <span onClick={() => { setPath('directory'); }}
+                style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', cursor: 'pointer' }}>
+                Browse Public Directory
+              </span>
+              <span style={{ color: 'var(--text-dim)' }}>{'\u00b7'}</span>
+              <span onClick={onRegisterAsset}
+                style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)', cursor: 'pointer' }}>
+                Create Claim
+              </span>
             </div>
           </div>
         )}
@@ -820,64 +923,49 @@ export default function RequestDisclosureModal({ contextNode, requirementSets, p
         )}
       </ModalBody>
       <ModalFooter>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step > 0 && <Btn label="← Back" onClick={() => {
-            if (step === 1) { setPath(null); setStep(0); setSelectedDirAsset(null) }
-            else setStep(s => s - 1)
-          }} />}
-          <StepDots current={step} total={3} />
-        </div>
-        {step === 0 && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Choose a path above</div>}
+        <div />
         {step === 1 && path === 'pins' && (
           <Btn
-            label={
-              !allResolved ? 'Validating...'
-              : !hasValidPins ? 'No valid PINs'
-              : `Connect ${validCount} Asset${validCount !== 1 ? 's' : ''} →`
-            }
+            label={!allResolved ? 'Validating...' : !hasValidPins ? 'No valid PINs' : 'Send Request'}
             accent
             disabled={!hasValidPins}
-            onClick={() => setStep(2)}
+            onClick={() => {
+              const validPinValues = validEntries.map(([pin]) => pin)
+              const fullSets = selectedReqSets.map(id => requirementSets?.find(s => s.id === id)).filter(Boolean)
+              if (onSubmitRequest) {
+                onSubmitRequest({ pins: validPinValues.length > 0 ? validPinValues : pins, requirements: fullSets, message, contextNode })
+              }
+              setSubmitted(true)
+            }}
           />
         )}
         {step === 1 && path === 'directory' && (
           <Btn
-            label={selectedDirAsset ? 'Request Disclosure →' : 'Select an asset above'}
+            label={selectedDirAsset ? 'Send Request' : 'Select an asset above'}
             accent
             disabled={!selectedDirAsset}
-            onClick={() => setStep(2)}
+            onClick={() => {
+              const fullSets = selectedReqSets.map(id => requirementSets?.find(s => s.id === id)).filter(Boolean)
+              if (onSubmitRequest) {
+                onSubmitRequest({ pins: [selectedDirAsset.pin], requirements: fullSets, message, contextNode, fromDirectory: true })
+              }
+              setSubmitted(true)
+            }}
           />
         )}
-        {step === 2 && <Btn label="Send Request" accent onClick={() => {
-          if (path === 'directory' && selectedDirAsset) {
-            const fullSets = selectedReqSets
-              .map(id => requirementSets?.find(s => s.id === id))
-              .filter(Boolean)
-            if (onSubmitRequest) {
-              onSubmitRequest({
-                pins: [selectedDirAsset.pin],
-                requirements: fullSets,
-                message,
-                contextNode,
-                fromDirectory: true,
-              })
-            }
-          } else {
-            const validPinValues = validEntries.map(([pin]) => pin)
-            const fullSets = selectedReqSets
-              .map(id => requirementSets?.find(s => s.id === id))
-              .filter(Boolean)
-            if (onSubmitRequest) {
-              onSubmitRequest({
-                pins: validPinValues.length > 0 ? validPinValues : pins,
-                requirements: fullSets,
-                message,
-                contextNode,
-              })
-            }
-          }
-          setSubmitted(true)
-        }} />}
+        {step === 2 && (
+          <>
+            <Btn label={"\u2190 Back"} onClick={() => setStep(1)} />
+            <Btn label="Send Request" accent onClick={() => {
+              const validPinValues = validEntries.map(([pin]) => pin)
+              const fullSets = selectedReqSets.map(id => requirementSets?.find(s => s.id === id)).filter(Boolean)
+              if (onSubmitRequest) {
+                onSubmitRequest({ pins: validPinValues.length > 0 ? validPinValues : pins, requirements: fullSets, message, contextNode })
+              }
+              setSubmitted(true)
+            }} />
+          </>
+        )}
       </ModalFooter>
     </Modal>
   )

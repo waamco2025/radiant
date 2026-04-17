@@ -219,6 +219,7 @@ function makeEvidenceNode(parentId, evidenceMeta, owner, claims = [], uniqueId =
     isEvidence: true,
     lastEval: null,
     attributedClaims: claims,
+    artifactUri: evidenceMeta.uri,
     date: new Date().toISOString().slice(0, 10),
     dateTime: new Date().toISOString(),
   }
@@ -262,6 +263,7 @@ function makePepNode(parentAssetId, sourceEvidenceId, templateName, parsedFields
     isEvidence: false,
     isParse: true,
     lastEval: null,
+    artifactUri: `provenance://artifacts/${pepId}`,
     date: new Date().toISOString().slice(0, 10),
     dateTime: new Date().toISOString(),
   }
@@ -318,6 +320,7 @@ function makeClaimNode(parentAssetId, requirementSet, referencedEvidenceIds, own
     requirementSetLineageId: lineageId,
     referencedEvidenceIds: referencedEvidenceIds || [],
     claims: claimDefs,
+    artifactUri: `provenance://claims/${id}`,
     date: new Date().toISOString().slice(0, 10),
     dateTime: new Date().toISOString(),
     lastEval: null,
@@ -550,6 +553,7 @@ function buildBobData() {
     upstreamSda: null,
     lastEval: null,
     selectedEvidenceIds: [],
+    artifactUri: 'provenance://artifacts/eval-power-reg-bob-001',
   }
   powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
@@ -576,6 +580,10 @@ function buildBobData() {
     children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 1400, y: 0,
     artifactUri: 'provenance://claims/power-reg',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/power-reg-datasheet-001', filename: 'powerregulationmodule-datasheet.pdf', size: 2411724, mimeType: 'application/pdf', label: 'Power Regulation Module Datasheet' },
+      { uri: 'provenance://evidence/power-reg-thermal-001', filename: 'power-reg-thermal-analysis.pdf', size: 1153434, mimeType: 'application/pdf', label: 'Thermal Analysis Report' },
+    ],
   })
 
   // VReg IC: fully disclosed from MicroCo, no evaluations yet (Bob hasn't run one)
@@ -605,6 +613,10 @@ function buildBobData() {
     children: [vregEv, vregPep],
     x: 1400, y: 400,
     artifactUri: 'provenance://claims/vreg-ic',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/vreg-datasheet-001', filename: 'voltageregulator-datasheet.pdf', size: 1887437, mimeType: 'application/pdf', label: 'Voltage Regulator Datasheet' },
+      { uri: 'provenance://evidence/vreg-qual-001', filename: 'vreg-qualification-report.pdf', size: 3355443, mimeType: 'application/pdf', label: 'Qualification Test Report' },
+    ],
   })
 
   // Set static parse dates for Bob's disclosed copies
@@ -750,6 +762,7 @@ function buildAliceData() {
     upstreamSda: null,
     lastEval: null,
     selectedEvidenceIds: [],
+    artifactUri: 'provenance://artifacts/eval-power-reg-bob-001',
   }
   powerRegEval.selectedEvidenceIds = [powerRegEv.id]
 
@@ -807,6 +820,10 @@ function buildAliceData() {
     children: [powerRegEv, powerRegPep, powerRegClaim, powerRegEval],
     x: 500, y: -300,
     artifactUri: 'provenance://claims/power-reg',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/power-reg-datasheet-001', filename: 'powerregulationmodule-datasheet.pdf', size: 2411724, mimeType: 'application/pdf', label: 'Power Regulation Module Datasheet' },
+      { uri: 'provenance://evidence/power-reg-thermal-001', filename: 'power-reg-thermal-analysis.pdf', size: 1153434, mimeType: 'application/pdf', label: 'Thermal Analysis Report' },
+    ],
   })
 
   // VReg IC: has evidence, fully disclosed to GovCo, no evaluations yet
@@ -841,6 +858,10 @@ function buildAliceData() {
     children: [vregEv, vregPep],
     x: 500, y: 0,
     artifactUri: 'provenance://claims/vreg-ic',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/vreg-datasheet-001', filename: 'voltageregulator-datasheet.pdf', size: 1887437, mimeType: 'application/pdf', label: 'Voltage Regulator Datasheet' },
+      { uri: 'provenance://evidence/vreg-qual-001', filename: 'vreg-qualification-report.pdf', size: 3355443, mimeType: 'application/pdf', label: 'Qualification Test Report' },
+    ],
   })
 
   // PCB Substrate: shell, no evidence yet
@@ -894,6 +915,9 @@ function buildAliceData() {
     x: 500, y: 600,
     description: 'Board-level EMI shielding assembly for high-frequency noise suppression.',
     artifactUri: 'provenance://claims/emi-shield',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/emi-datasheet-001', filename: 'emishielding-datasheet.pdf', size: 1258291, mimeType: 'application/pdf', label: 'EMI Shield Datasheet' },
+    ],
   })
 
   // Thermal Interface Pad: has evidence + parse
@@ -921,6 +945,9 @@ function buildAliceData() {
     x: 500, y: 900,
     description: 'Thermally conductive gap filler pad for heat dissipation between components and heatsinks.',
     artifactUri: 'provenance://claims/thermal-pad',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/thermal-datasheet-001', filename: 'thermalinterfacepad-datasheet.pdf', size: 1003520, mimeType: 'application/pdf', label: 'Thermal Pad Datasheet' },
+    ],
   })
 
   // Connector Assembly: has evidence + parse
@@ -948,6 +975,9 @@ function buildAliceData() {
     x: 500, y: 1200,
     description: 'Board-to-board connector assembly for inter-module signal and power routing.',
     artifactUri: 'provenance://claims/connector-assy',
+    evidenceRefs: [
+      { uri: 'provenance://evidence/connector-datasheet-001', filename: 'connectorassembly-datasheet.pdf', size: 1433600, mimeType: 'application/pdf', label: 'Connector Assembly Datasheet' },
+    ],
   })
 
   const radiantNetwork = {
@@ -1091,6 +1121,7 @@ function makeEvalNode(parentAssetId, requirementSet, claims, evaluatorParty, eva
     previousEvalId,
     evalVersion: previousEvalId ? 2 : 1,
     selectedEvidenceIds: [],
+    artifactUri: `provenance://artifacts/${id}`,
   }
 }
 
@@ -1142,6 +1173,7 @@ export function makeRootClaim(name, evidenceFiles, owner, opts = {}) {
       hash: f.hash || null,
     })),
     referencedEvidenceIds: [],
+    artifactUri: `provenance://claims/${id}`,
     date: new Date().toISOString().slice(0, 10),
     dateTime: new Date().toISOString(),
     lastEval: null,
