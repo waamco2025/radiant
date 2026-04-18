@@ -568,6 +568,17 @@ export default function AssetNode({
         }}
       >
         <div style={isFlipping ? { animation: 'revealContentFade 700ms ease-in-out forwards' } : undefined}>
+        {/* Row 0: V2.2 type label on its own line above the name (spec §3). */}
+        {node.v22Type && (
+          <div style={{ marginBottom: 2, lineHeight: 1 }}>
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '1px 6px', borderRadius: 3, letterSpacing: '0.1em',
+              color: 'var(--text-tertiary)',
+              background: 'var(--bg-raised)',
+            }}>{node.v22Type}</span>
+          </div>
+        )}
         {/* Row 1: name + status badges + stack badge */}
         <div style={{
           display: 'flex',
@@ -931,8 +942,16 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         position: 'relative',
         zIndex: 1,
       }}>
-        {/* Top half: title */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* Top half: title (v22Type on its own line above name when present) */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+          {node.v22Type && (
+            <span style={{
+              fontSize: 7, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: 'var(--text-tertiary)',
+              lineHeight: 1,
+            }}>{node.v22Type}</span>
+          )}
           <span style={{
             fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

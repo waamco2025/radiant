@@ -428,6 +428,8 @@ const V2Canvas = forwardRef(function V2Canvas({
   onCreateClaim,
   activeParty,
   revealAnim,
+  selectedEdgeId = null,
+  onEdgeClick,
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -859,10 +861,14 @@ const V2Canvas = forwardRef(function V2Canvas({
       const effectiveSdaType = edge._showAsProvisional ? 'provisional' : edge.sdaType
       const sdaCfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const isNewEdge = !!edge._isNew
-      const edgeColor = isNewEdge
+      const isSelectedEdge = !!edge._isSelected
+      // Selected edge treatment per spec §4.4: color shifts 40% toward white,
+      // stroke width +0.5px. Preserves dash/dot pattern.
+      const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
+      const edgeColor = (isNewEdge || isSelectedEdge)
         ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
         : new THREE.Color(sdaCfg.color)
-      const lineWidth = isNewEdge ? 3.0 : (SDA_EDGE_WIDTH[effectiveSdaType] || 2.0)
+      const lineWidth = isNewEdge ? 3.0 : (isSelectedEdge ? baseWidth + 0.5 : baseWidth)
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -2540,10 +2546,36 @@ const V2Canvas = forwardRef(function V2Canvas({
   const handleBackgroundClick = useCallback((e) => {
     if (transitioningRef.current) return
     if (wasDragRef.current) return
-    if (e.target === overlayRef.current || e.target === canvasRef.current || e.target === containerRef.current) {
-      onCloseSel?.()
+    // Only react to clicks that landed on the canvas/overlay/container background.
+    if (e.target !== overlayRef.current && e.target !== canvasRef.current && e.target !== containerRef.current) return
+
+    // V2.2 edge click: raycast against the edge group; if a line hits, emit
+    // onEdgeClick with screen coordinates so V2App can open the edge menu or panel.
+    if (onEdgeClick) {
+      const camera = cameraRef.current
+      const edgeGroup = edgeGroupRef.current
+      const container = containerRef.current
+      const rc = raycasterRef.current
+      if (camera && edgeGroup && container && rc) {
+        const rect = container.getBoundingClientRect()
+        const mouse = new THREE.Vector2(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        )
+        rc.setFromCamera(mouse, camera)
+        const intersects = rc.intersectObjects(edgeGroup.children, false)
+        if (intersects.length > 0) {
+          const edgeId = intersects[0].object.userData?.edgeId
+          if (edgeId) {
+            onEdgeClick(edgeId, { x: e.clientX, y: e.clientY })
+            return
+          }
+        }
+      }
     }
-  }, [onCloseSel])
+
+    onCloseSel?.()
+  }, [onCloseSel, onEdgeClick])
 
   // Double-click empty canvas: zoom in at root, surface at child depth
   const handleBackgroundDblClick = useCallback((e) => {
@@ -2580,6 +2612,30 @@ const V2Canvas = forwardRef(function V2Canvas({
     setZoom(newZoom)
     updateCamera()
   }, [layerStack.length, handleSurface, clampPan, updateCamera, isSubchain, onExitSubchain])
+
+  // Apply selected-edge treatment per spec §4.4: selected edge gets a brighter
+  // colour (40% white blend) and +0.5px stroke. All other edges revert to their
+  // baseline colour/width for their disclosure type.
+  useEffect(() => {
+    const group = edgeGroupRef.current
+    if (!group) return
+    group.children.forEach((line) => {
+      const mat = line.material
+      if (!mat) return
+      const effectiveSdaType = line.userData?.sdaType || 'full'
+      const cfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
+      const isSelected = !!selectedEdgeId && line.userData?.edgeId === selectedEdgeId
+      const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
+      const baseColor = new THREE.Color(cfg.color)
+      const color = isSelected ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.4) : baseColor
+      mat.linewidth = isSelected ? baseWidth + 0.5 : baseWidth
+      if (mat.color) {
+        mat.color.copy(color)
+      }
+      mat.needsUpdate = true
+    })
+    dirtyRef.current = true
+  }, [selectedEdgeId])
 
   // Edge hover state for tooltip (raycaster-based)
   const [hoveredEdge, setHoveredEdge] = useState(null)

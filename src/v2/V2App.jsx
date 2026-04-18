@@ -5,7 +5,10 @@ import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
 import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin, makeRootClaim } from './v2Data.js'
-import { V2_2_ENABLED } from './v2_2Data.js'
+import { V2_2_ENABLED, getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge } from './v2_2Data.js'
+import EdgeMenu from './EdgeMenu.jsx'
+import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
+import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -60,7 +63,36 @@ export default function V2App() {
   const prevSelRef = useRef(null)
 
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
-  const roleData = useMemo(() => getDataForRole(roleId), [roleId])
+  // V2.2 mode builds its own { nodes, edges, nodeMap } via the canvas adapter.
+  // V2.1 mode keeps its existing role-data source and processing pipeline.
+  const v22View = useMemo(
+    () => (V2_2_ENABLED ? getV22DataForRole(roleId) : null),
+    [roleId],
+  )
+  const v22Data = useMemo(
+    () => (V2_2_ENABLED && v22View ? buildV22Canvas(v22View) : null),
+    [v22View],
+  )
+
+  // V2.2 edge interactions — selectedEdgeId drives the highlight state in V2Canvas;
+  // edgeMenu drives the contextual menu; openAgreement drives the side Detail Panel.
+  // Per spec §4.4, edge selection clears when a node is selected OR the panel closes.
+  const [selectedEdgeId, setSelectedEdgeId] = useState(null)
+  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor }
+  const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
+
+  // Clear edge selection when a node becomes selected (spec §4.4).
+  useEffect(() => {
+    if (sel && selectedEdgeId) {
+      setSelectedEdgeId(null)
+      setEdgeMenu(null)
+      setOpenAgreement(null)
+    }
+  }, [sel, selectedEdgeId])
+  const roleData = useMemo(
+    () => (V2_2_ENABLED ? { nodes: v22Data.nodes, edges: v22Data.edges, nodeMap: v22Data.nodeMap, pendingRequests: [], existingCascades: [] } : getDataForRole(roleId)),
+    [roleId, v22Data],
+  )
   // Per-role dynamic state — persists across role switches
   const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null, pepTemplates: null }
   const [perRoleState, setPerRoleState] = useState(() => {
@@ -147,6 +179,18 @@ export default function V2App() {
   const removedEdges = currentRoleState.removedEdges || []
 
   const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => {
+    // V2.2 short-circuit: the adapter has already computed role-filtered nodes,
+    // edges, and nodeMap. Skip the V2.1 merge/roll-up pipeline (SDA mutations,
+    // addedNodes/Edges, cascade requests, etc.) which is V2.1-shape specific.
+    if (V2_2_ENABLED) {
+      return {
+        nodes: roleData.nodes,
+        edges: roleData.edges,
+        nodeMap: roleData.nodeMap,
+        pendingRequests: [],
+        existingCascades: [],
+      }
+    }
     const data = { ...roleData }
 
     // Step 0: Filter removed nodes from static data
@@ -1870,6 +1914,19 @@ export default function V2App() {
           onCreateClaim={(node) => setClaimContext(node ? { initiatingNode: node } : true)}
           activeParty={activeRole.party}
           revealAnim={revealAnim}
+          selectedEdgeId={selectedEdgeId}
+          onEdgeClick={V2_2_ENABLED ? (edgeId, anchor) => {
+            // Phase 3: edge click opens the EdgeMenu (if paired EA) or the DA panel directly (§4.3).
+            const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
+            if (!resolved || !resolved.disclosureAgreement) return
+            setSelectedEdgeId(edgeId)
+            if (resolved.evaluationAgreement) {
+              setEdgeMenu({ edgeId, anchor })
+            } else {
+              setEdgeMenu(null)
+              setOpenAgreement({ kind: 'disclosure', edgeId })
+            }
+          } : undefined}
         />
 
         {/* Subchain pill */}
@@ -1909,6 +1966,64 @@ export default function V2App() {
             </span>
           </div>
         )}
+
+        {/* V2.2 Edge Menu — opens on edge click when paired EA exists (spec §4.3). */}
+        {V2_2_ENABLED && edgeMenu && (() => {
+          const resolved = resolveAgreementsForEdge(edgeMenu.edgeId, v22View, edges)
+          const hasEA = !!(resolved && resolved.evaluationAgreement)
+          return (
+            <EdgeMenu
+              open
+              anchor={edgeMenu.anchor}
+              hasEvaluationAgreement={hasEA}
+              onViewDisclosure={() => setOpenAgreement({ kind: 'disclosure', edgeId: edgeMenu.edgeId })}
+              onViewEvaluation={() => setOpenAgreement({ kind: 'evaluation', edgeId: edgeMenu.edgeId })}
+              onClose={() => setEdgeMenu(null)}
+            />
+          )
+        })()}
+
+        {/* V2.2 Agreement Detail Panels — slide over from the right, reuse the canvas panel slot. */}
+        {V2_2_ENABLED && openAgreement && (() => {
+          const resolved = resolveAgreementsForEdge(openAgreement.edgeId, v22View, edges)
+          if (!resolved || !resolved.disclosureAgreement) return null
+          const resolveNodeName = (id) => nodeMap[id]?.name || null
+          const close = () => {
+            setOpenAgreement(null)
+            setSelectedEdgeId(null)
+          }
+          const swapToEvaluation = resolved.evaluationAgreement
+            ? () => setOpenAgreement({ kind: 'evaluation', edgeId: openAgreement.edgeId })
+            : undefined
+          const swapToDisclosure = () => setOpenAgreement({ kind: 'disclosure', edgeId: openAgreement.edgeId })
+          return (
+            <div style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0,
+              width: 480, zIndex: 55,
+              animation: 'detail-panel-slide-in 200ms ease',
+            }}>
+              {openAgreement.kind === 'disclosure' ? (
+                <DisclosureAgreementDetailPanel
+                  agreement={resolved.disclosureAgreement}
+                  resolveNodeName={resolveNodeName}
+                  activeParty={activeRole.party}
+                  onClose={close}
+                  onAmend={() => { /* Phase 6 wires up amendment flow */ }}
+                  onViewEvaluationAgreement={swapToEvaluation}
+                />
+              ) : (
+                <EvaluationAgreementDetailPanel
+                  agreement={resolved.evaluationAgreement}
+                  resolveNodeName={resolveNodeName}
+                  activeParty={activeRole.party}
+                  onClose={close}
+                  onAmend={() => { /* Phase 6 wires up amendment flow */ }}
+                  onViewDisclosureAgreement={swapToDisclosure}
+                />
+              )}
+            </div>
+          )
+        })()}
 
         {/* Detail Panel overlay */}
         {sel && nodeMap[sel] && nodeMap[sel].category !== 'party' && (
