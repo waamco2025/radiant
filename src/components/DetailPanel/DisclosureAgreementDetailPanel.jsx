@@ -112,12 +112,20 @@ export default function DisclosureAgreementDetailPanel({
     ? (resolveNodeName?.(agreement.granteeAssetId) || agreement.granteeAssetId)
     : null
 
+  const isProvisional = agreement.type === 'provisional'
   const amendDisabled = !isGrantor || agreement.status !== 'active'
   const amendTooltip = !isGrantor
-    ? `Only ${agreement.grantor.party} (the grantor) can amend this agreement.`
+    ? (isProvisional
+        ? `Waiting for ${agreement.grantor.party} to respond.`
+        : `Only ${agreement.grantor.party} (the grantor) can amend this agreement.`)
     : agreement.status !== 'active'
       ? `This agreement is ${agreement.status}; amendments are disabled.`
       : null
+  const amendLabel = isProvisional && isGrantor
+    ? 'Respond to Request'
+    : isProvisional
+      ? 'Awaiting Response'
+      : 'Amend Disclosure'
 
   return (
     <div style={{
@@ -268,7 +276,9 @@ export default function DisclosureAgreementDetailPanel({
           style={{
             flex: 1,
             padding: '10px 14px',
-            background: amendDisabled ? 'var(--bg-raised)' : 'var(--accent-indigo)',
+            background: amendDisabled
+              ? 'var(--bg-raised)'
+              : (isProvisional ? 'var(--accent-amber)' : 'var(--accent-indigo)'),
             border: '1px solid var(--border)',
             borderRadius: 4,
             color: amendDisabled ? 'var(--text-dim)' : 'var(--bg-deep)',
@@ -280,7 +290,7 @@ export default function DisclosureAgreementDetailPanel({
             cursor: amendDisabled ? 'not-allowed' : 'pointer',
           }}
         >
-          Amend Disclosure
+          {amendLabel}
         </button>
       </div>
     </div>

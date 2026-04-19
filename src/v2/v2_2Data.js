@@ -579,7 +579,9 @@ export function buildV22SharedArtifacts() {
     parseResultIds: ['parse-emi-datasheet'],
   })
 
-  // ── Bob's Asset ───────────────────────────────────────────────────────
+  // ── Bob's Assets ─────────────────────────────────────────────────────
+  // Avionics Module (the Sentinel-4 anchor) is the original Phase 1 Asset and
+  // already carries inter-party DAs to MicroCo for the Power Reg + VReg Claims.
   const bAvionics = makeAsset({
     id: 'asset-bob-avionics',
     owner: bob.party,
@@ -596,8 +598,43 @@ export function buildV22SharedArtifacts() {
     registrationDate: '2026-01-15T10:00:00Z',
     parseResultIds: [],
   })
+  // Guidance Computer + Thermal Subsystem are unattached Bob anchors — added
+  // for Phase 5 so the per-Asset request flow can be exercised end-to-end
+  // against Alice's remaining un-disclosed Claims (e.g., EMI Shield).
+  const bGuidance = makeAsset({
+    id: 'asset-bob-guidance',
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    name: 'Guidance Computer',
+    description: 'Sentinel-4 attitude control and orbit determination compute module.',
+    file: {
+      uri: 'provenance://evidence/guidance-computer-spec',
+      filename: 'guidance-computer-spec.pdf',
+      size: 3210496,
+      mimeType: 'application/pdf',
+      hash: 'sha256:guidance-computer-spec',
+    },
+    registrationDate: '2026-01-22T11:30:00Z',
+    parseResultIds: [],
+  })
+  const bThermal = makeAsset({
+    id: 'asset-bob-thermal',
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    name: 'Thermal Subsystem',
+    description: 'Spacecraft thermal management — radiators, heaters, MLI blanket spec.',
+    file: {
+      uri: 'provenance://evidence/thermal-subsystem-spec',
+      filename: 'thermal-subsystem-spec.pdf',
+      size: 2854400,
+      mimeType: 'application/pdf',
+      hash: 'sha256:thermal-subsystem-spec',
+    },
+    registrationDate: '2026-02-01T09:00:00Z',
+    parseResultIds: [],
+  })
 
-  // ── Carol's Asset ─────────────────────────────────────────────────────
+  // ── Carol's Assets ────────────────────────────────────────────────────
   const cAuditWorkspace = makeAsset({
     id: 'asset-carol-audit-workspace',
     owner: carol.party,
@@ -614,6 +651,23 @@ export function buildV22SharedArtifacts() {
     registrationDate: '2026-01-20T09:00:00Z',
     parseResultIds: [],
   })
+  // Carol's secondary anchor — useful for Story 3 (auditing additional Claims).
+  const cComplianceQueue = makeAsset({
+    id: 'asset-carol-compliance-queue',
+    owner: carol.party,
+    ownerDot: carol.partyDot,
+    name: 'Compliance Audit Queue',
+    description: 'Open audit engagements awaiting evidence disclosure.',
+    file: {
+      uri: 'provenance://evidence/auditco-compliance-queue',
+      filename: 'auditco-compliance-queue.md',
+      size: 8192,
+      mimeType: 'text/markdown',
+      hash: 'sha256:auditco-compliance-queue',
+    },
+    registrationDate: '2026-02-05T10:00:00Z',
+    parseResultIds: [],
+  })
 
   const assets = [
     aPrmDatasheet,
@@ -622,7 +676,10 @@ export function buildV22SharedArtifacts() {
     aVregDatasheet,
     aEmiDatasheet,
     bAvionics,
+    bGuidance,
+    bThermal,
     cAuditWorkspace,
+    cComplianceQueue,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -727,7 +784,7 @@ export function buildV22SharedArtifacts() {
       terms: { createdDate: a.registrationDate },
     }),
   )
-  const bobOwnAssets = [bAvionics].map((a) =>
+  const bobOwnAssets = [bAvionics, bGuidance, bThermal].map((a) =>
     makeInternalDisclosureAgreement({
       id: `da-own-${a.id}`,
       owner: bob.party,
@@ -736,7 +793,7 @@ export function buildV22SharedArtifacts() {
       terms: { createdDate: a.registrationDate },
     }),
   )
-  const carolOwnAssets = [cAuditWorkspace].map((a) =>
+  const carolOwnAssets = [cAuditWorkspace, cComplianceQueue].map((a) =>
     makeInternalDisclosureAgreement({
       id: `da-own-${a.id}`,
       owner: carol.party,
@@ -771,6 +828,19 @@ export function buildV22SharedArtifacts() {
         terms: { createdDate: claim.createdDate },
       }),
     ),
+  )
+
+  // Parse Result → source Asset (Full, implicit) — one DA per parse result (spec §3.3).
+  // subject is the Parse Result; scope.assetIds names the source Asset. Edge: Parse ↔ Asset.
+  const parseResultRefEdges = parseResults.map((pr) =>
+    makeInternalDisclosureAgreement({
+      id: `da-parse-${pr.id}`,
+      owner: pr.owner,
+      ownerDot: makeDot(pr.owner),
+      subject: { kind: 'parseResult', id: pr.id },
+      scope: { assetIds: [pr.sourceAssetId], includeDerivatives: true },
+      terms: { createdDate: pr.parseDate },
+    }),
   )
 
   // Explicit inter-party Disclosure Agreements. Edge: subject (Claim) ↔ granteeAssetId.
@@ -1023,6 +1093,7 @@ export function buildV22SharedArtifacts() {
     ...carolOwnAssets,
     ...aliceOwnClaims,
     ...claimRefEdges,
+    ...parseResultRefEdges,
     daAliceToBobPrm,
     daAliceToBobVreg,
     daAliceToCarolPrm,
@@ -1174,6 +1245,49 @@ function buildViewForActor(actor, shared) {
   // node is personal to each view (see §6). Counterparty artifacts appear as
   // pulled-in Claims/Assets anchored to the actor's own Asset, not to a Party node.
 
+  // Decline records — claims previously requested by this actor but declined by
+  // the owner. Per spec §11.4 these surface on the requester's canvas in a
+  // "Disclosure Declined" state until the requester dismisses them.
+  const declineRecordsForActor = (shared.declineRecords || []).filter(
+    (r) => r.requesterParty === party,
+  )
+  const declinedClaimIds = new Map() // claimId → record (for adapter)
+  for (const r of declineRecordsForActor) declinedClaimIds.set(r.claimId, r)
+  // Add the declined claims to the visible set so the adapter can render them.
+  for (const r of declineRecordsForActor) {
+    if (!visibleClaims.some((c) => c.id === r.claimId)) {
+      const claim = shared.claims.find((c) => c.id === r.claimId)
+      if (claim) visibleClaims.push(claim)
+    }
+    if (r.requesterAssetId && !visibleAssets.some((a) => a.id === r.requesterAssetId)) {
+      const asset = shared.assets.find((a) => a.id === r.requesterAssetId)
+      if (asset && asset.owner === party) visibleAssets.push(asset)
+    }
+  }
+
+  // Mark claims / assets as provisional when their only connection to this
+  // actor is a provisional DA (i.e., an outstanding request not yet responded
+  // to). Visual treatment flows from this set in the adapter.
+  const provisionalClaimIds = new Set()
+  const provisionalAssetIds = new Set()
+  for (const pulledId of pulledInClaimIds) {
+    const relatedDAs = disclosureAgreements.filter(
+      (d) => d.subject.kind === 'claim' && d.subject.id === pulledId,
+    )
+    if (relatedDAs.length > 0 && relatedDAs.every((d) => d.type === 'provisional' || d.status !== 'active')) {
+      provisionalClaimIds.add(pulledId)
+    }
+  }
+  for (const pulledId of pulledInAssetIds) {
+    const relatedDAs = disclosureAgreements.filter(
+      (d) => (d.granteeAssetId === pulledId || (d.subject.kind === 'asset' && d.subject.id === pulledId)) &&
+             d.grantor.party === party && d.grantee.party !== party,
+    )
+    if (relatedDAs.length > 0 && relatedDAs.every((d) => d.type === 'provisional' || d.status !== 'active')) {
+      provisionalAssetIds.add(pulledId)
+    }
+  }
+
   return {
     actor,
     actors,
@@ -1188,6 +1302,9 @@ function buildViewForActor(actor, shared) {
     pairedDaIds,
     pulledInClaimIds,
     pulledInAssetIds,
+    provisionalClaimIds,
+    provisionalAssetIds,
+    declinedClaimIds,
   }
 }
 
@@ -1210,13 +1327,62 @@ export function buildCarolView(shared) {
 }
 
 /**
- * Role dispatcher. Used by V2App when V2_2_ENABLED is true.
+ * Merge optional runtime artifacts (request/response/eval-run flows) into a
+ * shared artifact set. Used by V2App for Phase 4 provisional cycles AND Phase 5
+ * evaluation runs / decline records.
+ *
+ * `provisionals` shape: {
+ *   disclosureAgreements, evaluationAgreements, evaluationResults,
+ *   declineRecords: [{ id, requesterParty, ownerParty, claimId, requesterAssetId, reason, declinedDate }],
+ * }
+ * All fields optional. Matching ids on existing artifacts REPLACE (used to
+ * supersede prior eval results / flip provisional DAs to active).
  */
-export function getV22DataForRole(roleId) {
-  const shared = buildV22SharedArtifacts()
+function mergeProvisionals(shared, provisionals) {
+  if (!provisionals) return shared
+  const merged = { ...shared }
+  const mergeById = (existing, incoming) => {
+    if (!incoming || incoming.length === 0) return existing
+    const byId = new Map(existing.map((x) => [x.id, x]))
+    for (const item of incoming) byId.set(item.id, item)
+    return Array.from(byId.values())
+  }
+  if (provisionals.disclosureAgreements?.length) {
+    merged.disclosureAgreements = mergeById(merged.disclosureAgreements, provisionals.disclosureAgreements)
+  }
+  if (provisionals.evaluationAgreements?.length) {
+    merged.evaluationAgreements = mergeById(merged.evaluationAgreements, provisionals.evaluationAgreements)
+  }
+  if (provisionals.evaluationResults?.length) {
+    merged.evaluationResults = mergeById(merged.evaluationResults, provisionals.evaluationResults)
+  }
+  // declineRecords ride along on the merged shared bundle so view builders can
+  // surface declined claims without inventing a new module-level store.
+  merged.declineRecords = [...(shared.declineRecords || []), ...(provisionals.declineRecords || [])]
+  return merged
+}
+
+/**
+ * Role dispatcher. Used by V2App when V2_2_ENABLED is true. `provisionals`
+ * optional — pass the V2App `v22Provisionals` state here to include in-progress
+ * request/response flows.
+ */
+export function getV22DataForRole(roleId, provisionals) {
+  const shared = mergeProvisionals(buildV22SharedArtifacts(), provisionals)
   if (roleId === 'alice-microco') return buildAliceView(shared)
   if (roleId === 'carol-auditco') return buildCarolView(shared)
   return buildBobView(shared)
+}
+
+/**
+ * Resolve a Claim by its PIN across the shared artifact set (plus any
+ * provisionals). Returns `{ claim, ownerParty }` or null.
+ */
+export function resolveClaimByPinInShared(pin, provisionals) {
+  const shared = mergeProvisionals(buildV22SharedArtifacts(), provisionals)
+  const claim = shared.claims.find((c) => c.pin === pin)
+  if (!claim) return null
+  return { claim, ownerParty: claim.owner }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1248,6 +1414,7 @@ export function deriveAgreementEdges(view) {
   const visibleAssetIds = new Set(view.assets.map((a) => a.id))
   const visibleClaimIds = new Set(view.claims.map((c) => c.id))
   const visibleEvalIds = new Set(view.evaluationResults.map((e) => e.id))
+  const visibleParseIds = new Set(view.parseResults.map((p) => p.id))
   const actorPartyInView = new Set(view.actors.map((a) => a.party))
   const evalResultById = new Map(view.evaluationResults.map((e) => [e.id, e]))
 
@@ -1261,7 +1428,8 @@ export function deriveAgreementEdges(view) {
     nodeId.startsWith(ACTOR_NODE_ID_PREFIX) ||
     visibleAssetIds.has(nodeId) ||
     visibleClaimIds.has(nodeId) ||
-    visibleEvalIds.has(nodeId)
+    visibleEvalIds.has(nodeId) ||
+    visibleParseIds.has(nodeId)
 
   const pushEdge = (from, to, da) => {
     if (!from || !to || from === to) return
@@ -1331,7 +1499,12 @@ export function deriveAgreementEdges(view) {
       if (er) pushEdge(id, er.claimId, da)
       continue
     }
-    // Anything else: silently skip. Phase 3 may introduce additional variants.
+    if (kind === 'parseResult' && internal && hasScopeAssets) {
+      // Parse Result → source Asset (spec §3.3). One edge per (parse, asset) pair.
+      for (const aid of da.scope.assetIds) pushEdge(id, aid, da)
+      continue
+    }
+    // Anything else: silently skip. Later phases may introduce additional variants.
     void actorPartyInView
   }
 
@@ -1639,6 +1812,226 @@ function evalResultToNode(er, x, y) {
 }
 
 /**
+ * Build a new provisional Disclosure Agreement + Evaluation Agreement pair for
+ * a request (spec §7.1 step 1). Both artifacts start with `status: 'active'`
+ * structurally (so the view builder includes them) but the DA's `type` is
+ * `'provisional'` which drives the edge styling in §4.2.
+ *
+ * `options` carries the identifying request context:
+ *   - requesterParty / requesterDot   — grantee of the DA (Bob on Story 1)
+ *   - requesterAssetId                — anchor on the grantee's canvas
+ *   - ownerParty / ownerDot           — grantor of the DA (Alice)
+ *   - claimId                         — the subject Claim being requested
+ *   - requestedRequirementsSetIds     — optional suggestions forwarded to EA
+ *   - message                         — free-text context (not stored on-chain in real life; attached here for UI)
+ */
+export function makeProvisionalAgreementPair({
+  idSeed,
+  requesterParty, requesterDot,
+  requesterAssetId,
+  ownerParty, ownerDot,
+  claimId,
+  requestedRequirementsSetIds = [],
+  message = '',
+}) {
+  const stamp = idSeed || `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const daId = `da-prov-${stamp}`
+  const eaId = `ea-prov-${stamp}`
+  const createdDate = new Date().toISOString()
+
+  const da = makeDisclosureAgreement({
+    id: daId,
+    grantor: { party: ownerParty, dot: ownerDot || makeDot(ownerParty) },
+    grantee: { party: requesterParty, dot: requesterDot || makeDot(requesterParty) },
+    subject: { kind: 'claim', id: claimId },
+    granteeAssetId: requesterAssetId,
+    type: 'provisional',
+    scope: { includeDerivatives: false },
+    terms: { createdDate },
+    status: 'active',
+  })
+
+  const ea = makeEvaluationAgreement({
+    id: eaId,
+    grantor: { party: ownerParty, dot: ownerDot || makeDot(ownerParty) },
+    grantee: { party: requesterParty, dot: requesterDot || makeDot(requesterParty) },
+    claimId,
+    granteeAssetId: requesterAssetId,
+    disclosureAgreementId: daId,
+    authorizedRequirementsSetIds: requestedRequirementsSetIds,
+    terms: { createdDate },
+    status: 'active',
+  })
+
+  // Attach request metadata to the DA for round-trip display in the response
+  // modal. This field is outside spec §10.4; it's a UI-layer convenience.
+  da._requestMeta = { message, requestedRequirementsSetIds: [...requestedRequirementsSetIds] }
+
+  return { disclosureAgreement: da, evaluationAgreement: ea }
+}
+
+/**
+ * Flip a provisional DA+EA pair to active with the grantor's chosen settings.
+ * Returns `{ disclosureAgreement, evaluationAgreement }`, each a new artifact
+ * with the updated fields. Callers replace the prior provisionals in the
+ * V2App `v22Provisionals` state.
+ */
+export function finalizeProvisionalAgreementPair({
+  provisionalDa, provisionalEa,
+  type, scope, eaTerms,
+}) {
+  const activeDa = makeDisclosureAgreement({
+    id: provisionalDa.id,
+    grantor: provisionalDa.grantor,
+    grantee: provisionalDa.grantee,
+    subject: provisionalDa.subject,
+    granteeAssetId: provisionalDa.granteeAssetId,
+    type, // full | selective | proofonly
+    scope: scope || provisionalDa.scope,
+    terms: {
+      createdDate: provisionalDa.terms?.createdDate,
+      expires: eaTerms?.expires ?? provisionalDa.terms?.expires,
+      autoRenew: false,
+    },
+    amendments: provisionalDa.amendments,
+    status: 'active',
+  })
+  const activeEa = makeEvaluationAgreement({
+    id: provisionalEa.id,
+    grantor: provisionalEa.grantor,
+    grantee: provisionalEa.grantee,
+    claimId: provisionalEa.claimId,
+    granteeAssetId: provisionalEa.granteeAssetId,
+    disclosureAgreementId: provisionalEa.disclosureAgreementId,
+    authorizedRequirementsSetIds: eaTerms?.authorizedRequirementsSetIds ?? provisionalEa.authorizedRequirementsSetIds,
+    restrictions: provisionalEa.restrictions,
+    terms: {
+      createdDate: provisionalEa.terms?.createdDate,
+      evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
+      resultExpiry: provisionalEa.terms?.resultExpiry,
+      flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
+    },
+    incentives: provisionalEa.incentives,
+    status: 'active',
+  })
+  return { disclosureAgreement: activeDa, evaluationAgreement: activeEa }
+}
+
+/**
+ * Build a decline record (spec §11.4). Caller pulls the provisional DA+EA
+ * separately; this just produces the surface that the requester sees.
+ */
+export function makeDeclineRecord({ provisionalDa, reason = '' }) {
+  return {
+    id: `decline-${provisionalDa.id}`,
+    requesterParty: provisionalDa.grantee.party,
+    ownerParty: provisionalDa.grantor.party,
+    claimId: provisionalDa.subject.id,
+    requesterAssetId: provisionalDa.granteeAssetId || null,
+    reason: reason.trim(),
+    declinedDate: new Date().toISOString(),
+  }
+}
+
+/**
+ * Build the artifact triple a completed evaluation run produces:
+ *   - The Evaluation Result itself (spec §10.6)
+ *   - A Proof-of-Evaluation Disclosure Agreement (evaluator → claim owner)
+ *   - The evaluator's ownership DA linking the Eval Result to their anchor Asset
+ *
+ * If `priorActiveResult` is supplied AND its requirementsSet.id matches, the
+ * caller should also include the prior result with status='superseded' and
+ * supersededBy=newId in the v22Provisionals state.
+ */
+export function makeEvaluationRunArtifacts({
+  evaluatorParty, evaluatorDot,
+  claimOwnerParty, claimOwnerDot,
+  evaluationAgreement,
+  granteeAssetId,
+  requirementsSet,
+  rows,            // [{ requirementId, label, value, status }]
+  evidenceUsed,    // [assetId, ...]
+  priorActiveResult,
+}) {
+  const idSeed = `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const evalId = `eval-${evaluationAgreement.id}-${idSeed}`
+  const evaluationDate = new Date().toISOString()
+
+  const evalResult = makeEvaluationResult({
+    id: evalId,
+    owner: evaluatorParty,
+    ownerDot: evaluatorDot || makeDot(evaluatorParty),
+    evaluationAgreementId: evaluationAgreement.id,
+    claimId: evaluationAgreement.claimId,
+    granteeAssetId,
+    requirementsSet,
+    results: rows,
+    evidenceUsed,
+    evaluationDate,
+    status: 'active',
+    supersededBy: null,
+  })
+
+  const proofDa = makeProofOfEvalDisclosureAgreement({
+    id: `da-proof-${evalId}`,
+    evaluator: evaluatorParty,
+    evaluatorDot,
+    claimOwner: claimOwnerParty,
+    claimOwnerDot,
+    evaluationResultId: evalId,
+    terms: { createdDate: evaluationDate },
+  })
+
+  const ownershipDa = makeInternalDisclosureAgreement({
+    id: `da-own-${evalId}`,
+    owner: evaluatorParty,
+    ownerDot: evaluatorDot,
+    subject: { kind: 'evalResult', id: evalId },
+    scope: { assetIds: [granteeAssetId], includeDerivatives: false },
+    terms: { createdDate: evaluationDate },
+  })
+
+  // If a prior result with the same requirements-set lineage exists, mark it
+  // superseded and link its supersededBy field.
+  let supersededVersion = null
+  if (priorActiveResult && priorActiveResult.requirementsSet?.id === requirementsSet.id && priorActiveResult.status === 'active') {
+    supersededVersion = makeEvaluationResult({
+      id: priorActiveResult.id,
+      owner: priorActiveResult.owner,
+      ownerDot: priorActiveResult.ownerDot,
+      evaluationAgreementId: priorActiveResult.evaluationAgreementId,
+      claimId: priorActiveResult.claimId,
+      granteeAssetId: priorActiveResult.granteeAssetId,
+      requirementsSet: priorActiveResult.requirementsSet,
+      results: priorActiveResult.results,
+      evidenceUsed: priorActiveResult.evidenceUsed,
+      evaluationDate: priorActiveResult.evaluationDate,
+      status: 'superseded',
+      supersededBy: evalResult.id,
+    })
+  }
+
+  return {
+    evaluationResult: evalResult,
+    proofDisclosureAgreement: proofDa,
+    ownershipDisclosureAgreement: ownershipDa,
+    supersededPriorResult: supersededVersion,
+  }
+}
+
+/**
+ * Find any active prior Eval Result for (claimId, requirementsSetId) lineage
+ * across the merged shared+provisional set. Used by the eval modal/handler to
+ * detect supersede cases (spec §11.3).
+ */
+export function findPriorActiveEvaluationResult({ claimId, requirementsSetId, shared, provisionals }) {
+  const merged = mergeProvisionals(shared || buildV22SharedArtifacts(), provisionals)
+  return merged.evaluationResults.find(
+    (e) => e.claimId === claimId && e.requirementsSet?.id === requirementsSetId && e.status === 'active',
+  ) || null
+}
+
+/**
  * Given an edge id and the view used to derive edges, return the underlying
  * Disclosure Agreement and (optionally) paired Evaluation Agreement. Used by
  * Phase 3's edge menu and detail panels.
@@ -1678,6 +2071,15 @@ export function buildV22Canvas(view) {
     nodes.push(assetToNode(asset, COL_OWN_ASSET, i * ROW_STEP))
   })
 
+  const markProvisional = (node, set) => {
+    if (set && set.has(node.id)) {
+      node.isProvisional = true
+      node._showAsProvisional = true
+      node.v22Type = (node.v22Type || '') + ' · PROVISIONAL'
+    }
+    return node
+  }
+
   // ── Owned Parse Results (column 2) aligned with their source asset ───
   const assetRowIndex = new Map(ownedAssets.map((a, i) => [a.id, i]))
   // Multiple Parse Results on one Asset stack with small vertical offsets.
@@ -1699,12 +2101,23 @@ export function buildV22Canvas(view) {
   })
   pulledClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
-    nodes.push(claimToNode(claim, rollup, COL_PULLED_CLAIM, i * ROW_STEP))
+    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM, i * ROW_STEP)
+    markProvisional(node, view.provisionalClaimIds)
+    // Declined claims (Phase 5 / spec §11.4) live alongside pulled-in ones.
+    const declineRecord = view.declinedClaimIds?.get(claim.id)
+    if (declineRecord) {
+      node.isDeclined = true
+      node._declineRecord = declineRecord
+      node.v22Type = (node.v22Type || '') + ' · DECLINED'
+    }
+    nodes.push(node)
   })
 
   // ── Pulled-in counterparty Assets (column 6) ────────────────────────
   pulledAssets.forEach((asset, i) => {
-    nodes.push(assetToNode(asset, COL_PULLED_ASSET, i * ROW_STEP))
+    const node = assetToNode(asset, COL_PULLED_ASSET, i * ROW_STEP)
+    markProvisional(node, view.provisionalAssetIds)
+    nodes.push(node)
   })
 
   // ── Evaluation Results (column 4) ────────────────────────────────────

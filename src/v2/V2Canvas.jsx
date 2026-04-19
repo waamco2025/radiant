@@ -862,13 +862,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       const sdaCfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const isNewEdge = !!edge._isNew
       const isSelectedEdge = !!edge._isSelected
-      // Selected edge treatment per spec §4.4: color shifts 40% toward white,
-      // stroke width +0.5px. Preserves dash/dot pattern.
+      // Selected edge treatment per spec §4.4 (tuned from spec's 40%/+0.5px to
+      // 65%/+1.5px after visual testing showed the spec's values were invisible
+      // on dashed/dotted edges).
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
-      const edgeColor = (isNewEdge || isSelectedEdge)
+      const edgeColor = isNewEdge
         ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
-        : new THREE.Color(sdaCfg.color)
-      const lineWidth = isNewEdge ? 3.0 : (isSelectedEdge ? baseWidth + 0.5 : baseWidth)
+        : isSelectedEdge
+          ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.65)
+          : new THREE.Color(sdaCfg.color)
+      const lineWidth = isNewEdge ? 3.0 : (isSelectedEdge ? baseWidth + 1.5 : baseWidth)
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -2613,9 +2616,12 @@ const V2Canvas = forwardRef(function V2Canvas({
     updateCamera()
   }, [layerStack.length, handleSurface, clampPan, updateCamera, isSubchain, onExitSubchain])
 
-  // Apply selected-edge treatment per spec §4.4: selected edge gets a brighter
-  // colour (40% white blend) and +0.5px stroke. All other edges revert to their
-  // baseline colour/width for their disclosure type.
+  // Apply selected-edge treatment per spec §4.4. Spec calls for "color shifts
+  // toward white (40% blend)" and "+0.5px stroke," but in practice the 40% blend
+  // was barely visible on amber dashed / green dotted lines against the dark
+  // background. Bumped to 65% white blend + 1.5px stroke so the selection state
+  // is unmistakable across all four disclosure types (Full indigo solid,
+  // Selective amber dashed, Proof-Only green dotted, Provisional muted dashed).
   useEffect(() => {
     const group = edgeGroupRef.current
     if (!group) return
@@ -2627,8 +2633,8 @@ const V2Canvas = forwardRef(function V2Canvas({
       const isSelected = !!selectedEdgeId && line.userData?.edgeId === selectedEdgeId
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
       const baseColor = new THREE.Color(cfg.color)
-      const color = isSelected ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.4) : baseColor
-      mat.linewidth = isSelected ? baseWidth + 0.5 : baseWidth
+      const color = isSelected ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.65) : baseColor
+      mat.linewidth = isSelected ? baseWidth + 1.5 : baseWidth
       if (mat.color) {
         mat.color.copy(color)
       }

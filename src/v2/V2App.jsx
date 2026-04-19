@@ -5,10 +5,19 @@ import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
 import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin, makeRootClaim } from './v2Data.js'
-import { V2_2_ENABLED, getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge } from './v2_2Data.js'
+import {
+  V2_2_ENABLED, getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge,
+  resolveClaimByPinInShared, makeProvisionalAgreementPair, finalizeProvisionalAgreementPair,
+  makeDeclineRecord, makeEvaluationRunArtifacts, findPriorActiveEvaluationResult,
+  buildV22SharedArtifacts,
+} from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
 import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
+import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
+import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
+import CombinedResponseModal from '../components/modals/CombinedResponseModal.jsx'
+import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -65,14 +74,48 @@ export default function V2App() {
   const activeRole = ROLES.find(r => r.id === roleId) || ROLES[0]
   // V2.2 mode builds its own { nodes, edges, nodeMap } via the canvas adapter.
   // V2.1 mode keeps its existing role-data source and processing pipeline.
+  // V2.2 provisional state — cross-role (Bob's request appears on Alice's view too).
+  // Shape: { disclosureAgreements, evaluationAgreements, evaluationResults, declineRecords }.
+  // Entries with a matching id REPLACE the seeded artifact (accept / supersede).
+  const [v22Provisionals, setV22Provisionals] = useState({
+    disclosureAgreements: [],
+    evaluationAgreements: [],
+    evaluationResults: [],
+    declineRecords: [],
+  })
+  // V2.2 modal state
+  const [v22RequestOpen, setV22RequestOpen] = useState(false)
+  const [v22RequestAnchor, setV22RequestAnchor] = useState(null) // Asset node passed when launched from per-Asset entry
+  const [v22RespondingTo, setV22RespondingTo] = useState(null) // { daId }
+  const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId, claimId, priorResultId? }
+  const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives reveal
+  const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
+
   const v22View = useMemo(
-    () => (V2_2_ENABLED ? getV22DataForRole(roleId) : null),
-    [roleId],
+    () => (V2_2_ENABLED ? getV22DataForRole(roleId, v22Provisionals) : null),
+    [roleId, v22Provisionals],
   )
   const v22Data = useMemo(
     () => (V2_2_ENABLED && v22View ? buildV22Canvas(v22View) : null),
     [v22View],
   )
+
+  // Mark the recently-accepted claim node with `_isNew` so V2Canvas /
+  // AssetNode's existing reveal-animation path fires.
+  const v22DataWithReveal = useMemo(() => {
+    if (!v22Data || !v22RecentlyAcceptedClaimId) return v22Data
+    const nodes = v22Data.nodes.map(n => (
+      n.id === v22RecentlyAcceptedClaimId ? { ...n, _isNew: true } : n
+    ))
+    const nodeMap = {}
+    for (const n of nodes) nodeMap[n.id] = n
+    return { ...v22Data, nodes, nodeMap }
+  }, [v22Data, v22RecentlyAcceptedClaimId])
+
+  // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
+  // updateRoleState (further down in this component) because they depend on
+  // it via useCallback deps. Initial Phase 5 placement here triggered a TDZ
+  // error; relocating fixed it. See the V2.2 handlers block after updateRoleState.
 
   // V2.2 edge interactions — selectedEdgeId drives the highlight state in V2Canvas;
   // edgeMenu drives the contextual menu; openAgreement drives the side Detail Panel.
@@ -81,17 +124,17 @@ export default function V2App() {
   const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor }
   const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
-  // Clear edge selection when a node becomes selected (spec §4.4).
-  useEffect(() => {
-    if (sel && selectedEdgeId) {
-      setSelectedEdgeId(null)
-      setEdgeMenu(null)
-      setOpenAgreement(null)
-    }
-  }, [sel, selectedEdgeId])
+  // Mutual exclusion between node selection and edge selection (spec §4.4) is
+  // enforced inside the click handlers themselves — not via a reactive effect —
+  // because an effect that watches both keys races with the user's next click
+  // (clicking a new edge while a node is still selected would otherwise fire
+  // the effect and wipe the edge state immediately). See the onEdgeClick and
+  // handleSelect handlers for the explicit clears.
   const roleData = useMemo(
-    () => (V2_2_ENABLED ? { nodes: v22Data.nodes, edges: v22Data.edges, nodeMap: v22Data.nodeMap, pendingRequests: [], existingCascades: [] } : getDataForRole(roleId)),
-    [roleId, v22Data],
+    () => (V2_2_ENABLED
+      ? { nodes: (v22DataWithReveal || v22Data).nodes, edges: (v22DataWithReveal || v22Data).edges, nodeMap: (v22DataWithReveal || v22Data).nodeMap, pendingRequests: [], existingCascades: [] }
+      : getDataForRole(roleId)),
+    [roleId, v22Data, v22DataWithReveal],
   )
   // Per-role dynamic state — persists across role switches
   const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null, pepTemplates: null }
@@ -107,6 +150,248 @@ export default function V2App() {
       [targetRoleId]: updater(prev[targetRoleId] || { ...emptyRoleState }),
     }))
   }, [])
+
+  // ── V2.2 Phase 4–5 handlers ───────────────────────────────────────────
+  // Declared here (after updateRoleState) so the useCallback deps array can
+  // safely reference it. Initial Phase 5 placement before updateRoleState
+  // triggered a temporal-dead-zone ReferenceError at component init.
+
+  // Helper: enqueue a notification on the requester's perRoleState inbox so the
+  // V2.1 notification UI surfaces accept/decline events natively.
+  const enqueueV22NotificationForRequester = useCallback((requesterRoleId, notif) => {
+    updateRoleState(requesterRoleId, (prev) => ({
+      ...prev,
+      addedRequests: [...(prev.addedRequests || []), notif],
+    }))
+  }, [updateRoleState])
+
+  const handleV22RequestSubmit = useCallback((payload) => {
+    const { claim, ownerParty, selectedRequirementsSetIds, message } = payload
+    const anchorNode = v22RequestAnchor
+      || v22Data?.nodes.find((n) => n.v22Type === 'ASSET' && n.owner === activeRole.party)
+    if (!anchorNode) return
+    const pair = makeProvisionalAgreementPair({
+      requesterParty: activeRole.party,
+      requesterDot: activeRole.partyDot,
+      requesterAssetId: anchorNode.id,
+      ownerParty,
+      claimId: claim.id,
+      requestedRequirementsSetIds: selectedRequirementsSetIds,
+      message,
+    })
+    pair.disclosureAgreement._requestMeta = {
+      ...(pair.disclosureAgreement._requestMeta || {}),
+      requesterParty: activeRole.party,
+      requesterAssetName: anchorNode.name,
+      createdDate: pair.disclosureAgreement.terms?.createdDate,
+    }
+    setV22Provisionals((prev) => ({
+      ...prev,
+      disclosureAgreements: [...prev.disclosureAgreements, pair.disclosureAgreement],
+      evaluationAgreements: [...prev.evaluationAgreements, pair.evaluationAgreement],
+    }))
+    setV22RequestOpen(false)
+    setV22RequestAnchor(null)
+    setV22PanToClaimId(claim.id)
+    setV22RecentlyAcceptedClaimId(claim.id)
+    setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
+  }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor])
+
+  const handleV22Accept = useCallback(({ type, scope, eaTerms }) => {
+    if (!v22RespondingTo) return
+    const daId = v22RespondingTo.daId
+    let claimIdForReveal = null
+    let requesterPartyForNotif = null
+    let claimNameForNotif = null
+    let claimPinForNotif = null
+    let anchorIdForNotif = null
+
+    setV22Provisionals((prev) => {
+      const provisionalDa = prev.disclosureAgreements.find((d) => d.id === daId)
+      if (!provisionalDa) return prev
+      const provisionalEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === daId)
+      if (!provisionalEa) return prev
+      const finalized = finalizeProvisionalAgreementPair({
+        provisionalDa, provisionalEa,
+        type, scope, eaTerms,
+      })
+      finalized.disclosureAgreement._requestMeta = provisionalDa._requestMeta
+      claimIdForReveal = provisionalDa.subject.id
+      requesterPartyForNotif = provisionalDa.grantee.party
+      anchorIdForNotif = provisionalDa.granteeAssetId
+      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === provisionalDa.subject.id)
+      if (sharedClaim) {
+        claimNameForNotif = sharedClaim.name
+        claimPinForNotif = sharedClaim.pin
+      }
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.map((d) => d.id === daId ? finalized.disclosureAgreement : d),
+        evaluationAgreements: prev.evaluationAgreements.map((e) => e.id === provisionalEa.id ? finalized.evaluationAgreement : e),
+      }
+    })
+    setV22RespondingTo(null)
+    if (claimIdForReveal) {
+      setV22RecentlyAcceptedClaimId(claimIdForReveal)
+      setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
+    }
+    if (requesterPartyForNotif && claimPinForNotif) {
+      const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
+      if (requesterRole) {
+        enqueueV22NotificationForRequester(requesterRole.id, {
+          id: `v22-accept-${daId}-${Date.now().toString(36)}`,
+          type: 'acceptance',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: { id: anchorIdForNotif, pin: null },
+          disclosureType: type,
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  const handleV22Decline = useCallback(({ reason } = {}) => {
+    if (!v22RespondingTo) return
+    const daId = v22RespondingTo.daId
+    let claimNameForNotif = null
+    let claimPinForNotif = null
+    let requesterPartyForNotif = null
+    let anchorIdForNotif = null
+
+    setV22Provisionals((prev) => {
+      const provisionalDa = prev.disclosureAgreements.find((d) => d.id === daId)
+      if (!provisionalDa) return prev
+      const provisionalEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === daId)
+      const declineRecord = makeDeclineRecord({ provisionalDa, reason })
+      requesterPartyForNotif = provisionalDa.grantee.party
+      anchorIdForNotif = provisionalDa.granteeAssetId
+      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === provisionalDa.subject.id)
+      if (sharedClaim) {
+        claimNameForNotif = sharedClaim.name
+        claimPinForNotif = sharedClaim.pin
+      }
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.filter((d) => d.id !== daId),
+        evaluationAgreements: provisionalEa
+          ? prev.evaluationAgreements.filter((e) => e.id !== provisionalEa.id)
+          : prev.evaluationAgreements,
+        declineRecords: [...prev.declineRecords, declineRecord],
+      }
+    })
+    setV22RespondingTo(null)
+    setSelectedEdgeId(null)
+    setOpenAgreement(null)
+    if (requesterPartyForNotif && claimPinForNotif) {
+      const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
+      if (requesterRole) {
+        enqueueV22NotificationForRequester(requesterRole.id, {
+          id: `v22-decline-${daId}-${Date.now().toString(36)}`,
+          type: 'decline',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: { id: anchorIdForNotif, pin: null },
+          reason: (reason || '').trim(),
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  const handleV22CancelRequest = useCallback((claimId) => {
+    setV22Provisionals((prev) => {
+      const provisionalDa = prev.disclosureAgreements.find(
+        (d) => d.subject.id === claimId && d.type === 'provisional' && d.grantee.party === activeRole.party,
+      )
+      if (!provisionalDa) return prev
+      const provisionalEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === provisionalDa.id)
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.filter((d) => d.id !== provisionalDa.id),
+        evaluationAgreements: provisionalEa
+          ? prev.evaluationAgreements.filter((e) => e.id !== provisionalEa.id)
+          : prev.evaluationAgreements,
+      }
+    })
+    setSel(null)
+  }, [activeRole.party])
+
+  const handleV22DismissDeclined = useCallback((claimId) => {
+    setV22Provisionals((prev) => ({
+      ...prev,
+      declineRecords: prev.declineRecords.filter(
+        (r) => !(r.claimId === claimId && r.requesterParty === activeRole.party),
+      ),
+    }))
+    setSel(null)
+  }, [activeRole.party])
+
+  const handleV22OpenRunEvaluation = useCallback((evaluationAgreement) => {
+    if (!evaluationAgreement) return
+    setV22EvalContext({
+      evaluationAgreementId: evaluationAgreement.id,
+      claimId: evaluationAgreement.claimId,
+    })
+    setOpenAgreement(null)
+    setEdgeMenu(null)
+    setSelectedEdgeId(null)
+  }, [])
+
+  const handleV22EvaluationSubmit = useCallback(({ requirementsSet, rows, evidenceUsed }) => {
+    if (!v22EvalContext) return
+    const { evaluationAgreementId, claimId } = v22EvalContext
+    const ea = v22View?.evaluationAgreements.find((e) => e.id === evaluationAgreementId)
+    if (!ea) return
+    const prior = findPriorActiveEvaluationResult({
+      claimId, requirementsSetId: requirementsSet.id,
+      shared: buildV22SharedArtifacts(), provisionals: v22Provisionals,
+    })
+    const artifacts = makeEvaluationRunArtifacts({
+      evaluatorParty: ea.grantee.party,
+      evaluatorDot: activeRole.partyDot,
+      claimOwnerParty: ea.grantor.party,
+      evaluationAgreement: ea,
+      granteeAssetId: ea.granteeAssetId,
+      requirementsSet,
+      rows,
+      evidenceUsed,
+      priorActiveResult: prior,
+    })
+    setV22Provisionals((prev) => {
+      const newEvalResults = [...prev.evaluationResults, artifacts.evaluationResult]
+      if (artifacts.supersededPriorResult) {
+        const idx = newEvalResults.findIndex((e) => e.id === artifacts.supersededPriorResult.id)
+        if (idx >= 0) newEvalResults[idx] = artifacts.supersededPriorResult
+        else newEvalResults.push(artifacts.supersededPriorResult)
+      }
+      return {
+        ...prev,
+        disclosureAgreements: [
+          ...prev.disclosureAgreements,
+          artifacts.proofDisclosureAgreement,
+          artifacts.ownershipDisclosureAgreement,
+        ],
+        evaluationResults: newEvalResults,
+      }
+    })
+    setV22EvalContext(null)
+    setV22PanToClaimId(claimId)
+    setV22RecentlyAcceptedClaimId(claimId)
+    setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
+  }, [v22EvalContext, v22View, v22Provisionals, activeRole.partyDot])
+
+  // Pan-to-node effect: triggered by v22PanToClaimId (provisional creation, accept).
+  useEffect(() => {
+    if (!v22PanToClaimId) return
+    const target = v22Data?.nodeMap?.[v22PanToClaimId]
+    if (target && target.x != null && target.y != null) {
+      setTimeout(() => {
+        canvasRef.current?.panToWithZoom?.(target.x, target.y, 1.0)
+      }, 0)
+    }
+    setV22PanToClaimId(null)
+  }, [v22PanToClaimId, v22Data])
 
   const currentRoleState = perRoleState[roleId] || emptyRoleState
 
@@ -869,12 +1154,25 @@ export default function V2App() {
     setSel(node.id)
     setForcePanelTab(null)
     setForceExpandSda(null)
+    // Node selection is mutually exclusive with edge selection (spec §4.4).
+    // Clear here explicitly instead of via effect — avoids a race where an
+    // effect watching [sel, selectedEdgeId] fires on a subsequent edge-click
+    // and wipes the fresh edge state.
+    setSelectedEdgeId(null)
+    setEdgeMenu(null)
+    setOpenAgreement(null)
   }, [])
 
   const handleCloseSel = useCallback(() => {
     setSel(null)
     setForcePanelTab(null)
     setForceExpandSda(null)
+    // V2.2: a "close selection" gesture (background click, Detail Panel close,
+    // ESC) should clear edge state too. Node-selection and edge-selection are
+    // mutually exclusive per spec §4.4.
+    setSelectedEdgeId(null)
+    setEdgeMenu(null)
+    setOpenAgreement(null)
   }, [])
 
   const enterSubchain = useCallback((nodeId) => {
@@ -1801,6 +2099,28 @@ export default function V2App() {
           <span style={{ opacity: 0.6, textTransform: 'none', letterSpacing: 'normal' }}>
             — architecture migration in progress (see v2.2-architecture-migration-spec.md)
           </span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={() => setV22RequestOpen(true)}
+            style={{
+              padding: '5px 12px',
+              fontSize: 10,
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--bg-deep)',
+              background: 'var(--accent-indigo)',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.1)')}
+            onMouseLeave={e => (e.currentTarget.style.filter = 'none')}
+          >
+            Request Agreement…
+          </button>
         </div>
       )}
 
@@ -1919,9 +2239,16 @@ export default function V2App() {
             // Phase 3: edge click opens the EdgeMenu (if paired EA) or the DA panel directly (§4.3).
             const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
             if (!resolved || !resolved.disclosureAgreement) return
+            // Clear node selection before setting edge state — keeps node and
+            // edge selection mutually exclusive (§4.4) without relying on a
+            // reactive effect that races with the current update batch.
+            setSel(null)
+            setForcePanelTab(null)
+            setForceExpandSda(null)
             setSelectedEdgeId(edgeId)
             if (resolved.evaluationAgreement) {
               setEdgeMenu({ edgeId, anchor })
+              setOpenAgreement(null)
             } else {
               setEdgeMenu(null)
               setOpenAgreement({ kind: 'disclosure', edgeId })
@@ -2008,7 +2335,16 @@ export default function V2App() {
                   resolveNodeName={resolveNodeName}
                   activeParty={activeRole.party}
                   onClose={close}
-                  onAmend={() => { /* Phase 6 wires up amendment flow */ }}
+                  onAmend={() => {
+                    // Phase 4: for a provisional DA where the active party is the
+                    // grantor, "Amend" means "respond to the outstanding request."
+                    // Spec §6 Phase 6 wires actual post-acceptance amendments.
+                    if (resolved.disclosureAgreement.type === 'provisional' &&
+                        resolved.disclosureAgreement.grantor.party === activeRole.party) {
+                      setV22RespondingTo({ daId: resolved.disclosureAgreement.id })
+                      close()
+                    }
+                  }}
                   onViewEvaluationAgreement={swapToEvaluation}
                 />
               ) : (
@@ -2025,8 +2361,161 @@ export default function V2App() {
           )
         })()}
 
-        {/* Detail Panel overlay */}
-        {sel && nodeMap[sel] && nodeMap[sel].category !== 'party' && (
+        {/* V2.2 Combined Request Modal */}
+        {V2_2_ENABLED && v22RequestOpen && (
+          <CombinedRequestModal
+            requesterParty={activeRole.party}
+            requesterAsset={v22Data?.nodes.find(n => n.v22Type === 'ASSET' && n.owner === activeRole.party) || null}
+            availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
+            resolveClaimByPin={(pin) => resolveClaimByPinInShared(pin, v22Provisionals)}
+            onSubmit={handleV22RequestSubmit}
+            onClose={() => setV22RequestOpen(false)}
+          />
+        )}
+
+        {/* V2.2 Combined Response Modal — opens via the DA panel when a provisional request is selected. */}
+        {V2_2_ENABLED && v22RespondingTo && (() => {
+          const da = v22Provisionals.disclosureAgreements.find(d => d.id === v22RespondingTo.daId)
+          if (!da) return null
+          const claim = v22View?.claims.find(c => c.id === da.subject.id)
+          if (!claim) return null
+          // Alice's Assets referenced by this Claim, and her Parse Results on them.
+          const referencedAssets = (v22View?.assets || [])
+            .filter(a => claim.referencedAssetIds.includes(a.id))
+            .map(a => ({ id: a.id, name: a.name }))
+          const parseResultsForModal = (v22View?.parseResults || [])
+            .filter(pr => claim.referencedAssetIds.includes(pr.sourceAssetId))
+            .map(pr => ({
+              id: pr.id,
+              sourceAssetId: pr.sourceAssetId,
+              templateName: pr.templateName,
+              fields: pr.fields.map(f => ({ id: f.id, name: f.name })),
+            }))
+          return (
+            <CombinedResponseModal
+              request={{
+                claim,
+                ownerParty: da.grantor.party,
+                requesterParty: da.grantee.party,
+                requesterAsset: da.granteeAssetId,
+                message: da._requestMeta?.message || '',
+                requestedRequirementsSetIds: da._requestMeta?.requestedRequirementsSetIds || [],
+              }}
+              referencedAssets={referencedAssets}
+              parseResults={parseResultsForModal}
+              availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
+              onAccept={handleV22Accept}
+              onDecline={handleV22Decline}
+              onClose={() => setV22RespondingTo(null)}
+            />
+          )
+        })()}
+
+        {/* V2.2 Run Evaluation Modal */}
+        {V2_2_ENABLED && v22EvalContext && (() => {
+          const ea = v22View?.evaluationAgreements.find(e => e.id === v22EvalContext.evaluationAgreementId)
+          const claim = v22View?.claims.find(c => c.id === v22EvalContext.claimId)
+          if (!ea || !claim) return null
+          const da = v22View?.disclosureAgreements.find(d => d.id === ea.disclosureAgreementId)
+          const scopeAssetIds = da?.scope?.assetIds || claim.referencedAssetIds || []
+          const evidenceAssets = (v22View?.assets || [])
+            .filter(a => scopeAssetIds.includes(a.id))
+            .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          // Restrict library to EA's authorized req sets in the modal itself.
+          return (
+            <V22RunEvaluationModal
+              evaluationAgreement={ea}
+              claim={claim}
+              evidenceAssets={evidenceAssets}
+              availableRequirementsSets={requirementSets.map(rs => ({
+                id: rs.id,
+                name: rs.name,
+                version: rs.version ?? 1,
+                claims: rs.claims || [],
+              }))}
+              priorActiveResult={findPriorActiveEvaluationResult({
+                claimId: claim.id,
+                requirementsSetId: ea.authorizedRequirementsSetIds[0],
+                shared: buildV22SharedArtifacts(),
+                provisionals: v22Provisionals,
+              })}
+              onSubmit={handleV22EvaluationSubmit}
+              onClose={() => setV22EvalContext(null)}
+            />
+          )
+        })()}
+
+        {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel */}
+        {V2_2_ENABLED && sel && nodeMap[sel]?.v22Type && nodeMap[sel].category !== 'party' && (() => {
+          const node = nodeMap[sel]
+          // Build per-panel context.
+          const referencedAssetNames = (node.v22Artifact?.referencedAssetIds || [])
+            .map(id => {
+              const a = nodeMap[id]
+              return a ? { id: a.id, name: a.name } : null
+            })
+            .filter(Boolean)
+          const evaluationResultsForClaim = (v22View?.evaluationResults || []).filter(e => e.claimId === node.id)
+          const parseResultsForAsset = (v22View?.parseResults || []).filter(p => p.sourceAssetId === node.id)
+          // EA the active actor can use to evaluate this Claim:
+          const evaluationAgreementForActor = (v22View?.evaluationAgreements || []).find(e =>
+            e.claimId === node.id &&
+            e.grantee.party === activeRole.party &&
+            e.status === 'active' &&
+            (v22Provisionals.disclosureAgreements.find(d => d.id === e.disclosureAgreementId)?.type !== 'provisional')
+          ) || (v22View?.evaluationAgreements || []).find(e =>
+            e.claimId === node.id && e.grantee.party === activeRole.party && e.status === 'active'
+          )
+          const sourceAsset = node.v22Artifact?.sourceAssetId
+            ? (v22View?.assets || []).find(a => a.id === node.v22Artifact.sourceAssetId)
+            : null
+          return (
+            <div style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0,
+              width: 480, zIndex: 50,
+              animation: 'detail-panel-slide-in 200ms ease',
+            }}>
+              <V22NodeDetailPanel
+                node={node}
+                activeParty={activeRole.party}
+                onClose={handleCloseSel}
+                // Asset actions
+                onRequestAgreement={() => { setV22RequestAnchor(node); setV22RequestOpen(true) }}
+                onCreateClaim={undefined}  // Phase 6+ surfaces inline Claim creation from Asset
+                parseResultsForAsset={parseResultsForAsset}
+                // Claim actions
+                referencedAssetNames={referencedAssetNames}
+                evaluationResultsForClaim={evaluationResultsForClaim}
+                evaluationAgreementForActor={evaluationAgreementForActor && evaluationAgreementForActor.disclosureAgreementId &&
+                  (() => {
+                    const da = v22View?.disclosureAgreements.find(d => d.id === evaluationAgreementForActor.disclosureAgreementId)
+                    return da && da.type !== 'provisional' ? evaluationAgreementForActor : null
+                  })()}
+                onRespondToRequest={() => {
+                  // Find the provisional DA for this claim to start the response flow.
+                  const provDa = (v22View?.disclosureAgreements || []).find(d =>
+                    d.subject.id === node.id && d.type === 'provisional' &&
+                    d.grantor.party === activeRole.party,
+                  )
+                  if (provDa) setV22RespondingTo({ daId: provDa.id })
+                }}
+                onCancelRequest={() => handleV22CancelRequest(node.id)}
+                onDismissDeclined={() => handleV22DismissDeclined(node.id)}
+                onRunEvaluation={() => handleV22OpenRunEvaluation(evaluationAgreementForActor)}
+                // Parse Result actions
+                sourceAsset={sourceAsset}
+                // Eval Result actions
+                onReRunEvaluation={() => {
+                  const ea = (v22View?.evaluationAgreements || []).find(e => e.id === node.v22Artifact?.evaluationAgreementId)
+                  if (ea) handleV22OpenRunEvaluation(ea)
+                }}
+              />
+            </div>
+          )
+        })()}
+
+        {/* Detail Panel overlay — V2.1 path (untouched) */}
+        {!V2_2_ENABLED && sel && nodeMap[sel] && nodeMap[sel].category !== 'party' && (
           <div style={{
             position: 'absolute',
             top: 0,
