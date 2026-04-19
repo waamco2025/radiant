@@ -114,7 +114,7 @@ export default function EvaluationAgreementDetailPanel({
             {agreement.grantor.party} → {agreement.grantee.party}
           </span>
         </div>
-        <CopyBadge value={agreement.id} />
+        <CopyBadge value={agreement.id} truncated />
       </div>
 
       {/* Body */}

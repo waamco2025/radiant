@@ -1200,13 +1200,18 @@ function buildViewForActor(actor, shared) {
   //   • Similarly, a proof-of-eval DA pulls in the evaluator's granteeAssetId for the
   //     claim owner's canvas (the Eval Result's ownership edge to the evaluator's Asset
   //     is an internal ownership relation and not pulled in for the claim owner).
+  // Phase 6 carry-over #5: provisional requests live ONLY in the grantor's
+  // notification inbox until they accept. The grantor's canvas stays unchanged
+  // during the provisional state — no counterparty Asset is pulled in. After
+  // acceptance, the DA's type flips to full/selective/proofonly and the
+  // grantee-side anchor pulls in normally with a reveal animation.
   const pulledInAssetIds = new Set()
   for (const da of disclosureAgreements) {
-    // Only when this actor is grantor and there's an explicit grantee-side anchor.
     if (da.grantor.party !== party) continue
-    if (da.grantee.party === party) continue // skip internal
-    if (da.grantee.party === RADIANT_NETWORK_PARTY) continue // directory has no asset anchor
+    if (da.grantee.party === party) continue
+    if (da.grantee.party === RADIANT_NETWORK_PARTY) continue
     if (!da.granteeAssetId) continue
+    if (da.type === 'provisional') continue
     pulledInAssetIds.add(da.granteeAssetId)
   }
   const pulledInAssets = shared.assets.filter(
@@ -1248,15 +1253,31 @@ function buildViewForActor(actor, shared) {
   // Decline records — claims previously requested by this actor but declined by
   // the owner. Per spec §11.4 these surface on the requester's canvas in a
   // "Disclosure Declined" state until the requester dismisses them.
+  // Phase 6.5 #3: also derive declined state from DAs annotated with
+  // `_declineMeta` (handler keeps the provisional DA in state so the synthetic
+  // edge to the requester's anchor Asset persists until dismissal).
   const declineRecordsForActor = (shared.declineRecords || []).filter(
     (r) => r.requesterParty === party,
   )
   const declinedClaimIds = new Map() // claimId → record (for adapter)
   for (const r of declineRecordsForActor) declinedClaimIds.set(r.claimId, r)
+  for (const d of partyDisclosureAgreements) {
+    if (!d._declineMeta) continue
+    if (d.grantee.party !== party) continue
+    if (declinedClaimIds.has(d.subject.id)) continue
+    declinedClaimIds.set(d.subject.id, {
+      claimId: d.subject.id,
+      requesterParty: d.grantee.party,
+      ownerParty: d.grantor.party,
+      requesterAssetId: d.granteeAssetId,
+      reason: d._declineMeta.reason,
+      declinedDate: d._declineMeta.declinedDate,
+    })
+  }
   // Add the declined claims to the visible set so the adapter can render them.
-  for (const r of declineRecordsForActor) {
-    if (!visibleClaims.some((c) => c.id === r.claimId)) {
-      const claim = shared.claims.find((c) => c.id === r.claimId)
+  for (const [claimId, r] of declinedClaimIds) {
+    if (!visibleClaims.some((c) => c.id === claimId)) {
+      const claim = shared.claims.find((c) => c.id === claimId)
       if (claim) visibleClaims.push(claim)
     }
     if (r.requesterAssetId && !visibleAssets.some((a) => a.id === r.requesterAssetId)) {
@@ -1268,9 +1289,12 @@ function buildViewForActor(actor, shared) {
   // Mark claims / assets as provisional when their only connection to this
   // actor is a provisional DA (i.e., an outstanding request not yet responded
   // to). Visual treatment flows from this set in the adapter.
+  // Phase 6.5 #3: declined claims (above) are NOT also marked provisional —
+  // decline takes precedence over awaiting-response.
   const provisionalClaimIds = new Set()
   const provisionalAssetIds = new Set()
   for (const pulledId of pulledInClaimIds) {
+    if (declinedClaimIds.has(pulledId)) continue
     const relatedDAs = disclosureAgreements.filter(
       (d) => d.subject.kind === 'claim' && d.subject.id === pulledId,
     )
@@ -1355,6 +1379,12 @@ function mergeProvisionals(shared, provisionals) {
   }
   if (provisionals.evaluationResults?.length) {
     merged.evaluationResults = mergeById(merged.evaluationResults, provisionals.evaluationResults)
+  }
+  // Phase 6: amended Claims live in provisionals.claims so the original seeded
+  // Claim is replaced by the amended version (carrying its updated
+  // referencedAssetIds + amendments[] history).
+  if (provisionals.claims?.length) {
+    merged.claims = mergeById(merged.claims, provisionals.claims)
   }
   // declineRecords ride along on the merged shared bundle so view builders can
   // surface declined claims without inventing a new module-level store.
@@ -1495,6 +1525,15 @@ export function deriveAgreementEdges(view) {
     }
     if (kind === 'evalResult' && !internal) {
       // Proof-of-Evaluation — resolve Claim via the Eval Result.
+      const er = evalResultById.get(id)
+      if (er) pushEdge(id, er.claimId, da)
+      continue
+    }
+    if (kind === 'evalResult' && internal && !hasScopeAssets) {
+      // Self-evaluation proof-of-evaluation — owner is both grantor and grantee.
+      // scope.evaluationResultIds carries the eval id; edge goes to the Claim
+      // (resolved via the eval's claimId) so it reads visually identical to a
+      // non-self proof-of-eval edge.
       const er = evalResultById.get(id)
       if (er) pushEdge(id, er.claimId, da)
       continue
@@ -1806,7 +1845,9 @@ function evalResultToNode(er, x, y) {
       humanValue: r.value,
     })),
     artifactUri: er.artifactUri,
-    v22Type: isSuperseded ? 'EVAL RESULT (SUPERSEDED)' : 'EVAL RESULT',
+    // AssetNode renders its own SUPERSEDED badge when status === 'superseded';
+    // v22Type stays a single canonical label (Phase 6 carry-over #4).
+    v22Type: 'EVAL RESULT',
     v22Artifact: er,
   }
 }
@@ -1918,6 +1959,74 @@ export function finalizeProvisionalAgreementPair({
 }
 
 /**
+ * Amend a Claim by adding additional referenced Assets (spec §11.1). Returns a
+ * new Claim artifact with the merged `referencedAssetIds` plus a new entry in
+ * `amendments[]`. The original Claim's id is preserved so the artifact replaces
+ * its prior version when merged into the shared dataset via `mergeProvisionals`.
+ *
+ * Also returns the new internal claim-ref Disclosure Agreements that need to be
+ * added to the shared dataset for the new Asset references to render edges.
+ * (The seeded `claimRefEdges` only covers original references.)
+ */
+export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = [] }) {
+  const existing = new Set(claim.referencedAssetIds)
+  for (const id of removedAssetIds) existing.delete(id)
+  for (const id of addedAssetIds) existing.add(id)
+  const amendedClaim = makeClaim({
+    id: claim.id,
+    owner: claim.owner,
+    ownerDot: claim.ownerDot,
+    name: claim.name,
+    description: claim.description,
+    referencedAssetIds: Array.from(existing),
+    createdDate: claim.createdDate,
+    amendments: [
+      ...(claim.amendments || []),
+      {
+        date: new Date().toISOString(),
+        added: [...addedAssetIds],
+        removed: [...removedAssetIds],
+      },
+    ],
+  })
+  const newClaimRefEdges = addedAssetIds.map((assetId) =>
+    makeInternalDisclosureAgreement({
+      id: `da-ref-${claim.id}-${assetId}`,
+      owner: claim.owner,
+      ownerDot: claim.ownerDot,
+      subject: { kind: 'claim', id: claim.id },
+      scope: { assetIds: [assetId], includeDerivatives: true },
+      terms: { createdDate: amendedClaim.amendments.at(-1).date },
+    }),
+  )
+  return { claim: amendedClaim, newClaimRefEdges }
+}
+
+/**
+ * Amend a Disclosure Agreement's scope (spec §11.2). Returns a new DA with the
+ * updated scope and an appended `amendments[]` entry. Per §11.2, callers MUST
+ * have already enforced "no removal of evaluated evidence" — this helper does
+ * not re-validate (the caller knows whether evaluations have been run).
+ */
+export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope, note = '' }) {
+  return makeDisclosureAgreement({
+    id: da.id,
+    grantor: da.grantor,
+    grantee: da.grantee,
+    subject: da.subject,
+    granteeAssetId: da.granteeAssetId,
+    type: da.type,
+    scope,
+    terms: da.terms,
+    amendments: [
+      ...(da.amendments || []),
+      { date: new Date().toISOString(), note: (note || '').trim(), scopeBefore: da.scope },
+    ],
+    status: da.status,
+  })
+}
+
+/**
  * Build a decline record (spec §11.4). Caller pulls the provisional DA+EA
  * separately; this just produces the surface that the requester sees.
  */
@@ -1987,7 +2096,9 @@ export function makeEvaluationRunArtifacts({
     owner: evaluatorParty,
     ownerDot: evaluatorDot,
     subject: { kind: 'evalResult', id: evalId },
-    scope: { assetIds: [granteeAssetId], includeDerivatives: false },
+    scope: granteeAssetId
+      ? { assetIds: [granteeAssetId], includeDerivatives: false }
+      : { includeDerivatives: false },
     terms: { createdDate: evaluationDate },
   })
 
@@ -2071,11 +2182,16 @@ export function buildV22Canvas(view) {
     nodes.push(assetToNode(asset, COL_OWN_ASSET, i * ROW_STEP))
   })
 
+  // Phase 6 carry-over #4: do NOT append "· PROVISIONAL" / "· DECLINED" to v22Type.
+  // The node card already renders separate PROVISIONAL/DECLINED badges via
+  // AssetNode.jsx (showAsProvisional / isDeclined). Doubling up looks duplicated.
+  // Phase 6 carry-over #3: set _isNew on provisional nodes so the NEW badge
+  // renders for the entire provisional duration (not just for the brief reveal).
   const markProvisional = (node, set) => {
     if (set && set.has(node.id)) {
       node.isProvisional = true
       node._showAsProvisional = true
-      node.v22Type = (node.v22Type || '') + ' · PROVISIONAL'
+      node._isNew = true
     }
     return node
   }
@@ -2103,12 +2219,22 @@ export function buildV22Canvas(view) {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
     const node = claimToNode(claim, rollup, COL_PULLED_CLAIM, i * ROW_STEP)
     markProvisional(node, view.provisionalClaimIds)
-    // Declined claims (Phase 5 / spec §11.4) live alongside pulled-in ones.
+    // Declined claims (Phase 5 / spec §11.4 + Phase 6.5 #3). AssetNode renders
+    // its own DECLINED badge from `isDeclined`; we keep `_showAsProvisional`
+    // true so the dashed border persists, but clear `_isNew` (no NEW badge).
     const declineRecord = view.declinedClaimIds?.get(claim.id)
     if (declineRecord) {
       node.isDeclined = true
+      // V2.1's AssetNode reads `_isDeclined` (underscore-prefixed) for badge
+      // precedence; V22NodeDetailPanel reads `isDeclined`. Set both so node
+      // card and panel agree (Phase 6.5+ #2 — without this, the inline badge
+      // fell through to PROVISIONAL because `_isDeclined` stayed undefined).
+      node._isDeclined = true
+      node._declineReason = declineRecord.reason
       node._declineRecord = declineRecord
-      node.v22Type = (node.v22Type || '') + ' · DECLINED'
+      node._showAsProvisional = true
+      node._isNew = false
+      node.isProvisional = false
     }
     nodes.push(node)
   })
@@ -2124,11 +2250,16 @@ export function buildV22Canvas(view) {
   // Owned Eval Results first, then proof-of-eval-visible ones from other parties.
   const erOwn = view.evaluationResults.filter((e) => e.owner === actor.party)
   const erExternal = view.evaluationResults.filter((e) => e.owner !== actor.party)
+  // Phase 6.5 #17: nudge Eval Results onto a half-row offset so the
+  // claim ↔ eval-result edge doesn't fight with the claim ↔ asset edge on
+  // the same horizontal line (especially noticeable on Bob's canvas where
+  // his sole Eval Result was sharing a row with the pulled-in Claim).
+  const EVAL_ROW_OFFSET = ROW_STEP / 2
   erOwn.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL, i * ROW_STEP))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL, i * ROW_STEP + EVAL_ROW_OFFSET))
   })
   erExternal.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL, (erOwn.length + i) * ROW_STEP + 80))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL, (erOwn.length + i) * ROW_STEP + EVAL_ROW_OFFSET + 80))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────

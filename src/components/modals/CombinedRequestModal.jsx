@@ -28,10 +28,12 @@ export default function CombinedRequestModal({
   resolveClaimByPin,     // (pin) => { claim, ownerParty } | null
   onSubmit,              // ({ claimPin, claim, selectedRequirementsSetIds, message }) => void
   onClose,
+  initialPin = '',                // Phase 7 — AI Shopper pre-populates the target PIN
+  initialRequirementsSetIds = [], // Phase 7 — AI Shopper pre-selects its suggested Req Set
 }) {
-  const [pin, setPin] = useState('')
+  const [pin, setPin] = useState(initialPin)
   const [message, setMessage] = useState('')
-  const [selectedReqSets, setSelectedReqSets] = useState([])
+  const [selectedReqSets, setSelectedReqSets] = useState(() => [...initialRequirementsSetIds])
 
   const trimmed = pin.trim()
   const pinShapeOk = isValidPinShape(trimmed)

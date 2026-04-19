@@ -124,7 +124,7 @@ function PanelHeader({ typeLabel, name, pin, onClose, badge }) {
         >✕</button>
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{name}</div>
-      {pin && <CopyBadge value={pin} />}
+      {pin && <CopyBadge value={pin} truncated />}
     </div>
   )
 }
@@ -196,6 +196,8 @@ function V22ClaimPanel({
   node, activeParty, onClose,
   onRespondToRequest, onCancelRequest, onDismissDeclined,
   onRunEvaluation,
+  onAmendClaim,
+  onSelfEvaluate,
   referencedAssetNames = [],
   evaluationResultsForClaim = [],
   evaluationAgreementForActor,
@@ -356,11 +358,17 @@ function V22ClaimPanel({
         </>
       }
       footer={
-        // Only the grantee with an active EA on this Claim sees Run Evaluation.
-        evaluationAgreementForActor && !isOwner ? (
+        // Owner: Amend Claim + (optional) Self-Evaluate.
+        // Non-owner with active EA: Run Evaluation.
+        isOwner ? (
+          <>
+            <FooterButton label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
+            {onSelfEvaluate && (
+              <FooterButton label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+            )}
+          </>
+        ) : evaluationAgreementForActor ? (
           <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
-        ) : isOwner ? (
-          <FooterButton label="Amend Claim" onClick={undefined} disabled title="Phase 6 — claim amendments will land here." />
         ) : null
       }
     />
@@ -481,8 +489,7 @@ const STATUS_CFG = {
 export default function V22NodeDetailPanel(props) {
   const { node } = props
   if (!node) return null
-  const v22Type = (node.v22Type || '').split(' · ')[0]
-  switch (v22Type) {
+  switch (node.v22Type) {
     case 'ASSET': return <V22AssetPanel {...props} />
     case 'CLAIM': return <V22ClaimPanel {...props} />
     case 'PARSE RESULT': return <V22ParseResultPanel {...props} />

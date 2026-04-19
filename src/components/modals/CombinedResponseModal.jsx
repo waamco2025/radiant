@@ -8,10 +8,10 @@
 // On accept → V2App flips the provisional DA + EA to active with the chosen
 // settings. On decline → V2App removes both provisional artifacts.
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, StepDots, FieldLabel, DecisionCard, SDATypeCard, ExpiryPicker, expiryLabel,
+  Btn, StepDots, FieldLabel, DecisionCard, ExpiryPicker, expiryLabel,
 } from './ModalShared'
 
 /* Step layout per action:
@@ -27,10 +27,10 @@ const TYPE_DECISIONS = [
 ]
 
 export default function CombinedResponseModal({
-  request,              // { claim, ownerParty, requesterParty, requesterAsset, message, provisionalDisclosureAgreement, provisionalEvaluationAgreement, requestedRequirementsSetIds }
-  referencedAssets = [],  // [{ id, name }] — Assets referenced by the Claim (owned by Alice)
-  parseResults = [],    // [{ id, sourceAssetId, templateName, fields: [{ id, name }] }] — Alice's parse results on her referenced assets
-  availableRequirementsSets = [],
+  request,              // { claim, ownerParty, requesterParty, requesterAsset, message, requestedRequirementsSetIds }
+  referencedAssets = [],   // [{ id, name }] — Assets referenced by the Claim (owned by the grantor)
+  parseResults = [],       // [{ id, sourceAssetId, templateName, fields: [{ id, name }] }]
+  evalResultsForClaim = [], // [{ id, requirementsSet: { name, version }, evaluationDate, status }] — for Proof-Only scope step
   onAccept,             // ({ type, scope, eaTerms }) => void
   onDecline,            // ({ reason }) => void
   onClose,
@@ -39,17 +39,16 @@ export default function CombinedResponseModal({
   const [step, setStep] = useState(1)
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [selectedFieldIds, setSelectedFieldIds] = useState([])
-  const [authorizedReqSetIds, setAuthorizedReqSetIds] = useState([])
+  const [selectedEvalResultIds, setSelectedEvalResultIds] = useState([])
   const [expiry, setExpiry] = useState('1-year')
   const [customExpiry, setCustomExpiry] = useState('')
   const [declineReason, setDeclineReason] = useState('')
 
-  // Prime authorized req sets from the requester's suggested list.
-  useEffect(() => {
-    if (request?.requestedRequirementsSetIds?.length && authorizedReqSetIds.length === 0) {
-      setAuthorizedReqSetIds([...request.requestedRequirementsSetIds])
-    }
-  }, [request, authorizedReqSetIds.length])
+  // The requester's suggested req sets are surfaced contextually in the Run Eval
+  // modal as "SUGGESTED" chips (spec §10.5 — advisory, not enforced). The grantor
+  // no longer authorizes a list here; those suggestions ride along on the EA
+  // unchanged and are forwarded as the EA's `authorizedRequirementsSetIds` field
+  // (preserved for context only). See Phase 6 carry-over #1.
 
   // Prime selected assets — default to all referenced assets for Full, none for Selective.
   useEffect(() => {
@@ -80,7 +79,9 @@ export default function CombinedResponseModal({
   const buildScope = () => {
     if (action === 'full') {
       return {
-        assetIds: referencedAssets.map((a) => a.id),
+        // Phase 6.5 #11: full now respects the user's Asset checklist (was
+        // hardcoded to all referenced Assets).
+        assetIds: [...selectedAssetIds],
         fieldIds: null,
         evaluationResultIds: null,
         includeDerivatives: true,
@@ -98,7 +99,7 @@ export default function CombinedResponseModal({
       return {
         assetIds: null,
         fieldIds: null,
-        evaluationResultIds: null,
+        evaluationResultIds: [...selectedEvalResultIds],
         includeDerivatives: false,
       }
     }
@@ -114,15 +115,23 @@ export default function CombinedResponseModal({
       type: action,
       scope: buildScope(),
       eaTerms: {
-        authorizedRequirementsSetIds: authorizedReqSetIds,
+        // §10.5: forward the original requester's suggestions as advisory only.
+        authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
         expires: computeExpiryIso(),
       },
     })
   }
 
   const canAdvanceFromStep1 = action != null
-  const canAdvanceFromStep2Accept = action === 'full' || (selectedAssetIds.length > 0 || (action === 'selective' && selectedFieldIds.length > 0)) || action === 'proofonly'
-  const canAdvanceFromStep3 = authorizedReqSetIds.length > 0
+  // Per Phase 6 carry-over #7: Proof-Only requires at least one Eval Result to be
+  // selected. Per Phase 6.5 #11: Full now also requires at least one Asset.
+  const canAdvanceFromStep2Accept = (
+    (action === 'full' && selectedAssetIds.length > 0)
+    || (action === 'selective' && selectedFieldIds.length > 0)
+    || (action === 'proofonly' && selectedEvalResultIds.length > 0)
+  )
+  // Step 3 is now just expiry — always advanceable.
+  const canAdvanceFromStep3 = true
   const canSubmitDecline = true // decline reason is optional per spec §11.4
 
   const header = isDecline
@@ -191,31 +200,53 @@ export default function CombinedResponseModal({
             <>
               {action === 'full' && (
                 <>
-                  <FieldLabel label="Full Disclosure — all referenced Assets will be shared" />
+                  <FieldLabel label="Select Assets to disclose" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    With Full Disclosure, {request.requesterParty} gets access to every Asset referenced by this Claim.
-                    You can't deselect individual Assets at this type (choose Selective if you want finer control).
+                    Assets in scope will have their <strong>evidence files</strong> revealed to {request.requesterParty}. Pick which referenced Assets to include — all are pre-selected by default.
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                    {referencedAssets.map((a) => (
-                      <div key={a.id} style={{
-                        padding: '10px 14px', borderRadius: 6,
-                        background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-                        fontSize: 12, color: 'var(--text-primary)',
-                        display: 'flex', gap: 10, alignItems: 'center',
-                      }}>
-                        <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-tertiary)', padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3 }}>ASSET</span>
-                        <span>{a.name}</span>
-                      </div>
-                    ))}
+                  {referencedAssets.length === 0 ? (
+                    <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                      This Claim has no referenced Assets to disclose.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      {referencedAssets.map((a) => {
+                        const sel = selectedAssetIds.includes(a.id)
+                        return (
+                          <div
+                            key={a.id}
+                            onClick={() => toggle(selectedAssetIds, setSelectedAssetIds, a.id)}
+                            style={{
+                              padding: '10px 14px', cursor: 'pointer',
+                              background: sel ? 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)' : 'transparent',
+                              borderBottom: '1px solid var(--border-faint)',
+                              display: 'flex', alignItems: 'center', gap: 10,
+                            }}
+                          >
+                            <div style={{
+                              width: 14, height: 14, borderRadius: 3,
+                              border: `1.5px solid ${sel ? 'var(--accent-indigo)' : 'var(--border-hover)'}`,
+                              background: sel ? 'var(--accent-indigo)' : 'transparent',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {sel && <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                            </div>
+                            <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{a.name}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                    {selectedAssetIds.length} of {referencedAssets.length} Asset{referencedAssets.length !== 1 ? 's' : ''} selected
                   </div>
                 </>
               )}
               {action === 'selective' && (
                 <>
-                  <FieldLabel label="Select fields from parsed Assets to disclose" required />
+                  <FieldLabel label="Select parsed fields to disclose" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    Pick individual fields extracted by your Parse Results. Only selected fields will be exposed to {request.requesterParty}.
+                    With <strong>Selective Disclosure</strong>, only the parsed fields you pick are exposed — the underlying evidence files stay private. (Compare to <strong>Full Disclosure</strong>, which reveals the evidence itself.)
                   </div>
                   {parseResults.length === 0 ? (
                     <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
@@ -266,9 +297,62 @@ export default function CombinedResponseModal({
               )}
               {action === 'proofonly' && (
                 <>
-                  <FieldLabel label="Proof-Only Disclosure — share an evaluation result only" />
+                  <FieldLabel label="Select Evaluation Results to share" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    {request.requesterParty} will see the pass/fail status of an evaluation run. No access to raw evidence. A Proof-of-Evaluation Disclosure is created when you run an evaluation under this agreement.
+                    {request.requesterParty} will see only the pass/fail outcome of the selected Evaluation Results. No access to raw evidence is granted.
+                  </div>
+                  {evalResultsForClaim.length === 0 ? (
+                    <div style={{
+                      padding: 14,
+                      background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+                      border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+                      borderRadius: 8, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+                    }}>
+                      No evaluations have been run on <em>{request.claim.name}</em> yet — there is nothing to disclose under Proof-Only.
+                      Consider <strong>Full</strong> or <strong>Selective</strong> instead, which give {request.requesterParty} the access required to run an evaluation themselves.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      {evalResultsForClaim.map((er) => {
+                        const selected = selectedEvalResultIds.includes(er.id)
+                        const ok = (er.results || []).filter(r => r.status === 'satisfactory').length
+                        const bad = (er.results || []).filter(r => r.status === 'unsatisfactory').length
+                        return (
+                          <div
+                            key={er.id}
+                            onClick={() => toggle(selectedEvalResultIds, setSelectedEvalResultIds, er.id)}
+                            style={{
+                              padding: '10px 14px', cursor: 'pointer',
+                              background: selected ? 'color-mix(in srgb, var(--accent-green) 8%, transparent)' : 'transparent',
+                              borderBottom: '1px solid var(--border-faint)',
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              opacity: er.status === 'superseded' ? 0.55 : 1,
+                            }}
+                          >
+                            <div style={{
+                              width: 14, height: 14, borderRadius: 3,
+                              border: `1.5px solid ${selected ? 'var(--accent-green)' : 'var(--border-hover)'}`,
+                              background: selected ? 'var(--accent-green)' : 'transparent',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {selected && <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
+                                {er.requirementsSet?.name || er.id}
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                                by {er.owner} · {ok} SAT · {bad} UNSAT
+                                {er.status === 'superseded' && ' · SUPERSEDED'}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                    {selectedEvalResultIds.length} eval result{selectedEvalResultIds.length !== 1 ? 's' : ''} selected
                   </div>
                 </>
               )}
@@ -302,52 +386,20 @@ export default function CombinedResponseModal({
             </>
           )}
 
-          {/* STEP 3 — EA terms (accept flows only) */}
+          {/* STEP 3 — Agreement terms (accept flows only). Per Phase 6 carry-over #1,
+              Requirements Sets in the EA are advisory and the grantor no longer
+              authorizes them here — only expiry is set. The requester's suggested
+              Req Sets ride along with the EA artifact unchanged. */}
           {step === 3 && !isDecline && (
             <>
-              <FieldLabel label="Authorize Requirements Sets for evaluation" required />
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                {request.requesterParty} may run evaluations using <em>only</em> the Requirements Sets you authorize here.
-                {request.requestedRequirementsSetIds?.length > 0 && (
-                  <> They suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)}.</>
-                )}
-              </div>
-              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 22 }}>
-                {availableRequirementsSets.map((rs) => {
-                  const selected = authorizedReqSetIds.includes(rs.id)
-                  const suggested = request.requestedRequirementsSetIds?.includes(rs.id)
-                  return (
-                    <div
-                      key={rs.id}
-                      onClick={() => toggle(authorizedReqSetIds, setAuthorizedReqSetIds, rs.id)}
-                      style={{
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: selected ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)' : 'transparent',
-                        borderBottom: '1px solid var(--border-faint)',
-                        display: 'flex', alignItems: 'center', gap: 10,
-                      }}
-                    >
-                      <div style={{
-                        width: 14, height: 14, borderRadius: 3,
-                        border: `1.5px solid ${selected ? 'var(--accent-indigo)' : 'var(--border-hover)'}`,
-                        background: selected ? 'var(--accent-indigo)' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        {selected && <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{rs.name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{rs.id} · v{rs.version ?? 1}</div>
-                      </div>
-                      {suggested && (
-                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-amber)', padding: '2px 6px', background: 'color-mix(in srgb, var(--accent-amber) 10%, transparent)', borderRadius: 3 }}>SUGGESTED</span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
               <FieldLabel label="Agreement expiry" />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+                Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
+                {request.requestedRequirementsSetIds?.length > 0 && (
+                  <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
+                )}
+                .
+              </div>
               <ExpiryPicker
                 expiry={expiry}
                 setExpiry={setExpiry}
@@ -378,13 +430,15 @@ export default function CombinedResponseModal({
                 {action === 'full' && (
                   <div style={{ display: 'flex', gap: 14 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Assets in scope</div>
-                    <div style={{ color: 'var(--text-primary)' }}>{referencedAssets.length}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{selectedAssetIds.length} of {referencedAssets.length}</div>
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Req sets authorized</div>
-                  <div style={{ color: 'var(--text-primary)' }}>{authorizedReqSetIds.length}</div>
-                </div>
+                {action === 'proofonly' && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Eval Results shared</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{selectedEvalResultIds.length}</div>
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 14 }}>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Agreement expires</div>
                   <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
@@ -426,5 +480,3 @@ export default function CombinedResponseModal({
   )
 }
 
-// Silence unused-import lint in projects that don't use the imported helper.
-void SDATypeCard

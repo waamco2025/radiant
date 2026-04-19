@@ -9,6 +9,7 @@ import {
   V2_2_ENABLED, getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge,
   resolveClaimByPinInShared, makeProvisionalAgreementPair, finalizeProvisionalAgreementPair,
   makeDeclineRecord, makeEvaluationRunArtifacts, findPriorActiveEvaluationResult,
+  makeAmendedClaim, makeAmendedDisclosureAgreement,
   buildV22SharedArtifacts,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
@@ -16,8 +17,12 @@ import DisclosureAgreementDetailPanel from '../components/DetailPanel/Disclosure
 import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
 import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
+import AIShopperModal from '../components/modals/AIShopperModal.jsx'
+import DirectoryLayer from './DirectoryLayer.jsx'
 import CombinedResponseModal from '../components/modals/CombinedResponseModal.jsx'
 import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
+import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
+import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 // PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
 import DetailPanel from '../components/DetailPanel/index.jsx'
 import PublishModal from '../components/modals/PublishModal.jsx'
@@ -87,9 +92,18 @@ export default function V2App() {
   const [v22RequestOpen, setV22RequestOpen] = useState(false)
   const [v22RequestAnchor, setV22RequestAnchor] = useState(null) // Asset node passed when launched from per-Asset entry
   const [v22RespondingTo, setV22RespondingTo] = useState(null) // { daId }
-  const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId, claimId, priorResultId? }
+  const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId|null, claimId, selfEvaluation? }
+  const [v22AmendingClaimId, setV22AmendingClaimId] = useState(null) // claim id being amended
+  const [v22AmendingDaId, setV22AmendingDaId] = useState(null) // disclosure agreement id being amended
   const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives reveal
+  const [v22RecentlyAcceptedAssetId, setV22RecentlyAcceptedAssetId] = useState(null) // drives Alice-side reveal on the pulled-in counterparty Asset
   const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
+  // V2.2 Phase 7 — Directory Layer + AI Shopper (spec §8 / §9)
+  const [v22DirectoryOpen, setV22DirectoryOpen] = useState(false)
+  const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
+  // Pre-population carried from an AI Shopper candidate into the
+  // CombinedRequestModal (Story 2 step 5 — spec §7.2).
+  const [v22AIShopperResult, setV22AIShopperResult] = useState(null) // { claimPin, suggestedRequirementsSetId } | null
 
   const v22View = useMemo(
     () => (V2_2_ENABLED ? getV22DataForRole(roleId, v22Provisionals) : null),
@@ -100,17 +114,20 @@ export default function V2App() {
     [v22View],
   )
 
-  // Mark the recently-accepted claim node with `_isNew` so V2Canvas /
-  // AssetNode's existing reveal-animation path fires.
+  // Mark the recently-accepted claim node and (Phase 6.5 #4) the recently
+  // pulled-in counterparty Asset with `_isNew` so V2Canvas / AssetNode's
+  // existing reveal-animation path fires on both Bob's and Alice's canvases.
   const v22DataWithReveal = useMemo(() => {
-    if (!v22Data || !v22RecentlyAcceptedClaimId) return v22Data
+    if (!v22Data) return v22Data
+    if (!v22RecentlyAcceptedClaimId && !v22RecentlyAcceptedAssetId) return v22Data
+    const flagged = new Set([v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId].filter(Boolean))
     const nodes = v22Data.nodes.map(n => (
-      n.id === v22RecentlyAcceptedClaimId ? { ...n, _isNew: true } : n
+      flagged.has(n.id) ? { ...n, _isNew: true } : n
     ))
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
     return { ...v22Data, nodes, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -192,10 +209,34 @@ export default function V2App() {
     }))
     setV22RequestOpen(false)
     setV22RequestAnchor(null)
+    // Select the new provisional Claim so V2Canvas's selection-pan targets it
+    // (was panning to the anchor Asset because selection remained on the
+    // anchor after submission). This also opens the "Awaiting Response" panel
+    // for the requester, giving them immediate context.
+    setSel(claim.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
     setV22PanToClaimId(claim.id)
     setV22RecentlyAcceptedClaimId(claim.id)
-    setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
-  }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor])
+    // Phase 7 carry-over #1: _isNew persists until the user deselects (see
+    // the v22-reveal-clear effect near the V2.1 sibling, below). No timeout.
+    // Phase 6 carry-over #6: enqueue a 'v22-request' notification on the
+    // grantor's inbox so they can open the response modal from notifications
+    // (provisional edges no longer render on the grantor's canvas — see #5).
+    const grantorRole = ROLES.find((r) => r.party === ownerParty)
+    if (grantorRole) {
+      enqueueV22NotificationForRequester(grantorRole.id, {
+        id: `v22-request-${pair.disclosureAgreement.id}`,
+        type: 'v22-request',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: claim.name, pin: claim.pin },
+        connectTo: { id: anchorNode.id, pin: anchorNode.pin || null },
+        v22DaId: pair.disclosureAgreement.id,
+        message: message || '',
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor, enqueueV22NotificationForRequester])
 
   const handleV22Accept = useCallback(({ type, scope, eaTerms }) => {
     if (!v22RespondingTo) return
@@ -233,8 +274,24 @@ export default function V2App() {
     setV22RespondingTo(null)
     if (claimIdForReveal) {
       setV22RecentlyAcceptedClaimId(claimIdForReveal)
-      setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
+      // Phase 7 carry-over #1: no timeout; clears on deselection.
     }
+    // Phase 6.5 #4: also reveal the newly pulled-in counterparty Asset on
+    // Alice's (the grantor's) canvas. anchorIdForNotif is the granteeAssetId,
+    // which is exactly the Asset that just got pulled in via §6.1.
+    if (anchorIdForNotif) {
+      setV22RecentlyAcceptedAssetId(anchorIdForNotif)
+      setSel(anchorIdForNotif)
+      setForcePanelTab(null)
+      setForceExpandSda(null)
+      setV22PanToClaimId(anchorIdForNotif)
+    }
+    // Phase 6 carry-over #6: dismiss the original v22-request notification on
+    // the grantor's inbox now that the request has been resolved.
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-request-${daId}`],
+    }))
     if (requesterPartyForNotif && claimPinForNotif) {
       const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
       if (requesterRole) {
@@ -249,7 +306,7 @@ export default function V2App() {
         })
       }
     }
-  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
   const handleV22Decline = useCallback(({ reason } = {}) => {
     if (!v22RespondingTo) return
@@ -271,11 +328,24 @@ export default function V2App() {
         claimNameForNotif = sharedClaim.name
         claimPinForNotif = sharedClaim.pin
       }
+      // Phase 6.5 #3: keep the provisional DA + EA in state (annotated as
+      // declined) so Bob's canvas continues to render the edge to his anchor
+      // Asset until he dismisses. Spec §11.4 calls for the artifacts to be
+      // "deleted"; in V2.2 we keep them as a UI-layer affordance and collapse
+      // them on dismiss. The decline reason rides along on the DA via
+      // `_declineMeta` so the V22ClaimPanel can surface it.
+      const annotatedDa = {
+        ...provisionalDa,
+        _declineMeta: { reason: (reason || '').trim(), declinedDate: declineRecord.declinedDate },
+      }
+      const annotatedEa = provisionalEa
+        ? { ...provisionalEa, _declined: true }
+        : null
       return {
         ...prev,
-        disclosureAgreements: prev.disclosureAgreements.filter((d) => d.id !== daId),
+        disclosureAgreements: prev.disclosureAgreements.map((d) => d.id === daId ? annotatedDa : d),
         evaluationAgreements: provisionalEa
-          ? prev.evaluationAgreements.filter((e) => e.id !== provisionalEa.id)
+          ? prev.evaluationAgreements.map((e) => e.id === provisionalEa.id ? annotatedEa : e)
           : prev.evaluationAgreements,
         declineRecords: [...prev.declineRecords, declineRecord],
       }
@@ -283,6 +353,11 @@ export default function V2App() {
     setV22RespondingTo(null)
     setSelectedEdgeId(null)
     setOpenAgreement(null)
+    // Dismiss the v22-request notification on the grantor's inbox.
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-request-${daId}`],
+    }))
     if (requesterPartyForNotif && claimPinForNotif) {
       const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
       if (requesterRole) {
@@ -297,7 +372,7 @@ export default function V2App() {
         })
       }
     }
-  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
   const handleV22CancelRequest = useCallback((claimId) => {
     setV22Provisionals((prev) => {
@@ -318,12 +393,27 @@ export default function V2App() {
   }, [activeRole.party])
 
   const handleV22DismissDeclined = useCallback((claimId) => {
-    setV22Provisionals((prev) => ({
-      ...prev,
-      declineRecords: prev.declineRecords.filter(
-        (r) => !(r.claimId === claimId && r.requesterParty === activeRole.party),
-      ),
-    }))
+    setV22Provisionals((prev) => {
+      // Find the declined DA(s) for this claim/actor and drop them along with
+      // their paired EA(s) so the synthetic edge disappears on dismissal.
+      const matchingDas = prev.disclosureAgreements.filter(
+        (d) => d.subject?.id === claimId && d._declineMeta && d.grantee.party === activeRole.party,
+      )
+      const matchingDaIds = new Set(matchingDas.map((d) => d.id))
+      const matchingEaIds = new Set(
+        prev.evaluationAgreements
+          .filter((e) => matchingDaIds.has(e.disclosureAgreementId))
+          .map((e) => e.id),
+      )
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.filter((d) => !matchingDaIds.has(d.id)),
+        evaluationAgreements: prev.evaluationAgreements.filter((e) => !matchingEaIds.has(e.id)),
+        declineRecords: prev.declineRecords.filter(
+          (r) => !(r.claimId === claimId && r.requesterParty === activeRole.party),
+        ),
+      }
+    })
     setSel(null)
   }, [activeRole.party])
 
@@ -340,9 +430,25 @@ export default function V2App() {
 
   const handleV22EvaluationSubmit = useCallback(({ requirementsSet, rows, evidenceUsed }) => {
     if (!v22EvalContext) return
-    const { evaluationAgreementId, claimId } = v22EvalContext
-    const ea = v22View?.evaluationAgreements.find((e) => e.id === evaluationAgreementId)
-    if (!ea) return
+    const { evaluationAgreementId, claimId, selfEvaluation } = v22EvalContext
+    const claim = v22View?.claims.find((c) => c.id === claimId)
+    let ea
+    if (selfEvaluation) {
+      // Phase 6.D: synthesise a lightweight EA-like object so the artifact
+      // factory has a stable id to thread through. The proof DA + ownership DA
+      // it produces are both internal (Alice → Alice).
+      const firstAsset = claim?.referencedAssetIds?.[0] || null
+      ea = {
+        id: `self-eval-${claimId}`,
+        grantor: { party: activeRole.party, dot: activeRole.partyDot },
+        grantee: { party: activeRole.party, dot: activeRole.partyDot },
+        claimId,
+        granteeAssetId: firstAsset,
+      }
+    } else {
+      ea = v22View?.evaluationAgreements.find((e) => e.id === evaluationAgreementId)
+      if (!ea) return
+    }
     const prior = findPriorActiveEvaluationResult({
       claimId, requirementsSetId: requirementsSet.id,
       shared: buildV22SharedArtifacts(), provisionals: v22Provisionals,
@@ -376,19 +482,192 @@ export default function V2App() {
       }
     })
     setV22EvalContext(null)
-    setV22PanToClaimId(claimId)
-    setV22RecentlyAcceptedClaimId(claimId)
-    setTimeout(() => setV22RecentlyAcceptedClaimId(null), 900)
-  }, [v22EvalContext, v22View, v22Provisionals, activeRole.partyDot])
+    // Phase 6.5+ #5: explicitly select the new Eval Result BEFORE setting the
+    // pan target. Otherwise V2Canvas's selection-pan effect (which observes
+    // `sel`) keeps holding the pre-modal Claim selection and re-pans to the
+    // Claim after the external pan completes. Also drop the pre-modal sel
+    // (could be the Claim) so we don't fight V2Canvas's selection-pan during
+    // the externalPanRef lockout window.
+    setSel(artifacts.evaluationResult.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(artifacts.evaluationResult.id)
+    setV22RecentlyAcceptedClaimId(artifacts.evaluationResult.id)
+    // Phase 7 carry-over #1: no timeout; clears on deselection.
+    // Phase 6.5 #6: notify the Claim owner that an evaluation completed
+    // (skip self-eval, where evaluator === claim owner).
+    if (!selfEvaluation) {
+      const claimOwnerRole = ROLES.find((r) => r.party === ea.grantor.party)
+      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === claimId)
+      if (claimOwnerRole && sharedClaim) {
+        enqueueV22NotificationForRequester(claimOwnerRole.id, {
+          id: `v22-evaluation-${artifacts.evaluationResult.id}`,
+          type: 'v22-evaluation',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: sharedClaim.name, pin: sharedClaim.pin },
+          v22EvalResultId: artifacts.evaluationResult.id,
+          supersedesPriorResultId: artifacts.supersededPriorResult?.id || null,
+          requirementsSetName: requirementsSet.name,
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22EvalContext, v22View, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
-  // Pan-to-node effect: triggered by v22PanToClaimId (provisional creation, accept).
+  // ── Phase 6: Amendment handlers ──────────────────────────────────────
+
+  const handleV22AmendClaimSubmit = useCallback(({ addedAssetIds }) => {
+    if (!v22AmendingClaimId) return
+    setV22Provisionals((prev) => {
+      // Look up the latest version of the claim (could be a prior amendment).
+      const existing = prev.claims?.find((c) => c.id === v22AmendingClaimId)
+        || buildV22SharedArtifacts().claims.find((c) => c.id === v22AmendingClaimId)
+      if (!existing) return prev
+      const { claim: amended, newClaimRefEdges } = makeAmendedClaim({
+        claim: existing,
+        addedAssetIds,
+      })
+      return {
+        ...prev,
+        claims: [...(prev.claims || []).filter((c) => c.id !== amended.id), amended],
+        disclosureAgreements: [...prev.disclosureAgreements, ...newClaimRefEdges],
+      }
+    })
+    setV22AmendingClaimId(null)
+    // Phase 6.5+ #5: select + pan to the amended Claim before triggering the
+    // pan effect, so V2Canvas's selection-pan settles on the correct target
+    // and doesn't fight the external pan.
+    setSel(v22AmendingClaimId)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(v22AmendingClaimId)
+    setV22RecentlyAcceptedClaimId(v22AmendingClaimId)
+    // Phase 7 carry-over #1: no timeout; clears on deselection.
+  }, [v22AmendingClaimId])
+
+  const handleV22AmendDisclosureSubmit = useCallback(({ scope, note }) => {
+    if (!v22AmendingDaId) return
+    // Phase 7 carry-over #2: compute notification targets BEFORE the
+    // setV22Provisionals updater runs. Previous implementation captured
+    // counterpartyParty / claimPinForNotif inside the updater's closure
+    // via mutable outer `let` vars, which is unreliable: React may defer
+    // the updater to the next render phase, so the downstream
+    // `if (counterpartyParty && ...)` branch saw nulls and the enqueue
+    // never fired. Read from the current render's `v22Provisionals` snapshot
+    // and fall back to the shared seeded data.
+    const seededDa = buildV22SharedArtifacts().disclosureAgreements.find((d) => d.id === v22AmendingDaId)
+    const existing = v22Provisionals.disclosureAgreements.find((d) => d.id === v22AmendingDaId) || seededDa
+    if (!existing) return
+    const counterpartyParty = existing.grantee.party
+    const claimIdForPan = existing.subject.id
+    const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === existing.subject.id)
+    const claimNameForNotif = sharedClaim?.name || null
+    const claimPinForNotif = sharedClaim?.pin || null
+    const amended = makeAmendedDisclosureAgreement({ disclosureAgreement: existing, scope, note })
+
+    setV22Provisionals((prev) => ({
+      ...prev,
+      disclosureAgreements: [
+        ...prev.disclosureAgreements.filter((d) => d.id !== amended.id),
+        amended,
+      ],
+    }))
+    setV22AmendingDaId(null)
+    setOpenAgreement(null)
+    setSelectedEdgeId(null)
+    if (claimIdForPan) {
+      // Phase 6.5 #12: pan + reveal the amended Claim with the existing
+      // _isNew infrastructure (badge reads "NEW" briefly — works as the
+      // "AMENDED" cue in the absence of a dedicated badge style).
+      setSel(claimIdForPan)
+      setForcePanelTab(null)
+      setForceExpandSda(null)
+      setV22PanToClaimId(claimIdForPan)
+      setV22RecentlyAcceptedClaimId(claimIdForPan)
+      // Phase 7 carry-over #1: no timeout; clears on deselection.
+    }
+    // Phase 6 own scope: cross-role amendment notification — counterparty
+    // (grantee) is told the DA's scope changed, with a deep-link to the Claim.
+    // Phase 7 carry-over #2: also skip when grantee == active role (internal
+    // DA would otherwise notify the amender of their own amendment).
+    if (
+      counterpartyParty &&
+      counterpartyParty !== 'Radiant Network' &&
+      counterpartyParty !== activeRole.party &&
+      claimPinForNotif
+    ) {
+      const counterpartyRole = ROLES.find((r) => r.party === counterpartyParty)
+      if (counterpartyRole) {
+        enqueueV22NotificationForRequester(counterpartyRole.id, {
+          id: `v22-amendment-${v22AmendingDaId}-${Date.now().toString(36)}`,
+          type: 'v22-amendment',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: null,
+          v22DaId: v22AmendingDaId,
+          note: (note || '').trim(),
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22AmendingDaId, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  // Phase 6.D: self-evaluation entry point. Owner clicks Run Evaluation on
+  // their own Claim — no EA required. The eval modal opens in self-eval mode;
+  // the resulting Eval Result is owned by the Claim owner.
+  const handleV22OpenSelfEvaluation = useCallback((claim) => {
+    if (!claim) return
+    setV22EvalContext({
+      evaluationAgreementId: null,
+      claimId: claim.id,
+      selfEvaluation: true,
+      ownerParty: claim.owner,
+    })
+    setOpenAgreement(null)
+    setEdgeMenu(null)
+    setSelectedEdgeId(null)
+  }, [])
+
+  // Pan-to-node effect: triggered by v22PanToClaimId (provisional creation,
+  // accept, eval run, amendment). Uses the animated pan path so V2Canvas sets
+  // externalPanRef during the animation — short-circuits V2Canvas's own
+  // selection-pan effect for the duration.
+  //
+  // Phase 6.5+ #5 — panel compensation:
+  // V2Canvas's selection-pan adds `panelWidth > 0 ? 180/z : 0` to node.x and
+  // `0.10 * containerHeight / z` to node.y so the target appears centred to
+  // the LEFT of the open Detail Panel. After our animatedPanToWithZoom
+  // completes (~500ms), the v22DataWithReveal effect eventually re-runs (e.g.
+  // when v22RecentlyAcceptedClaimId clears at 900ms), nodeMap reference
+  // changes, V2Canvas's selection-pan re-fires with externalPanRef now false,
+  // and pans again to the panel-compensated position. The user sees a
+  // "secondary adjustment" 400ms after the initial pan.
+  //
+  // Fix: apply the same panel compensation up-front so the initial pan lands
+  // on the same coordinates the eventual selection-pan would target — no
+  // secondary jump.
   useEffect(() => {
     if (!v22PanToClaimId) return
     const target = v22Data?.nodeMap?.[v22PanToClaimId]
-    if (target && target.x != null && target.y != null) {
-      setTimeout(() => {
-        canvasRef.current?.panToWithZoom?.(target.x, target.y, 1.0)
-      }, 0)
+    const ref = canvasRef.current
+    if (target && target.x != null && target.y != null && ref) {
+      Promise.resolve().then(() => {
+        // Match V2Canvas's exact `panelWidth` calculation (V2App line ~2450)
+        // so the offset agrees with what selection-pan would later apply.
+        const selNode = sel ? v22Data?.nodeMap?.[sel] : null
+        const panelOpen = !!(selNode && selNode.category !== 'party')
+        const container = document.querySelector('[data-canvas-container]')
+        const z = 1.28
+        const horizontalOffsetX = panelOpen ? (180 / z) : 0
+        const verticalOffsetY = container ? (container.clientHeight * 0.10) / z : 0
+        const tx = target.x + horizontalOffsetX
+        const ty = target.y + verticalOffsetY
+        if (ref.animatedPanToWithZoom) {
+          ref.animatedPanToWithZoom(tx, ty, z, 500)
+        } else {
+          ref.panToWithZoom?.(tx, ty, z)
+        }
+      })
     }
     setV22PanToClaimId(null)
   }, [v22PanToClaimId, v22Data])
@@ -403,6 +682,23 @@ export default function V2App() {
       prevRoleRef.current = roleId
     }
   }, [roleId])
+
+  // Phase 7 carry-over #1: V2.2 NEW badge persists until the user moves on.
+  // The reveal ids (v22RecentlyAcceptedClaimId / v22RecentlyAcceptedAssetId)
+  // are set when a handler creates a new node; they drive `_isNew` via the
+  // `v22DataWithReveal` memo. Previously each handler also scheduled a 900ms
+  // setTimeout to clear the id; that cleared the badge before the user had a
+  // chance to read it. The new rule: clear the reveal id when `sel` moves
+  // off the revealed node (click empty canvas, close panel, or select a
+  // different node). Uses the same prevSelRef the V2.1 sibling effect reads
+  // so role-switch semantics stay aligned.
+  useEffect(() => {
+    if (!V2_2_ENABLED) return
+    const prevSel = prevSelRef.current
+    if (!prevSel || prevSel === sel) return
+    if (v22RecentlyAcceptedClaimId === prevSel) setV22RecentlyAcceptedClaimId(null)
+    if (v22RecentlyAcceptedAssetId === prevSel) setV22RecentlyAcceptedAssetId(null)
+  }, [sel, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId])
 
   // Clear _isNew from previously selected node on deselection
   useEffect(() => {
@@ -468,11 +764,17 @@ export default function V2App() {
     // edges, and nodeMap. Skip the V2.1 merge/roll-up pipeline (SDA mutations,
     // addedNodes/Edges, cascade requests, etc.) which is V2.1-shape specific.
     if (V2_2_ENABLED) {
+      // Phase 6 follow-up bug: notifications were never reaching the grantor's
+      // inbox because this short-circuit hardcoded `pendingRequests: []`. The
+      // V2.1 path flows `addedRequests` (per-role state) into `pendingRequests`
+      // further down (see line ~878); reproduce that merge here so the V2.2
+      // notification UI (which reads from `pendingRequests` / `visibleRequests`)
+      // sees entries enqueued by `enqueueV22NotificationForRequester`.
       return {
         nodes: roleData.nodes,
         edges: roleData.edges,
         nodeMap: roleData.nodeMap,
-        pendingRequests: [],
+        pendingRequests: [...addedRequests],
         existingCascades: [],
       }
     }
@@ -1541,7 +1843,9 @@ export default function V2App() {
         />
       )}
 
-      {/* Top bar */}
+      {/* Top bar — z-index 300 sits above Detail Panel (200) and Agreement
+           Panel (210) so notification icon, credits badge, and user menu
+           stay clickable even when a panel is open (Phase 6.5+ #1). */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -1549,7 +1853,8 @@ export default function V2App() {
         padding: '8px 16px',
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
-        zIndex: 100,
+        zIndex: 300,
+        position: 'relative',
         background: 'var(--bg-deep)',
       }}>
         {/* Left group: 3D radiant + RADIANT logotype */}
@@ -1631,6 +1936,44 @@ export default function V2App() {
             </svg>
           </div>
 
+          {/* V2.2 Phase 7: Radiant Network (Directory Layer) + AI Shopper.
+              Spec §8 anchors the Radiant Network button bottom-left; Andrew's
+              Phase 7 task accepts chrome placement near the notification icon. */}
+          {V2_2_ENABLED && (
+            <>
+              <div
+                onClick={() => setV22DirectoryOpen(true)}
+                style={iconBtnStyle}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
+                title="Radiant Network — browse the Public Directory"
+              >
+                {/* Globe icon: circle + meridian + two latitude arcs. */}
+                <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" fill="none" />
+                  <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" strokeWidth="1" fill="none" />
+                  <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="1" />
+                  <path d="M3 5 Q8 3.5 13 5" stroke="currentColor" strokeWidth="1" fill="none" />
+                  <path d="M3 11 Q8 12.5 13 11" stroke="currentColor" strokeWidth="1" fill="none" />
+                </svg>
+              </div>
+              <div
+                onClick={() => setV22AIShopperOpen(true)}
+                style={iconBtnStyle}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
+                title="AI Shopper — discover public Claims matching a Requirements Set"
+              >
+                {/* Search + sparkle icon signalling AI-assisted discovery. */}
+                <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                  <circle cx="7" cy="7" r="4" stroke="currentColor" strokeWidth="1.3" fill="none" />
+                  <line x1="10" y1="10" x2="13.5" y2="13.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <path d="M12 3 L12.5 4.5 L14 5 L12.5 5.5 L12 7 L11.5 5.5 L10 5 L11.5 4.5 Z" fill="currentColor" />
+                </svg>
+              </div>
+            </>
+          )}
+
           {/* Notification inbox */}
           <div ref={inboxRef} style={{ position: 'relative' }}>
             <button
@@ -1693,8 +2036,11 @@ export default function V2App() {
                     const isRevision = req.type === 'revision'
                     const isEvaluation = req.type === 'evaluation'
                     const isPublishedStandard = req.type === 'published_standard'
-                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : 'REQUEST'
+                    const isV22Request = req.type === 'v22-request'
+                    const isV22Amendment = req.type === 'v22-amendment'
+                    const isV22Evaluation = req.type === 'v22-evaluation'
+                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -1725,17 +2071,15 @@ export default function V2App() {
                               if (targetNode) {
                                 setSel(targetNode.id)
                                 if (targetNode._isNew && targetNode._wasProvisional) {
-                                  canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 1.28)
+                                  // Reveal animation handles its own pan.
                                   startReveal(targetNode.id)
                                 } else {
-                                  const pairedNode = req.connectTo?.id ? nodeMap[req.connectTo.id] : null
-                                  if (pairedNode) {
-                                    const midX = (targetNode.x + pairedNode.x) / 2
-                                    const midY = (targetNode.y + pairedNode.y) / 2
-                                    canvasRef.current?.panToWithZoom?.(midX, midY, 0.7)
-                                  } else {
-                                    canvasRef.current?.panToWithZoom?.(targetNode.x, targetNode.y, 0.7)
-                                  }
+                                  // Phase 6.5+ #4: pan to the target node only,
+                                  // zoom 1.28 (was midpointing toward a paired
+                                  // node at zoom 0.7, which felt under-panned
+                                  // and under-zoomed). Edge framing is a polish
+                                  // follow-up.
+                                  canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
                                 }
                               }
                             }
@@ -1744,7 +2088,12 @@ export default function V2App() {
                                 n.pin === req.asset?.pin && n._isDeclined
                               )
                               if (targetNode) {
-                                setTimeout(() => setSel(targetNode.id), 100)
+                                // Phase 6.5+ #3: select + animated pan to the
+                                // declined node, mirroring the ACCEPTED branch.
+                                // (Was setSel-only with a 100ms delay and no
+                                // pan call.)
+                                setSel(targetNode.id)
+                                canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
                               }
                             }
                           })
@@ -1776,6 +2125,35 @@ export default function V2App() {
                           }))
                           setLibraryInitialSetId(null)
                           setShowLibrary(true)
+                        } else if (req.type === 'v22-request') {
+                          // Phase 6.5 #8: do NOT dismiss on click — only on
+                          // terminal action (accept / decline in handleV22Accept
+                          // / handleV22Decline). If the user closes the modal
+                          // without resolving, the notification reappears.
+                          if (req.v22DaId) setV22RespondingTo({ daId: req.v22DaId })
+                        } else if (req.type === 'v22-amendment') {
+                          // Phase 6 own scope: amendment notifications deep-link
+                          // to the amended Claim on the recipient's canvas.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
+                          if (targetNode) {
+                            setSel(targetNode.id)
+                            canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
+                          }
+                        } else if (req.type === 'v22-evaluation') {
+                          // Phase 6.5 #6: deep-link to the new Eval Result node.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const targetNode = req.v22EvalResultId ? nodeMap[req.v22EvalResultId] : null
+                          if (targetNode) {
+                            setSel(targetNode.id)
+                            canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
+                          }
                         } else {
                           ensureParentLayer(() => {
                             const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -2085,7 +2463,10 @@ export default function V2App() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            zIndex: 100,
+            // Phase 6.5 #13: lower than the notification dropdown (z-index 200)
+            // so the inbox menu sits above the banner when both are visible.
+            zIndex: 10,
+            position: 'relative',
           }}
         >
           <span style={{
@@ -2142,7 +2523,7 @@ export default function V2App() {
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].category !== 'party' ? 480 : 0}
           onLayerChange={setLayerInfo}
-          onConnect={(node) => setConnectNode(node)}
+          onConnect={V2_2_ENABLED ? undefined : ((node) => setConnectNode(node))}
           onDisclose={(node) => setPublishNode(node)}
           onAddEvidence={(node) => {
             setEvidenceNode(node)
@@ -2326,7 +2707,7 @@ export default function V2App() {
           return (
             <div style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
-              width: 480, zIndex: 55,
+              width: 480, zIndex: 210,
               animation: 'detail-panel-slide-in 200ms ease',
             }}>
               {openAgreement.kind === 'disclosure' ? (
@@ -2336,12 +2717,15 @@ export default function V2App() {
                   activeParty={activeRole.party}
                   onClose={close}
                   onAmend={() => {
-                    // Phase 4: for a provisional DA where the active party is the
-                    // grantor, "Amend" means "respond to the outstanding request."
-                    // Spec §6 Phase 6 wires actual post-acceptance amendments.
-                    if (resolved.disclosureAgreement.type === 'provisional' &&
-                        resolved.disclosureAgreement.grantor.party === activeRole.party) {
-                      setV22RespondingTo({ daId: resolved.disclosureAgreement.id })
+                    const da = resolved.disclosureAgreement
+                    // Provisional DA + grantor → respond-to-request flow (Phase 4).
+                    // Active DA + grantor → real amendment flow (Phase 6).
+                    if (da.grantor.party !== activeRole.party) return
+                    if (da.type === 'provisional') {
+                      setV22RespondingTo({ daId: da.id })
+                      close()
+                    } else {
+                      setV22AmendingDaId(da.id)
                       close()
                     }
                   }}
@@ -2361,15 +2745,88 @@ export default function V2App() {
           )
         })()}
 
+        {/* V2.2 Phase 7 — Directory Layer (spec §8). Separate canvas layer
+            reached via the Radiant Network button in the chrome. Always
+            mounted in V2.2 mode; internal `phase` state controls visibility
+            so the reverse wipe can play. */}
+        {V2_2_ENABLED && (
+          <DirectoryLayer
+            open={v22DirectoryOpen}
+            activeParty={activeRole.party}
+            onOpenAIShopper={() => setV22AIShopperOpen(true)}
+            onClose={() => setV22DirectoryOpen(false)}
+          />
+        )}
+
+        {/* V2.2 Phase 7 — AI Shopper modal (spec §9). Opens either from the
+            chrome icon (user had no Directory context in mind) or from within
+            the Directory Layer (user already browsing). */}
+        {V2_2_ENABLED && v22AIShopperOpen && (() => {
+          const shared = buildV22SharedArtifacts()
+          const publicDas = shared.disclosureAgreements.filter(
+            (d) => d.grantee?.party === 'Radiant Network' && d.subject?.kind === 'claim',
+          )
+          const publicClaims = publicDas
+            .map((d) => {
+              const claim = shared.claims.find((c) => c.id === d.subject.id)
+              if (!claim) return null
+              return {
+                id: claim.id,
+                name: claim.name,
+                pin: claim.pin,
+                owner: claim.owner,
+                publishedDisclosureType: d.type,
+              }
+            })
+            .filter(Boolean)
+          return (
+            <AIShopperModal
+              availableRequirementsSets={requirementSets.map((rs) => ({
+                id: rs.id, name: rs.name, version: rs.version ?? 1,
+              }))}
+              publicClaims={publicClaims}
+              onRequestAgreement={({ claimPin, suggestedRequirementsSetId }) => {
+                // Story 2 step 5 → 6: close shopper/directory, open the
+                // CombinedRequestModal with PIN + Req Set pre-populated, then
+                // Phase 4's Request flow takes over and Story 1 resumes.
+                setV22AIShopperResult({ claimPin, suggestedRequirementsSetId })
+                setV22AIShopperOpen(false)
+                setV22DirectoryOpen(false)
+                setV22RequestAnchor(null)
+                setV22RequestOpen(true)
+              }}
+              onClose={() => setV22AIShopperOpen(false)}
+            />
+          )
+        })()}
+
         {/* V2.2 Combined Request Modal */}
         {V2_2_ENABLED && v22RequestOpen && (
           <CombinedRequestModal
             requesterParty={activeRole.party}
-            requesterAsset={v22Data?.nodes.find(n => n.v22Type === 'ASSET' && n.owner === activeRole.party) || null}
+            requesterAsset={
+              // Phase 6 carry-over #2: the modal's "anchor" must be whatever
+              // Asset the user clicked. Fall back to the first owned Asset only
+              // when launched from the always-on banner button or the AI
+              // Shopper result flow (no specific anchor in either case).
+              v22RequestAnchor
+              || v22Data?.nodes.find(n => n.v22Type === 'ASSET' && n.owner === activeRole.party)
+              || null
+            }
             availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
             resolveClaimByPin={(pin) => resolveClaimByPinInShared(pin, v22Provisionals)}
-            onSubmit={handleV22RequestSubmit}
-            onClose={() => setV22RequestOpen(false)}
+            onSubmit={(payload) => {
+              handleV22RequestSubmit(payload)
+              setV22AIShopperResult(null)
+            }}
+            onClose={() => { setV22RequestOpen(false); setV22AIShopperResult(null) }}
+            // Phase 7: AI Shopper pre-populates PIN + suggested Req Set.
+            initialPin={v22AIShopperResult?.claimPin || ''}
+            initialRequirementsSetIds={
+              v22AIShopperResult?.suggestedRequirementsSetId
+                ? [v22AIShopperResult.suggestedRequirementsSetId]
+                : []
+            }
           />
         )}
 
@@ -2391,6 +2848,11 @@ export default function V2App() {
               templateName: pr.templateName,
               fields: pr.fields.map(f => ({ id: f.id, name: f.name })),
             }))
+          // Phase 6 carry-over #7: Eval Results visible to the grantor for the
+          // Proof-Only scope step. Pull from view.evaluationResults filtered to
+          // this Claim (includes both grantor-owned and proof-of-eval-shared).
+          const evalResultsForClaim = (v22View?.evaluationResults || [])
+            .filter(er => er.claimId === claim.id)
           return (
             <CombinedResponseModal
               request={{
@@ -2403,7 +2865,7 @@ export default function V2App() {
               }}
               referencedAssets={referencedAssets}
               parseResults={parseResultsForModal}
-              availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
+              evalResultsForClaim={evalResultsForClaim}
               onAccept={handleV22Accept}
               onDecline={handleV22Decline}
               onClose={() => setV22RespondingTo(null)}
@@ -2413,15 +2875,42 @@ export default function V2App() {
 
         {/* V2.2 Run Evaluation Modal */}
         {V2_2_ENABLED && v22EvalContext && (() => {
-          const ea = v22View?.evaluationAgreements.find(e => e.id === v22EvalContext.evaluationAgreementId)
           const claim = v22View?.claims.find(c => c.id === v22EvalContext.claimId)
-          if (!ea || !claim) return null
-          const da = v22View?.disclosureAgreements.find(d => d.id === ea.disclosureAgreementId)
-          const scopeAssetIds = da?.scope?.assetIds || claim.referencedAssetIds || []
-          const evidenceAssets = (v22View?.assets || [])
-            .filter(a => scopeAssetIds.includes(a.id))
-            .map(a => ({ id: a.id, name: a.name, file: a.file }))
-          // Restrict library to EA's authorized req sets in the modal itself.
+          if (!claim) return null
+          const isSelf = !!v22EvalContext.selfEvaluation
+          const ea = isSelf
+            ? null
+            : v22View?.evaluationAgreements.find(e => e.id === v22EvalContext.evaluationAgreementId)
+          if (!isSelf && !ea) return null
+          // Evidence assets: for inter-party, the DA's scope.assetIds; for
+          // self-eval, all of the Claim's referenced Assets.
+          const da = ea ? v22View?.disclosureAgreements.find(d => d.id === ea.disclosureAgreementId) : null
+          const scopeAssetIds = isSelf
+            ? (claim.referencedAssetIds || [])
+            : (da?.scope?.assetIds || claim.referencedAssetIds || [])
+          // Phase 6.5 #5 (Option A): the in-scope Assets are legitimately
+          // disclosed under this Agreement, but they aren't pulled onto Bob's
+          // main canvas (counterparty Assets stay private per spec §6.4). For
+          // the modal's evidence list we therefore resolve directly from the
+          // shared artifact dataset (incl. provisionals). Phase 6.5 polish
+          // backlog tracks Option B: bring disclosed Assets onto the grantee's
+          // canvas when an active Agreement covers them.
+          const sharedForEval = buildV22SharedArtifacts()
+          const allAssetSources = [
+            ...sharedForEval.assets,
+            ...(v22View?.assets || []),
+          ]
+          const seenAssetIds = new Set()
+          const evidenceAssets = scopeAssetIds
+            .map(id => {
+              if (seenAssetIds.has(id)) return null
+              seenAssetIds.add(id)
+              const asset = allAssetSources.find(a => a.id === id)
+              return asset ? { id: asset.id, name: asset.name, file: asset.file } : null
+            })
+            .filter(Boolean)
+          // Library is the requester's full library; the EA's suggested ids
+          // surface as a "SUGGESTED" chip per spec §10.5 (advisory).
           return (
             <V22RunEvaluationModal
               evaluationAgreement={ea}
@@ -2431,16 +2920,97 @@ export default function V2App() {
                 id: rs.id,
                 name: rs.name,
                 version: rs.version ?? 1,
+                requirements: rs.requirements || [],
                 claims: rs.claims || [],
               }))}
-              priorActiveResult={findPriorActiveEvaluationResult({
-                claimId: claim.id,
-                requirementsSetId: ea.authorizedRequirementsSetIds[0],
-                shared: buildV22SharedArtifacts(),
-                provisionals: v22Provisionals,
-              })}
+              priorActiveResult={null /* the modal looks up per-Req-Set on submit; supersede is detected in the handler */}
+              existingEvalResults={
+                // Phase 6.5+ #6: feed the modal the eval results already on
+                // this Claim so it can detect exact (Req Set, evidence) duplicates.
+                (v22View?.evaluationResults || []).filter(er => er.claimId === claim.id && er.status !== 'superseded')
+              }
+              onJumpToExistingEvalResult={(evalResultId) => {
+                setV22EvalContext(null)
+                setSel(evalResultId)
+                setV22PanToClaimId(evalResultId)
+              }}
+              selfEvaluation={isSelf}
               onSubmit={handleV22EvaluationSubmit}
               onClose={() => setV22EvalContext(null)}
+            />
+          )
+        })()}
+
+        {/* V2.2 Amend Claim Modal */}
+        {V2_2_ENABLED && v22AmendingClaimId && (() => {
+          // Look up the latest version of the Claim (could be in provisionals).
+          const claim = v22View?.claims.find(c => c.id === v22AmendingClaimId)
+          if (!claim) return null
+          const ownedAssetIds = new Set([...v22View.ownedAssetIds])
+          const alreadyReferenced = new Set(claim.referencedAssetIds || [])
+          const candidateAssets = (v22View?.assets || [])
+            .filter(a => ownedAssetIds.has(a.id) && !alreadyReferenced.has(a.id))
+            .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          // Phase 6.5 #9: pass already-referenced Assets so the modal renders
+          // them as read-only cards instead of a "{N} Assets already referenced"
+          // text box.
+          const alreadyReferencedAssets = (v22View?.assets || [])
+            .filter(a => alreadyReferenced.has(a.id))
+            .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          return (
+            <AmendClaimModal
+              claim={claim}
+              candidateAssets={candidateAssets}
+              alreadyReferencedAssets={alreadyReferencedAssets}
+              onSubmit={handleV22AmendClaimSubmit}
+              onClose={() => setV22AmendingClaimId(null)}
+            />
+          )
+        })()}
+
+        {/* V2.2 Amend Disclosure Modal */}
+        {V2_2_ENABLED && v22AmendingDaId && (() => {
+          const da = v22View?.disclosureAgreements.find(d => d.id === v22AmendingDaId)
+          if (!da) return null
+          const claim = v22View?.claims.find(c => c.id === da.subject.id)
+          // Build candidate lists for whichever scope dimension this DA uses.
+          const candidateAssets = (v22View?.assets || [])
+            .filter(a => (claim?.referencedAssetIds || []).includes(a.id))
+            .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          const candidateFields = (v22View?.parseResults || [])
+            .filter(pr => (claim?.referencedAssetIds || []).includes(pr.sourceAssetId))
+            .flatMap(pr => pr.fields.map(f => ({
+              key: `${pr.id}::${f.id}`,
+              label: f.name,
+              parseTemplateName: pr.templateName,
+            })))
+          const candidateEvalResults = (v22View?.evaluationResults || [])
+            .filter(er => er.claimId === da.subject.id)
+            .map(er => ({ id: er.id, name: er.requirementsSet?.name || er.id }))
+          // §11.2: items already evaluated (referenced by an active eval result)
+          // cannot be removed. Compute lock sets per scope dimension.
+          const evaluatedAssets = new Set(
+            (v22View?.evaluationResults || [])
+              .filter(er => er.claimId === da.subject.id && er.status !== 'superseded')
+              .flatMap(er => er.evidenceUsed || []),
+          )
+          const evaluatedFields = new Set() // V2.1 evals don't track field provenance; safe to leave empty for Phase 6
+          const evaluatedEvals = new Set(
+            (v22View?.evaluationResults || [])
+              .filter(er => er.claimId === da.subject.id && er.status !== 'superseded')
+              .map(er => er.id),
+          )
+          return (
+            <AmendDisclosureModal
+              agreement={da}
+              candidateAssets={candidateAssets}
+              candidateFields={candidateFields}
+              candidateEvalResults={candidateEvalResults}
+              lockedAssetIds={Array.from(evaluatedAssets).filter(id => (da.scope?.assetIds || []).includes(id))}
+              lockedFieldIds={Array.from(evaluatedFields)}
+              lockedEvalResultIds={Array.from(evaluatedEvals).filter(id => (da.scope?.evaluationResultIds || []).includes(id))}
+              onSubmit={handleV22AmendDisclosureSubmit}
+              onClose={() => setV22AmendingDaId(null)}
             />
           )
         })()}
@@ -2448,13 +3018,41 @@ export default function V2App() {
         {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel */}
         {V2_2_ENABLED && sel && nodeMap[sel]?.v22Type && nodeMap[sel].category !== 'party' && (() => {
           const node = nodeMap[sel]
-          // Build per-panel context.
-          const referencedAssetNames = (node.v22Artifact?.referencedAssetIds || [])
-            .map(id => {
-              const a = nodeMap[id]
-              return a ? { id: a.id, name: a.name } : null
-            })
-            .filter(Boolean)
+          // Phase 6.5 #16: for non-owner viewers (e.g., Bob viewing Alice's
+          // Claim), resolve referenced Asset names from the shared dataset
+          // limited to those legitimately in scope under an active DA. Owner
+          // viewers see all referenced Assets (they own them).
+          const sharedForPanel = buildV22SharedArtifacts()
+          const isOwnerViewing = node.v22Type === 'CLAIM' && node.owner === activeRole.party
+          let referencedAssetNames = []
+          if (node.v22Artifact?.referencedAssetIds) {
+            const refIds = node.v22Artifact.referencedAssetIds
+            if (isOwnerViewing) {
+              referencedAssetNames = refIds.map(id => {
+                const a = nodeMap[id] || sharedForPanel.assets.find(x => x.id === id)
+                return a ? { id: a.id, name: a.name } : null
+              }).filter(Boolean)
+            } else {
+              // Build the union of in-scope Asset ids across all visible active
+              // DAs on this Claim where the active actor is grantee.
+              const inScope = new Set()
+              for (const da of (v22View?.disclosureAgreements || [])) {
+                if (da.subject?.id !== node.id) continue
+                if (da.grantee.party !== activeRole.party) continue
+                if (da.type === 'provisional' || da._declineMeta) continue
+                if (Array.isArray(da.scope?.assetIds)) {
+                  for (const id of da.scope.assetIds) inScope.add(id)
+                }
+              }
+              referencedAssetNames = refIds
+                .filter(id => inScope.has(id))
+                .map(id => {
+                  const a = nodeMap[id] || sharedForPanel.assets.find(x => x.id === id)
+                  return a ? { id: a.id, name: a.name } : null
+                })
+                .filter(Boolean)
+            }
+          }
           const evaluationResultsForClaim = (v22View?.evaluationResults || []).filter(e => e.claimId === node.id)
           const parseResultsForAsset = (v22View?.parseResults || []).filter(p => p.sourceAssetId === node.id)
           // EA the active actor can use to evaluate this Claim:
@@ -2472,7 +3070,7 @@ export default function V2App() {
           return (
             <div style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
-              width: 480, zIndex: 50,
+              width: 480, zIndex: 200,
               animation: 'detail-panel-slide-in 200ms ease',
             }}>
               <V22NodeDetailPanel
@@ -2502,6 +3100,8 @@ export default function V2App() {
                 onCancelRequest={() => handleV22CancelRequest(node.id)}
                 onDismissDeclined={() => handleV22DismissDeclined(node.id)}
                 onRunEvaluation={() => handleV22OpenRunEvaluation(evaluationAgreementForActor)}
+                onAmendClaim={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => setV22AmendingClaimId(node.id) : undefined}
+                onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
                 // Parse Result actions
                 sourceAsset={sourceAsset}
                 // Eval Result actions
@@ -2522,7 +3122,7 @@ export default function V2App() {
             right: 0,
             bottom: 0,
             width: 480,
-            zIndex: 50,
+            zIndex: 200,
             animation: 'detail-panel-slide-in 200ms ease',
           }}>
             <DetailPanel
@@ -3291,7 +3891,7 @@ export default function V2App() {
           _noBackdrop
         />
       )}
-      {connectNode && (
+      {!V2_2_ENABLED && connectNode && (
         <RequestDisclosureModal
           contextNode={connectNode}
           requirementSets={requirementSets}
@@ -3307,7 +3907,7 @@ export default function V2App() {
           _noBackdrop
         />
       )}
-      {responseRequest && (
+      {!V2_2_ENABLED && responseRequest && (
         <DisclosureResponseModal
           request={responseRequest}
           assetNode={nodeMap[responseRequest.node?.id]}

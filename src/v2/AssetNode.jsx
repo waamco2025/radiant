@@ -425,7 +425,13 @@ export default function AssetNode({
     }
     if (!revealPhase) setFlipMidpoint(false)
   }, [revealPhase])
-  const handleCreateAsset = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onConnect ? onConnect(node) : console.log('Create associated asset for', node.id) : undefined
+  // Only render the "+" Connect Asset action when an onConnect handler is
+  // actually provided. In V2.2 mode V2App passes `onConnect={undefined}` so
+  // the no-op console.log placeholder previously showed an inert button on
+  // Asset cards (Phase 6.5 #7).
+  const handleCreateAsset = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser && typeof onConnect === 'function')
+    ? () => onConnect(node)
+    : undefined
   const handleCreateSDA = (!node.isEvidence && !node.isClaim && !isTerminalNode && !isProvisional && isOwnedByUser) ? () => onDisclose?.(node) : undefined
   const handleAddEvidence = ((node.isClaim || node.category === 'claim') && !isProvisional && isOwnedByUser) ? () => onAddEvidence?.(node) : undefined
   const handleParseEvidence = (node.isEvidence && !isProvisional && isOwnedByUser && !isAnchor) ? () => onParseEvidence?.(node) : undefined
