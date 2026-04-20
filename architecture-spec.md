@@ -118,7 +118,7 @@ The output of a Parsing process applied to an Asset. Contains extracted fields w
 
 ### 3.4 Claim Node
 
-An assertion backed by one or more Assets. The gateway to other parties.
+An assertion backed by one or more Assets. The gateway to other parties. **Constraint: a Claim must reference ≥1 Asset** — Claims with zero `referencedAssetIds` are not permitted, and creation UI must enforce this at submit.
 
 - Visual label: `CLAIM`.
 - Key JSON fields: `name`, `description`, `referencedAssetIds[]`, `creationDate`, `amendments[]`.

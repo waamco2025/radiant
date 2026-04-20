@@ -389,3 +389,23 @@ Ten-item polish pass across AssetNode (visuals + card action bar), V2Canvas + v2
 - Status picker: ◂ SATISFACTORY ▸ chevrons + word all cycle as expected.
 - Card actions: per-role walk-through confirmed one-to-one with Detail Panel footer for Asset/Claim/Eval Result/Parse Result.
 - Human-edited pencil: appears next to the confidence chip after typing in a value; persists into the Parse Result panel.
+
+### Phase 9A.3 scope (2026-04-20)
+
+**Preamble (this session):** Dev hygiene pass on `polish-backlog.md`, `CLAUDE.md`, `architecture-spec.md`. Markdown-only, no canvas or data work. See `polish-backlog.md` Update Log entry dated 2026-04-19 (late) for the full diff.
+
+**Main scope (separate session):** Asset registration flow (`V22CreateAssetModal`) and Claim creation flow (`V22CreateClaimModal`). Brings the Registering and Claiming processes from "❌ Missing / no-op placeholder" → demo-complete.
+
+- `V22QualifiedStoragePicker.jsx` — V2.2 port of V2.1 `QualifiedStoragePicker.jsx`. Mock file picker, multi-select.
+- `V22CreateAssetModal.jsx` — pattern-matched from V2.1 `RegisterAssetModal.jsx` in `/reference/`. Produces V2.2 Asset artifacts via `makeAsset`. Uses `V22QualifiedStoragePicker`.
+- `V22CreateClaimModal.jsx` — new flow. Select 1+ existing Assets via picker; produces V2.2 Claim artifacts via `makeClaim`. V2.1 reference available from backups if needed (V2.1 version predates V2.2's Claim-as-primary-node).
+
+Wire entry points:
+- Actor Detail Panel footer + Actor card action bar → "Register Asset" → `V22CreateAssetModal`
+- Asset Detail Panel footer ("Create Claim" placeholder) + Asset card action bar → `V22CreateClaimModal`
+
+Both flows produce provisional nodes with `_isNew` flag and pan-to behavior matching other flows. Constraint: Claims require ≥1 Asset reference.
+
+Four carry-over defects from 9A.2 to fold in if scope allows (see `polish-backlog.md` item #62).
+
+**Status:** [ ] In Progress. Flip to [x] at phase close per convention.
