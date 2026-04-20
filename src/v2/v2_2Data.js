@@ -1391,6 +1391,11 @@ function mergeProvisionals(shared, provisionals) {
   if (provisionals.claims?.length) {
     merged.claims = mergeById(merged.claims, provisionals.claims)
   }
+  // Phase 9A.3: Create Asset produces a new Asset in provisionals.assets.
+  // Merge-by-id here so the canvas adapter picks it up on next render.
+  if (provisionals.assets?.length) {
+    merged.assets = mergeById(merged.assets, provisionals.assets)
+  }
   // declineRecords ride along on the merged shared bundle so view builders can
   // surface declined claims without inventing a new module-level store.
   merged.declineRecords = [...(shared.declineRecords || []), ...(provisionals.declineRecords || [])]
@@ -2138,6 +2143,125 @@ export function makeEvaluationRunArtifacts({
     ownershipDisclosureAgreement: ownershipDa,
     supersededPriorResult: supersededVersion,
   }
+}
+
+/**
+ * Phase 9A.3: factory for registering a new Asset.
+ *
+ * Produces:
+ *   • `asset`        — the Asset artifact (makeAsset).
+ *   • `ownershipDa`  — internal Full DA wiring Actor → Asset, matching the
+ *                       seeded `aliceOwnAssets` / `bobOwnAssets` shape so
+ *                       edge derivation treats it identically.
+ *
+ * Asset creation is unilateral (no counterparty acceptance). V2App merges
+ * both artifacts into `v22Provisionals` and triggers the standard
+ * `_isNew` + pan-to reveal.
+ */
+export function makeAssetRegistrationArtifacts({
+  ownerParty,
+  ownerDot,
+  file,             // { uri, filename, size, mimeType, hash }
+  name,             // optional display name — falls back to stripped filename
+  description = '',
+}) {
+  if (!ownerParty) throw new Error('makeAssetRegistrationArtifacts: ownerParty is required')
+  if (!file || !file.uri || !file.filename) {
+    throw new Error('makeAssetRegistrationArtifacts: file { uri, filename } is required')
+  }
+  const idSeed = `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const partySlug = ownerParty.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const assetId = `asset-${partySlug}-${idSeed}`
+  const registrationDate = new Date().toISOString()
+
+  const displayName = (name && name.trim())
+    || file.filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+    || file.filename
+
+  const asset = makeAsset({
+    id: assetId,
+    owner: ownerParty,
+    ownerDot: ownerDot || makeDot(ownerParty),
+    name: displayName,
+    description,
+    file,
+    registrationDate,
+    parseResultIds: [],
+  })
+
+  const ownershipDa = makeInternalDisclosureAgreement({
+    id: `da-own-${assetId}`,
+    owner: ownerParty,
+    ownerDot,
+    subject: { kind: 'asset', id: assetId },
+    terms: { createdDate: registrationDate },
+  })
+
+  return { asset, ownershipDa }
+}
+
+/**
+ * Phase 9A.3: factory for creating a new Claim referencing ≥1 Asset.
+ *
+ * Produces:
+ *   • `claim`         — the Claim artifact (makeClaim).
+ *   • `ownershipDa`   — Actor → Claim ownership DA (internal Full).
+ *   • `claimRefDas`   — one internal Full DA per referenced Asset, matching
+ *                       the seeded `claimRefEdges` shape so edge derivation
+ *                       emits a Claim ↔ Asset edge for each reference.
+ *
+ * Spec §3.4 requires `referencedAssetIds.length >= 1` — enforced here so
+ * callers catch the invariant at the factory boundary. V2App merges all
+ * three artifact groups into `v22Provisionals`.
+ */
+export function makeClaimCreationArtifacts({
+  ownerParty,
+  ownerDot,
+  name,
+  description = '',
+  referencedAssetIds = [],
+}) {
+  if (!ownerParty) throw new Error('makeClaimCreationArtifacts: ownerParty is required')
+  if (!name || !name.trim()) throw new Error('makeClaimCreationArtifacts: name is required')
+  if (!Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
+    throw new Error('makeClaimCreationArtifacts: referencedAssetIds must be non-empty (spec §3.4)')
+  }
+  const idSeed = `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const partySlug = ownerParty.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const claimId = `claim-${partySlug}-${idSeed}`
+  const createdDate = new Date().toISOString()
+
+  const claim = makeClaim({
+    id: claimId,
+    owner: ownerParty,
+    ownerDot: ownerDot || makeDot(ownerParty),
+    name: name.trim(),
+    description,
+    referencedAssetIds,
+    createdDate,
+    amendments: [],
+  })
+
+  const ownershipDa = makeInternalDisclosureAgreement({
+    id: `da-own-${claimId}`,
+    owner: ownerParty,
+    ownerDot,
+    subject: { kind: 'claim', id: claimId },
+    terms: { createdDate },
+  })
+
+  const claimRefDas = referencedAssetIds.map((assetId) =>
+    makeInternalDisclosureAgreement({
+      id: `da-ref-${claimId}-${assetId}`,
+      owner: ownerParty,
+      ownerDot,
+      subject: { kind: 'claim', id: claimId },
+      scope: { assetIds: [assetId], includeDerivatives: true },
+      terms: { createdDate },
+    }),
+  )
+
+  return { claim, ownershipDa, claimRefDas }
 }
 
 /**

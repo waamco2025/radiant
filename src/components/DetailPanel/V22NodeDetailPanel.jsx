@@ -187,6 +187,40 @@ function PanelLayout({ header, body, footer }) {
   )
 }
 
+/* ─── Actor Panel ─────────────────────────────────────────────────────── */
+// Phase 9A.3: owner-only Register Asset CTA. Radiant Network (the public
+// directory pseudo-actor) has no footer actions — it isn't an owner of
+// anything in the conventional sense. Counterparty Actor nodes don't
+// render on the canvas in V2.2 so we don't need to branch for them here.
+function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAssetCount = 0 }) {
+  const actor = node.v22Artifact
+  const isOwner = activeParty === node.name && !node.isNetworkNode
+  return (
+    <PanelLayout
+      header={<PanelHeader typeLabel="ACTOR" name={node.name} pin={node.pin} onClose={onClose} />}
+      body={
+        <>
+          <Section title="Party">
+            <Row label="Name" value={node.name} />
+            <Row label="DOT" value={node.dot} mono />
+            {actor?.role && <Row label="Role" value={actor.role} />}
+            {actor?.vertical && <Row label="Vertical" value={actor.vertical} />}
+            {actor?.user && <Row label="User" value={actor.user} />}
+          </Section>
+          <Section title="Assets">
+            <Row label="Registered" value={ownedAssetCount} />
+          </Section>
+        </>
+      }
+      footer={
+        isOwner && onRegisterAsset ? (
+          <FooterButton label="Register Asset" accent onClick={onRegisterAsset} title="Register a new Asset from a file in your Qualified Storage." />
+        ) : null
+      }
+    />
+  )
+}
+
 /* ─── Asset Panel ─────────────────────────────────────────────────────── */
 function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreateClaim, onParseEvidence, parseResultsForAsset = [] }) {
   const asset = node.v22Artifact
@@ -534,6 +568,7 @@ export default function V22NodeDetailPanel(props) {
   const { node } = props
   if (!node) return null
   switch (node.v22Type) {
+    case 'ACTOR': return <V22ActorPanel {...props} />
     case 'ASSET': return <V22AssetPanel {...props} />
     case 'CLAIM': return <V22ClaimPanel {...props} />
     case 'PARSE RESULT': return <V22ParseResultPanel {...props} />

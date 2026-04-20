@@ -11,6 +11,7 @@ import {
   makeDeclineRecord, makeEvaluationRunArtifacts, findPriorActiveEvaluationResult,
   makeAmendedClaim, makeAmendedDisclosureAgreement,
   makeParseRunArtifacts,
+  makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   buildV22SharedArtifacts,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
@@ -24,6 +25,8 @@ import Tooltip from '../components/Tooltip.jsx'
 import V22ParseEvidenceModal from '../components/modals/V22ParseEvidenceModal.jsx'
 import CombinedResponseModal from '../components/modals/CombinedResponseModal.jsx'
 import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
+import V22CreateAssetModal from '../components/modals/V22CreateAssetModal.jsx'
+import V22CreateClaimModal from '../components/modals/V22CreateClaimModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
@@ -97,6 +100,14 @@ export default function V2App() {
   const [v22AIShopperResult, setV22AIShopperResult] = useState(null) // { claimPin, suggestedRequirementsSetId } | null
   // V2.2 parse flow (Phase 8): set by the Asset panel's Parse Evidence action.
   const [v22ParsingAsset, setV22ParsingAsset] = useState(null) // Asset node | null
+  // V2.2 Phase 9A.3: creation flows.
+  //   v22RegisteringAsset — opens V22CreateAssetModal. Object so callers can
+  //     pass context (the Actor node that launched it) without conflating
+  //     with the unilateral no-context case — both render the same modal.
+  //   v22CreatingClaim    — opens V22CreateClaimModal. `initialAssetIds`
+  //     pre-selects the Asset when launched from an Asset panel/card.
+  const [v22RegisteringAsset, setV22RegisteringAsset] = useState(null) // null | { source: 'actor' }
+  const [v22CreatingClaim, setV22CreatingClaim] = useState(null)       // null | { initialAssetIds: string[] }
 
   const v22View = useMemo(
     () => getV22DataForRole(roleId, v22Provisionals),
@@ -632,6 +643,78 @@ export default function V2App() {
     // Phase 7 carry-over #1: no timeout; clears on deselection.
   }, [v22ParsingAsset, activeRole.party, activeRole.partyDot])
 
+  // Phase 9A.3: V2.2 Asset registration. Produces a new Asset + ownership DA
+  // (makeAssetRegistrationArtifacts) and merges both into v22Provisionals.
+  // Unilateral — no counterparty acceptance. The new Asset gets `_isNew` +
+  // pan-to via the standard reveal pipeline. Returns the new Asset id so
+  // nested callers (Create Claim's inline Register-new-Asset CTA) can
+  // auto-select the fresh row.
+  const handleV22CreateAssetSubmit = useCallback(({ file, displayName, _nested = false } = {}) => {
+    if (!file) return null
+    const artifacts = makeAssetRegistrationArtifacts({
+      ownerParty: activeRole.party,
+      ownerDot: activeRole.partyDot,
+      file,
+      name: displayName,
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      assets: [...(prev.assets || []), artifacts.asset],
+      disclosureAgreements: [...prev.disclosureAgreements, artifacts.ownershipDa],
+    }))
+    setV22RegisteringAsset(null)
+    // Suppress pan when nested inside Create Claim — user is still in a modal.
+    if (!_nested) {
+      setSel(artifacts.asset.id)
+      setForcePanelTab(null)
+      setForceExpandSda(null)
+      setV22PanToClaimId(artifacts.asset.id)
+      setV22RecentlyAcceptedAssetId(artifacts.asset.id)
+    }
+    return artifacts.asset.id
+  }, [activeRole.party, activeRole.partyDot])
+
+  // Phase 9A.3: V2.2 Claim creation. Produces a new Claim + Actor→Claim
+  // ownership DA + one Claim→Asset internal DA per reference. Unilateral.
+  // NEW badge + pan-to via the shared `_isNew` reveal path.
+  const handleV22CreateClaimSubmit = useCallback(({ name, description, referencedAssetIds }) => {
+    if (!name || !name.trim() || !Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
+      return null
+    }
+    const artifacts = makeClaimCreationArtifacts({
+      ownerParty: activeRole.party,
+      ownerDot: activeRole.partyDot,
+      name,
+      description,
+      referencedAssetIds,
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      claims: [...(prev.claims || []), artifacts.claim],
+      disclosureAgreements: [
+        ...prev.disclosureAgreements,
+        artifacts.ownershipDa,
+        ...artifacts.claimRefDas,
+      ],
+    }))
+    setV22CreatingClaim(null)
+    setSel(artifacts.claim.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(artifacts.claim.id)
+    setV22RecentlyAcceptedClaimId(artifacts.claim.id)
+    return artifacts.claim.id
+  }, [activeRole.party, activeRole.partyDot])
+
+  // Nested Register-new-Asset handler — fires from inside V22CreateClaimModal
+  // or AmendClaimModal (Gate B). The shared handleV22CreateAssetSubmit does
+  // the real work; the `_nested` flag suppresses pan-to because the parent
+  // modal is still open. Returns the new Asset id so the parent modal can
+  // auto-select the fresh row in its picker.
+  const handleV22NestedAssetCreated = useCallback((payload) => {
+    return handleV22CreateAssetSubmit({ ...payload, _nested: true })
+  }, [handleV22CreateAssetSubmit])
+
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, note }) => {
     if (!v22AmendingDaId) return
     // Phase 7 carry-over #2: compute notification targets BEFORE the
@@ -742,7 +825,7 @@ export default function V2App() {
         // Match V2Canvas's exact `panelWidth` calculation (V2App line ~2450)
         // so the offset agrees with what selection-pan would later apply.
         const selNode = sel ? v22Data?.nodeMap?.[sel] : null
-        const panelOpen = !!(selNode && selNode.category !== 'party')
+        const panelOpen = !!(selNode && selNode.v22Type && !selNode.isNetworkNode)
         const container = document.querySelector('[data-canvas-container]')
         const z = 1.28
         const horizontalOffsetX = panelOpen ? (180 / z) : 0
@@ -798,7 +881,7 @@ export default function V2App() {
     // Panel-aware visible canvas area (panelWidth matches V2App's own
     // panelWidth prop calculation at the V2Canvas mount).
     const selNode = sel ? v22Data.nodeMap[sel] : null
-    const panelOpenFromSel = !!(selNode && selNode.category !== 'party')
+    const panelOpenFromSel = !!(selNode && selNode.v22Type && !selNode.isNetworkNode)
     const panelOpenFromEdge = !!openAgreement
     const panelOpen = panelOpenFromSel || panelOpenFromEdge
     const PANEL_W = 480
@@ -2284,7 +2367,7 @@ export default function V2App() {
           subchainFocusId={subchainFocusId}
           onExitSubchain={exitSubchain}
           modalOpen={!!modalNode}
-          panelWidth={sel && nodeMap[sel] && nodeMap[sel].category !== 'party' ? 480 : 0}
+          panelWidth={sel && nodeMap[sel] && nodeMap[sel].v22Type && !nodeMap[sel].isNetworkNode ? 480 : 0}
           onLayerChange={setLayerInfo}
           // Phase 8: onConnect was V2.1's "connect to counterparty" handler
           // on the Asset card. V2.2 has no equivalent (request flow lives in
@@ -2393,9 +2476,18 @@ export default function V2App() {
               case 'parseEvidence':
                 setV22ParsingAsset(node)
                 return
+              case 'registerAsset':
+                // Phase 9A.3: owner-only; Actor card action fires this.
+                if (node.v22Type === 'ACTOR' && node.name === activeRole.party && !node.isNetworkNode) {
+                  setV22RegisteringAsset({ source: 'actor' })
+                }
+                return
               case 'createClaim':
-                // Phase 6+ is expected to wire this; today the Detail Panel
-                // footer also disables Create Claim until that lands.
+                // Phase 9A.3: owner-only; Asset card action fires this with
+                // the Asset pre-selected in the Claim's picker.
+                if (node.v22Type === 'ASSET' && node.owner === activeRole.party) {
+                  setV22CreatingClaim({ initialAssetIds: [node.id] })
+                }
                 return
               case 'amendClaim':
                 if (node.owner === activeRole.party && node.v22Type === 'CLAIM') setV22AmendingClaimId(node.id)
@@ -2867,8 +2959,43 @@ export default function V2App() {
           )
         })()}
 
-        {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel */}
-        {sel && nodeMap[sel]?.v22Type && nodeMap[sel].category !== 'party' && (() => {
+        {/* V2.2 Create Asset modal (Phase 9A.3) — opens from the Actor
+            panel/card action bar's "Register Asset" action for the active
+            party. Also opens nested from Create Claim's inline CTA; that
+            path is handled by V22CreateClaimModal itself passing
+            `handleV22NestedAssetCreated` through. */}
+        {v22RegisteringAsset && (
+          <V22CreateAssetModal
+            activeParty={activeRole.party}
+            onClose={() => setV22RegisteringAsset(null)}
+            onComplete={handleV22CreateAssetSubmit}
+          />
+        )}
+
+        {/* V2.2 Create Claim modal (Phase 9A.3) — opens from an Asset's
+            panel/card "Create Claim" action. `initialAssetIds` pre-selects
+            the triggering Asset so the user lands on a valid selection. */}
+        {v22CreatingClaim && (() => {
+          const ownedAssets = (v22View?.assets || [])
+            .filter(a => v22View.ownedAssetIds.has(a.id))
+            .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          return (
+            <V22CreateClaimModal
+              activeParty={activeRole.party}
+              ownedAssets={ownedAssets}
+              initialAssetIds={v22CreatingClaim.initialAssetIds || []}
+              onClose={() => setV22CreatingClaim(null)}
+              onComplete={handleV22CreateClaimSubmit}
+              onNestedAssetCreated={handleV22NestedAssetCreated}
+            />
+          )
+        })()}
+
+        {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel.
+            Phase 9A.3: ACTOR nodes now render the panel too (V22ActorPanel)
+            so the owner can surface Register Asset from the footer.
+            Radiant Network is excluded — it's not a party the user acts as. */}
+        {sel && nodeMap[sel]?.v22Type && !nodeMap[sel].isNetworkNode && (() => {
           const node = nodeMap[sel]
           // Phase 6.5 #16: for non-owner viewers (e.g., Bob viewing Alice's
           // Claim), resolve referenced Asset names from the shared dataset
@@ -2929,9 +3056,18 @@ export default function V2App() {
                 node={node}
                 activeParty={activeRole.party}
                 onClose={handleCloseSel}
+                // Actor actions (Phase 9A.3)
+                onRegisterAsset={node.v22Type === 'ACTOR' && node.name === activeRole.party && !node.isNetworkNode
+                  ? () => setV22RegisteringAsset({ source: 'actor' })
+                  : undefined}
+                ownedAssetCount={node.v22Type === 'ACTOR'
+                  ? (v22View?.assets || []).filter(a => a.owner === node.name).length
+                  : 0}
                 // Asset actions
                 onRequestAgreement={() => { setV22RequestAnchor(node); setV22RequestOpen(true) }}
-                onCreateClaim={undefined}  // Phase 6+ surfaces inline Claim creation from Asset
+                onCreateClaim={node.v22Type === 'ASSET' && node.owner === activeRole.party
+                  ? () => setV22CreatingClaim({ initialAssetIds: [node.id] })
+                  : undefined}
                 onParseEvidence={node.owner === activeRole.party && node.v22Type === 'ASSET'
                   ? () => setV22ParsingAsset(node)
                   : undefined}

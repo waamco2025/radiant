@@ -729,27 +729,39 @@ export default function AssetNode({
   )
 }
 
-// Phase 9A item 9: V2.2 action bar. Per-type button set matches
-// V22NodeDetailPanel's footer exactly:
-//   ASSET (owner)        → Request Agreement, Parse Evidence, Create Claim
+// Phase 9A item 9 (extended Phase 9A.3): V2.2 action bar. Per-type button
+// set matches V22NodeDetailPanel's footer exactly:
+//   ACTOR (owner)        → Register Asset                                 (9A.3)
+//   ASSET (owner)        → Request Agreement, Parse Evidence, Create Claim (9A.3)
 //   CLAIM (owner)        → Amend Claim, Self-Evaluate
 //   CLAIM (non-owner+EA) → Run Evaluation
 //   EVAL RESULT (owner,  → Re-run Evaluation
 //                 active)
-//   PARSE RESULT / ACTOR → no actions
+//   PARSE RESULT         → no actions
 function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementForActor, categoryColor }) {
-  const isOwner = !node.owner || node.owner === activeParty
+  // For ACTOR nodes, `node.owner` is null (see actorToNode in v2_2Data.js).
+  // The owner test is "this party equals the active party" — so we compare
+  // the node's party name against the active party for ACTOR, and fall back
+  // to node.owner for everything else.
+  const isOwner = node.v22Type === 'ACTOR'
+    ? node.name === activeParty && !node.isNetworkNode
+    : (!node.owner || node.owner === activeParty)
   const fire = (action) => (e) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
     onV22CardAction?.(action, node)
   }
   const buttons = []
   switch (node.v22Type) {
+    case 'ACTOR':
+      if (isOwner && onV22CardAction) {
+        buttons.push({ icon: '＋', tooltip: 'Register Asset', onClick: fire('registerAsset') })
+      }
+      break
     case 'ASSET':
       if (isOwner && onV22CardAction) {
         buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
         buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
-        buttons.push({ icon: '◇', tooltip: 'Create Claim (Phase 6+)', onClick: fire('createClaim') })
+        buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
       }
       break
     case 'CLAIM': {
