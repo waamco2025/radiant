@@ -20,6 +20,7 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
+import Tooltip from '../components/Tooltip.jsx'
 import V22ParseEvidenceModal from '../components/modals/V22ParseEvidenceModal.jsx'
 import CombinedResponseModal from '../components/modals/CombinedResponseModal.jsx'
 import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
@@ -123,10 +124,38 @@ export default function V2App() {
     const flagged = new Set([v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId].filter(Boolean))
     // Phase 9A item 5: compute the endpoint set for the currently-selected
     // edge so AssetNode can render a glow on the two connected nodes.
+    // Phase 9A.1.5 item 4: also compute which side of each endpoint card
+    // faces the OTHER endpoint, so AssetNode can render the endpoint line
+    // on the inside edge (facing the partner) rather than always on the
+    // right. Compare card-centre x-coordinates: the endpoint whose centre
+    // is LEFT of its partner's centre shows the line on its RIGHT edge
+    // (facing right toward the partner); the other shows on its LEFT.
     const endpointSet = new Set()
+    const endpointSideById = {}
     if (selectedEdgeId) {
       const edge = v22Data.edges.find(e => e.id === selectedEdgeId)
-      if (edge) { endpointSet.add(edge.from); endpointSet.add(edge.to) }
+      if (edge) {
+        endpointSet.add(edge.from)
+        endpointSet.add(edge.to)
+        const fromNode = v22Data.nodeMap?.[edge.from]
+        const toNode = v22Data.nodeMap?.[edge.to]
+        if (fromNode && toNode && fromNode.x != null && toNode.x != null) {
+          // node.x is the card top-left; the centre is x + CARD_W/2. Since
+          // both cards have the same width, comparing raw x is equivalent.
+          if (fromNode.x < toNode.x) {
+            endpointSideById[edge.from] = 'right'
+            endpointSideById[edge.to] = 'left'
+          } else if (fromNode.x > toNode.x) {
+            endpointSideById[edge.from] = 'left'
+            endpointSideById[edge.to] = 'right'
+          } else {
+            // Equal x (stacked vertically) — keep both on the right as a
+            // stable fallback; the line is still a useful indicator.
+            endpointSideById[edge.from] = 'right'
+            endpointSideById[edge.to] = 'right'
+          }
+        }
+      }
     }
     // Phase 9A item 9: decorate Claim nodes with the evaluation agreement
     // where the current actor is grantee. V22ActionBar reads this to decide
@@ -149,7 +178,10 @@ export default function V2App() {
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
-        ...(isEndpoint ? { _isEdgeEndpoint: true } : {}),
+        ...(isEndpoint ? {
+          _isEdgeEndpoint: true,
+          _edgeEndpointSide: endpointSideById[n.id] || 'right',
+        } : {}),
         ...(eaForClaim ? { _evaluationAgreementForActor: eaForClaim } : {}),
       }
     })
@@ -726,6 +758,75 @@ export default function V2App() {
     }
     setV22PanToClaimId(null)
   }, [v22PanToClaimId, v22Data])
+
+  // Phase 9A.1.5 item 5: edge-select framing. When the user selects an
+  // Agreement Edge, animate-pan + animate-zoom the canvas to frame both
+  // endpoint cards with ~25% padding around the union of their bounding
+  // boxes. Detail Panel is accounted for by offsetting the target centre
+  // into the visible canvas area (left of the open panel). Reuses the
+  // existing `animatedPanToWithZoom` imperative handle that already drives
+  // post-request / post-accept reveals.
+  //
+  // Fires when `selectedEdgeId` transitions from null → non-null, and when
+  // it changes from one edge to another. Deselection (→ null) does not
+  // re-frame. Edges whose endpoints lack positions (e.g., the Radiant
+  // Network pseudo-actor) are skipped.
+  useEffect(() => {
+    if (!selectedEdgeId) return
+    const edge = v22Data?.edges?.find(e => e.id === selectedEdgeId)
+    if (!edge) return
+    const from = v22Data?.nodeMap?.[edge.from]
+    const to = v22Data?.nodeMap?.[edge.to]
+    if (!from || !to || from.x == null || to.x == null || from.y == null || to.y == null) return
+    const ref = canvasRef.current
+    if (!ref || !ref.animatedPanToWithZoom) return
+    const container = document.querySelector('[data-canvas-container]')
+    if (!container) return
+
+    // AssetNode CARD_W / CARD_H constants (held locally to avoid importing).
+    const CARD_W = 210
+    const CARD_H = 96
+
+    // Union bounding box of the two cards.
+    const xmin = Math.min(from.x, to.x)
+    const xmax = Math.max(from.x, to.x) + CARD_W
+    const ymin = Math.min(from.y, to.y)
+    const ymax = Math.max(from.y, to.y) + CARD_H
+    const unionW = xmax - xmin
+    const unionH = ymax - ymin
+
+    // Panel-aware visible canvas area (panelWidth matches V2App's own
+    // panelWidth prop calculation at the V2Canvas mount).
+    const selNode = sel ? v22Data.nodeMap[sel] : null
+    const panelOpenFromSel = !!(selNode && selNode.category !== 'party')
+    const panelOpenFromEdge = !!openAgreement
+    const panelOpen = panelOpenFromSel || panelOpenFromEdge
+    const PANEL_W = 480
+    const panelW = panelOpen ? PANEL_W : 0
+    const visibleW = Math.max(200, container.clientWidth - panelW)
+    const visibleH = container.clientHeight
+
+    // Padding around the union — ~20-30% on each side. Convert to a scale
+    // factor (1 + 2×padFrac) so a padFrac of 0.25 gives 25% padding each
+    // side = 1.5× effective extent.
+    const padFrac = 0.25
+    const scaleFactor = 1 + 2 * padFrac
+
+    const zoomByW = visibleW / (unionW * scaleFactor)
+    const zoomByH = visibleH / (unionH * scaleFactor)
+    // Clamp to the same range the manual zoom UI supports.
+    const targetZoom = Math.max(0.3, Math.min(1.5, Math.min(zoomByW, zoomByH)))
+
+    // Midpoint of the union. Panel compensation: shift camera target right
+    // by half the panel width (in world units) so the rendered midpoint
+    // lands in the centre of the visible canvas area instead of the full
+    // canvas. Without this, the midpoint sits under the panel.
+    const midX = (xmin + xmax) / 2
+    const midY = (ymin + ymax) / 2
+    const panelOffsetWorld = panelOpen ? (panelW / 2) / targetZoom : 0
+
+    ref.animatedPanToWithZoom(midX + panelOffsetWorld, midY, targetZoom, 600)
+  }, [selectedEdgeId, v22Data, sel, openAgreement])
 
   const currentRoleState = perRoleState[roleId] || emptyRoleState
 
@@ -1596,23 +1697,24 @@ export default function V2App() {
         {/* Right group: theme toggle + credits + user menu */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Theme toggle */}
+          <Tooltip content={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
           <div
             onClick={toggleTheme}
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             style={{ ...iconBtnStyle, fontSize: 16 }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
           >
             {theme === 'dark' ? '☀' : '☾'}
           </div>
+          </Tooltip>
 
           {/* Requirements Library */}
+          <Tooltip content="Requirements Library">
           <div
             onClick={() => { setLibraryInitialSetId(null); setShowLibrary(true) }}
             style={iconBtnStyle}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
-            title="Requirements Library"
           >
             <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
               <rect x="3" y="2.5" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
@@ -1622,14 +1724,15 @@ export default function V2App() {
               <line x1="5.5" y1="12" x2="8.5" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
             </svg>
           </div>
+          </Tooltip>
 
           {/* PEP Template Library */}
+          <Tooltip content="PEP Template Library">
           <div
             onClick={() => setShowPEPLibrary(true)}
             style={iconBtnStyle}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
-            title="PEP Template Library"
           >
             <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
               <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
@@ -1638,12 +1741,14 @@ export default function V2App() {
               <line x1="10" y1="6" x2="10" y2="13" stroke="currentColor" strokeWidth="1" />
             </svg>
           </div>
+          </Tooltip>
 
           {/* V2.2 Phase 7: Radiant Network (Directory Layer) + AI Shopper.
               Spec §8 anchors the Radiant Network button bottom-left; Andrew's
               Phase 7 task accepts chrome placement near the notification icon. */}
           {/* Radiant Network (Directory Layer) + AI Shopper chrome buttons. */}
           <>
+              <Tooltip content={v22DirectoryOpen ? 'Close the Public Directory' : 'Radiant Network — browse the Public Directory'} width={280}>
               <div
                 onClick={() => setV22DirectoryOpen((v) => !v)}
                 style={{
@@ -1656,7 +1761,6 @@ export default function V2App() {
                 }}
                 onMouseEnter={e => { if (!v22DirectoryOpen) e.currentTarget.style.background = 'var(--bg-raised)' }}
                 onMouseLeave={e => { if (!v22DirectoryOpen) e.currentTarget.style.background = 'var(--bg-surface)' }}
-                title={v22DirectoryOpen ? 'Close the Public Directory' : 'Radiant Network — browse the Public Directory'}
               >
                 {/* Globe icon: circle + meridian + two latitude arcs. */}
                 <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
@@ -1667,12 +1771,13 @@ export default function V2App() {
                   <path d="M3 11 Q8 12.5 13 11" stroke="currentColor" strokeWidth="1" fill="none" />
                 </svg>
               </div>
+              </Tooltip>
+              <Tooltip content="AI Shopper — discover public Claims matching a Requirements Set" width={280}>
               <div
                 onClick={() => setV22AIShopperOpen(true)}
                 style={iconBtnStyle}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
-                title="AI Shopper — discover public Claims matching a Requirements Set"
               >
                 {/* Search + sparkle icon signalling AI-assisted discovery. */}
                 <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
@@ -1681,6 +1786,7 @@ export default function V2App() {
                   <path d="M12 3 L12.5 4.5 L14 5 L12.5 5.5 L12 7 L11.5 5.5 L10 5 L11.5 4.5 Z" fill="currentColor" />
                 </svg>
               </div>
+              </Tooltip>
           </>
 
           {/* Notification inbox */}
@@ -1900,7 +2006,8 @@ export default function V2App() {
                           borderRadius: 4,
                         }}>{badgeLabel}</span>
                         {req.fromDirectory && (
-                          <span title="Discovered via Public Directory" style={{
+                          <Tooltip content="Discovered via Public Directory">
+                          <span style={{
                             display: 'inline-flex', alignItems: 'center', marginLeft: 4,
                           }}>
                             <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
@@ -1909,6 +2016,7 @@ export default function V2App() {
                               <line x1="2" y1="8" x2="14" y2="8" stroke="#38bdf8" strokeWidth="0.9" />
                             </svg>
                           </span>
+                          </Tooltip>
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 30 }}>

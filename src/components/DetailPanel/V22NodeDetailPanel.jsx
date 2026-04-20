@@ -11,6 +11,7 @@
 //     show owner's decline reason + "Dismiss" CTA.
 
 import CopyBadge from './shared/CopyBadge'
+import Tooltip from '../Tooltip'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
 
@@ -19,19 +20,20 @@ const TYPE_BADGE_BG = 'var(--bg-raised)'
 // Kept identical to the icon inside the Parse / Eval modals.
 function HumanEditedIcon() {
   return (
-    <span
-      title="Human-edited from AI's original extraction."
-      aria-label="Human-edited"
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 12, height: 12, color: 'var(--accent-amber)', marginLeft: 4,
-      }}
-    >
-      <svg width={10} height={10} viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
-              stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
-      </svg>
-    </span>
+    <Tooltip content="Human-edited from AI's original extraction.">
+      <span
+        aria-label="Human-edited"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 12, height: 12, color: 'var(--accent-amber)', marginLeft: 4,
+        }}
+      >
+        <svg width={10} height={10} viewBox="0 0 16 16" fill="none" aria-hidden>
+          <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
+                stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+        </svg>
+      </span>
+    </Tooltip>
   )
 }
 
@@ -104,10 +106,12 @@ function FooterButton({ label, onClick, accent, danger, amber, disabled, title }
           ? 'var(--accent-indigo)'
           : 'transparent'
   const color = disabled ? 'var(--text-dim)' : (accent || danger || amber ? 'var(--bg-deep)' : 'var(--text-primary)')
-  return (
+  // Phase 9A.2: tooltips are instant-on-hover via the Tooltip primitive.
+  // Only render one when `title` is explicitly passed — plain label buttons
+  // don't need a tooltip repeating their own label.
+  const button = (
     <button
       type="button"
-      title={title || label}
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
       style={{
@@ -126,6 +130,11 @@ function FooterButton({ label, onClick, accent, danger, amber, disabled, title }
       }}
     >{label}</button>
   )
+  // wrapperStyle flex:1 preserves the existing equal-width-in-flex-container
+  // layout — FooterButton is used inside `{display: 'flex', gap: 8}` rows.
+  return title
+    ? <Tooltip content={title} width={280} wrapperStyle={{ flex: 1 }}>{button}</Tooltip>
+    : button
 }
 
 function PanelHeader({ typeLabel, name, pin, onClose, badge }) {

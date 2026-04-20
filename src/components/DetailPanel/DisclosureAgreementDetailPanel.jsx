@@ -14,6 +14,7 @@
 // Phase 3 acceptance criterion ("... with Amend action (if grantor)").
 
 import CopyBadge from './shared/CopyBadge'
+import Tooltip from '../Tooltip'
 
 const DISCLOSURE_TYPE_COLOR = {
   full: 'var(--accent-indigo)',
@@ -268,30 +269,31 @@ export default function DisclosureAgreementDetailPanel({
         padding: '12px 18px', borderTop: '1px solid var(--border)',
         display: 'flex', gap: 8, flexShrink: 0,
       }}>
-        <button
-          type="button"
-          onClick={amendDisabled ? undefined : onAmend}
-          title={amendTooltip || 'Amend the Disclosure Agreement'}
-          disabled={amendDisabled}
-          style={{
-            flex: 1,
-            padding: '10px 14px',
-            background: amendDisabled
-              ? 'var(--bg-raised)'
-              : (isProvisional ? 'var(--accent-amber)' : 'var(--accent-indigo)'),
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: amendDisabled ? 'var(--text-dim)' : 'var(--bg-deep)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            cursor: amendDisabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {amendLabel}
-        </button>
+        <Tooltip content={amendTooltip || 'Amend the Disclosure Agreement'} width={280} wrapperStyle={{ flex: 1 }}>
+          <button
+            type="button"
+            onClick={amendDisabled ? undefined : onAmend}
+            disabled={amendDisabled}
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              background: amendDisabled
+                ? 'var(--bg-raised)'
+                : (isProvisional ? 'var(--accent-amber)' : 'var(--accent-indigo)'),
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: amendDisabled ? 'var(--text-dim)' : 'var(--bg-deep)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              cursor: amendDisabled ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {amendLabel}
+          </button>
+        </Tooltip>
       </div>
     </div>
   )

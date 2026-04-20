@@ -15,13 +15,13 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, FieldLabel,
 } from './ModalShared'
+import Tooltip from '../Tooltip'
 
 function ToggleRow({ id, label, sublabel, selected, locked, onToggle, color }) {
   const cursor = locked ? 'not-allowed' : 'pointer'
-  return (
+  const row = (
     <div
       onClick={locked ? undefined : () => onToggle(id)}
-      title={locked ? 'Cannot remove — an evaluation has already been run against this item.' : undefined}
       style={{
         padding: '10px 14px', cursor,
         background: selected ? `color-mix(in srgb, ${color} 10%, transparent)` : 'transparent',
@@ -55,6 +55,9 @@ function ToggleRow({ id, label, sublabel, selected, locked, onToggle, color }) {
       )}
     </div>
   )
+  return locked
+    ? <Tooltip content="Cannot remove — an evaluation has already been run against this item." width={280} wrapperStyle={{ display: 'block' }}>{row}</Tooltip>
+    : row
 }
 
 export default function AmendDisclosureModal({

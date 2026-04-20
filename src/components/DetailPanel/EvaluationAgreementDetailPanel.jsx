@@ -8,6 +8,7 @@
 // sets are carried alongside the DA scope.
 
 import CopyBadge from './shared/CopyBadge'
+import Tooltip from '../Tooltip'
 
 function formatDateTime(iso) {
   if (!iso) return '—'
@@ -221,28 +222,29 @@ export default function EvaluationAgreementDetailPanel({
         padding: '12px 18px', borderTop: '1px solid var(--border)',
         display: 'flex', gap: 8, flexShrink: 0,
       }}>
-        <button
-          type="button"
-          onClick={amendDisabled ? undefined : onAmend}
-          title={amendTooltip || 'Amend the Evaluation Agreement'}
-          disabled={amendDisabled}
-          style={{
-            flex: 1,
-            padding: '10px 14px',
-            background: amendDisabled ? 'var(--bg-raised)' : 'var(--accent-purple, #a78bfa)',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: amendDisabled ? 'var(--text-dim)' : 'var(--bg-deep)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            cursor: amendDisabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          Amend Evaluation Agreement
-        </button>
+        <Tooltip content={amendTooltip || 'Amend the Evaluation Agreement'} width={280} wrapperStyle={{ flex: 1 }}>
+          <button
+            type="button"
+            onClick={amendDisabled ? undefined : onAmend}
+            disabled={amendDisabled}
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              background: amendDisabled ? 'var(--bg-raised)' : 'var(--accent-purple, #a78bfa)',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: amendDisabled ? 'var(--text-dim)' : 'var(--bg-deep)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              cursor: amendDisabled ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Amend Evaluation Agreement
+          </button>
+        </Tooltip>
       </div>
     </div>
   )

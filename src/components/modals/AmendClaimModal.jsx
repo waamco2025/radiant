@@ -10,6 +10,7 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, FieldLabel,
 } from './ModalShared'
+import Tooltip from '../Tooltip'
 
 export default function AmendClaimModal({
   claim,                      // { id, name, description, referencedAssetIds }
@@ -40,9 +41,13 @@ export default function AmendClaimModal({
                 No Assets currently referenced.
               </div>
             ) : alreadyReferencedAssets.map((a) => (
-              <div
+              <Tooltip
                 key={a.id}
-                title="Already referenced — cannot deselect (Asset removal is not supported in V2.2)."
+                content="Already referenced — cannot deselect (Asset removal is not supported in V2.2)."
+                width={300}
+                wrapperStyle={{ display: 'block' }}
+              >
+              <div
                 style={{
                   padding: '10px 14px',
                   background: 'color-mix(in srgb, var(--text-dim) 5%, transparent)',
@@ -65,6 +70,7 @@ export default function AmendClaimModal({
                   <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a.file?.filename || a.id}</div>
                 </div>
               </div>
+              </Tooltip>
             ))}
           </div>
           <FieldLabel label={`Add Assets (${candidateAssets.length} available)`} required />

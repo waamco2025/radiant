@@ -13,6 +13,7 @@
 // state.
 
 import { useEffect, useState, useMemo, useRef } from 'react'
+import Tooltip from '../components/Tooltip.jsx'
 import { buildV22SharedArtifacts } from './v2_2Data.js'
 
 // Deterministic PRNG so cluster dot positions stay stable across renders.
@@ -175,9 +176,9 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
     >
       {/* User's corner node anchor (spec §8.1 — morphs from the chrome button
           into the Directory's bottom-left anchor node). */}
+      <Tooltip content="Exit Directory" position="top">
       <div
         onClick={onClose}
-        title="Exit Directory"
         style={{
           position: 'absolute',
           left: 32,
@@ -200,6 +201,7 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
       >
         {activeParty || 'You'}
       </div>
+      </Tooltip>
 
       {/* Cluster dot clouds */}
       {clusters.map((c) => (

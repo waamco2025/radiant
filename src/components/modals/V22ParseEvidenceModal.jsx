@@ -21,6 +21,7 @@ import {
   Btn, FieldLabel, ConfidenceBadge, StepDots,
 } from './ModalShared'
 import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
+import Tooltip from '../Tooltip'
 
 // Deterministic mock for "parsed" field values when the user hasn't yet
 // supplied real text. Mirrors the evaluation modal's mock-row initialisation:
@@ -59,19 +60,20 @@ function initialRowsFromTemplate(template) {
 // wording matches the one in V22RunEvaluationModal.
 function HumanEditedIcon() {
   return (
-    <span
-      title="Human-edited from AI's original extraction."
-      aria-label="Human-edited"
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 14, height: 14, color: 'var(--accent-amber)',
-      }}
-    >
-      <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
-              stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
-      </svg>
-    </span>
+    <Tooltip content="Human-edited from AI's original extraction.">
+      <span
+        aria-label="Human-edited"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, color: 'var(--accent-amber)',
+        }}
+      >
+        <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden>
+          <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
+                stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+        </svg>
+      </span>
+    </Tooltip>
   )
 }
 
@@ -207,15 +209,16 @@ export default function V22ParseEvidenceModal({
                         {row.name}
                         {row.required && <span style={{ color: 'var(--accent-red)', marginLeft: 2 }}>*</span>}
                       </span>
-                      <span
-                        onClick={() => {
-                          setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, confidence: nextConfidence(r.confidence) } : r))
-                        }}
-                        style={{ cursor: 'pointer' }}
-                        title="Click to cycle confidence"
-                      >
-                        <ConfidenceBadge level={row.confidence} />
-                      </span>
+                      <Tooltip content="Click to cycle confidence">
+                        <span
+                          onClick={() => {
+                            setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, confidence: nextConfidence(r.confidence) } : r))
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <ConfidenceBadge level={row.confidence} />
+                        </span>
+                      </Tooltip>
                       {/* Phase 9A item 10: human-edited pencil when the row's
                           current value differs from the AI's original extraction. */}
                       {row._aiOriginalValue != null && row.value !== row._aiOriginalValue && <HumanEditedIcon />}

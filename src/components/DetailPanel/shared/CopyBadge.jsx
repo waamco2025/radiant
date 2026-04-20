@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Tooltip from '../../Tooltip'
 
 export default function CopyBadge({ value, truncated }) {
   const [copied, setCopied] = useState(false)
@@ -14,28 +15,29 @@ export default function CopyBadge({ value, truncated }) {
   }
 
   return (
-    <span
-      data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined}
-      onClick={handleCopy}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '3px 8px',
-        borderRadius: 4,
-        fontSize: 11,
-        fontFamily: 'var(--font-mono)',
-        color: copied ? 'var(--accent-green)' : 'var(--text-secondary)',
-        background: copied
-          ? 'color-mix(in srgb, var(--accent-green) 6%, transparent)'
-          : 'var(--bg-deep)',
-        border: `1px solid ${copied ? 'var(--accent-green)' : 'var(--border)'}`,
-        cursor: 'pointer',
-        transition: 'all 180ms',
-        whiteSpace: 'nowrap',
-      }}
-      title="Click to copy"
-    >
-      {copied ? '✓ Copied' : display}
-    </span>
+    <Tooltip content={copied ? 'Copied!' : 'Click to copy'} mono>
+      <span
+        data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined}
+        onClick={handleCopy}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '3px 8px',
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          color: copied ? 'var(--accent-green)' : 'var(--text-secondary)',
+          background: copied
+            ? 'color-mix(in srgb, var(--accent-green) 6%, transparent)'
+            : 'var(--bg-deep)',
+          border: `1px solid ${copied ? 'var(--accent-green)' : 'var(--border)'}`,
+          cursor: 'pointer',
+          transition: 'all 180ms',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {copied ? '✓ Copied' : display}
+      </span>
+    </Tooltip>
   )
 }

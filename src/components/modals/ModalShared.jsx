@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import Tooltip from '../Tooltip'
 
 /* ═══════════════════════════════════════════════════════════════════════
    SDA TYPE CONFIG
@@ -198,17 +199,19 @@ export function CopyBadge({ value, truncated }) {
     : value
   const copy = (e) => { e.stopPropagation(); navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
-    <span data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined} onClick={copy} title="Click to copy" style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '3px 9px', borderRadius: 4,
-      background: 'var(--bg-raised)', border: '1px solid var(--border)',
-      fontFamily: 'var(--font-mono)', fontSize: 11,
-      color: copied ? 'var(--accent-green)' : 'var(--text-dim)',
-      cursor: 'pointer', transition: 'color 150ms', userSelect: 'none',
-      whiteSpace: 'nowrap',
-    }}>
-      {copied ? '✓ Copied' : display}
-    </span>
+    <Tooltip content={copied ? 'Copied!' : 'Click to copy'} mono>
+      <span data-badge-type={value?.startsWith?.('DOT-') ? 'dot' : undefined} onClick={copy} style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '3px 9px', borderRadius: 4,
+        background: 'var(--bg-raised)', border: '1px solid var(--border)',
+        fontFamily: 'var(--font-mono)', fontSize: 11,
+        color: copied ? 'var(--accent-green)' : 'var(--text-dim)',
+        cursor: 'pointer', transition: 'color 150ms', userSelect: 'none',
+        whiteSpace: 'nowrap',
+      }}>
+        {copied ? '✓ Copied' : display}
+      </span>
+    </Tooltip>
   )
 }
 

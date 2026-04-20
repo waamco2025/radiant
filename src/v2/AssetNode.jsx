@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import Tooltip from '../components/Tooltip.jsx'
 
 // Inject reveal animation keyframes once
 if (typeof document !== 'undefined' && !document.getElementById('reveal-keyframes')) {
@@ -44,49 +45,15 @@ const MINI_CARD_H = 48
 const CLICK_DELAY = 250
 const ACTION_BAR_W = 34 // 6px gap + 24px button + 4px breathing
 
-// Portal tooltip: renders via createPortal to document.body with position:fixed
-// Positioned to the RIGHT of the trigger by default, flips left if near viewport edge
-function PortalTooltip({ text, x, y, anchor = 'right', maxWidth }) {
-  if (!text || x == null || y == null) return null
+// Phase 9A.1 warmer node border value — 40% indigo blended with var(--border).
+// Surfaced as a shared constant so the full card, mini card, and dot card
+// all render identically. Phase 9A.1.5 item 1 extended the treatment to the
+// mini and dot LOD renderings (was full-size only in Phase 9A.1).
+const WARM_BORDER = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
 
-  // Estimate tooltip width for flip check
-  const estWidth = (typeof text === 'string' ? text.length * 6.5 : 80) + 20
-  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 2000
-  const wouldClipRight = anchor === 'right' && (x + 8 + estWidth > viewportW - 16)
-
-  const effectiveAnchor = wouldClipRight ? 'left' : anchor
-
-  const style = {
-    position: 'fixed',
-    zIndex: 5000,
-    padding: '4px 8px',
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 4,
-    fontSize: 10,
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--text-secondary)',
-    pointerEvents: 'none',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-    maxWidth: maxWidth || undefined,
-    whiteSpace: maxWidth ? 'normal' : 'nowrap',
-  }
-  if (effectiveAnchor === 'above') {
-    style.left = x
-    style.top = y - 8
-    style.transform = 'translate(-50%, -100%)'
-  } else if (effectiveAnchor === 'left') {
-    style.left = x - 8
-    style.top = y
-    style.transform = 'translate(-100%, -50%)'
-  } else {
-    // right (default)
-    style.left = x + 8
-    style.top = y
-    style.transform = 'translateY(-50%)'
-  }
-  return createPortal(<div style={style}>{text}</div>, document.body)
-}
+// Phase 9A.2: PortalTooltip removed in favour of the shared Tooltip primitive
+// (src/components/Tooltip.jsx). StackBadge / GlobeBadge / EvidenceClip /
+// ActionButton each wrap themselves in <Tooltip content=…> now.
 
 function HealthBar({ health }) {
   const total = health.ok + health.warn + health.bad
@@ -111,160 +78,123 @@ function HealthBar({ health }) {
 
 function StackBadge({ count, categoryColor }) {
   const [hovered, setHovered] = useState(false)
-  const [tooltipPos, setTooltipPos] = useState(null)
-
   if (!count || count === 0) return null
-
   const tooltipText = `${count} associated asset${count === 1 ? '' : 's'} — evidence, evaluations, and linked records. Double-click or use the dive button to explore.`
-
-  const handleMouseEnter = (e) => {
-    e.stopPropagation()
-    setHovered(true)
-    const rect = e.currentTarget.getBoundingClientRect()
-    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top })
-  }
-
   return (
-    <div
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
-      style={{
-        minWidth: 24,
-        height: 20,
-        padding: '0 6px',
-        borderRadius: 6,
-        background: hovered ? 'var(--bg-surface)' : 'var(--bg-surface)',
-        border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'default',
-        transition: 'background 120ms, border-color 120ms',
-      }}
-    >
-      <span style={{
-        fontFamily: 'var(--font-mono)',
-        fontSize: 9,
-        color: hovered ? 'var(--text-secondary)' : 'var(--text-secondary)',
-        fontWeight: 600,
-        transition: 'color 120ms',
-        lineHeight: 1,
-      }}>
-        {count}
-      </span>
-      {hovered && tooltipPos && (
-        <PortalTooltip text={tooltipText} x={tooltipPos.x} y={tooltipPos.y} anchor="above" maxWidth={260} />
-      )}
-    </div>
+    <Tooltip content={tooltipText} width={260}>
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          minWidth: 24,
+          height: 20,
+          padding: '0 6px',
+          borderRadius: 6,
+          background: 'var(--bg-surface)',
+          border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'default',
+          transition: 'background 120ms, border-color 120ms',
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: 'var(--text-secondary)',
+          fontWeight: 600,
+          transition: 'color 120ms',
+          lineHeight: 1,
+        }}>
+          {count}
+        </span>
+      </div>
+    </Tooltip>
   )
 }
 
 function GlobeBadge() {
   const [hovered, setHovered] = useState(false)
-  const [tooltipPos, setTooltipPos] = useState(null)
-
-  const handleMouseEnter = (e) => {
-    e.stopPropagation()
-    setHovered(true)
-    const rect = e.currentTarget.getBoundingClientRect()
-    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top })
-  }
-
   return (
-    <div
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
-      style={{
-        width: 24, height: 20, borderRadius: 6,
-        background: hovered
-          ? 'color-mix(in srgb, #38bdf8 12%, transparent)'
-          : 'var(--bg-surface)',
-        border: hovered
-          ? '1px solid color-mix(in srgb, #38bdf8 30%, transparent)'
-          : '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0, cursor: 'default',
-        transition: 'background 120ms, border-color 120ms',
-      }}
-    >
-      <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="1.2" />
-        <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
-        <line x1="2" y1="8" x2="14" y2="8" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
-      </svg>
-      {hovered && tooltipPos && (
-        <PortalTooltip text="Listed in Public Directory" x={tooltipPos.x} y={tooltipPos.y} anchor="above" />
-      )}
-    </div>
+    <Tooltip content="Listed in Public Directory">
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          width: 24, height: 20, borderRadius: 6,
+          background: hovered
+            ? 'color-mix(in srgb, #38bdf8 12%, transparent)'
+            : 'var(--bg-surface)',
+          border: hovered
+            ? '1px solid color-mix(in srgb, #38bdf8 30%, transparent)'
+            : '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, cursor: 'default',
+          transition: 'background 120ms, border-color 120ms',
+        }}
+      >
+        <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="1.2" />
+          <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
+          <line x1="2" y1="8" x2="14" y2="8" stroke={hovered ? '#38bdf8' : 'var(--text-dim)'} strokeWidth="0.9" />
+        </svg>
+      </div>
+    </Tooltip>
   )
 }
 
 function EvidenceClip() {
   const [hovered, setHovered] = useState(false)
-  const [tooltipPos, setTooltipPos] = useState(null)
   return (
-    <div
-      onMouseEnter={(e) => {
-        setHovered(true)
-        const rect = e.currentTarget.getBoundingClientRect()
-        setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top })
-      }}
-      onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
-      style={{ display: 'flex', alignItems: 'center', cursor: 'default' }}
-    >
-      <svg width={12} height={12} viewBox="0 0 16 16" fill="none" style={{
-        opacity: hovered ? 0.8 : 0.5,
-        transition: 'opacity 150ms',
-      }}>
-        <path d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5"
-          stroke="var(--text-tertiary)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-      {hovered && tooltipPos && (
-        <PortalTooltip text="Has attached evidence" x={tooltipPos.x} y={tooltipPos.y} anchor="above" />
-      )}
-    </div>
+    <Tooltip content="Has attached evidence">
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{ display: 'flex', alignItems: 'center', cursor: 'default' }}
+      >
+        <svg width={12} height={12} viewBox="0 0 16 16" fill="none" style={{
+          opacity: hovered ? 0.8 : 0.5,
+          transition: 'opacity 150ms',
+        }}>
+          <path d="M10.5 4.5v6a3 3 0 01-6 0v-7a2 2 0 014 0v6.5a1 1 0 01-2 0V5"
+            stroke="var(--text-tertiary)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    </Tooltip>
   )
 }
 
 function ActionButton({ icon, tooltip, onClick, categoryColor }) {
   const [hovered, setHovered] = useState(false)
-  const [tooltipPos, setTooltipPos] = useState(null)
-
-  const handleMouseEnter = (e) => {
-    setHovered(true)
-    const rect = e.currentTarget.getBoundingClientRect()
-    setTooltipPos({ x: rect.right, y: rect.top + rect.height / 2 })
-  }
-
   return (
-    <div
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => { setHovered(false); setTooltipPos(null) }}
-    >
-      <button
-        onClick={e => { e.stopPropagation(); onClick() }}
-        onDoubleClick={e => e.stopPropagation()}
-        style={{
-          width: 24, height: 24,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: hovered ? 'var(--bg-raised)' : 'var(--bg-surface)',
-          border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
-          borderRadius: 4,
-          color: hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
-          fontSize: 12,
-          cursor: 'pointer',
-          padding: 0,
-          lineHeight: 1,
-          fontFamily: 'var(--font-mono)',
-          transition: 'background 100ms, color 100ms',
-        }}
+    <Tooltip content={tooltip}>
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {icon}
-      </button>
-      {hovered && tooltipPos && (
-        <PortalTooltip text={tooltip} x={tooltipPos.x} y={tooltipPos.y} anchor="right" />
-      )}
-    </div>
+        <button
+          onClick={e => { e.stopPropagation(); onClick() }}
+          onDoubleClick={e => e.stopPropagation()}
+          style={{
+            width: 24, height: 24,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: hovered ? 'var(--bg-raised)' : 'var(--bg-surface)',
+            border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
+            borderRadius: 4,
+            color: hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+            fontSize: 12,
+            cursor: 'pointer',
+            padding: 0,
+            lineHeight: 1,
+            fontFamily: 'var(--font-mono)',
+            transition: 'background 100ms, color 100ms',
+          }}
+        >
+          {icon}
+        </button>
+      </div>
+    </Tooltip>
   )
 }
 
@@ -456,8 +386,9 @@ export default function AssetNode({
   // Phase 9A.1 item 4: bumped 22% → 40% indigo blend. The 22% baseline was
   // imperceptible in browser; 40% reads as a clear indigo-grey that stops
   // node terminations from fading into the dark canvas without competing
-  // with edge indigo (edges render at full accent-indigo).
-  const warmBorder = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
+  // with edge indigo (edges render at full accent-indigo). Value is now a
+  // module-level constant (WARM_BORDER) shared with the mini + dot cards
+  // per Phase 9A.1.5 item 1.
   const borderColor = isDeclined
     ? 'var(--accent-red)'
     : isProvisional
@@ -466,7 +397,7 @@ export default function AssetNode({
       ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
-        : warmBorder
+        : WARM_BORDER
 
   // Phase 9A item 2: counterparty visual distinction. Pulled-in nodes owned
   // by a different party get a muted tint — same base bg-card, blended with a
@@ -562,24 +493,32 @@ export default function AssetNode({
         }} />
       )}
 
-      {/* Phase 9A.1 item 7: edge-endpoint indicator — right-side vertical
-          indigo line, 4px offset from the card, same height as the card.
-          Static, no pulse. Suppressed when the node is itself selected so
-          the amber selection border wins and the two states stay visually
-          distinct. */}
-      {isEdgeEndpoint && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: CARD_W * scale + 4,
-          width: 3,
-          height: CARD_H * scale,
-          background: 'var(--accent-indigo)',
-          borderRadius: 1.5,
-          pointerEvents: 'none',
-          zIndex: 0,
-        }} />
-      )}
+      {/* Phase 9A.1 item 7 + Phase 9A.1.5 item 4: edge-endpoint indicator —
+          vertical indigo line, 4px offset from the card, same height as
+          the card. Renders on the INSIDE edge of the card — the side
+          facing the other endpoint of the selected edge. V2App sets
+          `_edgeEndpointSide` to 'left' or 'right' based on x-position
+          comparison. Static, no pulse. Suppressed when the node is itself
+          selected so the amber selection border wins. */}
+      {isEdgeEndpoint && (() => {
+        const side = node._edgeEndpointSide === 'left' ? 'left' : 'right'
+        const horizStyle = side === 'left'
+          ? { left: -7 }                        // 4px outside + 3px line width
+          : { left: CARD_W * scale + 4 }
+        return (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            width: 3,
+            height: CARD_H * scale,
+            background: 'var(--accent-indigo)',
+            borderRadius: 1.5,
+            pointerEvents: 'none',
+            zIndex: 0,
+            ...horizStyle,
+          }} />
+        )
+      })()}
 
       <div
         onClick={handleClick}
@@ -723,15 +662,21 @@ export default function AssetNode({
         )}
         </div>
 
-        {/* Row 3: health minibar (or provisional message). Lives outside the
-            top-content wrapper so flex:space-between on the parent pushes it
-            to the bottom and centres the whitespace above it. */}
+        {/* Row 3: health minibar (or provisional message). Phase 9A.1.5
+            item 2: marginBottom on the minibar shifts it up from the
+            inner-area bottom so the whitespace above (owner-row → minibar-
+            top) and below (minibar-bottom → card bottom edge) reads as
+            roughly symmetric. Empirically tuned in Chrome: with the 51px
+            top group + 78px inner-area + 9px card padding-bottom, a
+            marginBottom of 3 yields ~11px above / ~12px below — the
+            minibar now sits visually centred in the lower half. */}
         {showAsProvisional ? (
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
             color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
             fontStyle: 'italic',
+            marginBottom: 3,
           }}>
             {isDeclined ? 'Disclosure declined' : 'Awaiting disclosure from owner'}
           </div>
@@ -741,7 +686,7 @@ export default function AssetNode({
           const total = dh.ok + (dh.warn || 0) + dh.bad
           if (total === 0) return null
           return (
-            <div style={{ display: 'flex' }}>
+            <div style={{ display: 'flex', marginBottom: 3 }}>
               <HealthBar health={dh} />
             </div>
           )
@@ -911,12 +856,38 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
         cursor: 'pointer',
       }}
     >
+      {/* Phase 9A.2 item 2: dot-LOD edge-endpoint indicator — hollow indigo
+          ring around the dot when _isEdgeEndpoint is set. Suppressed when
+          the dot is itself selected (amber selection ring below wins). */}
+      {node._isEdgeEndpoint && !isSelected && (
+        <div style={{
+          position: 'absolute',
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          border: '1.5px solid var(--accent-indigo)',
+          boxSizing: 'border-box',
+          top: -1,
+          left: -1,
+          pointerEvents: 'none',
+        }} />
+      )}
+      {/* Phase 9A.1.5 item 1: dots get the same WARM_BORDER ring as mini +
+          full cards. The 1px border at 40% indigo keeps dots from fading
+          into the dark canvas at low zoom. Red UNSAT borders applied if the
+          dot's node has bad health. */}
       <div style={{
         width: 8,
         height: 8,
         borderRadius: '50%',
         background: 'var(--text-tertiary)',
         margin: 4,
+        border: `1px solid ${
+          (node.displayHealth || node.health)?.bad > 0
+            ? 'var(--accent-red)'
+            : WARM_BORDER
+        }`,
+        boxSizing: 'border-box',
         position: 'relative',
       }}>
         {isSelected && (
@@ -982,6 +953,9 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
   const isDeclined = !!node._isDeclined
   const h = node.displayHealth || node.health
   const hasBadHealth = h && h.bad > 0
+  // Phase 9A.1.5 item 1: mini cards now use the same WARM_BORDER treatment
+  // as full-size cards so node terminations don't fade into the canvas at
+  // MID_LOD zoom.
   const borderColor = isDeclined
     ? 'var(--accent-red)'
     : isProvisional
@@ -990,7 +964,7 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
       ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
-        : 'var(--border)'
+        : WARM_BORDER
 
   const handleClick = useCallback((e) => {
     e.stopPropagation()
@@ -1050,6 +1024,17 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
 
   const showTooltip = (hovered || isSelected) && tooltipPos
 
+  // Phase 9A.2 item 1: mini-LOD endpoint indicator. Same right/left-of-card
+  // vertical indigo line as the full card, scaled for the smaller footprint.
+  // Full card ships a 3px line with 4px offset against a 96px card; mini
+  // card uses a 2px line with 3px offset against a 48px card so the visual
+  // weight is proportional at the MID_LOD zoom range.
+  const miniIsEdgeEndpoint = !!node._isEdgeEndpoint && !isSelected
+  const miniEndpointSide = node._edgeEndpointSide === 'left' ? 'left' : 'right'
+  const miniEndpointLineStyle = miniEndpointSide === 'left'
+    ? { left: -5 }                                // 3px offset + 2px line width
+    : { left: MINI_CARD_W + 3 }
+
   return (
     <div
       ref={miniRef}
@@ -1063,6 +1048,20 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         cursor: 'pointer',
       }}
     >
+      {/* Phase 9A.2 item 1: mini-LOD edge-endpoint indicator. */}
+      {miniIsEdgeEndpoint && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          width: 2,
+          height: MINI_CARD_H,
+          background: 'var(--accent-indigo)',
+          borderRadius: 1,
+          pointerEvents: 'none',
+          zIndex: 0,
+          ...miniEndpointLineStyle,
+        }} />
+      )}
       {isSelected && (
         <div style={{
           position: 'absolute',

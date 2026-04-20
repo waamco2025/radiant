@@ -2639,6 +2639,12 @@ const V2Canvas = forwardRef(function V2Canvas({
   // background. Bumped to 65% white blend + 1.5px stroke so the selection state
   // is unmistakable across all four disclosure types (Full indigo solid,
   // Selective amber dashed, Proof-Only green dotted, Provisional muted dashed).
+  //
+  // Phase 9A.2 item 3: added `currentLayer.edges` and `zoom` to deps. The
+  // buildEdges effect at line ~2188 rebuilds all edge materials when the
+  // layer or zoom changes, which wipes the selection brightening from the
+  // previous render. Re-running this effect after each rebuild re-applies
+  // the brightening so selection persists through zoom + layer changes.
   useEffect(() => {
     const group = edgeGroupRef.current
     if (!group) return
@@ -2663,7 +2669,7 @@ const V2Canvas = forwardRef(function V2Canvas({
       mat.needsUpdate = true
     })
     dirtyRef.current = true
-  }, [selectedEdgeId])
+  }, [selectedEdgeId, currentLayer.edges, zoom])
 
   // Edge hover state for tooltip (raycaster-based)
   const [hoveredEdge, setHoveredEdge] = useState(null)

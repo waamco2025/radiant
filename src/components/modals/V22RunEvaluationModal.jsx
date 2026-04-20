@@ -15,6 +15,7 @@ import {
   Btn, FieldLabel,
 } from './ModalShared'
 import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
+import Tooltip from '../Tooltip'
 
 const STATUS_CYCLE = ['satisfactory', 'unsatisfactory', 'missing', 'na']
 const STATUS_CFG = {
@@ -62,19 +63,20 @@ function ConfidenceBadge({ confidence }) {
 // differs from the AI's original extraction. Tooltip reads the spec wording.
 function HumanEditedIcon() {
   return (
-    <span
-      title="Human-edited from AI's original extraction."
-      aria-label="Human-edited"
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 14, height: 14, color: 'var(--accent-amber)',
-      }}
-    >
-      <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
-              stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
-      </svg>
-    </span>
+    <Tooltip content="Human-edited from AI's original extraction.">
+      <span
+        aria-label="Human-edited"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, color: 'var(--accent-amber)',
+        }}
+      >
+        <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden>
+          <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
+                stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+        </svg>
+      </span>
+    </Tooltip>
   )
 }
 
@@ -100,30 +102,36 @@ function StatusChevronPicker({ status, onCycle }) {
   }
   return (
     <span style={chipStyle}>
-      <span
-        onClick={(e) => { e.stopPropagation(); onCycle(-1) }}
-        title="Previous status"
-        style={chevStyle}
-      >◂</span>
-      <span
-        onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
-        title="Next status"
-        style={{
-          padding: '2px 2px',
-          cursor: 'pointer',
-          textAlign: 'center',
-          display: 'inline-block',
-          // Pin to the widest label's width ("UNSATISFACTORY" = 14 chars at
-          // 10px mono ≈ 94px including letter-spacing). Eyeballed in Chrome
-          // and padded a bit for safety across font variants.
-          minWidth: 96,
-        }}
-      >{cfg.label}</span>
-      <span
-        onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
-        title="Next status"
-        style={chevStyle}
-      >▸</span>
+      <Tooltip content="Previous status">
+        <span
+          onClick={(e) => { e.stopPropagation(); onCycle(-1) }}
+          style={chevStyle}
+        >◂</span>
+      </Tooltip>
+      <Tooltip content="Next status">
+        <span
+          onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
+          style={{
+            padding: '2px 2px',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'inline-block',
+            // Pin to the widest label's width ("UNSATISFACTORY" = 14 chars at
+            // 10px mono). Phase 9A.1.5 item 3 bumped 96 → 100 because the
+            // UNSATISFACTORY rendered width came in at ~95-96 and brushed up
+            // against the pinned minimum, causing a sub-pixel width flicker
+            // when cycling in/out. 100 leaves a clear margin and keeps all
+            // four states pixel-stable.
+            minWidth: 100,
+          }}
+        >{cfg.label}</span>
+      </Tooltip>
+      <Tooltip content="Next status">
+        <span
+          onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
+          style={chevStyle}
+        >▸</span>
+      </Tooltip>
     </span>
   )
 }
