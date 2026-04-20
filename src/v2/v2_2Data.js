@@ -122,6 +122,53 @@ const RADIANT_NETWORK_ACTOR = {
 
 export { RADIANT_NETWORK_ACTOR, RADIANT_NETWORK_PARTY, RADIANT_NETWORK_DOT, RADIANT_NETWORK_PIN }
 
+/**
+ * Actor pool — the four known actors whose PINs the transfer modal will
+ * accept. Kept in a module-level lazy cache so PIN resolution is a pure
+ * lookup, not a full `buildV22SharedArtifacts` walk per keystroke.
+ */
+let _actorPoolCache = null
+function actorPool() {
+  if (_actorPoolCache) return _actorPoolCache
+  const actors = [
+    { id: 'bob-govco',     user: 'Bob',   party: 'GovCo',   role: 'buyer'    },
+    { id: 'alice-microco', user: 'Alice', party: 'MicroCo', role: 'seller'   },
+    { id: 'carol-auditco', user: 'Carol', party: 'AuditCo', role: 'auditor'  },
+    RADIANT_NETWORK_ACTOR,
+  ]
+  _actorPoolCache = actors.map((a) => ({
+    ...a,
+    pin: a.pin || makePin(a.id),
+    partyDot: a.partyDot || makeDot(a.party),
+  }))
+  return _actorPoolCache
+}
+
+/**
+ * Resolve an Actor by PIN. Used by V22TransferAssetModal to validate the
+ * recipient the user typed.
+ *
+ * Returns `{ actor, isSelf, isNetwork }` where:
+ *   • actor     — the resolved actor object (or null if no match)
+ *   • isSelf    — true when the resolved PIN belongs to activeParty
+ *   • isNetwork — true when the resolved PIN is the Radiant Network
+ *
+ * Callers typically reject self + network transfers; the resolver surfaces
+ * both conditions so callers can tailor error copy.
+ */
+export function resolveActorByPin(pin, { activeParty } = {}) {
+  if (!pin || typeof pin !== 'string') return { actor: null, isSelf: false, isNetwork: false }
+  const trimmed = pin.trim()
+  for (const actor of actorPool()) {
+    if (actor.pin === trimmed) {
+      const isNetwork = actor.id === RADIANT_NETWORK_ACTOR.id
+      const isSelf = !!activeParty && actor.party === activeParty
+      return { actor, isSelf, isNetwork }
+    }
+  }
+  return { actor: null, isSelf: false, isNetwork: false }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // FACTORY FUNCTIONS — spec §10
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1428,6 +1475,16 @@ function buildViewForActor(actor, shared) {
     }
   }
 
+  // Phase 9A.4 Gate B: pending transfers where this actor is the SENDER
+  // produce a TRANSFERRING badge on the actor's Asset. Map: assetId → transfer
+  // record. The canvas adapter stamps `_pendingTransfer` from this map.
+  const pendingTransfersByAssetId = new Map()
+  for (const t of (shared.transfers || [])) {
+    if (t.fromParty === party) {
+      pendingTransfersByAssetId.set(t.assetId, t)
+    }
+  }
+
   return {
     actor,
     actors,
@@ -1445,6 +1502,7 @@ function buildViewForActor(actor, shared) {
     provisionalClaimIds,
     provisionalAssetIds,
     declinedClaimIds,
+    pendingTransfersByAssetId,
   }
 }
 
@@ -1513,6 +1571,10 @@ function mergeProvisionals(shared, provisionals) {
   // declineRecords ride along on the merged shared bundle so view builders can
   // surface declined claims without inventing a new module-level store.
   merged.declineRecords = [...(shared.declineRecords || []), ...(provisionals.declineRecords || [])]
+  // Phase 9A.4 Gate B: pending transfer records surface on the sender's
+  // Asset as a TRANSFERRING badge. Canvas adapter reads these to stamp
+  // `_pendingTransfer` onto the sender's Asset node.
+  merged.transfers = [...(shared.transfers || []), ...(provisionals.transfers || [])]
   return merged
 }
 
@@ -2481,7 +2543,16 @@ export function buildV22Canvas(view) {
   const ownedAssets = view.assets.filter((a) => view.ownedAssetIds.has(a.id))
   const pulledAssets = view.assets.filter((a) => !view.ownedAssetIds.has(a.id))
   ownedAssets.forEach((asset, i) => {
-    nodes.push(assetToNode(asset, COL_OWN_ASSET, i * ROW_STEP))
+    const node = assetToNode(asset, COL_OWN_ASSET, i * ROW_STEP)
+    // Phase 9A.4 Gate B: stamp _pendingTransfer so AssetNode can render the
+    // TRANSFERRING badge. Canvas adapter also sets _showAsProvisional so the
+    // dashed-border treatment fires (same visual language as Phase 4 PROVISIONAL).
+    const pendingTransfer = view.pendingTransfersByAssetId?.get(asset.id)
+    if (pendingTransfer) {
+      node._pendingTransfer = pendingTransfer
+      node._showAsProvisional = true
+    }
+    nodes.push(node)
   })
 
   // Phase 6 carry-over #4: do NOT append "· PROVISIONAL" / "· DECLINED" to v22Type.

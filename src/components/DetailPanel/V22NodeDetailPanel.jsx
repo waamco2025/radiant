@@ -222,9 +222,18 @@ function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAsset
 }
 
 /* ─── Asset Panel ─────────────────────────────────────────────────────── */
-function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreateClaim, onParseEvidence, parseResultsForAsset = [] }) {
+function V22AssetPanel({
+  node, activeParty, onClose,
+  onRequestAgreement, onCreateClaim, onParseEvidence,
+  onTransferAsset, onCancelTransfer,
+  parseResultsForAsset = [],
+}) {
   const asset = node.v22Artifact
   const isOwner = activeParty === node.owner
+  // Phase 9A.4 Gate B: while a transfer is pending the owner can only
+  // cancel. Post-accept the Asset moves off this canvas entirely; pre-accept
+  // the other actions would be ambiguous under a change of ownership.
+  const isPendingTransfer = !!node._pendingTransfer
   return (
     <PanelLayout
       header={<PanelHeader typeLabel="ASSET" name={node.name} pin={node.pin} onClose={onClose} />}
@@ -256,15 +265,32 @@ function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreat
             <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />
             <Row label="Parse Results" value={parseResultsForAsset.length} />
           </Section>
+          {isPendingTransfer && (
+            <Section title="Pending Transfer">
+              <Row label="Recipient" value={node._pendingTransfer.toParty} />
+              <Row label="Initiated" value={formatDateTime(node._pendingTransfer.initiatedTimestamp)} />
+              {node._pendingTransfer.note && (
+                <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--bg-raised)', borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Note to recipient</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>"{node._pendingTransfer.note}"</div>
+                </div>
+              )}
+            </Section>
+          )}
         </>
       }
       footer={
         isOwner ? (
-          <>
-            <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
-            <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a PEP template" />
-            <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
-          </>
+          isPendingTransfer ? (
+            <FooterButton label="Cancel Transfer" danger onClick={onCancelTransfer} title="Withdraw the pending transfer — no ledger record, recipient notification dismisses." />
+          ) : (
+            <>
+              <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
+              <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a PEP template" />
+              <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
+              <FooterButton label="Transfer" onClick={onTransferAsset} disabled={!onTransferAsset} title="Transfer ownership of this Asset to another actor" />
+            </>
+          )
         ) : null
       }
     />

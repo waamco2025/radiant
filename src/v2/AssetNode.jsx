@@ -614,7 +614,7 @@ export default function AssetNode({
           }}>
             {node.name}
           </div>
-          {showAsProvisional && !isDeclined && (
+          {showAsProvisional && !isDeclined && !node._pendingTransfer && (
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
               padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
@@ -622,6 +622,19 @@ export default function AssetNode({
               background: 'color-mix(in srgb, var(--text-dim) 10%, transparent)',
               flexShrink: 0,
             }}>PROVISIONAL</span>
+          )}
+          {/* Phase 9A.4 Gate B: TRANSFERRING badge on the sender's Asset
+              while a transfer is pending. Amber to match the provisional
+              language used for Disclosure Agreements while keeping it
+              distinct from the grey PROVISIONAL pill. */}
+          {node._pendingTransfer && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+              color: 'var(--accent-amber)',
+              background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+              flexShrink: 0,
+            }}>TRANSFERRING</span>
           )}
           {node.isEvaluation && node.status === 'superseded' && (
             <span style={{
@@ -674,11 +687,19 @@ export default function AssetNode({
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
-            color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
+            color: isDeclined
+              ? 'var(--accent-red)'
+              : node._pendingTransfer
+                ? 'var(--accent-amber)'
+                : 'var(--text-dim)',
             fontStyle: 'italic',
             marginBottom: 3,
           }}>
-            {isDeclined ? 'Disclosure declined' : 'Awaiting disclosure from owner'}
+            {isDeclined
+              ? 'Disclosure declined'
+              : node._pendingTransfer
+                ? `Awaiting acceptance from ${node._pendingTransfer.toParty}`
+                : 'Awaiting disclosure from owner'}
           </div>
         ) : (() => {
           if (node.isEvidence || node.isParse || node.category === 'parse') return null
@@ -759,9 +780,17 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
       break
     case 'ASSET':
       if (isOwner && onV22CardAction) {
-        buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
-        buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
-        buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
+        // Phase 9A.4 Gate B: while a transfer is pending the owner can only
+        // cancel it — the other actions would be ambiguous under a change
+        // of ownership. Post-accept the Asset moves off this canvas entirely.
+        if (node._pendingTransfer) {
+          buttons.push({ icon: '✕', tooltip: 'Cancel Transfer', onClick: fire('cancelTransfer') })
+        } else {
+          buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
+          buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
+          buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
+          buttons.push({ icon: '→', tooltip: 'Transfer', onClick: fire('transferAsset') })
+        }
       }
       break
     case 'CLAIM': {

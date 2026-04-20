@@ -12,6 +12,7 @@ import {
   makeAmendedClaim, makeAmendedDisclosureAgreement,
   makeParseRunArtifacts,
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
+  makeTransferRecord, makeAsset, makeDotObject,
   buildV22SharedArtifacts,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
@@ -27,6 +28,7 @@ import CombinedResponseModal from '../components/modals/CombinedResponseModal.js
 import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
 import V22CreateAssetModal from '../components/modals/V22CreateAssetModal.jsx'
 import V22CreateClaimModal from '../components/modals/V22CreateClaimModal.jsx'
+import V22TransferAssetModal from '../components/modals/V22TransferAssetModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
@@ -81,6 +83,17 @@ export default function V2App() {
     evaluationAgreements: [],
     evaluationResults: [],
     declineRecords: [],
+    // Phase 9A.4 Gate B: `transfers` holds provisional transfer records.
+    //   Shape: [{ id, assetId, fromOwnerDid, fromParty, toOwnerDid, toParty, initiatedTimestamp, note }]
+    //   On accept: removed from here, Asset is re-emitted with updated dot
+    //     (ownerDid, lineage[]) into `assets`; the canvas adapter then
+    //     renders the Asset on the recipient's canvas.
+    //   On decline: removed from here, a declined transfer record is appended
+    //     to the Asset's lineage via a re-emit; sender's Asset loses the
+    //     TRANSFERRING badge. Sender's canvas retains the Asset.
+    //   On cancel: removed from here, sender's Asset clears badge. No
+    //     ledger record (cancelled transfers don't persist per §11.7).
+    transfers: [],
   })
   // V2.2 modal state
   const [v22RequestOpen, setV22RequestOpen] = useState(false)
@@ -108,6 +121,11 @@ export default function V2App() {
   //     pre-selects the Asset when launched from an Asset panel/card.
   const [v22RegisteringAsset, setV22RegisteringAsset] = useState(null) // null | { source: 'actor' }
   const [v22CreatingClaim, setV22CreatingClaim] = useState(null)       // null | { initialAssetIds: string[] }
+  // Phase 9A.4 Gate B: Transferring process (spec §11.7).
+  //   v22TransferringAsset — Asset node currently being transferred (modal open).
+  //   v22Provisionals.transfers — provisional transfer artifacts (pending on sender's canvas).
+  //     Shape: [{ id, assetId, fromOwnerDid, fromParty, toOwnerDid, toParty, initiatedTimestamp, note }]
+  const [v22TransferringAsset, setV22TransferringAsset] = useState(null)
 
   const v22View = useMemo(
     () => getV22DataForRole(roleId, v22Provisionals),
@@ -714,6 +732,98 @@ export default function V2App() {
   const handleV22NestedAssetCreated = useCallback((payload) => {
     return handleV22CreateAssetSubmit({ ...payload, _nested: true })
   }, [handleV22CreateAssetSubmit])
+
+  // ── Phase 9A.4 Gate B: Transferring handlers ────────────────────────
+  //
+  // Submit creates a provisional transfer record on `v22Provisionals.transfers`.
+  // The view builder + adapter stamp `_pendingTransfer` on the sender's Asset
+  // so it renders with the TRANSFERRING badge until the recipient accepts/
+  // declines (Gate C) or the sender cancels (here).
+  //
+  // Notifications fire cross-role via `enqueueV22NotificationForRequester`
+  // so the recipient sees a `v22-transfer-request` item in their inbox.
+  const handleV22TransferSubmit = useCallback(({ recipientActor, note }) => {
+    const asset = v22TransferringAsset
+    if (!asset || !recipientActor) return
+    const initiatedTimestamp = new Date().toISOString()
+    const transferId = `transfer-${asset.id}-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+    // We store party names alongside DIDs so the adapter can render
+    // "Awaiting acceptance from Bob" without resolving DID → party on every
+    // render. DIDs drive the ledger-level append to `dot.lineage[]` on accept.
+    const fromOwnerDid = asset.dot?.ownerDid || asset.ownerDot
+    const toOwnerDid = recipientActor.partyDot || makeDot(recipientActor.party)
+    const transferRecord = {
+      id: transferId,
+      assetId: asset.id,
+      assetName: asset.name,
+      fromOwnerDid,
+      fromParty: activeRole.party,
+      toOwnerDid,
+      toParty: recipientActor.party,
+      toUser: recipientActor.user || recipientActor.party,
+      initiatedTimestamp,
+      note: (note || '').trim(),
+    }
+    setV22Provisionals((prev) => ({
+      ...prev,
+      transfers: [...(prev.transfers || []), transferRecord],
+    }))
+    setV22TransferringAsset(null)
+    // Enqueue a v22-transfer-request notification on the recipient's inbox.
+    const recipientRole = ROLES.find((r) => r.party === recipientActor.party)
+    if (recipientRole) {
+      enqueueV22NotificationForRequester(recipientRole.id, {
+        id: `v22-transfer-request-${transferId}`,
+        type: 'v22-transfer-request',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: asset.name, pin: asset.pin },
+        connectTo: null,
+        transferId,
+        assetId: asset.id,
+        note: (note || '').trim(),
+        date: initiatedTimestamp.slice(0, 10),
+      })
+    }
+    // Select the sender's Asset so the TRANSFERRING badge is visible on pan.
+    setSel(asset.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(asset.id)
+  }, [v22TransferringAsset, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  const handleV22CancelTransfer = useCallback((assetId) => {
+    let cancelledTransfer = null
+    setV22Provisionals((prev) => {
+      const remaining = (prev.transfers || []).filter((t) => {
+        if (t.assetId === assetId && t.fromParty === activeRole.party) {
+          cancelledTransfer = t
+          return false
+        }
+        return true
+      })
+      return { ...prev, transfers: remaining }
+    })
+    if (!cancelledTransfer) return
+    // Dismiss the pending v22-transfer-request on the recipient's inbox and
+    // fire a v22-transfer-cancelled notice. Spec §11.7: cancelled transfers
+    // leave no ledger record (the `lineage[]` only records accepted / declined).
+    const recipientRole = ROLES.find((r) => r.party === cancelledTransfer.toParty)
+    if (recipientRole) {
+      updateRoleState(recipientRole.id, (prevState) => ({
+        ...prevState,
+        dismissedReqs: [...(prevState.dismissedReqs || []), `v22-transfer-request-${cancelledTransfer.id}`],
+        addedRequests: [...(prevState.addedRequests || []), {
+          id: `v22-transfer-cancelled-${cancelledTransfer.id}`,
+          type: 'v22-transfer-cancelled',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: cancelledTransfer.assetName, pin: null },
+          connectTo: null,
+          transferId: cancelledTransfer.id,
+          date: new Date().toISOString().slice(0, 10),
+        }],
+      }))
+    }
+  }, [activeRole.party, activeRole.partyDot, updateRoleState])
 
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, note }) => {
     if (!v22AmendingDaId) return
@@ -2494,6 +2604,18 @@ export default function V2App() {
                   setV22CreatingClaim({ initialAssetIds: [node.id] })
                 }
                 return
+              case 'transferAsset':
+                // Phase 9A.4 Gate B: owner-only; Asset card action fires this.
+                // `_pendingTransfer` guards a second initiation mid-flight.
+                if (node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer) {
+                  setV22TransferringAsset(node.v22Artifact || node)
+                }
+                return
+              case 'cancelTransfer':
+                if (node.v22Type === 'ASSET' && node.owner === activeRole.party && node._pendingTransfer) {
+                  handleV22CancelTransfer(node.id)
+                }
+                return
               case 'amendClaim':
                 if (node.owner === activeRole.party && node.v22Type === 'CLAIM') setV22AmendingClaimId(node.id)
                 return
@@ -2998,6 +3120,19 @@ export default function V2App() {
           )
         })()}
 
+        {/* V2.2 Transfer Asset modal (Phase 9A.4 Gate B) — opens from the
+            Asset panel/card Transfer action. Sender picks a recipient by
+            PIN; submit creates a provisional transfer + v22-transfer-request
+            notification on the recipient's inbox. */}
+        {v22TransferringAsset && (
+          <V22TransferAssetModal
+            activeParty={activeRole.party}
+            asset={v22TransferringAsset}
+            onClose={() => setV22TransferringAsset(null)}
+            onComplete={handleV22TransferSubmit}
+          />
+        )}
+
         {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel.
             Phase 9A.3: ACTOR nodes now render the panel too (V22ActorPanel)
             so the owner can surface Register Asset from the footer.
@@ -3077,6 +3212,12 @@ export default function V2App() {
                   : undefined}
                 onParseEvidence={node.owner === activeRole.party && node.v22Type === 'ASSET'
                   ? () => setV22ParsingAsset(node)
+                  : undefined}
+                onTransferAsset={node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer
+                  ? () => setV22TransferringAsset(node.v22Artifact || node)
+                  : undefined}
+                onCancelTransfer={node.v22Type === 'ASSET' && node.owner === activeRole.party && node._pendingTransfer
+                  ? () => handleV22CancelTransfer(node.id)
                   : undefined}
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
