@@ -80,6 +80,16 @@ All artifacts live in qualified storage (QS). QS is an actor-controlled storage 
 
 For the prototype, QS is mocked: a fake file picker shows pre-populated files per actor.
 
+### 2.6 DOTs and Identity
+
+Every registered data element — Asset, Claim, Evaluation Result — is anchored by a **DOT** (Data Object Title). The DOT is a cryptographically verifiable identity object: it carries a PIN (the everyday identifier, printed on the DOT), the content hash where applicable, the current owner's DID, the registration timestamp, free-form metadata, and an append-only ownership lineage. This structure follows client canon X.1–X.10.
+
+**The car-title analogy.** A DOT is to a data element what a vehicle title is to a car. The PIN is the VIN — it's printed on the title and used as the everyday identifier, but the title (the DOT) is the thing that establishes and transfers ownership. Transferring a car doesn't move the car; it re-registers the title to a new owner and records the state change on the back. Transferring an Asset on the platform works the same way: the file doesn't move, but the DOT updates (the `ownerDid` field flips to the recipient) and an immutable transfer record is appended to `lineage[]` as a verifiable provenance chain (canon X.5).
+
+**PIN vs DOT in the UI.** PINs render as click-to-copy badges throughout the app — they're the identifier users read, copy, and paste when referring to a specific Asset or Claim. The surrounding DOT is plumbing: it's what the ledger verifies and what transfers manipulate, but it isn't typically exposed in UI except in Detail Panels, where the DOT's own PIN is surfaced alongside the file hash and URI (the Asset Detail Panel's "DOT" row shows `asset.dot.pin`, not the owner DID — owner identity surfaces via the "Owner" row).
+
+**Why DOTs matter for this build.** Without a structured DOT, ownership is denormalised: `asset.owner` is the current owner's party name, but there's no provenance chain to show who held it before, and no clean place to record "this transfer happened at this timestamp, from this DID to this DID." The DOT gives transfers a proper home in the data model and enables any auditor to verify the full chain independently — which is the whole point of the Trust Plane.
+
 ---
 
 ## 3. Node Types on the Parent Layer
@@ -101,10 +111,12 @@ The user's own organization (GovCo for Bob, MicroCo for Alice, AuditCo for Carol
 A registered evidence file. Contains the file's URI, hash, size, MIME type, and registration metadata. Assets are *private* — they only appear on their owner's network.
 
 - Visual label: `ASSET` (small mono tag in card header).
-- Key JSON fields: `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`.
+- Identity: anchored by a DOT object (see §2.6). The Detail Panel's "DOT" row surfaces `asset.dot.pin` (the Asset's own DOT identifier). The "Hash" row surfaces `asset.file.hash` (identical to `asset.dot.hash` for Assets). The "URI" row surfaces `asset.file.uri`. `asset.dot.ownerDid` is also accessible on the artifact but not rendered in the panel UI yet — provenance lineage is a future phase.
+- Key JSON fields: `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`, `dot`.
 - Child layer: intentionally empty in V2.2 (child layer code retained but unused — see §5).
 - Can be referenced by: one or more Claims owned by the same actor.
 - Cannot be disclosed directly — only Claims can be disclosed.
+- **Transferable** — Asset ownership can be transferred between parties; see §11.7.
 
 ### 3.3 Parse Result Node
 
@@ -121,7 +133,8 @@ The output of a Parsing process applied to an Asset. Contains extracted fields w
 An assertion backed by one or more Assets. The gateway to other parties. **Constraint: a Claim must reference ≥1 Asset** — Claims with zero `referencedAssetIds` are not permitted, and creation UI must enforce this at submit.
 
 - Visual label: `CLAIM`.
-- Key JSON fields: `name`, `description`, `referencedAssetIds[]`, `creationDate`, `amendments[]`.
+- Identity: anchored by a DOT object (see §2.6). `claim.dot.hash` is null — Claims are derived artifacts without a canonical file.
+- Key JSON fields: `name`, `description`, `referencedAssetIds[]`, `creationDate`, `amendments[]`, `dot`.
 - Connections on owner's canvas: Agreement Edges (styled as Full Disclosure) to each referenced Asset, and Agreement Edges (styled by disclosure type) to each counterparty's Asset for each active Disclosure + Evaluation Agreement pair.
 - Can be disclosed to: specific parties (via Disclosure Agreement) or to the Public Directory.
 
@@ -130,7 +143,8 @@ An assertion backed by one or more Assets. The gateway to other parties. **Const
 The output of an evaluation. Owned by the evaluator; visible to both evaluator and Claim owner (and any other party the evaluator grants disclosure to — e.g., Carol disclosing her audit result to Bob).
 
 - Visual label: `EVAL RESULT` (or `SUPERSEDED` if superseded).
-- Key JSON fields: `evaluatorId`, `claimId`, `evaluationAgreementId`, `requirementsSet` (embedded snapshot: id, name, version), `results[]` (SAT/UNSAT/MISSING/N/A per requirement with values), `evidenceUsed[]` (Asset IDs), `supersededBy` (null or eval result ID), `status` (`active` | `superseded`).
+- Identity: anchored by a DOT object (see §2.6). `evalResult.dot.hash` is null; metadata carries `claimId` and `evaluationAgreementId` so the provenance chain can be navigated from the DOT alone.
+- Key JSON fields: `evaluatorId`, `claimId`, `evaluationAgreementId`, `requirementsSet` (embedded snapshot: id, name, version), `results[]` (SAT/UNSAT/MISSING/N/A per requirement with values), `evidenceUsed[]` (Asset IDs), `supersededBy` (null or eval result ID), `status` (`active` | `superseded`), `dot`.
 - Health minibar: rolls up from `results[]`, excluding N/A items.
 - Connections: Agreement Edge to the Claim it evaluated (the Proof of Evaluation relationship, modeled as an implicit Full Disclosure Agreement from evaluator to Claim owner scoped to this Eval Result). Additional Agreement Edge to the evaluator's own Asset (ownership relationship).
 - Rendered on: both the evaluator's network AND the Claim owner's network. On the Claim owner's side, it is displayed but action-restricted (Amend, Supersede, Disclose-to-other-parties live with the evaluator only). Ownership is conveyed by which actions are available, not by visual treatment — see §15 for future visual-distinction work.
@@ -604,7 +618,24 @@ Alice evaluates her own Claim against a Requirements Set without a counterparty.
 
 ### 11.7 Ownership transfer (Transferring process)
 
-Defined in the model; not implemented. When implemented, produces a new DOT (ownership token) that replaces the previous owner's DOT on an Asset or Claim.
+Alice transfers an Asset she owns to another actor. Canon X.5: the transfer is recorded as an immutable state transition; the ownership lineage is preserved as a verifiable provenance chain. (Assets only in Phase 9A.4 — Claim and Evaluation Result transfer deferred to a later phase, tracked as backlog #72.)
+
+1. Alice clicks **Transfer** on her Asset's Detail Panel footer or card action bar (owner-only CTA). `V22TransferAssetModal` opens with the Asset in context.
+2. **Step 1 — Recipient.** Alice enters the recipient's Actor PIN. Live PIN resolution runs against the demo Actor pool (Bob, Alice, Carol, Radiant Network). Three rejection cases: own PIN (cannot transfer to self), Radiant Network PIN (cannot transfer to the public-directory pseudo-actor), unknown PIN. Continue is gated on a valid recipient. Optional "note to recipient" textarea.
+3. **Step 2 — Review & Confirm.** Asset summary, recipient card, note, and a warning: "On accept, ownership of this Asset transfers to {recipient}. This Asset will no longer appear on your canvas. The transfer is recorded on the ledger and cannot be reversed." Submit sends the transfer request.
+4. **Provisional state.** On submit, a provisional transfer record is created (stashed on `v22Provisionals.transfers`) and the Asset is stamped with `_pendingTransfer: { recipientDid, initiatedTimestamp }`. Alice's Asset renders with a `TRANSFERRING` badge until the recipient responds. The recipient receives a `v22-transfer-request` notification with Accept / Decline action buttons.
+5. **Cancel-while-pending.** The Asset's Detail Panel footer and card action bar expose a **Cancel Transfer** CTA while `_pendingTransfer` is set. Cancellation clears the badge, drops the provisional, and fires `v22-transfer-cancelled` to the recipient (which auto-dismisses their pending notification).
+6. **Accept path.** Recipient clicks Accept on the notification.
+   - `asset.dot.ownerDid` updates to the recipient's DID; `asset.owner` and `asset.ownerDot` update to match.
+   - A `makeTransferRecord(...)` with `status: 'accepted'` is appended to `asset.dot.lineage[]` (the provenance chain).
+   - The Asset disappears from Alice's canvas and materialises on the recipient's canvas with an `_isNew` reveal (NEW badge persists to deselection per the standard rule) and an ownership Agreement Edge to the recipient's Actor node. Pan-to fires on the recipient's canvas to the new Asset.
+   - Recipient notification dismisses; Alice receives a `v22-transfer-accepted` notification.
+7. **Decline path.** Recipient clicks Decline; an optional decline-reason textarea captures a reason (empty is acceptable).
+   - `asset.dot` does not change; ownership stays with Alice.
+   - A `makeTransferRecord(...)` with `status: 'declined'` (and the reason if given) is appended to `asset.dot.lineage[]` for auditability — declined transfers are part of the provenance chain too.
+   - The Asset's `_pendingTransfer` field clears and the `TRANSFERRING` badge removes. Alice receives a `v22-transfer-declined` notification that surfaces the reason.
+
+**No cascading state.** The transferred Asset arrives "clean" on the recipient's canvas — existing Parse Results, Evaluation Results, and Disclosure Agreements against the Asset stay with Alice. Production cascade semantics (do derived Parse Results transfer too? what happens to Claims referencing the Asset on Alice's side?) are deferred. Similarly, transferring an Asset that is the sole evidence backing an active disclosed Claim is permitted in the demo but has no guardrail UI — backlog #73.
 
 ### 11.8 Parse flow
 

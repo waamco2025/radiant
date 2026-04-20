@@ -233,14 +233,17 @@ function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreat
           {asset?.description && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>{asset.description}</div>
           )}
-          <Section title="Owner">
-            <Row label="Party" value={node.owner} />
-            {/* Phase 9A.4 preamble (feature 3): long identifiers render as
-                truncated click-to-copy badges, matching the PIN treatment
-                elsewhere in the app. Owner DOT is the party-level hash; the
-                Asset has no distinct DOT per spec §3.2 — the file hash below
-                is the true per-Asset cryptographic identifier. */}
-            <Row label="DOT" value={node.dot ? <CopyBadge value={node.dot} truncated /> : '—'} />
+          <Section title="Identity">
+            {/* Phase 9A.4 Gate A: DOT row now sources from the Asset's own
+                structured DOT (spec §2.4 / canon X.1–X.10) — not the
+                party-level identifier that the preamble surfaced. The
+                owner DID is accessible via `asset.dot.ownerDid` but not
+                rendered here yet (will land with the provenance lineage
+                UI in a future phase — backlog #74).
+                Hash + URI keep their existing sourcing (`file.hash` /
+                `file.uri`); `dot.hash` mirrors `file.hash` for Assets. */}
+            <Row label="Owner" value={node.owner} />
+            <Row label="DOT" value={asset?.dot?.pin ? <CopyBadge value={asset.dot.pin} truncated /> : '—'} />
           </Section>
           <Section title="File">
             <Row label="Filename" value={asset?.file?.filename} mono />

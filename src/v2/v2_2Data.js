@@ -31,6 +31,78 @@ const DISCLOSURE_TYPES = new Set(['full', 'selective', 'proofonly', 'provisional
 // Valid subject kinds per spec §10.4 (DA subject field).
 const SUBJECT_KINDS = new Set(['asset', 'claim', 'evalResult', 'parseResult'])
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DOT (Data Object Title) — client canon X.1–X.10 / spec §2.4
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Every registered data element (Asset, Claim, Eval Result) is anchored to
+// a DOT — a cryptographically verifiable identity object carrying PIN, hash,
+// owner DID, registration timestamp, metadata, and ownership lineage.
+//
+// Mental model: DOT is to data element as vehicle title is to car. The PIN
+// is the VIN — printed on the title, used as everyday identifier. Ownership
+// transfers between parties by updating the title; the car (file) doesn't
+// move. Each transfer is recorded on the back of the title (`lineage[]`)
+// as an immutable state transition (canon X.5).
+
+/**
+ * Structured DOT object — spec §2.4 / canon X.1–X.10.
+ *
+ * Required: `pin`, `ownerDid`. All other fields default per canon:
+ *   • `hash` — file fingerprint (Assets only; null for Claims / Eval Results
+ *     which are derived artifacts without a canonical file).
+ *   • `registrationTimestamp` — ISO-8601; defaults to now.
+ *   • `metadata` — free-form bag for artifact-specific context.
+ *   • `lineage` — append-only transfer history (see `makeTransferRecord`).
+ */
+export function makeDotObject({
+  pin,
+  hash = null,
+  ownerDid,
+  registrationTimestamp = new Date().toISOString(),
+  metadata = {},
+  lineage = [],
+}) {
+  if (!pin) throw new Error('makeDotObject: pin is required')
+  if (!ownerDid) throw new Error('makeDotObject: ownerDid is required')
+  return {
+    pin,
+    hash,
+    ownerDid,
+    registrationTimestamp,
+    metadata: { ...metadata },
+    lineage: [...lineage],
+  }
+}
+
+/**
+ * Transfer record — spec §11.7 / canon X.5.
+ *
+ * Appended to `dot.lineage[]` on every transfer (accepted or declined).
+ * Declined transfers are retained in lineage for auditability — the
+ * provenance chain documents what was attempted, not just what succeeded.
+ */
+export function makeTransferRecord({
+  fromOwnerDid,
+  toOwnerDid,
+  initiatedTimestamp,
+  acceptedTimestamp = null,
+  status = 'pending', // 'pending' | 'accepted' | 'declined'
+  declineReason = null,
+}) {
+  if (!fromOwnerDid) throw new Error('makeTransferRecord: fromOwnerDid is required')
+  if (!toOwnerDid) throw new Error('makeTransferRecord: toOwnerDid is required')
+  if (!initiatedTimestamp) throw new Error('makeTransferRecord: initiatedTimestamp is required')
+  return {
+    fromOwnerDid,
+    toOwnerDid,
+    initiatedTimestamp,
+    acceptedTimestamp,
+    status,
+    declineReason,
+  }
+}
+
 // ─── Radiant Network pseudo-actor (public directory) ──────────────────────
 const RADIANT_NETWORK_PARTY = 'Radiant Network'
 const RADIANT_NETWORK_DOT = makeDot(RADIANT_NETWORK_PARTY)
@@ -73,7 +145,7 @@ export function makeActor({ id, user, party, role, credits = 0, vertical = '' })
   }
 }
 
-/** Asset artifact — spec §10.1. */
+/** Asset artifact — spec §10.1. Identity anchored by a DOT object (spec §2.4). */
 export function makeAsset({
   id,
   owner,
@@ -83,19 +155,32 @@ export function makeAsset({
   file,
   registrationDate,
   parseResultIds = [],
+  dot,   // optional structured DOT; derived below if absent
 }) {
   if (!id) throw new Error('makeAsset: id is required')
   if (!owner) throw new Error('makeAsset: owner is required')
   if (!file || !file.uri || !file.filename) {
     throw new Error('makeAsset: file { uri, filename } is required')
   }
+  const pin = makePin(id)
+  const ownerDid = ownerDot || makeDot(owner)
+  // Phase 9A.4 Gate A: structured DOT per canon X.1–X.10. Top-level `pin` /
+  // `ownerDot` / `file.hash` remain as convenience aliases pointing into
+  // `asset.dot.*` for backward compat — read sites keep working unchanged.
+  const assetDot = dot || makeDotObject({
+    pin,
+    hash: file.hash ?? null,
+    ownerDid,
+    registrationTimestamp: registrationDate,
+    metadata: { fileUri: file.uri, filename: file.filename },
+  })
   return {
     artifactType: 'asset',
     artifactUri: assetUri(id),
     id,
-    pin: makePin(id),
+    pin,
     owner,
-    ownerDot: ownerDot || makeDot(owner),
+    ownerDot: ownerDid,
     name,
     description,
     file: {
@@ -107,6 +192,7 @@ export function makeAsset({
     },
     registrationDate,
     parseResultIds: [...parseResultIds],
+    dot: assetDot,
   }
 }
 
@@ -160,16 +246,29 @@ export function makeClaim({
   referencedAssetIds = [],
   createdDate,
   amendments = [],
+  dot,   // optional structured DOT; derived below if absent
 }) {
   if (!id) throw new Error('makeClaim: id is required')
   if (!owner) throw new Error('makeClaim: owner is required')
+  const pin = makePin(id)
+  const ownerDid = ownerDot || makeDot(owner)
+  // Phase 9A.4 Gate A: structured DOT (spec §2.4 / canon X.1–X.10).
+  // Claims have no file, so dot.hash is null. `referencedAssetCount` on
+  // metadata lets future UI surface Claim provenance at a glance.
+  const claimDot = dot || makeDotObject({
+    pin,
+    hash: null,
+    ownerDid,
+    registrationTimestamp: createdDate,
+    metadata: { referencedAssetCount: referencedAssetIds.length },
+  })
   return {
     artifactType: 'claim',
     artifactUri: claimUri(id),
     id,
-    pin: makePin(id),
+    pin,
     owner,
-    ownerDot: ownerDot || makeDot(owner),
+    ownerDot: ownerDid,
     name,
     description,
     referencedAssetIds: [...referencedAssetIds],
@@ -179,6 +278,7 @@ export function makeClaim({
       added: [...(a.added || [])],
       removed: [...(a.removed || [])],
     })),
+    dot: claimDot,
   }
 }
 
@@ -412,6 +512,7 @@ export function makeEvaluationResult({
   evaluationDate,
   status = 'active',
   supersededBy = null,
+  dot,   // optional structured DOT; derived below if absent
 }) {
   if (!id) throw new Error('makeEvaluationResult: id is required')
   if (!owner) throw new Error('makeEvaluationResult: owner is required')
@@ -422,13 +523,25 @@ export function makeEvaluationResult({
   if (!requirementsSet || !requirementsSet.id) {
     throw new Error('makeEvaluationResult: requirementsSet { id, name, version } is required')
   }
+  const pin = makePin(id)
+  const ownerDid = ownerDot || makeDot(owner)
+  // Phase 9A.4 Gate A: structured DOT (spec §2.4 / canon X.1–X.10). Metadata
+  // captures the paired Claim + Evaluation Agreement ids so the provenance
+  // chain can be navigated from any Eval Result without re-querying.
+  const evalDot = dot || makeDotObject({
+    pin,
+    hash: null,
+    ownerDid,
+    registrationTimestamp: evaluationDate,
+    metadata: { claimId, evaluationAgreementId },
+  })
   return {
     artifactType: 'evaluationResult',
     artifactUri: evaluationResultUri(id),
     id,
-    pin: makePin(id),
+    pin,
     owner,
-    ownerDot: ownerDot || makeDot(owner),
+    ownerDot: ownerDid,
     evaluationAgreementId,
     claimId,
     granteeAssetId,
@@ -452,6 +565,7 @@ export function makeEvaluationResult({
     evaluationDate,
     status, // 'active' | 'superseded'
     supersededBy,
+    dot: evalDot,
   }
 }
 
