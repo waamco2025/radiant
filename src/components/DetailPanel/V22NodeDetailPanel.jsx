@@ -235,14 +235,19 @@ function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreat
           )}
           <Section title="Owner">
             <Row label="Party" value={node.owner} />
-            <Row label="DOT" value={node.dot} mono />
+            {/* Phase 9A.4 preamble (feature 3): long identifiers render as
+                truncated click-to-copy badges, matching the PIN treatment
+                elsewhere in the app. Owner DOT is the party-level hash; the
+                Asset has no distinct DOT per spec §3.2 — the file hash below
+                is the true per-Asset cryptographic identifier. */}
+            <Row label="DOT" value={node.dot ? <CopyBadge value={node.dot} truncated /> : '—'} />
           </Section>
           <Section title="File">
             <Row label="Filename" value={asset?.file?.filename} mono />
             <Row label="Size" value={formatBytes(asset?.file?.size)} />
             <Row label="MIME" value={asset?.file?.mimeType} mono />
-            <Row label="Hash" value={asset?.file?.hash} mono />
-            <Row label="URI" value={asset?.file?.uri} mono />
+            <Row label="Hash" value={asset?.file?.hash ? <CopyBadge value={asset.file.hash} truncated /> : '—'} />
+            <Row label="URI" value={asset?.file?.uri ? <CopyBadge value={asset.file.uri} truncated /> : '—'} />
           </Section>
           <Section title="Registration">
             <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />

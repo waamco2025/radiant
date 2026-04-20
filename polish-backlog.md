@@ -101,7 +101,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Source:** Phase 4 visual review
 - **Scope:** Small
 - **Context:** When a request creates a provisional node, the canvas should pan-and-zoom to it with a "NEW" badge — matching V2.1's existing behavior for newly-created nodes.
-- **Status:** ✅ Complete (Phase 6 carry-over fix). `_isNew` is now set in the adapter for the entire provisional duration; `setV22PanToClaimId` pans to the new provisional Claim on the requester's canvas.
+- **Status:** ✅ Complete (Phase 6 carry-over fix; clarified Phase 9A.4 preamble). `_isNew` persists on the node until the user deselects it; the NEW badge renders for the same duration. The 900ms reveal is a separate fade-in animation on initial render — not a NEW-badge timer. `setV22PanToClaimId` pans to the new provisional Claim on the requester's canvas.
 
 ### 35. Edge-draw animation for new Amend Claim references
 - **Source:** Phase 6.5 #12 review — when an amendment adds new Asset references, the new claim ↔ asset edges appear without animation.
@@ -116,13 +116,30 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 
 ### 62. Carry-over defects from 9A.2
 - **Status:** ✅ Complete (Phase 9A.3 Gate C). All four defects addressed:
-  - (a) Dot-LOD endpoint ring — re-geometred around the inner 8px dot (wrapper centre at 8,8) instead of the 16px wrapper. New dims `14×14` at `top: 1, left: 1` give a clean 3px halo.
+  - (a) Dot-LOD endpoint ring — re-geometred around the inner 8px dot (wrapper centre at 8,8) instead of the 16px wrapper. New dims `14×14` at `top: 1, left: 1` give a clean 3px halo. (Note: revisited Phase 9A.4 preamble — the 9A.3 ring geometry was correct, but the `data-card-id` wrapper was 16×20 due to line-box allocation + a 4px baseline offset on the child. Fix: explicit `width/height: 16` + `display: flex` on the wrapper so the child lands flush at (0,0) and the ring centres on the visual dot centre, not just mathematically.)
   - (b) Bell chrome button wrapped in `<Tooltip content="Notifications (N)">`; content suppressed when the inbox dropdown is open so the tooltip doesn't obscure the list.
   - (c) (d) Root cause was Tooltip's TooltipBody `zIndex: 6000` sitting *below* the Modal Backdrop's `zIndex: 10000`. Tooltips anchored inside a modal rendered, but under the modal's darkening backdrop — invisible to the user. Bumped to `10100`; chrome tooltips still work (canvas-level z doesn't regress) and in-modal tooltips now appear on top of the modal content.
+
+### 68. Hashing / processing sequence UI per file
+- **Source:** Phase 9A.3 QA — restore from V2.1 backups.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** After a file is selected (from Qualified Storage or local upload), show a brief visual sequence representing the file being hashed on the network and registered as immutable. The V2.1 implementation had this step between picker-close and review-card render; it was lost during V2.2 migration. Pairs with #66 (multi-file registration) and #67 (local-upload tab).
+- **Proposed fix:** Pattern-match the V2.1 hashing sequence from reference backups. Drop it into V22CreateAssetModal between the picker step and the review step. Likely a small animation component with a progress bar + hash-display reveal.
+
+### 71. Restore provisional → disclosed card transform animation
+- **Source:** Phase 9A.3 QA — existed in V2.1, lost during migration cleanup.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** Card-level animation that played when a provisional node transitioned to disclosed (active). Distinct from backlog #9 (edge dashed-to-solid animation) — this is the node-card transform/reveal. Pairing both would give a full-fidelity provisional→active transition. Reference V2.1 backups for the original implementation.
+- **Proposed fix:** Reinstate the V2.1 card transform keyframes in `AssetNode.jsx` (or CSS sibling). Trigger on `_showAsProvisional` flipping false after `handleV22Accept`.
 
 ---
 
 ## Detail Panels
+
+### 64. Asset DOT / hash / URI click-to-copy badge
+- **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Matches the PIN treatment used elsewhere in the app. Null-value guard (`value ? <CopyBadge ... /> : '—'`) handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation. Per spec §3.2 the Asset has no distinct DOT — the file hash is the true per-Asset cryptographic identifier; the "DOT" label on the Asset panel refers to the party-level owner DOT.
 
 ### 11. Two-tab Overview/Artifact layout for DA and EA Detail Panels
 - **Source:** Phase 3 visual review
@@ -189,6 +206,24 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 
 ## Data Model & Content
 
+### 65. Credit charge for Asset registration + Claim creation
+- **Source:** Phase 9A.3 QA — client requirement.
+- **Scope:** Small
+- **Priority:** **High**
+- **Context:** Phase 9A.3 shipped V22CreateAssetModal + V22CreateClaimModal without credit cost (matched the V2.2 no-credit pattern of ParseEvidence / RunEvaluation / CombinedRequest). Client considers credit accounting core to the Registering + Claiming processes. Re-add a credit cost: V2.1 precedent was 25 credits per Claim; pick a proportional value for Assets (5 or 10 credits looks right given evidence-file cost vs. full-Claim cost).
+- **Proposed fix:** Reuse V2App's existing `credits` + `setCredits` state. Add a `CREDITS_PER_ASSET` + `CREDITS_PER_CLAIM` constant set near the top of the file. Gate submit on sufficient credits in both modals; render a credit-cost row in the review step matching V2.1's treatment. V2.2's other unilateral flows (Parse, self-evaluate) remain free per current behaviour; only Registering + Claiming get charged.
+
+### 70. Asset hierarchy — Asset-from-Asset registration
+- **Source:** Phase 9A.3 QA — surfaces supply-chain / Program modelling needs.
+- **Scope:** Medium
+- **Priority:** **Blocked on design decision**
+- **Context:** Enables structures like "Sentinel-4 Program" as a parent Asset with sub-Assets (individual modules, subsystems, mission-critical items). Today Assets are flat — all siblings under the Actor. Hierarchy would let users model Programs / Missions / supply chains with first-class parent→child Asset relationships.
+- **Design decision needed before build.** Three candidate models:
+  - (a) Add `parentAssetId` field to Asset schema (spec §3.2 extension). Canvas renders parent-first, child indented. Query: all Assets with this parent.
+  - (b) View-layer grouping only — no data-model change. Assets stay flat in storage, but the view builder groups them by `asset.metadata.parentAssetId` if present. Minimal blast radius.
+  - (c) New edge type: `ParentAsset` edge. Fits the existing "everything is an edge" principle. Requires edge-derivation + rendering work.
+- **Andrew to choose before scoping implementation.**
+
 ### 17. Terminology reconciliation with client canon
 - **Source:** Andrew's client feedback post-spec-review
 - **Scope:** Medium
@@ -237,6 +272,27 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 ---
 
 ## Process Flows
+
+### 66. Multi-file Asset registration in single flow
+- **Source:** Phase 9A.3 QA.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** V22CreateAssetModal currently registers exactly one Asset per flow (one file). Surveyors / operators onboarding a batch of evidence files (say, a whole program folder) have to run the flow N times. Enable multi-select in the QS picker + per-file rows in the review step → submit produces N Asset artifacts in one shot, all attached to the parent context (Actor, or the Asset picker that launched the nested flow). Pairs with #67 (local-upload tab) and #68 (per-file hashing sequence).
+- **Proposed fix:** Reuse V22QualifiedStoragePicker's existing `mode="multi"` path (already implemented, unused in 9A.3). Extend V22CreateAssetModal with a per-file list step (each row shows filename + editable label per #69 + confidence badge). V2App's handler iterates and calls `makeAssetRegistrationArtifacts` once per file.
+
+### 67. Local-storage upload tab in QS picker
+- **Source:** Phase 9A.3 QA.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** Today the picker only shows files pre-existing in Qualified Storage (mocked). Real users will want to upload from their machine. Add a tabbed UI: `[Qualified Storage | Local Storage]`. Local Storage path uploads the selected file through the app to the user's QS as a demo function, then proceeds through the normal Asset registration flow.
+- **Proposed fix:** Tab switcher at the picker header. Local tab renders `<input type="file" multiple>` + drag-drop zone. On file select, a fake "uploading to QS" progress step runs, then the file gets inserted into the mock QS bucket (in-memory), then the user continues through the Asset-registration review step as if they'd picked it from QS. Pairs with #66 and #68.
+
+### 69. User-editable Asset label
+- **Source:** Phase 9A.3 QA — pairs with #68's per-file row UI.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** V22CreateAssetModal currently derives the Asset's display name from the filename stem (`power-supply-spec.pdf` → `power supply spec`). In the multi-file / batch flow (#66) each file should land with an editable label. Single-file flow could also benefit — user may want "Sentinel-4 PSU Spec" instead of the filename-stem default.
+- **Proposed fix:** Add an editable text input to the review step, pre-populated with the derived label. Pass the user's final value through `makeAssetRegistrationArtifacts`'s `name` param. Spec §3.2 — name is already a field on the Asset schema (even though the Asset has no separate field today, makeAsset's `name` param is the slot).
 
 ### 20. Selective Disclosure: fields vs. assets scope
 - **Source:** Phase 4 open question #5
@@ -374,3 +430,4 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-19: Phase 9A.1.5 polish pass — five items on top of 9A.1. (1) WARM_BORDER (40% indigo blend) extended to mini and dot LOD renderings — mini cards now match full cards, dots grow a 1px ring so they don't fade into the canvas at zoom-out; red UNSAT borders unchanged. (2) Minibar vertical centering via `marginBottom: 3` on the minibar wrapper — DOM-verified ~11px above / ~13px below (near-symmetric). (3) Status pill `minWidth` bumped 96 → 100 to kill the sub-pixel width flicker when cycling to UNSATISFACTORY — DOM-verified pixel-stable 139.25px across SAT/UNSAT/MISSING/N/A. (4) Edge-endpoint vertical line now renders on the INSIDE edge of each endpoint card (the side facing the partner). V2App's `v22DataWithReveal` memo stamps `_edgeEndpointSide: 'left' | 'right'` based on x-position comparison; AssetNode reads the flag and positions the 3px line at `left: -7` (left side, 4px gap) or `left: CARD_W + 4` (right side). (5) Edge-select pan+zoom framing — new useEffect in V2App keyed on `[selectedEdgeId, v22Data, sel, openAgreement]` computes the union bounding box of the two endpoint cards with 25% padding, target zoom clamped to [0.3, 1.5], and calls `animatedPanToWithZoom` with 600ms duration. Panel-aware: when a Detail Panel is open (sel on non-party node, or edge-agreement panel), the target midX is offset by `panelW/2 / zoom` so the rendered midpoint lands in the centre of the visible canvas area, not the full canvas. Skips edges where either endpoint lacks a world position (Radiant Network pseudo-actor).
 - 2026-04-19: Phase 9A.2 — three defect fixes + new Tooltip primitive + app-wide sweep. **Defects:** (1) mini-LOD edge-endpoint indicator — 2px vertical indigo line at 3px offset on the mini card's inside edge, proportional to the full card's 3px/4px. (2) dot-LOD endpoint indicator — hollow 1.5px indigo ring around the dot, 4px wider than the dot's outer edge, suppressed when the dot is selected. (3) Edge brightening on selection regression fix — V2Canvas.jsx:2642 selection useEffect had `[selectedEdgeId]` deps but not the edge-rebuild triggers, so zooming or layer-changing wiped the selected-edge styling. Added `currentLayer.edges` and `zoom` to the deps so the brightening + stroke bump reapplies after every rebuild. **Tooltip primitive:** new `src/components/Tooltip.jsx` — portal-rendered, zero-delay, auto-positions above (flips below on viewport overflow), arrow pointer, `var(--bg-card)` / `var(--border)` / 6px radius / 6px 10px padding / 11px font / max 260px wrap / `pointer-events: none` / z-index 6000. API: `content` (string or JSX, empty → no-op), `position`, `mono`, `width`, `disabled`, `wrapperStyle` (preserves flex children). Wrapper span uses `display: inline-flex` so wrapped buttons/icons keep their layout. **Sweep:** replaced every `title=` attribute on interactive elements (V22NodeDetailPanel FooterButton + HumanEditedIcon; V22RunEvaluationModal HumanEditedIcon + StatusChevronPicker chevrons; V22ParseEvidenceModal HumanEditedIcon + confidence cycle; DisclosureAgreementDetailPanel + EvaluationAgreementDetailPanel amend buttons; CopyBadge in both `shared/CopyBadge.jsx` and `modals/ModalShared.jsx`; AmendClaimModal already-referenced row; AmendDisclosureModal evaluated-locked row; V2App chrome icons — theme toggle, Requirements Library, PEP Template Library, Radiant Network globe, AI Shopper magnifier, "Discovered via Public Directory" notification marker; DirectoryLayer exit-corner node). PortalTooltip in AssetNode.jsx deleted; StackBadge / GlobeBadge / EvidenceClip / ActionButton all now wrap with the shared primitive. `<Section title=...>` and `<ModalHeader title=...>` (component label props, not HTML tooltips) left untouched. **Known gap:** V2Canvas edge hover tooltip (raycaster-driven, cursor-tracking, multi-line rich content) left as-is per the task note that 9B will overhaul edge hover UX; LayerPill's tooltip also untouched since V2.2 never renders child layers. Browser spot-check verified three tooltip sites (chrome globe, Requirements Library icon, FooterButton "Request Agreement") render with `rgb(13,16,23)` background, 6px radius, 6px 10px padding, 11px font — zero delay on hover.
 - 2026-04-19 (late): Phase 9A.3 preamble hygiene — added items #53–62 (handoff roster + 9A.2 defect carry-over) plus one new ✅ item (#63) for mini/dot LOD warmer borders; removed 4 unscoped exploratory items (Timeline view, Satellite view, AI-led metadata search, EvA character concept); bumped #33 Transferring from Exploratory to Process Flows (Phase 9A.4 target). Structural: merged Phase 6.5 / 7 / 8 / 8.5 Discoveries sections into categorical homes; numbers preserved, sort by number ascending within each section.
+- 2026-04-20: Phase 9A.4 preamble — added items #64–71 (9A.3 QA surfaces + client DOT-badge request); #64 shipped in same session. Two 9A.3 defects fixed in same commit: nested QS picker z-index (surfaces 3 & 4 in QA), dot-LOD endpoint ring alignment (QA 8.1). Item #10 wording tightened to distinguish NEW badge (persists to deselection) from 900ms reveal (initial fade-in animation). Item #62(a) annotated with the 9A.4 follow-on fix (the 9A.3 ring geometry was mathematically correct, but the `data-card-id` wrapper had a 4px line-box offset that shifted the child dot down — wrapper now locked to `width/height: 16, display: flex`).

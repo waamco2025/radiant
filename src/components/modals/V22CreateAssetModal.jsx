@@ -60,9 +60,14 @@ export default function V22CreateAssetModal({
   const displayName = derivedNameFromFilename(file?.filename)
 
   // QS picker overlay — the picker is itself a fixed full-screen surface,
-  // so rendering it as a sibling of the modal content is fine. When the
-  // modal is nested (Gate B) we bump the picker's zIndex so it lands above
-  // both the nested modal and its parent.
+  // so rendering it as a sibling of the modal content is fine. Phase 9A.4
+  // preamble (defect 1): the previous `nested ? 10010 : 9999` ternary broke
+  // down in the nested case because the parent modal's Backdrop (z-index
+  // 10000) kept intercepting events even though V22CreateAssetModal
+  // short-circuits its own Backdrop while `showPicker` is true. Unconditional
+  // 10010 puts the picker above any plausible parent stack (Backdrop = 10000,
+  // nested modal = 10000 + modal-up animation, Tooltip body = 10100 which
+  // still wins because tooltips shouldn't land under picker chrome either).
   if (showPicker) {
     return (
       <V22QualifiedStoragePicker
@@ -73,7 +78,7 @@ export default function V22CreateAssetModal({
           setShowPicker(false)
         }}
         onCancel={() => setShowPicker(false)}
-        zIndex={nested ? 10010 : 9999}
+        zIndex={10010}
       />
     )
   }

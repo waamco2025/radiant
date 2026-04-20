@@ -2860,6 +2860,17 @@ const V2Canvas = forwardRef(function V2Canvas({
                 position: 'absolute',
                 left: sp.x - 8,
                 top: sp.y - 8,
+                // Phase 9A.4 preamble (defect 2): without explicit size the
+                // wrapper's line-box allocation stretched height to ~20px
+                // (~1.2 × font-size = 19.2px) AND offset the 16×16 child by
+                // 4px. Explicit width/height plus `display: flex` removes
+                // the line-box entirely so the child lands at (0, 0) of the
+                // wrapper — visual dot-centre matches sp.y, which is where
+                // edge geometry aims. `lineHeight: 0` alone shrank the
+                // wrapper but left the child's baseline offset intact.
+                width: 16,
+                height: 16,
+                display: 'flex',
                 pointerEvents: transitioning ? 'none' : 'auto',
                 opacity: chainNodeIds && !chainNodeIds.has(node.id) ? 0.35 : 1,
                 transition: 'opacity 200ms ease',
