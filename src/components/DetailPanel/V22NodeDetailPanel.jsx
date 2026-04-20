@@ -14,6 +14,34 @@ import CopyBadge from './shared/CopyBadge'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
 
+// Phase 9A item 10: pencil icon rendered when a Parse Result field's or an
+// Eval Result row's current value differs from the AI's original extraction.
+// Kept identical to the icon inside the Parse / Eval modals.
+function HumanEditedIcon() {
+  return (
+    <span
+      title="Human-edited from AI's original extraction."
+      aria-label="Human-edited"
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 12, height: 12, color: 'var(--accent-amber)', marginLeft: 4,
+      }}
+    >
+      <svg width={10} height={10} viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
+              stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+      </svg>
+    </span>
+  )
+}
+
+function isHumanEdited(item) {
+  // Item's `_aiOriginalValue` is set when the artifact was created via our
+  // Parse / Eval modal. Seeded artifacts don't carry it, so the pencil only
+  // appears for user-created rows that were subsequently edited.
+  return item && item._aiOriginalValue != null && item.value !== item._aiOriginalValue
+}
+
 function formatDateTime(iso) {
   if (!iso) return '—'
   try {
@@ -151,7 +179,7 @@ function PanelLayout({ header, body, footer }) {
 }
 
 /* ─── Asset Panel ─────────────────────────────────────────────────────── */
-function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreateClaim, parseResultsForAsset = [] }) {
+function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreateClaim, onParseEvidence, parseResultsForAsset = [] }) {
   const asset = node.v22Artifact
   const isOwner = activeParty === node.owner
   return (
@@ -183,7 +211,8 @@ function V22AssetPanel({ node, activeParty, onClose, onRequestAgreement, onCreat
         isOwner ? (
           <>
             <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
-            <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset (Phase 6+)" />
+            <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a PEP template" />
+            <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
           </>
         ) : null
       }
@@ -394,8 +423,11 @@ function V22ParseResultPanel({ node, onClose, sourceAsset }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {(pr?.fields || []).map((f) => (
                 <div key={f.id} style={{ padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{f.name}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                      {f.name}
+                      {isHumanEdited(f) && <HumanEditedIcon />}
+                    </span>
                     <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
                       conf {(f.confidence ?? 0).toFixed(2)}
                     </span>
@@ -446,8 +478,11 @@ function V22EvalResultPanel({ node, activeParty, onClose, onReRunEvaluation }) {
                 const cfg = STATUS_CFG[r.status] || STATUS_CFG.missing
                 return (
                   <div key={r.requirementId} style={{ padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{r.label}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                        {r.label}
+                        {isHumanEdited(r) && <HumanEditedIcon />}
+                      </span>
                       <span style={{
                         fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                         padding: '1px 5px', borderRadius: 3, letterSpacing: '0.06em',

@@ -1,22 +1,22 @@
-# Radiant by Provenance — V2.2 Architecture Migration Spec
+# Radiant by Provenance — Architecture Spec
 
-**Round 11 · Architecture Reference**
+**Architecture Reference**
 
-This document is the single source of truth for the V2.2 architecture. It supersedes `CLAUDE.md`, `handoff-v2.1.md`, and all previous batch specs. It is designed for two audiences: Andrew (product) reading for comprehension and review, and Claude Code reading for autonomous implementation.
+This document is the single source of truth for the Radiant by Provenance architecture. It is designed for two audiences: Andrew (product) reading for comprehension and review, and Claude Code reading for autonomous implementation. The per-phase migration history from the V2.1 → V2.2 transition is preserved in the changelog at the end of this document.
 
 ---
 
 ## 1. Summary
 
-V2.1 proved the basic Claims model works: evidence files get bundled into Claims, Claims are the disclosure boundary between organizations, evaluations run against Claims. V2.2 introduces two critical corrections identified during client architecture review:
+The platform rests on two foundational rules established during the V2.1 → V2.2 architecture review:
 
-**Correction 1 — Assets are distinct from Claims.** Claims *reference* Assets; they don't *contain* them. An Asset is an evidence file registered on the platform as a first-class node. A Claim is an assertion that references one or more Assets. Alice can have many Claims referencing overlapping Asset sets (the driver's license Asset might back both a Citizen Claim and an Age Verification Claim).
+**Rule 1 — Assets are distinct from Claims.** Claims *reference* Assets; they don't *contain* them. An Asset is an evidence file registered on the platform as a first-class node. A Claim is an assertion that references one or more Assets. Alice can have many Claims referencing overlapping Asset sets (the driver's license Asset might back both a Citizen Claim and an Age Verification Claim).
 
-**Correction 2 — Evaluation Agreements are the gateway.** In V2.1, a Disclosure Agreement caused Alice's Claim to appear on Bob's network. In V2.2, a Disclosure Agreement only grants visibility — it does not pull the Claim into Bob's network. That requires a second artifact: an Evaluation Agreement. The Evaluation Agreement is what causes Alice's Claim to render as a node on Bob's canvas, with evaluation as the explicit purpose of the connection.
+**Rule 2 — Evaluation Agreements are the gateway.** A Disclosure Agreement only grants visibility; it does not pull the Claim into another party's network. That requires a second artifact: an Evaluation Agreement. The Evaluation Agreement is what causes Alice's Claim to render as a node on Bob's canvas, with evaluation as the explicit purpose of the connection.
 
-These two corrections produce a cleaner model that scales to auditors (Carol), self-evaluation (Alice using OSHA's requirements on her own factory), and the Public Directory at scale (the AI Shopper browsing thousands of Claims). The Disclosure → Evaluation Agreement sequence is the platform's fundamental inter-party relationship.
+These two rules scale cleanly to auditors (Carol), self-evaluation (Alice using OSHA's requirements on her own factory), and the Public Directory at scale (the AI Shopper browsing thousands of Claims). The Disclosure → Evaluation Agreement sequence is the platform's fundamental inter-party relationship.
 
-The existing V2.1 codebase is substantial and much of it is retained. This is a **targeted migration, not a rewrite.** Canvas rendering, Detail Panel structure, modal framework, notification system, child layer dive/surface, and ~80% of modal logic carry forward unchanged. The new work is: adding Asset as a distinct node, introducing the Evaluation Agreement artifact, restructuring edges to be clickable and to represent agreement pairs, relocating Evaluation Results to the parent layer, and rebuilding process flows around the new model.
+> **Document structure note.** Sections §1–§11, §15–§17 describe the current platform architecture. §12 (V2.1 → V2.2 Migration Map) and §13 (Phased Implementation Plan) are preserved verbatim as historical record of the 2026-04 migration — they're no longer operative guidance but remain useful for understanding *why* certain component decisions were made. §14 implementation guidelines have been collapsed into operating conventions; see `CLAUDE.md` for the authoritative working-conventions reference.
 
 ---
 
@@ -299,7 +299,7 @@ Carol audits Alice's Claim. Bob wants to use Carol's audit as proof without re-r
 4. Bob does not re-run the evaluation. The existing Evaluation Result stands as proof.
 5. If Bob wants his own evaluation, he goes through Story 1 or 2 independently with Alice.
 
-### 7.4 V2.2 Notification Types
+### 7.4 Notification Types
 
 Three new notification types drive cross-role deep-links in V2.2. All three ride on the V2.1 notification inbox UI (no new surfaces); the `type` field branches rendering and click behaviour in `V2App.jsx`. (Phases 4–6.5.)
 
@@ -592,7 +592,7 @@ When an agreement's `expires` date passes, its `status` transitions to `expired`
 - Expired Evaluation Agreement: Bob cannot run new evaluations against the Claim. Existing Evaluation Results remain valid.
 - Auto-renewal (if enabled in terms): agreements automatically extend by the original duration at expiry.
 
-### 11.6 Self-evaluation (Phase 6)
+### 11.6 Self-evaluation
 
 Alice evaluates her own Claim against a Requirements Set without a counterparty.
 
@@ -605,6 +605,16 @@ Alice evaluates her own Claim against a Requirements Set without a counterparty.
 ### 11.7 Ownership transfer (Transferring process)
 
 Defined in the model; not implemented. When implemented, produces a new DOT (ownership token) that replaces the previous owner's DOT on an Asset or Claim.
+
+### 11.8 Parse flow
+
+Alice parses an Asset she owns to extract structured fields into a Parse Result artifact. Parsing is a prerequisite for Selective Disclosure (§2.3).
+
+1. Alice selects one of her own Assets; the Asset Detail Panel footer exposes **Parse Evidence** (owner-only).
+2. `V22ParseEvidenceModal` opens in a three-stage flow (select PEP template → processing → review + edit parsed fields). Templates already run on this Asset are shown with an `ALREADY PARSED` affordance and disabled.
+3. On submit, `makeParseRunArtifacts({ ownerParty, ownerDot, sourceAssetId, template, rows })` produces a Parse Result plus an internal Full Disclosure Agreement (`subject={kind:'parseResult', id}` with `scope.assetIds=[sourceAssetId]`) that wires the new Parse Result to its source Asset. The ref DA's shape matches the seeded `parseResultRefEdges` so edge derivation treats the new Parse Result identically.
+4. Both artifacts land on `v22Provisionals` and merge into the view; the new Parse Result node renders on Alice's canvas with an `_isNew` reveal.
+5. Structural parity with `V22RunEvaluationModal`: same split-panel layout, same `ConfidenceBadge` + row shape. Parse rows edit the extracted value + confidence only (no SAT/UNSAT/MISSING/N/A cycling), per the Parsing-vs-Evaluating distinction in §2.3.
 
 ---
 
@@ -979,3 +989,7 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 - **§11.4 Disclosure decline — Phase 6.5:** rewrote from "both artifacts deleted" to decline retention with `_declineMeta` annotation; declined DA derives its edge normally in DECLINED state; Dismiss strips annotations and collapses both artifacts + edge together.
 - **§11.6 Self-evaluation — Phase 6 (new subsection):** documented the self-eval artifact shape (no EA; internal proof-of-evaluation DA + ownership DA with grantor == grantee); noted the `deriveAgreementEdges` internal-proof branch and that duplicate detection / supersede rules apply identically.
 - **§12.6 Demo dataset composition — Phase 6.5 (new subsection):** enumerated actors + asset/claim/parse/eval/DA counts shipped in `buildV22SharedArtifacts`, including Bob's 3 Assets and Carol's 2 Assets added in Phase 5.
+- **§1 Summary + document structure note — Phase 8:** reframed from "V2.2 migration spec" to "platform architecture spec" post-migration; added a note clarifying that §12 + §13 are preserved as historical record rather than operative guidance.
+- **§7.4 Notification Types — Phase 8:** section title dropped the "V2.2" prefix.
+- **§11.6 Self-evaluation — Phase 8:** section title dropped the "(Phase 6)" suffix.
+- **§11.8 Parse flow — Phase 8 (new subsection):** documented the V2.2 Parse Evidence flow (`V22ParseEvidenceModal` + `makeParseRunArtifacts` factory + internal Full DA wiring the new Parse Result to its source Asset). Closes the one remaining gap in V2.2's process coverage — parsing was seeded in demo data but had no user-facing creation flow pre-Phase-8.

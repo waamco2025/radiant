@@ -14,22 +14,13 @@ Each item includes:
 ## Visual & Rendering
 
 ### 1. Warmer grey border on all nodes
-- **Source:** Phase 4 visual review
-- **Scope:** Small
-- **Context:** Current node borders are too dim — edges visually "fade into darkness" at node terminations. Red borders on UNSAT nodes are the only ones that read cleanly.
-- **Proposed fix:** Add a subtle warmer-grey border (slightly brighter than current `var(--border)`) to all nodes. Do not use indigo — it would compete with indigo edge color. Do not change the red UNSAT border treatment.
+- **Status:** ✅ Complete (Phase 9A). `warmBorder = color-mix(in srgb, var(--accent-indigo) 22%, var(--border))` — reads as a cool indigo-grey that stops node terminations from fading into the dark canvas without competing with indigo edges. Red UNSAT border treatment unchanged.
 
 ### 2. Visual distinction for counterparty-pulled-in nodes
-- **Source:** Spec §15.5 open question #4
-- **Scope:** Medium
-- **Context:** Pulled-in counterparty nodes (Alice's Claim on Bob's canvas, Bob's Asset on Alice's canvas) currently render identical to the user's own nodes. Some subtle treatment should signal "this isn't mine."
-- **Proposed fix:** TBD — try reduced opacity, a muted background tint, or a small "grantor: MicroCo" chip in the card header.
+- **Status:** ✅ Complete (Phase 9A). Counterparty cards (where `node.owner !== activeParty`, excluding Actor nodes) render a muted tint: `color-mix(in srgb, var(--bg-card) 82%, var(--bg-deep))`. Subtle flattening, no opacity/chip changes.
 
 ### 3. Subtle de-emphasis for internal/ownership edges
-- **Source:** Spec §15.5 open question #6
-- **Scope:** Small
-- **Context:** All edges use the same Agreement Edge type, so internal ownership edges (Alice's own Actor → Asset → Claim chain) visually compete with inter-party edges. The user's own internal structure can dominate the canvas.
-- **Proposed fix:** Thinner stroke or lower opacity for internal edges (where grantor and grantee are the same party).
+- **Status:** ✅ Complete (Phase 9A). Internal edges (where `edge.grantorParty === edge.granteeParty`, carried through from `deriveAgreementEdges`) now render at 70% of the default stroke width. Selected and NEW edges keep their emphasis regardless.
 
 ### 4. Layout density improvements
 - **Source:** Phase 2 visual review
@@ -38,10 +29,7 @@ Each item includes:
 - **Proposed fix:** Evaluate orthogonal edge routing, edge bundling, or tighter node clustering by relationship. May require V2Canvas refactor.
 
 ### 5. Node label truncation legibility
-- **Source:** Phase 2 visual review
-- **Scope:** Small
-- **Context:** Long Claim and Eval Result names ("Power Regulation…", "MIL-PRF-55…", "AuditCo PRM…") truncate with ellipsis. Type label on its own line has already helped.
-- **Proposed fix:** Either increase max card width slightly, wrap the name to two lines, or show full name on hover/focus.
+- **Status:** ✅ Complete (Phase 9A, expanded). Claim and Eval Result names wrap to two lines via `-webkit-line-clamp: 2`; Actor and Asset names stay on one line with ellipsis. Also in Phase 9A: vertical spacing above the name increased so the `CLAIM` / `EVAL RESULT` type badge no longer crowds the name, and the health minibar's wrapper flex-space-between-s the inner content so the whitespace between the owner row and the card edge equalises.
 
 ---
 
@@ -60,10 +48,7 @@ Each item includes:
 - **Proposed fix:** Offset the edge menu position from the click point, or dismiss the tooltip on click before rendering the menu.
 
 ### 8. Glow indicators on edge-connected nodes
-- **Source:** Phase 3 visual review
-- **Scope:** Medium
-- **Context:** When an edge is selected, it's not obvious which nodes it connects — especially on Alice's crowded canvas where edges overlap. Hard to identify endpoints without selecting the nodes themselves (which would conflict with edge selection).
-- **Proposed fix:** Add glowing left/right borders (offset by a few pixels) on each node where the selected edge terminates. Different visual treatment from the selected-node state.
+- **Status:** ✅ Complete (Phase 9A). The `v22DataWithReveal` memo stamps `_isEdgeEndpoint: true` on the two nodes touched by the currently-selected edge; AssetNode applies a static indigo glow (`box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-indigo) 35%, transparent)`) that sits 5px outside the card border. Distinct from the selected-node amber border so users can tell "I selected this" apart from "this is an edge endpoint." No animation/pulse per spec.
 
 ### 9. Richer provisional → active transition
 - **Source:** Phase 4 deviation #3
@@ -98,18 +83,10 @@ Each item includes:
 ## V1 File Cleanup
 
 ### 13. Delete V1 files
-- **Source:** Spec §12.3
-- **Scope:** Small
-- **Depends on:** Phase 7 complete and V2.2 demo stable.
-- **Context:** V1 files are archived but still in the repo. Scheduled for deletion after V2.2 stabilizes.
-- **Files:** `src/App.jsx`, `src/data/`, `src/components/Header.jsx`, `src/components/Footer.jsx`, `src/components/NetGraph.jsx`, `src/components/SystemNode.jsx`, and related V1-only files. `/index.html`.
+- **Status:** ✅ Complete (Phase 8). `src/App.jsx`, `src/App.css`, `src/main.jsx`, `src/ia-map-entry.jsx`, `src/data/`, `src/reference/`, and every `src/components/*.jsx` file outside `modals/` and `DetailPanel/` removed. `index.html` deleted. `vite.config.js` updated to drop the `main` input.
 
 ### 14. Delete V2.1-specific code paths
-- **Source:** Spec §12.3
-- **Scope:** Medium
-- **Depends on:** Phase 7 complete and V2.2 accepted as the default.
-- **Context:** Once V2.2 is the default render path, the `V2_2_ENABLED` flag can be removed and V2.1 code paths deleted.
-- **Includes:** V2.1 render branches in `V2App.jsx`, unused state (`addedNodes`, `addedChildren`, `addedSDAs` if superseded by V2.2's artifact arrays), deprecated modal files (`RegisterAssetModal.jsx`, `AddEvidenceModal.jsx`).
+- **Status:** ✅ Complete (Phase 8). `V2_2_ENABLED` flag removed from `v2_2Data.js`. All 23 conditional sites in `V2App.jsx` collapsed. 13 V2.1 modal files deleted (`RequestDisclosureModal`, `DisclosureResponseModal`, `ReviseDisclosureModal`, V2.1 `RunEvaluationModal`, V2.1 `ParseEvidenceModal`, `RegisterAssetModal`, `AddEvidenceModal`, `CascadeModal`, `UpstreamPicker`, `CreateClaimModal`, `QualifiedStoragePicker`, `RevocationNoticeModal`, `PublishModal`). 10 V2.1 DetailPanel files deleted (`index.jsx`, `PanelShell.jsx`, `ChildrenTab.jsx`, `DisclosuresTab.jsx`, `EvalPanel.jsx`, `EvaluationsTab.jsx`, `EvidenceBlock.jsx`, `ParsedFieldsTab.jsx`, `ClaimsTable.jsx`, `constants.js`) plus all of `shared/` except `CopyBadge.jsx`. V2.1 merge pipeline in `V2App.jsx` (~270 lines) removed along with the V2.1-only state fields (`addedNodes`, `addedSDAs`, `addedEdges`, `addedChildren`, `removedSDAs`, `removedNodes`, `removedEdges`, `newlyDisclosedIds`). Bundle dropped from 638 kB → 345 kB (46% shrinkage).
 
 ---
 
@@ -251,6 +228,9 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-19: Phase 6.5 bug-fix pass — added items #34, #35, #36 below for follow-up after migration stabilizes.
 - 2026-04-19: Phase 6.5+ visual-review pass — added items #37, #38, #39, #40, #41, #42.
 - 2026-04-19: Phase 7 — items #29 (Public Directory Cloud visualization) in-flight as placeholder; added Phase 7+ polish items #43, #44, #45, #46, #47, #48.
+- 2026-04-19: Phase 8 consolidation — items #13 (Delete V1 files) and #14 (Delete V2.1-specific code paths) marked ✅ Complete; added Phase 8 polish items #49, #50, #51.
+- 2026-04-19: Phase 8.5 bug-fix pass — five bugs fixed (confidence format mismatch, Carol missing from role switcher, white screen at base URL, eval confidence override on human edit, locked split-panel scroll); added polish item #52 for the richer human-validated indicator pattern.
+- 2026-04-19: Phase 9A polish pass — items #1, #2, #3, #5, #8 sub-items, #37, #38, #40, #42, #52 all shipped. Card cleanup (item #5 in the visual section) expanded into two-line name wrap + badge spacing + minibar centering.
 
 ---
 
@@ -275,14 +255,10 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - **Proposed fix:** Update `buildViewForActor` to also pull in Assets named in `da.scope.assetIds` for active inter-party DAs where the actor is grantee. Re-evaluate canvas density after; may pair with item #4 (Layout density improvements). Once landed, revert the Option A workaround in V2App's eval-modal mount (Phase 6.5 commit) and let the filter at line ~2680 work as-is.
 
 ### 37. Full Disclosure last-Asset deselect handling
-- **Source:** Phase 6.5+ #11 review
-- **Scope:** Small
-- **Context:** CombinedResponseModal's Full step lets the user deselect every Asset, which leaves Continue disabled. Currently no inline cue; the user has to notice the count footer. Allow deselection (don't snap-back to ≥1), but show an inline help line ("Select at least one Asset to continue") next to the count when the list is empty.
+- **Status:** ✅ Complete (Phase 9A). Deselecting all Assets no longer snaps back; an amber italic inline help line ("Select at least one Asset to continue.") renders beneath the count footer when the selection is empty. Continue button stays disabled (existing behaviour).
 
 ### 38. Run Evaluation review-stage UX improvements
-- **Source:** Phase 6.5+ #6 / #8 review
-- **Scope:** Medium
-- **Context:** Review rows currently show a tiny three-letter status pill (SAT/UNSAT/MISSING/N/A) that cycles on click. Polish to: full status words ("Satisfactory" / "Unsatisfactory" / "Missing" / "N/A") in a chevron-style selector; pre-populated values from the previous eval lineage when superseding; AI confidence chip per row matched to the Parse modal's pattern.
+- **Status:** ✅ Complete (Phase 9A). Three sub-items shipped: (1) `StatusChevronPicker` renders ◂ SATISFACTORY ▸ with full words, left chevron cycles back, right chevron + word cycle forward; (2) on supersede / re-evaluate, rows pre-populate `value`, `status`, AND `confidence` from the prior result (was hard-coded 0.9); (3) every row renders a confidence chip — null confidence shows `AWAITING AI` instead of the previous "chip missing" state.
 
 ### 39. Decline dismiss "ravel-out" animation
 - **Source:** Phase 6.5+ #2 / #3 review
@@ -290,9 +266,7 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - **Context:** Dismissing a declined Claim removes it instantly from Bob's canvas. A short ravel-out animation (border collapse + edge fade) would communicate "this is going away" instead of a hard cut.
 
 ### 40. Node card action button reassessment post-migration
-- **Source:** Phase 6.5+ #1 review
-- **Scope:** Medium
-- **Context:** V2.2 has a settled set of Detail Panel actions per node type, but the floating action bar attached to each card still hosts V2.1-era buttons (globe, disclose, dive, etc.). Audit for V2.2: which actions belong on the card vs. the panel, and which should be removed. Coordinate with item #2 (counterparty visual distinction) so action availability tracks viewer ownership.
+- **Status:** ✅ Complete (Phase 9A). V2.2 nodes route through a new `V22ActionBar` component that mirrors the Detail Panel footer one-to-one per type: ASSET (owner) → Request Agreement + Parse Evidence + Create Claim; CLAIM (owner) → Amend Claim + Self-Evaluate; CLAIM (non-owner + active EA) → Run Evaluation; EVAL RESULT (owner, not superseded) → Re-run Evaluation; PARSE RESULT / ACTOR → none. Single dispatch prop `onV22CardAction(actionName, node)` routes from card click → V2Canvas → V2App's action handlers, the same handlers V22NodeDetailPanel's footer fires. Legacy V2.1 ActionBar is retained as fallback for non-V2.2 nodes.
 
 ### 41. PDF file viewer in Run Evaluation processing/review stages
 - **Source:** Phase 6.5+ #2 follow-on
@@ -300,9 +274,7 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - **Context:** The Parse modal's evidence side currently shows file metadata only; the Run Eval modal does the same. A real (or stub) PDF viewer in the left split-pane would let evaluators read the evidence as they assess each row. Could reuse a lightweight PDF.js viewer.
 
 ### 42. "Re-Evaluate" entry point on existing Eval Result nodes
-- **Source:** Phase 6.5+ #6 review
-- **Scope:** Small
-- **Context:** Today the Run Evaluation flow is reachable only from the Claim panel. From an existing Eval Result, the user can't easily re-run with the same Req Set. Add a "Re-Evaluate" footer action on Eval Result panels (owner only) that opens the modal with the Req Set pre-selected and locked.
+- **Status:** ✅ Complete (Phase 9A). V22EvalResultPanel's "Re-run Evaluation" footer button (owner, not superseded) now opens `V22RunEvaluationModal` with `lockedRequirementsSetId` set to the prior result's Req Set id. The modal renders a LOCKED card (indigo border, LOCKED pill, "To change Requirements Set, start a new evaluation from the Claim." explainer) instead of the picker. Evidence selection remains free; on submit the standard supersede rules apply. The prior result is also passed as `priorActiveResult`, which pre-populates review rows with the prior values/status/confidence (see item #38).
 
 ---
 
@@ -337,3 +309,29 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - **Source:** Phase 7 scope boundary (spec §9)
 - **Scope:** Small
 - **Context:** Spec §9 lists "View a Claim's public-directory Detail Panel (owner, description, posted date, aggregate stats)" as a capability. Currently the candidate card jumps straight to Request Agreement. Add a secondary "Preview" CTA that opens a read-only panel showing what's publicly disclosed about the Claim (respecting the public DA's scope).
+
+---
+
+## Phase 8 Discoveries (post-consolidation)
+
+### 49. Rename `src/v2/` to `src/` (or `src/app/`)
+- **Source:** Phase 8 consolidation — deferred from the main cleanup pass.
+- **Scope:** Medium
+- **Context:** With V2.1 deleted and V2.2 the only shipped version, the `v2/` subdirectory is vestigial. Cascading import-path changes across every file (`src/components/modals/V22RunEvaluationModal.jsx` has `import PrimeRadiant from '../../v2/PrimeRadiant.jsx'` and similar relative-path stubs throughout) make this a high-blast-radius change. Should happen in a dedicated atomic pass with a codebase-wide find-and-replace, followed by a full build + runtime verification.
+
+### 50. Dead V2.1 handler sweep in V2App.jsx
+- **Source:** Phase 8 consolidation — some handlers deferred for focused pass.
+- **Scope:** Medium
+- **Context:** After the Phase 8 V2.1 modal + DetailPanel deletion, several V2.1-era handlers remain in `V2App.jsx` as dead code: `handlePanelViewChain`, `handlePanelExpandStack`, `handlePanelSurface`, `handleValidatePins`, `handleSubmitRequest`, plus state setters like `setClaimContext`, `setCascadeContext`, `setPublishNode`, `setReviseContext`, etc. Build tree-shakes these but they add file noise. Sweep them in a dedicated pass with no functional changes.
+
+### 51. V2Canvas.jsx V2.1 prop pruning
+- **Source:** Phase 8 audit
+- **Scope:** Small
+- **Context:** `V2Canvas.jsx` accepts several V2.1-only props that V2.2 no longer passes: `onConnect` (V2.2 passes `undefined`), `onDisclose`, `onAddEvidence`, `onParseEvidence`, `onRunEvaluation`, `onAmendEval`, `onCreateClaim`. These trace into V2Canvas's internal card-action-bar rendering. Prune the props from V2Canvas's signature and delete the corresponding card-action-bar code paths.
+
+---
+
+## Phase 8.5 Discoveries
+
+### 52. "Human-validated" indicator on Eval/Parse review rows
+- **Status:** ✅ Complete (Phase 9A item 10). `_aiOriginalValue` snapshot tracked per row from initialization (set to the AI's extracted value, or empty string for fresh rows). When `row.value !== row._aiOriginalValue` the modal + Detail Panel render a small amber pencil SVG next to the ConfidenceBadge with the tooltip "Human-edited from AI's original extraction." Persisted onto the submitted Parse Result `fields` and Eval Result `results` so the Detail Panel can render the pencil later. AI confidence remains unchanged by human edits (the Phase 8.5 rule).

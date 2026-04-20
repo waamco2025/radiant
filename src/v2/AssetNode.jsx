@@ -35,7 +35,10 @@ const CATEGORY_CONFIG = {
 }
 
 const CARD_W = 210
-const CARD_H = 86
+// Phase 9A.1 item 2: baseline card height bumped 86 → 96. The extra 10px
+// lets the health minibar sit with equal whitespace above and below when the
+// inner content uses flex space-between.
+const CARD_H = 96
 const MINI_CARD_W = 160
 const MINI_CARD_H = 48
 const CLICK_DELAY = 250
@@ -373,6 +376,11 @@ export default function AssetNode({
   onRunEvaluation,
   onAmendEval,
   onCreateClaim,
+  // Phase 9A item 9: single dispatch prop for V2.2 card-attached actions.
+  // V2App routes action names ('requestAgreement' | 'parseEvidence' |
+  // 'createClaim' | 'amendClaim' | 'selfEvaluate' | 'runEvaluation' |
+  // 'reRunEvaluation') to the same handlers V22NodeDetailPanel's footer fires.
+  onV22CardAction,
   activeParty,
   revealPhase,
 }) {
@@ -445,6 +453,11 @@ export default function AssetNode({
 
   const h = node.displayHealth || node.health
   const hasBadHealth = h && h.bad > 0
+  // Phase 9A.1 item 4: bumped 22% → 40% indigo blend. The 22% baseline was
+  // imperceptible in browser; 40% reads as a clear indigo-grey that stops
+  // node terminations from fading into the dark canvas without competing
+  // with edge indigo (edges render at full accent-indigo).
+  const warmBorder = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
   const borderColor = isDeclined
     ? 'var(--accent-red)'
     : isProvisional
@@ -453,7 +466,19 @@ export default function AssetNode({
       ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
-        : 'var(--border)'
+        : warmBorder
+
+  // Phase 9A item 2: counterparty visual distinction. Pulled-in nodes owned
+  // by a different party get a muted tint — same base bg-card, blended with a
+  // small amount of the deep bg so the card reads darker/flatter without
+  // introducing a new colour.
+  const isCounterpartyNode = activeParty && node.owner && node.owner !== activeParty && node.category !== 'party'
+
+  // Phase 9A item 5: edge-endpoint glow. `_isEdgeEndpoint` is set by the
+  // canvas adapter for the two nodes touched by the selected edge. Distinct
+  // from the selected-node amber border so users can tell "I selected this"
+  // apart from "this is an endpoint of the selected edge".
+  const isEdgeEndpoint = !!node._isEdgeEndpoint && !isSelected
 
   const showActionBar = isSelected || hovered
 
@@ -537,6 +562,25 @@ export default function AssetNode({
         }} />
       )}
 
+      {/* Phase 9A.1 item 7: edge-endpoint indicator — right-side vertical
+          indigo line, 4px offset from the card, same height as the card.
+          Static, no pulse. Suppressed when the node is itself selected so
+          the amber selection border wins and the two states stay visually
+          distinct. */}
+      {isEdgeEndpoint && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: CARD_W * scale + 4,
+          width: 3,
+          height: CARD_H * scale,
+          background: 'var(--accent-indigo)',
+          borderRadius: 1.5,
+          pointerEvents: 'none',
+          zIndex: 0,
+        }} />
+      )}
+
       <div
         onClick={handleClick}
         style={{
@@ -548,7 +592,12 @@ export default function AssetNode({
               ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
               : hovered
                 ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
-                : 'var(--bg-card)',
+                : isCounterpartyNode
+                  // Phase 9A.1 item 5: stronger mix (82% → 55% bg-card) plus a
+                  // subtle cooler shift via accent-blue so counterparty nodes
+                  // read as noticeably not-mine at a glance.
+                  ? 'color-mix(in srgb, color-mix(in srgb, var(--bg-card) 55%, var(--bg-deep)) 92%, var(--accent-blue, #38bdf8))'
+                  : 'var(--bg-card)',
           border: `1px ${showAsProvisional ? 'dashed' : 'solid'} ${borderColor}`,
           opacity: showAsProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,
@@ -556,6 +605,10 @@ export default function AssetNode({
           cursor: 'pointer',
           position: 'relative',
           zIndex: 1,
+          // Phase 9A.1 item 7: endpoint indicator is now a dedicated vertical
+          // line (rendered below) instead of a glow box-shadow. The old glow
+          // washed into the edge's own selected-state brightening, making
+          // both look wrong. `boxShadow` goes back to the plain hover lift.
           boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
           transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
           ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
@@ -573,19 +626,34 @@ export default function AssetNode({
           } : {}),
         }}
       >
-        <div style={isFlipping ? { animation: 'revealContentFade 700ms ease-in-out forwards' } : undefined}>
-        {/* Row 0: V2.2 type label on its own line above the name (spec §3). */}
+        {/* Phase 9A item 4: wrapper is now flex column + space-between so
+            the health minibar pins toward the bottom of the card and the
+            whitespace equalises between the owner row and the card edge. */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          height: '100%',
+          ...(isFlipping ? { animation: 'revealContentFade 700ms ease-in-out forwards' } : {}),
+        }}>
+        <div>
+        {/* Row 0: V2.2 type label on its own line above the name (spec §3).
+            Phase 9A.1 item 3: horizontal padding tightened to 4px; bottom
+            margin bumped to 8px so name has clear breathing room. */}
         {node.v22Type && (
-          <div style={{ marginBottom: 2, lineHeight: 1 }}>
+          <div style={{ marginBottom: 8, lineHeight: 1 }}>
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              padding: '1px 6px', borderRadius: 3, letterSpacing: '0.1em',
+              padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
               color: 'var(--text-tertiary)',
               background: 'var(--bg-raised)',
             }}>{node.v22Type}</span>
           </div>
         )}
-        {/* Row 1: name + status badges + stack badge */}
+        {/* Row 1: name + status badges + stack badge.
+            Phase 9A item 4: Claim and Eval Result names wrap to two lines
+            (cap via -webkit-line-clamp) since they tend to be longer. Actor
+            and Asset stay on one line with ellipsis. */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -594,11 +662,13 @@ export default function AssetNode({
         }}>
           <div style={{
             flex: 1,
+            minWidth: 0,
             fontFamily: 'var(--font-display)',
             fontSize: 13,
             fontWeight: 600,
             color: 'var(--text-primary)',
             lineHeight: 1.3,
+            // Phase 9A.1 item 1: all node types back to single-line ellipsis.
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -651,15 +721,17 @@ export default function AssetNode({
             {(node.sdas || []).some(s => s.party === 'Radiant Network') && <GlobeBadge />}
           </div>
         )}
+        </div>
 
-        {/* Row 3: health minibar (or provisional message) */}
+        {/* Row 3: health minibar (or provisional message). Lives outside the
+            top-content wrapper so flex:space-between on the parent pushes it
+            to the bottom and centres the whitespace above it. */}
         {showAsProvisional ? (
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
             color: isDeclined ? 'var(--accent-red)' : 'var(--text-dim)',
             fontStyle: 'italic',
-            marginTop: 2,
           }}>
             {isDeclined ? 'Disclosure declined' : 'Awaiting disclosure from owner'}
           </div>
@@ -669,7 +741,7 @@ export default function AssetNode({
           const total = dh.ok + (dh.warn || 0) + dh.bad
           if (total === 0) return null
           return (
-            <div style={{ display: 'flex', marginTop: 12 }}>
+            <div style={{ display: 'flex' }}>
               <HealthBar health={dh} />
             </div>
           )
@@ -677,25 +749,102 @@ export default function AssetNode({
         </div>
       </div>
 
-      {showActionBar && (
-        <ActionBar
-          onCreateAsset={handleCreateAsset}
-          onCreateSDA={handleCreateSDA}
-          onAddEvidence={handleAddEvidence}
-          onParseEvidence={handleParseEvidence}
-          onRunEvaluation={handleRunEvaluation}
-          onAmendEval={handleAmendEval}
-          onCreateClaim={handleCreateClaim}
-          onDive={handleDive}
-          onOpenSubgraph={onOpenSubgraph ? () => onOpenSubgraph(node) : undefined}
-          onSurface={onSurface}
-          hasChildren={hasChildren}
-          isAnchor={isAnchor}
-          isChild={isChild}
-          categoryColor={'var(--border-hover)'}
-          isParty={node.category === 'party'}
-        />
+      {/* Phase 9A item 9: V2.2 nodes get a type-aware action bar that
+          mirrors the Detail Panel footer one-to-one. The legacy V2.1
+          ActionBar is retained for archived / non-V2.2 nodes (none in
+          default mode post-Phase 8, but keeps the fallback intact for
+          any future child-layer work). */}
+      {showActionBar && (node.v22Type
+        ? <V22ActionBar
+            node={node}
+            activeParty={activeParty}
+            onV22CardAction={onV22CardAction}
+            evaluationAgreementForActor={node._evaluationAgreementForActor}
+            categoryColor={'var(--border-hover)'}
+          />
+        : <ActionBar
+            onCreateAsset={handleCreateAsset}
+            onCreateSDA={handleCreateSDA}
+            onAddEvidence={handleAddEvidence}
+            onParseEvidence={handleParseEvidence}
+            onRunEvaluation={handleRunEvaluation}
+            onAmendEval={handleAmendEval}
+            onCreateClaim={handleCreateClaim}
+            onDive={handleDive}
+            onOpenSubgraph={onOpenSubgraph ? () => onOpenSubgraph(node) : undefined}
+            onSurface={onSurface}
+            hasChildren={hasChildren}
+            isAnchor={isAnchor}
+            isChild={isChild}
+            categoryColor={'var(--border-hover)'}
+            isParty={node.category === 'party'}
+          />
       )}
+    </div>
+  )
+}
+
+// Phase 9A item 9: V2.2 action bar. Per-type button set matches
+// V22NodeDetailPanel's footer exactly:
+//   ASSET (owner)        → Request Agreement, Parse Evidence, Create Claim
+//   CLAIM (owner)        → Amend Claim, Self-Evaluate
+//   CLAIM (non-owner+EA) → Run Evaluation
+//   EVAL RESULT (owner,  → Re-run Evaluation
+//                 active)
+//   PARSE RESULT / ACTOR → no actions
+function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementForActor, categoryColor }) {
+  const isOwner = !node.owner || node.owner === activeParty
+  const fire = (action) => (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+    onV22CardAction?.(action, node)
+  }
+  const buttons = []
+  switch (node.v22Type) {
+    case 'ASSET':
+      if (isOwner && onV22CardAction) {
+        buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
+        buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
+        buttons.push({ icon: '◇', tooltip: 'Create Claim (Phase 6+)', onClick: fire('createClaim') })
+      }
+      break
+    case 'CLAIM': {
+      const isProvisional = !!node.isProvisional
+      const isDeclined = !!(node.isDeclined || node._isDeclined)
+      if (!isProvisional && !isDeclined && onV22CardAction) {
+        if (isOwner) {
+          buttons.push({ icon: '✎', tooltip: 'Amend Claim', onClick: fire('amendClaim') })
+          buttons.push({ icon: '◆', tooltip: 'Self-Evaluate', onClick: fire('selfEvaluate') })
+        } else if (evaluationAgreementForActor) {
+          buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: fire('runEvaluation') })
+        }
+      }
+      break
+    }
+    case 'EVAL RESULT': {
+      const isSuperseded = node.v22Artifact?.status === 'superseded'
+      if (isOwner && !isSuperseded && onV22CardAction) {
+        buttons.push({ icon: '↻', tooltip: 'Re-run Evaluation', onClick: fire('reRunEvaluation') })
+      }
+      break
+    }
+    // PARSE RESULT and ACTOR intentionally have no card actions — matches
+    // the empty-footer state in V22NodeDetailPanel.
+  }
+  if (buttons.length === 0) return null
+  return (
+    <div style={{
+      position: 'absolute',
+      left: CARD_W + 6,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2,
+      animation: 'v2-action-slide 150ms ease',
+    }}>
+      {buttons.map((b, i) => (
+        <ActionButton key={i} icon={b.icon} tooltip={b.tooltip} onClick={b.onClick} categoryColor={categoryColor} />
+      ))}
     </div>
   )
 }

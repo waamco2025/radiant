@@ -14,49 +14,47 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, FieldLabel,
+  Btn, FieldLabel, CopyBadge,
 } from './ModalShared'
+import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
 
-function MockProgress() {
-  // Simple three-dot progress used while the mock "agent" pretends to search.
-  // Matches the PrimeRadiant pattern in look (golden ripple, centred).
+function MockProgress({ reqSetName }) {
+  // Phase 8 polish #3: match the V22RunEvaluationModal / ParseEvidenceModal
+  // processing-stage layout — same PrimeRadiant + progress-bar treatment so
+  // the three structurally-similar flows feel like siblings.
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '48px 16px', gap: 20,
-    }}>
-      <div style={{
-        width: 64, height: 64, borderRadius: '50%',
-        background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-amber) 30%, transparent) 0%, transparent 70%)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        animation: 'v22ShopperPulse 1.6s ease-in-out infinite',
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: '50%',
-          background: 'color-mix(in srgb, var(--accent-amber) 80%, transparent)',
-          boxShadow: '0 0 18px color-mix(in srgb, var(--accent-amber) 60%, transparent)',
-        }} />
+    <div style={{ padding: '60px 36px', textAlign: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '0 auto 28px' }}>
+        <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.3} />
       </div>
-      <div style={{
-        fontFamily: 'var(--font-display)',
-        fontSize: 13,
-        letterSpacing: '0.06em',
-        color: 'var(--text-secondary)',
-      }}>
+      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
         Searching the Radiant Network for matches…
       </div>
-      <style>{`
-        @keyframes v22ShopperPulse {
-          0%   { transform: scale(0.85); opacity: 0.6; }
-          50%  { transform: scale(1.05); opacity: 1; }
-          100% { transform: scale(0.85); opacity: 0.6; }
-        }
-      `}</style>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+        Scanning public Claims against {reqSetName || 'your Requirements Set'}
+      </div>
+      <div style={{
+        width: '60%', height: 3, borderRadius: 2,
+        background: 'var(--border)', margin: '24px auto 0',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%', borderRadius: 2,
+          background: 'var(--accent-amber)',
+          animation: 'v22shopperprogress 2.2s ease forwards',
+        }} />
+      </div>
+      <style>{`@keyframes v22shopperprogress { from { width: 0% } to { width: 100% } }`}</style>
     </div>
   )
 }
 
 function CandidateCard({ candidate, onRequest }) {
+  // Phase 8 polish #4: visual hierarchy —
+  //   • match score is the largest and most prominent element
+  //   • claim name sits at 15px/600 as the primary heading
+  //   • per-result rationale (two lines: primary + secondary) as subtitle
+  //   • owner + truncated PIN live as a discreet footer row using CopyBadge
   return (
     <div
       style={{
@@ -64,46 +62,52 @@ function CandidateCard({ candidate, onRequest }) {
         borderRadius: 10,
         padding: '14px 16px',
         background: 'var(--bg-card)',
-        display: 'flex', alignItems: 'stretch', gap: 14,
+        display: 'flex', alignItems: 'stretch', gap: 16,
         marginBottom: 10,
       }}
     >
       <div style={{
-        width: 56, flexShrink: 0,
+        width: 72, flexShrink: 0,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         background: 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
         border: '1px solid color-mix(in srgb, var(--accent-amber) 30%, transparent)',
         borderRadius: 8,
       }}>
         <div style={{
-          fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700,
-          color: 'var(--accent-amber)',
+          fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 700,
+          color: 'var(--accent-amber)', lineHeight: 1,
         }}>
           {candidate.matchScore}
         </div>
         <div style={{
           fontFamily: 'var(--font-mono)', fontSize: 9,
-          letterSpacing: '0.08em', color: 'var(--text-dim)', marginTop: 2,
+          letterSpacing: '0.08em', color: 'var(--text-dim)', marginTop: 4,
         }}>
           MATCH
         </div>
       </div>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{
-          fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600,
+          fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 600,
           color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
           {candidate.claim.name}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-          <span style={{ color: 'var(--text-dim)' }}>Owner:</span>{' '}
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{candidate.claim.owner}</span>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          {candidate.rationalePrimary}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-          {candidate.claim.pin}
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          {candidate.rationaleSecondary}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>
-          {candidate.rationale}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          marginTop: 4, fontSize: 10,
+        }}>
+          <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+            {candidate.claim.owner}
+          </span>
+          <span style={{ color: 'var(--border-hover)' }}>·</span>
+          <CopyBadge value={candidate.claim.pin} truncated />
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -144,19 +148,40 @@ export default function AIShopperModal({
       // contains tokens overlapping the Req Set name or the prompt. Falling
       // back to insertion order keeps results stable across runs.
       const promptLower = prompt.toLowerCase()
-      const reqSetName = (reqSet?.name || '').toLowerCase()
+      const reqSetNameLower = (reqSet?.name || '').toLowerCase()
+      // Phase 8 polish #4: per-result rationale variety. Pick which "angle"
+      // the mock agent found to highlight — token match / disclosure type /
+      // recency / owner party — so three stacked candidates don't all say
+      // the same thing. Rationale decides by score band so the top result
+      // names the strongest match reason.
       const scored = publicClaims.map((c, i) => {
         const nameLower = (c.name || '').toLowerCase()
+        const tokenHit = reqSetNameLower && nameLower.split(/[\s-]+/).some((tok) => reqSetNameLower.includes(tok) && tok.length > 2)
+        const promptHit = promptLower && nameLower.split(/[\s-]+/).some((tok) => promptLower.includes(tok) && tok.length > 3)
         let score = 72 + (publicClaims.length - i) * 3
-        if (reqSetName && nameLower.split(' ').some((tok) => reqSetName.includes(tok))) score += 15
-        if (promptLower && nameLower.split(' ').some((tok) => promptLower.includes(tok))) score += 10
+        if (tokenHit) score += 15
+        if (promptHit) score += 10
+        const disclosureLabel = c.publishedDisclosureType === 'selective'
+          ? 'Selective publication — parsed fields available'
+          : c.publishedDisclosureType === 'proofonly'
+            ? 'Proof-only publication — attested by prior Eval Results'
+            : 'Full publication — complete evidence set available'
+        // Pick the strongest reason first; vary second reason by index.
+        const primary = tokenHit
+          ? `Direct match on “${reqSet?.name || 'Requirements Set'}” terms`
+          : promptHit
+            ? 'Semantic match against your prompt'
+            : `Aligns topically with ${reqSet?.name || 'Requirements Set'}`
+        const secondary = [
+          disclosureLabel,
+          `Owned by ${c.owner}`,
+          `${Math.max(2, 12 - i * 3)} other Req Sets have scored it highly`,
+        ][i % 3]
         return {
           claim: c,
           matchScore: Math.min(99, score),
-          rationale: [
-            reqSet ? `Aligns with ${reqSet.name}` : 'Aligns with selected Requirements Set',
-            c.publishedDisclosureType ? `Published as ${c.publishedDisclosureType}` : 'Published to Radiant Network',
-          ].join(' · '),
+          rationalePrimary: primary,
+          rationaleSecondary: secondary,
           suggestedRequirementsSetId: selectedReqSetId,
         }
       })
@@ -185,22 +210,73 @@ export default function AIShopperModal({
           {stage === 'setup' && (
             <>
               <FieldLabel label="Requirements Set" required />
-              <select
-                value={selectedReqSetId}
-                onChange={(e) => setSelectedReqSetId(e.target.value)}
-                style={{
-                  width: '100%', padding: '10px 12px', borderRadius: 6,
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-card)', color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-display)', fontSize: 13,
-                  marginBottom: 20,
-                }}
-              >
-                {!selectedReqSetId && <option value="">— Select a Requirements Set —</option>}
-                {availableRequirementsSets.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name} (v{r.version || 1})</option>
-                ))}
-              </select>
+              {/* Phase 8 polish #5: match the Req Set picker in V22RunEvaluationModal —
+                  a flat card list with name + id/version, indigo-tinted selection state.
+                  Retired the native <select> both for visual consistency and because
+                  its "first option visible regardless of state" behaviour caused a
+                  disabled-launch trap during Phase 7 runtime verification. */}
+              {availableRequirementsSets.length === 0 ? (
+                <div style={{
+                  padding: 14, background: 'var(--bg-card)',
+                  border: '1px solid var(--accent-amber)', borderRadius: 6,
+                  fontSize: 11, color: 'var(--text-secondary)', marginBottom: 20,
+                }}>
+                  No Requirements Sets in your library. Add one before launching the AI Shopper.
+                </div>
+              ) : (
+                <div
+                  role="radiogroup"
+                  aria-label="Requirements Set"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 20 }}
+                >
+                  {availableRequirementsSets.map((rs) => {
+                    const selected = selectedReqSetId === rs.id
+                    return (
+                      <div
+                        key={rs.id}
+                        role="radio"
+                        aria-checked={selected}
+                        tabIndex={0}
+                        onClick={() => setSelectedReqSetId(rs.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setSelectedReqSetId(rs.id)
+                          }
+                        }}
+                        style={{
+                          padding: '10px 14px', borderRadius: 6, cursor: 'pointer',
+                          background: selected ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : 'var(--bg-card)',
+                          border: `1px solid ${selected ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                          transition: 'all 120ms',
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          outline: 'none',
+                        }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = selected ? 'var(--accent-indigo)' : 'var(--border-hover)' }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = selected ? 'var(--accent-indigo)' : 'var(--border)' }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{rs.name}</div>
+                          <div style={{
+                            fontSize: 10, color: 'var(--text-dim)',
+                            fontFamily: 'var(--font-mono)', marginTop: 2,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {rs.id} · v{rs.version ?? 1}
+                          </div>
+                        </div>
+                        {/* Selection indicator dot — same language as the eval-modal picker. */}
+                        <div style={{
+                          width: 12, height: 12, borderRadius: '50%',
+                          border: `1.5px solid ${selected ? 'var(--accent-indigo)' : 'var(--border-hover)'}`,
+                          background: selected ? 'var(--accent-indigo)' : 'transparent',
+                          flexShrink: 0,
+                        }} />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               <FieldLabel label="What are you looking for?" required />
               <textarea
@@ -229,7 +305,11 @@ export default function AIShopperModal({
             </>
           )}
 
-          {stage === 'searching' && <MockProgress />}
+          {stage === 'searching' && (
+            <MockProgress
+              reqSetName={availableRequirementsSets.find((r) => r.id === selectedReqSetId)?.name}
+            />
+          )}
 
           {stage === 'results' && (
             <>

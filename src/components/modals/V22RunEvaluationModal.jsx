@@ -18,15 +18,31 @@ import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
 
 const STATUS_CYCLE = ['satisfactory', 'unsatisfactory', 'missing', 'na']
 const STATUS_CFG = {
-  satisfactory:   { label: 'SAT',     color: 'var(--accent-green)' },
-  unsatisfactory: { label: 'UNSAT',   color: 'var(--accent-red)' },
-  missing:        { label: 'MISSING', color: 'var(--accent-amber)' },
-  na:             { label: 'N/A',     color: 'var(--text-dim)' },
+  // Phase 9A item 8 sub-1: full status words in the cycling picker (was
+  // three-letter abbreviations). Short labels retained for Detail Panel
+  // rendering elsewhere.
+  satisfactory:   { label: 'SATISFACTORY',   short: 'SAT',     color: 'var(--accent-green)' },
+  unsatisfactory: { label: 'UNSATISFACTORY', short: 'UNSAT',   color: 'var(--accent-red)' },
+  missing:        { label: 'MISSING',        short: 'MISSING', color: 'var(--accent-amber)' },
+  na:             { label: 'N/A',            short: 'N/A',     color: 'var(--text-dim)' },
+}
+// Exported so V22NodeDetailPanel can render short labels using the same palette.
+export { STATUS_CFG as REVIEW_STATUS_CFG }
+
+function cycleNextStatus(current, direction = 1) {
+  const idx = STATUS_CYCLE.indexOf(current)
+  const n = STATUS_CYCLE.length
+  return STATUS_CYCLE[((idx < 0 ? 0 : idx) + direction + n) % n]
 }
 
 function ConfidenceBadge({ confidence }) {
-  // Match the V2.1 ConfidenceBadge palette so Parse & Eval rows feel identical.
-  const c = confidence ?? 0
+  // Phase 9A.1 item 9: AWAITING AI placeholder removed. Seeded Req Sets and
+  // PEP templates now carry `aiValue` + `aiConfidence` on every row, so a
+  // freshly-opened review stage always has real values to show. A null
+  // confidence is unreachable in normal demo flow; render nothing rather
+  // than a fallback pill to keep the row uncluttered.
+  if (confidence == null) return null
+  const c = confidence
   const tier = c >= 0.85 ? 'high' : c >= 0.65 ? 'medium' : 'low'
   const palette = {
     high:   { color: 'var(--accent-green)', label: 'HIGH' },
@@ -42,9 +58,79 @@ function ConfidenceBadge({ confidence }) {
   )
 }
 
+// Phase 9A item 10: small pencil icon rendered when the row's current value
+// differs from the AI's original extraction. Tooltip reads the spec wording.
+function HumanEditedIcon() {
+  return (
+    <span
+      title="Human-edited from AI's original extraction."
+      aria-label="Human-edited"
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, color: 'var(--accent-amber)',
+      }}
+    >
+      <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path d="M12.146 1.854a1.5 1.5 0 0 1 2.121 2.121L5.5 12.743 2 13l.257-3.5L10.146 1.854a1.5 1.5 0 0 1 2 0Z"
+              stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+      </svg>
+    </span>
+  )
+}
+
+// Phase 9A item 8 sub-1: chevron-flanked status picker — ◂ SATISFACTORY ▸ —
+// left chevron cycles backward, right chevron (and the word) cycles forward.
+// Phase 9A.1 item 8: word pinned to the width of UNSATISFACTORY (widest of
+// the four) so chevrons stay in fixed positions as the user cycles.
+function StatusChevronPicker({ status, onCycle }) {
+  if (!status) return null
+  const cfg = STATUS_CFG[status]
+  const chipStyle = {
+    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+    letterSpacing: '0.06em', userSelect: 'none',
+    display: 'inline-flex', alignItems: 'center',
+    border: `1px solid color-mix(in srgb, ${cfg.color} 30%, transparent)`,
+    background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
+    borderRadius: 3,
+    color: cfg.color,
+  }
+  const chevStyle = {
+    cursor: 'pointer', padding: '2px 6px', userSelect: 'none',
+    color: cfg.color, lineHeight: 1,
+  }
+  return (
+    <span style={chipStyle}>
+      <span
+        onClick={(e) => { e.stopPropagation(); onCycle(-1) }}
+        title="Previous status"
+        style={chevStyle}
+      >◂</span>
+      <span
+        onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
+        title="Next status"
+        style={{
+          padding: '2px 2px',
+          cursor: 'pointer',
+          textAlign: 'center',
+          display: 'inline-block',
+          // Pin to the widest label's width ("UNSATISFACTORY" = 14 chars at
+          // 10px mono ≈ 94px including letter-spacing). Eyeballed in Chrome
+          // and padded a bit for safety across font variants.
+          minWidth: 96,
+        }}
+      >{cfg.label}</span>
+      <span
+        onClick={(e) => { e.stopPropagation(); onCycle(+1) }}
+        title="Next status"
+        style={chevStyle}
+      >▸</span>
+    </span>
+  )
+}
+
 // Shared row component — used here for Eval rows and intended for Parse rows
-// in a Phase 6 unification. The status badge cycles only when `cyclable` is true.
-function ReviewRow({ label, description, value, onValueChange, confidence, status, onStatusCycle }) {
+// in a Phase 6 unification.
+function ReviewRow({ label, description, value, onValueChange, confidence, status, onStatusCycle, humanEdited }) {
   return (
     <div style={{
       padding: '12px 14px',
@@ -53,21 +139,12 @@ function ReviewRow({ label, description, value, onValueChange, confidence, statu
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1 }}>{label}</span>
-        {confidence != null && <ConfidenceBadge confidence={confidence} />}
-        {status && (
-          <span
-            onClick={onStatusCycle}
-            title="Cycle SAT → UNSAT → MISSING → N/A"
-            style={{
-              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              padding: '2px 8px', borderRadius: 3, letterSpacing: '0.06em',
-              cursor: 'pointer', userSelect: 'none',
-              color: STATUS_CFG[status].color,
-              background: `color-mix(in srgb, ${STATUS_CFG[status].color} 12%, transparent)`,
-              border: `1px solid color-mix(in srgb, ${STATUS_CFG[status].color} 30%, transparent)`,
-            }}
-          >{STATUS_CFG[status].label}</span>
-        )}
+        {/* Phase 9A item 8 sub-3: always render the confidence chip (AWAITING
+            AI when null). Phase 9A item 10: pencil icon when the row's
+            current value differs from the AI's original. */}
+        <ConfidenceBadge confidence={confidence} />
+        {humanEdited && <HumanEditedIcon />}
+        <StatusChevronPicker status={status} onCycle={(dir) => onStatusCycle(dir)} />
       </div>
       {description && (
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{description}</div>
@@ -104,37 +181,81 @@ export default function V22RunEvaluationModal({
   // Self-evaluation flow (spec §13 Phase 6) skips the EA gate; pass `selfEvaluation`
   // to render an "Owner self-evaluation" header context instead of the EA id.
   selfEvaluation = false,
+  // Phase 9A item 6: Re-Evaluate flow from an Eval Result panel. When set,
+  // the Req Set picker is replaced by a read-only card showing the locked
+  // Req Set, and the user proceeds directly to scope / review.
+  lockedRequirementsSetId = null,
 }) {
   // EA `authorizedRequirementsSetIds` is advisory per spec §10.5 (Phase 6
   // product decision). Show ALL Req Sets from the evaluator's library; the EA
   // suggestions are surfaced inline as a chip on each suggested set.
   const suggestedSetIds = new Set(evaluationAgreement?.authorizedRequirementsSetIds || [])
 
-  const [selectedReqSetId, setSelectedReqSetId] = useState(availableRequirementsSets[0]?.id || null)
-  const selectedReqSet = availableRequirementsSets.find((rs) => rs.id === selectedReqSetId) || null
+  const [selectedReqSetId, setSelectedReqSetId] = useState(
+    lockedRequirementsSetId || availableRequirementsSets[0]?.id || null,
+  )
+  // Phase 9A item 6: when the Re-Evaluate flow passes a locked Req Set id
+  // that isn't in the current actor's library (e.g., the Req Set lives on
+  // the other party's side, or library ids drifted), synthesize a minimal
+  // selectedReqSet from the prior result so the modal can still operate.
+  const librarySelectedReqSet = availableRequirementsSets.find((rs) => rs.id === selectedReqSetId) || null
+  const selectedReqSet = librarySelectedReqSet
+    || (lockedRequirementsSetId
+      && priorActiveResult
+      && priorActiveResult.requirementsSet?.id === lockedRequirementsSetId
+      ? {
+          id: priorActiveResult.requirementsSet.id,
+          name: priorActiveResult.requirementsSet.name,
+          version: priorActiveResult.requirementsSet.version ?? 1,
+          requirements: (priorActiveResult.results || []).map((r) => ({
+            id: r.requirementId,
+            label: r.label,
+            description: r.description,
+          })),
+        }
+      : null)
 
   // Initial rows: prior result (re-eval) takes precedence; otherwise pull from
   // the req set's `requirements` (V2.1 demo data shape) or `claims` (legacy).
   const initialRows = useMemo(() => {
     if (priorActiveResult && priorActiveResult.requirementsSet?.id === selectedReqSetId) {
+      // Phase 9A item 8 sub-2: supersede / re-evaluate pre-populates every
+      // row from the prior result — value, status, AND confidence (not a
+      // hard-coded 0.9). Saves the user re-entering unchanged data.
+      // Phase 9A item 10: `_aiOriginalValue` snapshots the prior value so
+      // the Human-Edited pencil can fire if the user subsequently edits.
       return priorActiveResult.results.map((r) => ({
         requirementId: r.requirementId,
         label: r.label,
         value: r.value,
-        confidence: 0.9,
+        confidence: typeof r.confidence === 'number' ? r.confidence : null,
         status: r.status,
+        _aiOriginalValue: r.value,
       }))
     }
     const defs = selectedReqSet?.requirements || selectedReqSet?.claims || []
     if (defs.length > 0) {
-      return defs.map((c) => ({
-        requirementId: c.id || c.requirementId || c.label,
-        label: c.label || c.requirement || c.name,
-        description: c.description || c.criterion,
-        value: '',
-        confidence: 0.0,
-        status: 'missing',
-      }))
+      // Phase 9A.1 item 9: pre-populate each row from the Req Set
+      // definition's `aiValue` + `aiConfidence`. If the definition happens
+      // not to carry an AI value (legacy data or published standards), fall
+      // back to an empty value with null confidence so the row still renders.
+      // `_aiOriginalValue` snapshots the AI's extraction so the Phase 9A
+      // item 10 pencil icon fires whenever the user edits.
+      return defs.map((c) => {
+        const aiValue = c.aiValue ?? ''
+        return {
+          requirementId: c.id || c.requirementId || c.label,
+          label: c.label || c.requirement || c.name,
+          description: c.description || c.criterion,
+          value: aiValue,
+          confidence: typeof c.aiConfidence === 'number' ? c.aiConfidence : null,
+          // Status defaults to 'satisfactory' when an AI value is present
+          // (the AI tentatively agrees), 'missing' when no value exists.
+          // The user cycles via chevrons if they disagree.
+          status: aiValue ? 'satisfactory' : 'missing',
+          _aiOriginalValue: aiValue,
+        }
+      })
     }
     return []
   }, [selectedReqSet, selectedReqSetId, priorActiveResult])
@@ -162,17 +283,22 @@ export default function V22RunEvaluationModal({
     setTimeout(() => setStep(2), 1500)
   }
 
-  const cycleStatus = (idx) => {
-    setRows((prev) => prev.map((r, i) => {
-      if (i !== idx) return r
-      const cur = STATUS_CYCLE.indexOf(r.status)
-      const next = STATUS_CYCLE[(cur + 1) % STATUS_CYCLE.length]
-      return { ...r, status: next }
-    }))
+  // Phase 9A item 8 sub-1: cycle accepts a direction (+1 for next, -1 for
+  // previous) so chevrons on both sides of the status chip can step it.
+  const cycleStatus = (idx, direction = 1) => {
+    setRows((prev) => prev.map((r, i) => (
+      i === idx ? { ...r, status: cycleNextStatus(r.status, direction) } : r
+    )))
   }
 
   const updateValue = (idx, value) => {
-    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value, confidence: r.confidence || 0.85 } : r)))
+    // Phase 8.5 Bug 4: human entry must not alter the AI's original confidence.
+    // Previously this set `confidence: r.confidence || 0.85`, which bumped any
+    // empty-confidence row to "High · 85%" the instant the user typed —
+    // muddling human edits with the AI's own analysis. Confidence now stays
+    // whatever the AI produced (or 0 if the row started empty). A future
+    // polish item may surface a separate "human-validated" indicator.
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value } : r)))
   }
 
   const toggleEvidence = (id) => {
@@ -208,6 +334,12 @@ export default function V22RunEvaluationModal({
         label: r.label,
         value: r.value,
         status: r.status,
+        // Phase 9A item 8 sub-3: persist AI confidence with each row so the
+        // Eval Result Detail Panel can render the same chip later. Phase 9A
+        // item 10: persist the AI's original value so the pencil icon can
+        // reappear in rendered Eval Result panels when a human edited.
+        confidence: r.confidence,
+        _aiOriginalValue: r._aiOriginalValue,
       })),
       evidenceUsed: [...evidenceSelection],
     })
@@ -233,7 +365,38 @@ export default function V22RunEvaluationModal({
             />
             <ModalBody>
               <FieldLabel label="Requirements Set" required />
-              {availableRequirementsSets.length === 0 ? (
+              {lockedRequirementsSetId ? (
+                // Phase 9A item 6: Re-Evaluate flow locks the Req Set to the
+                // one the prior Eval Result used. Show as a read-only card
+                // with a brief explainer; the user can still pick new
+                // evidence below and re-run.
+                <>
+                  <div style={{
+                    padding: 14, borderRadius: 6, marginBottom: 8,
+                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                    border: '1px solid var(--accent-indigo)',
+                    display: 'flex', alignItems: 'center', gap: 10, cursor: 'not-allowed',
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {selectedReqSet?.name || lockedRequirementsSetId}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                        {lockedRequirementsSetId} · v{selectedReqSet?.version ?? 1}
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+                      color: 'var(--accent-indigo)',
+                      background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                    }}>LOCKED</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: 16, fontStyle: 'italic' }}>
+                    To change Requirements Set, start a new evaluation from the Claim.
+                  </div>
+                </>
+              ) : availableRequirementsSets.length === 0 ? (
                 <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--accent-amber)', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', marginBottom: 16 }}>
                   No Requirements Sets in your library. Add one before running an evaluation.
                 </div>
@@ -420,8 +583,18 @@ export default function V22RunEvaluationModal({
               step={3} totalSteps={3} onClose={onClose}
             />
             <ModalBody>
-              <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 18, alignItems: 'start' }}>
-                <div>
+              {/* Phase 8.5 Bug 5: bound the split panel so each column scrolls
+                  independently — the rows side already had its own
+                  `maxHeight: 420, overflowY: auto`, but the evidence side
+                  rode with ModalBody's outer scroll, pulling both into a
+                  single scroll region on tall evidence sets. */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: '260px 1fr',
+                gap: 18, alignItems: 'stretch',
+                height: 'calc(90vh - 220px)',
+                minHeight: 360, maxHeight: 640,
+              }}>
+                <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                   <FieldLabel label={`Evidence (${evidenceSelection.length})`} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {evidenceAssets.filter(a => evidenceSelection.includes(a.id)).map((a) => (
@@ -437,11 +610,11 @@ export default function V22RunEvaluationModal({
                     ))}
                   </div>
                 </div>
-                <div>
+                <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   <FieldLabel label={`Requirement Rows (${rows.length})`} />
                   <div style={{
                     border: '1px solid var(--border)', borderRadius: 8,
-                    maxHeight: 420, overflowY: 'auto',
+                    flex: 1, minHeight: 0, overflowY: 'auto',
                   }}>
                     {rows.map((r, i) => (
                       <ReviewRow
@@ -452,7 +625,8 @@ export default function V22RunEvaluationModal({
                         onValueChange={(v) => updateValue(i, v)}
                         confidence={r.confidence}
                         status={r.status}
-                        onStatusCycle={() => cycleStatus(i)}
+                        onStatusCycle={(dir) => cycleStatus(i, dir)}
+                        humanEdited={r._aiOriginalValue != null && r.value !== r._aiOriginalValue}
                       />
                     ))}
                   </div>

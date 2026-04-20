@@ -12,7 +12,7 @@
 // different mechanics. Single sweep; no intermediate "everything hidden"
 // state.
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { buildV22SharedArtifacts } from './v2_2Data.js'
 
 // Deterministic PRNG so cluster dot positions stay stable across renders.
@@ -96,10 +96,30 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
   // out-phase so the reverse animation plays before unmount.
   const [phase, setPhase] = useState('closed')
 
+  // Keep a ref to the current phase so the opening-effect can read it
+  // without putting phase in the deps array. Putting phase in deps meant the
+  // effect re-ran as soon as phase became 'opening' and the cleanup cancelled
+  // the scheduled RAF that was about to flip to 'in' — so the CSS transition
+  // never fired.
+  const phaseRef = useRef(phase)
+  useEffect(() => { phaseRef.current = phase }, [phase])
+
   useEffect(() => {
     if (open) {
-      setPhase('in')
-    } else if (phase !== 'closed') {
+      // Phase 8 polish #1: animate opening the same way we animate closing.
+      // Mount in `opening` (clip-path = 0%), then flip to `in` (clip-path =
+      // 180%) after the browser has had a chance to paint the opening frame
+      // so the CSS transition has a real from-state to animate from.
+      // Two nested RAFs: the first waits for layout, the second for paint.
+      if (phaseRef.current === 'closed') {
+        setPhase('opening')
+        let raf2 = 0
+        const raf1 = requestAnimationFrame(() => {
+          raf2 = requestAnimationFrame(() => setPhase('in'))
+        })
+        return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2) }
+      }
+    } else if (phaseRef.current !== 'closed') {
       setPhase('out')
       const t = setTimeout(() => setPhase('closed'), 600)
       return () => clearTimeout(t)
@@ -107,8 +127,9 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
   }, [open])
 
   // Clip-path circle grows from the bottom-left corner to ~180vmax (covers
-  // the whole viewport). Reversed on exit. The single animation is the entry
-  // sweep; no separate fade of the underlying canvas.
+  // the whole viewport). Reversed on exit. Opening (first render) sits at
+  // clipCollapsed for one frame before transitioning to clipExpanded so the
+  // CSS transition has a from-state to animate from.
   const clipCollapsed = 'circle(0% at 0% 100%)'
   const clipExpanded = 'circle(180% at 0% 100%)'
   const clipPath = phase === 'in' ? clipExpanded : clipCollapsed

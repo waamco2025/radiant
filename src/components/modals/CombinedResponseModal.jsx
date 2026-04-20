@@ -50,12 +50,17 @@ export default function CombinedResponseModal({
   // unchanged and are forwarded as the EA's `authorizedRequirementsSetIds` field
   // (preserved for context only). See Phase 6 carry-over #1.
 
-  // Prime selected assets — default to all referenced assets for Full, none for Selective.
+  // Phase 9A.1 item 10: prime selected Assets ONCE when the user enters the
+  // Full disclosure step — default to all referenced Assets. Do NOT re-prime
+  // on subsequent selection changes; that was a deselect trap (clicking the
+  // last Asset to deselect it instantly snapped back to all-selected). The
+  // user can now deselect all Assets; Continue stays disabled + help text
+  // renders from Phase 9A item 7.
   useEffect(() => {
-    if (action === 'full' && selectedAssetIds.length === 0) {
+    if (action === 'full') {
       setSelectedAssetIds(referencedAssets.map((a) => a.id))
     }
-  }, [action, referencedAssets, selectedAssetIds.length])
+  }, [action, referencedAssets])
 
   const totalSteps = action === 'decline' ? 2 : action ? 4 : 1
   const isDecline = action === 'decline'
@@ -240,6 +245,17 @@ export default function CombinedResponseModal({
                   <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
                     {selectedAssetIds.length} of {referencedAssets.length} Asset{referencedAssets.length !== 1 ? 's' : ''} selected
                   </div>
+                  {/* Phase 9A item 7: inline help text when zero Assets are
+                      selected. Continue is already disabled at this count;
+                      this just makes the reason explicit. */}
+                  {referencedAssets.length > 0 && selectedAssetIds.length === 0 && (
+                    <div style={{
+                      marginTop: 4, fontSize: 11, color: 'var(--accent-amber)',
+                      fontStyle: 'italic',
+                    }}>
+                      Select at least one Asset to continue.
+                    </div>
+                  )}
                 </>
               )}
               {action === 'selective' && (

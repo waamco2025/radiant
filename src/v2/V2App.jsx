@@ -4,12 +4,13 @@ import V2Canvas from './V2Canvas.jsx'
 import V2SubgraphModal from './V2SubgraphModal.jsx'
 import V2BootScreen from './V2BootScreen.jsx'
 import PrimeRadiant from './PrimeRadiant.jsx'
-import { ROLES, getDataForRole, makePin, makeDot, makeEvidence, makeEvidenceNode, makePepNode, makeClaimNode, makeEvalNode, resolvePin, makeRootClaim } from './v2Data.js'
+import { ROLES, getDataForRole, makePin, makeDot, makeClaimNode } from './v2Data.js'
 import {
-  V2_2_ENABLED, getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge,
+  getV22DataForRole, buildV22Canvas, resolveAgreementsForEdge,
   resolveClaimByPinInShared, makeProvisionalAgreementPair, finalizeProvisionalAgreementPair,
   makeDeclineRecord, makeEvaluationRunArtifacts, findPriorActiveEvaluationResult,
   makeAmendedClaim, makeAmendedDisclosureAgreement,
+  makeParseRunArtifacts,
   buildV22SharedArtifacts,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
@@ -19,24 +20,13 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
+import V22ParseEvidenceModal from '../components/modals/V22ParseEvidenceModal.jsx'
 import CombinedResponseModal from '../components/modals/CombinedResponseModal.jsx'
 import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
-// PEP_TEMPLATES legacy import removed — now uses per-role pepTemplates via getPEPTemplatesForRole
-import DetailPanel from '../components/DetailPanel/index.jsx'
-import PublishModal from '../components/modals/PublishModal.jsx'
-import RequestDisclosureModal from '../components/modals/RequestDisclosureModal.jsx'
-import DisclosureResponseModal from '../components/modals/DisclosureResponseModal.jsx'
-import CascadeModal from '../components/modals/CascadeModal.jsx'
-import AddEvidenceModal from '../components/modals/AddEvidenceModal.jsx'
-import ParseEvidenceModal from '../components/modals/ParseEvidenceModal.jsx'
-import RevocationNoticeModal from '../components/modals/RevocationNoticeModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
 import PEPLibraryModal from '../components/modals/PEPLibraryModal.jsx'
-import RunEvaluationModal from '../components/modals/RunEvaluationModal.jsx'
-import CreateClaimModal from '../components/modals/CreateClaimModal.jsx'
-import ReviseDisclosureModal from '../components/modals/ReviseDisclosureModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
@@ -92,7 +82,7 @@ export default function V2App() {
   const [v22RequestOpen, setV22RequestOpen] = useState(false)
   const [v22RequestAnchor, setV22RequestAnchor] = useState(null) // Asset node passed when launched from per-Asset entry
   const [v22RespondingTo, setV22RespondingTo] = useState(null) // { daId }
-  const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId|null, claimId, selfEvaluation? }
+  const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId|null, claimId, selfEvaluation?, lockedRequirementsSetId?, priorActiveResultId? }
   const [v22AmendingClaimId, setV22AmendingClaimId] = useState(null) // claim id being amended
   const [v22AmendingDaId, setV22AmendingDaId] = useState(null) // disclosure agreement id being amended
   const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives reveal
@@ -104,42 +94,74 @@ export default function V2App() {
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
   const [v22AIShopperResult, setV22AIShopperResult] = useState(null) // { claimPin, suggestedRequirementsSetId } | null
+  // V2.2 parse flow (Phase 8): set by the Asset panel's Parse Evidence action.
+  const [v22ParsingAsset, setV22ParsingAsset] = useState(null) // Asset node | null
 
   const v22View = useMemo(
-    () => (V2_2_ENABLED ? getV22DataForRole(roleId, v22Provisionals) : null),
+    () => getV22DataForRole(roleId, v22Provisionals),
     [roleId, v22Provisionals],
   )
   const v22Data = useMemo(
-    () => (V2_2_ENABLED && v22View ? buildV22Canvas(v22View) : null),
+    () => (v22View ? buildV22Canvas(v22View) : null),
     [v22View],
   )
 
   // Mark the recently-accepted claim node and (Phase 6.5 #4) the recently
   // pulled-in counterparty Asset with `_isNew` so V2Canvas / AssetNode's
   // existing reveal-animation path fires on both Bob's and Alice's canvases.
+  // V2.2 edge interactions — selectedEdgeId drives the highlight state in V2Canvas;
+  // edgeMenu drives the contextual menu; openAgreement drives the side Detail Panel.
+  // Per spec §4.4, edge selection clears when a node is selected OR the panel closes.
+  // Declared before `v22DataWithReveal` so that memo can read `selectedEdgeId`
+  // without hitting a TDZ (Phase 9A item 5 wires edge endpoints into the memo).
+  const [selectedEdgeId, setSelectedEdgeId] = useState(null)
+  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor }
+  const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
+
   const v22DataWithReveal = useMemo(() => {
     if (!v22Data) return v22Data
-    if (!v22RecentlyAcceptedClaimId && !v22RecentlyAcceptedAssetId) return v22Data
     const flagged = new Set([v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId].filter(Boolean))
-    const nodes = v22Data.nodes.map(n => (
-      flagged.has(n.id) ? { ...n, _isNew: true } : n
-    ))
+    // Phase 9A item 5: compute the endpoint set for the currently-selected
+    // edge so AssetNode can render a glow on the two connected nodes.
+    const endpointSet = new Set()
+    if (selectedEdgeId) {
+      const edge = v22Data.edges.find(e => e.id === selectedEdgeId)
+      if (edge) { endpointSet.add(edge.from); endpointSet.add(edge.to) }
+    }
+    // Phase 9A item 9: decorate Claim nodes with the evaluation agreement
+    // where the current actor is grantee. V22ActionBar reads this to decide
+    // whether to show "Run Evaluation" on non-owner Claim cards.
+    const eaByClaimForActor = {}
+    if (v22View) {
+      for (const ea of (v22View.evaluationAgreements || [])) {
+        if (ea.grantee?.party === activeRole.party && ea.claimId) {
+          eaByClaimForActor[ea.claimId] = ea
+        }
+      }
+    }
+    const anyDecoration = flagged.size > 0 || endpointSet.size > 0 || Object.keys(eaByClaimForActor).length > 0
+    if (!anyDecoration) return v22Data
+    const nodes = v22Data.nodes.map(n => {
+      const needsReveal = flagged.has(n.id)
+      const isEndpoint = endpointSet.has(n.id)
+      const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
+      if (!needsReveal && !isEndpoint && !eaForClaim) return n
+      return {
+        ...n,
+        ...(needsReveal ? { _isNew: true } : {}),
+        ...(isEndpoint ? { _isEdgeEndpoint: true } : {}),
+        ...(eaForClaim ? { _evaluationAgreementForActor: eaForClaim } : {}),
+      }
+    })
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
     return { ...v22Data, nodes, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
   // it via useCallback deps. Initial Phase 5 placement here triggered a TDZ
   // error; relocating fixed it. See the V2.2 handlers block after updateRoleState.
-
-  // V2.2 edge interactions — selectedEdgeId drives the highlight state in V2Canvas;
-  // edgeMenu drives the contextual menu; openAgreement drives the side Detail Panel.
-  // Per spec §4.4, edge selection clears when a node is selected OR the panel closes.
-  const [selectedEdgeId, setSelectedEdgeId] = useState(null)
-  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor }
-  const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
   // Mutual exclusion between node selection and edge selection (spec §4.4) is
   // enforced inside the click handlers themselves — not via a reactive effect —
@@ -148,10 +170,14 @@ export default function V2App() {
   // the effect and wipe the edge state immediately). See the onEdgeClick and
   // handleSelect handlers for the explicit clears.
   const roleData = useMemo(
-    () => (V2_2_ENABLED
-      ? { nodes: (v22DataWithReveal || v22Data).nodes, edges: (v22DataWithReveal || v22Data).edges, nodeMap: (v22DataWithReveal || v22Data).nodeMap, pendingRequests: [], existingCascades: [] }
-      : getDataForRole(roleId)),
-    [roleId, v22Data, v22DataWithReveal],
+    () => ({
+      nodes: (v22DataWithReveal || v22Data).nodes,
+      edges: (v22DataWithReveal || v22Data).edges,
+      nodeMap: (v22DataWithReveal || v22Data).nodeMap,
+      pendingRequests: [],
+      existingCascades: [],
+    }),
+    [v22Data, v22DataWithReveal],
   )
   // Per-role dynamic state — persists across role switches
   const emptyRoleState = { addedNodes: [], addedSDAs: {}, addedEdges: [], dismissedReqs: [], addedChildren: {}, addedRequests: [], removedSDAs: [], removedNodes: [], removedEdges: [], newlyDisclosedIds: [], requirementSets: null, pepTemplates: null }
@@ -545,6 +571,35 @@ export default function V2App() {
     // Phase 7 carry-over #1: no timeout; clears on deselection.
   }, [v22AmendingClaimId])
 
+  // Phase 8: V2.2 parse flow — the Asset panel fires this via setV22ParsingAsset.
+  // Produces a new Parse Result + an internal Full DA that wires it back to the
+  // source Asset (same shape as the seeded `parseResultRefEdges` so edge
+  // derivation treats it identically). Both artifacts land on v22Provisionals
+  // and the Parse Result node gets a pan + `_isNew` reveal on the next render.
+  const handleV22ParseSubmit = useCallback(({ template, rows }) => {
+    const asset = v22ParsingAsset
+    if (!asset) return
+    const artifacts = makeParseRunArtifacts({
+      ownerParty: activeRole.party,
+      ownerDot: activeRole.partyDot,
+      sourceAssetId: asset.id,
+      template,
+      rows,
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      parseResults: [...(prev.parseResults || []), artifacts.parseResult],
+      disclosureAgreements: [...prev.disclosureAgreements, artifacts.refDisclosureAgreement],
+    }))
+    setV22ParsingAsset(null)
+    setSel(artifacts.parseResult.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(artifacts.parseResult.id)
+    setV22RecentlyAcceptedClaimId(artifacts.parseResult.id)
+    // Phase 7 carry-over #1: no timeout; clears on deselection.
+  }, [v22ParsingAsset, activeRole.party, activeRole.partyDot])
+
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, note }) => {
     if (!v22AmendingDaId) return
     // Phase 7 carry-over #2: compute notification targets BEFORE the
@@ -693,405 +748,53 @@ export default function V2App() {
   // different node). Uses the same prevSelRef the V2.1 sibling effect reads
   // so role-switch semantics stay aligned.
   useEffect(() => {
-    if (!V2_2_ENABLED) return
     const prevSel = prevSelRef.current
     if (!prevSel || prevSel === sel) return
     if (v22RecentlyAcceptedClaimId === prevSel) setV22RecentlyAcceptedClaimId(null)
     if (v22RecentlyAcceptedAssetId === prevSel) setV22RecentlyAcceptedAssetId(null)
   }, [sel, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId])
 
-  // Clear _isNew from previously selected node on deselection
+  // Phase 8: keep prevSelRef in sync with `sel` for the V2.2 reveal-clear
+  // effect above (which reads prevSelRef). V2.1 had a parallel effect here
+  // that cleared `_isNew` on `addedNodes` / `newlyDisclosedIds` / `addedEdges`
+  // — all V2.1-only state that was removed when the feature flag came down.
   useEffect(() => {
-    const prevSel = prevSelRef.current
     prevSelRef.current = sel
-    if (prevSel && prevSel !== sel) {
-      // Clear reveal animation when deselecting
-      if (revealAnim?.nodeId === prevSel) setRevealAnim(null)
-      updateRoleState(roleId, prev => {
-        let changed = false
-        let newState = { ...prev }
-
-        // Clear _isNew from addedNodes
-        const idx = prev.addedNodes.findIndex(n => n.id === prevSel && n._isNew)
-        if (idx >= 0) {
-          const updated = [...prev.addedNodes]
-          updated[idx] = { ...updated[idx], _isNew: false, _showAsProvisional: false }
-          newState.addedNodes = updated
-          changed = true
-        }
-
-        // Clear from newlyDisclosedIds
-        const discIdx = (prev.newlyDisclosedIds || []).indexOf(prevSel)
-        if (discIdx >= 0) {
-          newState.newlyDisclosedIds = prev.newlyDisclosedIds.filter(id => id !== prevSel)
-          changed = true
-        }
-
-        // Clear _isNew from connected edges
-        const currentEdges = newState.addedEdges || prev.addedEdges
-        const updatedEdges = currentEdges.map(e => {
-          if ((e.from === prevSel || e.to === prevSel) && e._isNew) {
-            return { ...e, _isNew: false }
-          }
-          return e
-        })
-        if (updatedEdges.some((e, i) => e !== currentEdges[i])) {
-          newState.addedEdges = updatedEdges
-          changed = true
-        }
-
-        return changed ? newState : prev
-      })
-    }
-  }, [sel, roleId])
-
-  // Trigger reveal animation when directly selecting a newly upgraded provisional card
-  useEffect(() => {
-    if (sel && nodeMap[sel]?._isNew && nodeMap[sel]?._wasProvisional && !revealAnim) {
-      canvasRef.current?.panToWithZoom?.(nodeMap[sel].x, nodeMap[sel].y, 1.28)
-      startReveal(sel)
-    }
   }, [sel])
 
-  const { addedNodes, addedSDAs, addedEdges, dismissedReqs, addedRequests } = currentRoleState
+  // Phase 8: `addedNodes` / `addedSDAs` / `addedEdges` / `addedChildren` /
+  // `removedX` / `newlyDisclosedIds` are no longer used by the V2.2 canvas
+  // pipeline (it short-circuits to the adapter), but a handful of V2.1-era
+  // handlers (kept in place pending a dedicated dead-code sweep — see polish
+  // item #50) still reference them. Destructure with empty-array defaults so
+  // those handlers resolve at runtime without throwing ReferenceErrors.
+  const { dismissedReqs, addedRequests } = currentRoleState
+  const addedNodes = currentRoleState.addedNodes || []
+  const addedSDAs = currentRoleState.addedSDAs || {}
+  const addedEdges = currentRoleState.addedEdges || []
   const addedChildren = currentRoleState.addedChildren || {}
   const removedSDAs = currentRoleState.removedSDAs || []
   const removedNodes = currentRoleState.removedNodes || []
   const removedEdges = currentRoleState.removedEdges || []
 
   const { nodes, edges, nodeMap, pendingRequests, existingCascades } = useMemo(() => {
-    // V2.2 short-circuit: the adapter has already computed role-filtered nodes,
-    // edges, and nodeMap. Skip the V2.1 merge/roll-up pipeline (SDA mutations,
-    // addedNodes/Edges, cascade requests, etc.) which is V2.1-shape specific.
-    if (V2_2_ENABLED) {
-      // Phase 6 follow-up bug: notifications were never reaching the grantor's
-      // inbox because this short-circuit hardcoded `pendingRequests: []`. The
-      // V2.1 path flows `addedRequests` (per-role state) into `pendingRequests`
-      // further down (see line ~878); reproduce that merge here so the V2.2
-      // notification UI (which reads from `pendingRequests` / `visibleRequests`)
-      // sees entries enqueued by `enqueueV22NotificationForRequester`.
-      return {
-        nodes: roleData.nodes,
-        edges: roleData.edges,
-        nodeMap: roleData.nodeMap,
-        pendingRequests: [...addedRequests],
-        existingCascades: [],
-      }
+    // The V2.2 adapter has already computed role-filtered nodes, edges, and
+    // nodeMap (see `buildV22Canvas` in v2_2Data.js). V2.1's merge-and-rollup
+    // pipeline — SDA mutations, addedNodes / addedEdges / addedChildren / the
+    // removedX filters, per-node health aggregation, selective-disclosure
+    // field filtering — was removed in Phase 8 when V2_2_ENABLED came down.
+    // Notifications flow through `addedRequests` which V2.2 still uses.
+    return {
+      nodes: roleData.nodes,
+      edges: roleData.edges,
+      nodeMap: roleData.nodeMap,
+      pendingRequests: [...addedRequests],
+      existingCascades: [],
     }
-    const data = { ...roleData }
+  }, [roleData, addedRequests])
 
-    // Step 0: Filter removed nodes from static data
-    if (removedNodes.length > 0) {
-      const removedSet = new Set(removedNodes)
-      data.nodes = data.nodes.filter(n => !removedSet.has(n.id))
-    }
-
-    // Step 0b: Filter removed edges from static data
-    if (removedEdges.length > 0) {
-      const removedEdgeSet = new Set(removedEdges)
-      data.edges = data.edges.filter(e => !removedEdgeSet.has(e.id))
-    }
-
-    // Step 0c: Filter removed SDAs from static data
-    if (removedSDAs.length > 0) {
-      data.nodes = data.nodes.map(n => {
-        const removals = removedSDAs.filter(r => r.nodeId === n.id)
-        if (removals.length === 0) return n
-        const filteredSDAs = (n.sdas || []).filter(sda =>
-          !removals.some(r => r.party === sda.party && r.type === sda.type && r.created === sda.created)
-        )
-        return { ...n, sdas: filteredSDAs }
-      })
-    }
-
-    // Merge added nodes
-    if (addedNodes.length > 0) {
-      data.nodes = [...data.nodes, ...addedNodes]
-    }
-
-    // Merge added SDAs into matching nodes
-    if (Object.keys(addedSDAs).length > 0) {
-      data.nodes = data.nodes.map(n => {
-        const added = addedSDAs[n.id]
-        if (!added) return n
-        return { ...n, sdas: [...(n.sdas || []), ...added] }
-      })
-    }
-
-    // Merge added children into matching parent nodes
-    if (Object.keys(addedChildren).length > 0) {
-      data.nodes = data.nodes.map(n => {
-        const added = addedChildren[n.id]
-        if (!added || added.length === 0) return n
-        // Deduplicate: added children with same ID as existing children replace them
-        const existingIds = new Set((n.children || []).map(c => c.id))
-        const replacements = new Map()
-        const genuinelyNew = []
-        added.forEach(c => {
-          if (existingIds.has(c.id)) {
-            replacements.set(c.id, c)
-          } else {
-            genuinelyNew.push(c)
-          }
-        })
-        const mergedChildren = (n.children || []).map(c => replacements.has(c.id) ? replacements.get(c.id) : c)
-        const allChildren = [...mergedChildren, ...genuinelyNew]
-        return {
-          ...n,
-          children: allChildren,
-          hasStack: allChildren.length > 0,
-          childCount: allChildren.length,
-        }
-      })
-    }
-
-    // Flag evidence nodes that have been parsed (a sibling 'parse' node references them)
-    data.nodes = data.nodes.map(n => {
-      if (!n.children || n.children.length === 0) return n
-      const parseNodes = n.children.filter(c => c.isParse || c.category === 'parse')
-      if (parseNodes.length === 0) return n
-      const parsedEvidenceIds = new Set(parseNodes.map(c => c.sourceEvidenceId))
-      const updatedChildren = n.children.map(c => {
-        if (c.isEvidence && parsedEvidenceIds.has(c.id)) {
-          return { ...c, _isParsed: true }
-        }
-        return c
-      })
-      return { ...n, children: updatedChildren }
-    })
-
-    // Unified health computation: eval → claim → parent rollup
-    data.nodes = data.nodes.map(n => {
-      let children = n.children
-      if (!children || children.length === 0) return n
-
-      // Step A: Compute health on eval child nodes from their claims + zero evidence health
-      children = children.map(c => {
-        if ((c.isEvaluation || c.category === 'evaluation') && c.claims && c.claims.length > 0) {
-          const ok = c.claims.filter(cl => cl.status === 'satisfactory').length
-          const bad = c.claims.filter(cl => cl.status === 'unsatisfactory').length
-          const warn = c.claims.filter(cl => cl.status === 'missing').length
-          return {
-            ...c,
-            health: { ok, warn, bad },
-            displayHealth: { ok, warn, bad },
-            claimCount: c.claims.length,
-            displayClaimCount: c.claims.length,
-          }
-        }
-        if (c.isEvidence) {
-          return {
-            ...c,
-            health: { ok: 0, warn: 0, bad: 0 },
-            displayHealth: { ok: 0, warn: 0, bad: 0 },
-            claimCount: 0,
-            displayClaimCount: 0,
-          }
-        }
-        return c
-      })
-
-      // Step B: Roll up eval health into parent claim nodes
-      const claimChildren = children.filter(c => c.isClaim || c.category === 'claim')
-      if (claimChildren.length > 0) {
-        children = children.map(c => {
-          if (!(c.isClaim || c.category === 'claim')) return c
-          const claimEvals = children.filter(e =>
-            (e.isEvaluation || e.category === 'evaluation') &&
-            e.claimId === c.id &&
-            e.status !== 'superseded'
-          )
-          let ok = 0, warn = 0, bad = 0, totalClaims = 0
-          for (const ev of claimEvals) {
-            const h = ev.health || { ok: 0, warn: 0, bad: 0 }
-            ok += h.ok
-            warn += (h.warn || 0)
-            bad += h.bad
-            totalClaims += (ev.claimCount || 0)
-          }
-          const claimHealth = { ok, warn, bad }
-          return {
-            ...c,
-            health: claimHealth,
-            displayHealth: claimHealth,
-            claimCount: totalClaims,
-            displayClaimCount: totalClaims,
-          }
-        })
-      }
-
-      // Step C: Roll up to parent from claim nodes (if any) or eval nodes (legacy fallback)
-      let ok = 0, warn = 0, bad = 0, totalClaims = 0
-      if (claimChildren.length > 0) {
-        const updatedClaims = children.filter(c => c.isClaim || c.category === 'claim')
-        for (const cl of updatedClaims) {
-          const h = cl.displayHealth || cl.health || { ok: 0, warn: 0, bad: 0 }
-          ok += h.ok
-          warn += (h.warn || 0)
-          bad += h.bad
-          totalClaims += (cl.claimCount || 0)
-        }
-      } else {
-        const evalChildren = children.filter(c =>
-          (c.isEvaluation || c.category === 'evaluation') && c.status !== 'superseded'
-        )
-        for (const ev of evalChildren) {
-          const h = ev.health || { ok: 0, warn: 0, bad: 0 }
-          ok += h.ok
-          warn += (h.warn || 0)
-          bad += h.bad
-          totalClaims += (ev.claimCount || 0)
-        }
-      }
-
-      const hasEvalData = totalClaims > 0
-      const combinedHealth = { ok, warn, bad }
-
-      return {
-        ...n,
-        children,
-        ...(hasEvalData ? {
-          childHealth: combinedHealth,
-          displayHealth: combinedHealth,
-          claimCount: totalClaims,
-          displayClaimCount: totalClaims,
-        } : {}),
-      }
-    })
-
-    // Filter disclosed fields for selective disclosures (non-owned nodes only)
-    data.nodes = data.nodes.map(n => {
-      // Only filter fields on nodes we don't own
-      if (n.owner === activeRole.party) return n
-
-      let fieldIds = n._disclosedFieldIds
-      if (!fieldIds) {
-        const selectiveSda = (n.sdas || []).find(s => s.type === 'selective' && s.selectedFieldIds)
-        if (selectiveSda) fieldIds = selectiveSda.selectedFieldIds
-      }
-
-      if (!fieldIds || !n.children) return n
-      const disclosedSet = new Set(fieldIds)
-      const filteredChildren = n.children.map(c => {
-        if (!c.isParse && c.category !== 'parse') return c
-        if (!c.parsedFields) return c
-        return {
-          ...c,
-          parsedFields: c.parsedFields.filter(f => disclosedSet.has(`${c.id}::${f.id}`)),
-          _isSelective: true,
-        }
-      })
-      return { ...n, children: filteredChildren, _isSelective: true }
-    })
-
-    // Filter disclosed children by selectedClaimIds (non-owned nodes only)
-    data.nodes = data.nodes.map(n => {
-      if (n.owner === activeRole.party) return n
-      if (!n.children || n.children.length === 0) return n
-      const sda = (n.sdas || []).find(s => s.party === activeRole.party && s.selectedClaimIds)
-      if (!sda || !sda.selectedClaimIds) return n
-      const disclosedClaimSet = new Set(sda.selectedClaimIds)
-      const filteredChildren = n.children.filter(c => {
-        if (c.isClaim || c.category === 'claim') return disclosedClaimSet.has(c.id)
-        if (c.isEvaluation || c.category === 'evaluation') {
-          if (c.claimId) return disclosedClaimSet.has(c.claimId)
-          return true
-        }
-        return true
-      })
-      return { ...n, children: filteredChildren }
-    })
-
-    // Rebuild nodeMap
-    const newMap = {}
-    data.nodes.forEach(n => { newMap[n.id] = n })
-    data.nodes.forEach(n => {
-      if (n.children) n.children.forEach(c => { newMap[c.id] = c })
-    })
-    data.nodeMap = newMap
-
-    // Merge added edges
-    if (addedEdges.length > 0) {
-      data.edges = [...data.edges, ...addedEdges]
-    }
-
-    // Merge added requests into pendingRequests
-    if (addedRequests && addedRequests.length > 0) {
-      data.pendingRequests = [...(data.pendingRequests || []), ...addedRequests]
-    }
-
-    // Apply _isNew from newlyDisclosedIds (for disclosure acceptance on existing nodes)
-    const newlyDisclosed = new Set(currentRoleState.newlyDisclosedIds || [])
-    if (newlyDisclosed.size > 0) {
-      data.nodes = data.nodes.map(n => {
-        if (newlyDisclosed.has(n.id) && !n._isNew) {
-          return { ...n, _isNew: true }
-        }
-        return n
-      })
-      // Update nodeMap for flagged nodes
-      data.nodes.forEach(n => { if (newlyDisclosed.has(n.id)) data.nodeMap[n.id] = n })
-    }
-
-    return data
-  }, [roleData, addedNodes, addedSDAs, addedEdges, addedChildren, addedRequests, removedSDAs, removedNodes, removedEdges, currentRoleState.newlyDisclosedIds])
 
   // Public listings from other role's merged state (sees dynamic publishes)
-  const publicListings = useMemo(() => {
-    const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-    if (!otherRoleId) return []
-
-    const otherData = getDataForRole(otherRoleId)
-    const otherState = perRoleState[otherRoleId] || emptyRoleState
-
-    let otherNodes = [...otherData.nodes]
-
-    if (otherState.removedNodes?.length > 0) {
-      const removedSet = new Set(otherState.removedNodes)
-      otherNodes = otherNodes.filter(n => !removedSet.has(n.id))
-    }
-    if (otherState.addedNodes?.length > 0) {
-      otherNodes = [...otherNodes, ...otherState.addedNodes]
-    }
-    if (Object.keys(otherState.addedSDAs || {}).length > 0) {
-      otherNodes = otherNodes.map(n => {
-        const added = otherState.addedSDAs[n.id]
-        if (!added) return n
-        return { ...n, sdas: [...(n.sdas || []), ...added] }
-      })
-    }
-    if (Object.keys(otherState.addedChildren || {}).length > 0) {
-      otherNodes = otherNodes.map(n => {
-        const added = otherState.addedChildren[n.id]
-        if (!added) return n
-        return { ...n, children: [...(n.children || []), ...added] }
-      })
-    }
-
-    const listings = []
-    for (const node of otherNodes) {
-      const publicSda = (node.sdas || []).find(s => s.party === 'Radiant Network')
-      if (!publicSda) continue
-      if (nodeMap[node.id]) continue
-      if (node.provisional) continue
-
-      listings.push({
-        id: node.id,
-        name: node.name,
-        pin: node.pin,
-        dot: node.dot,
-        category: node.category,
-        owner: node.owner,
-        description: node.description || null,
-        childCount: node.children?.length || 0,
-        hasEvidence: node.children?.some(c => c.isEvidence) || !!node.hasEvidence,
-        hasParsedData: node.children?.some(c => c.isParse || c.category === 'parse') || false,
-        hasEvaluations: node.children?.some(c => c.isEvaluation || c.category === 'evaluation') || false,
-        disclosureType: publicSda.type,
-      })
-    }
-    return listings
-  }, [roleId, perRoleState, nodeMap])
 
   // Subchain computation — filters nodes/edges to connected chain and lays out horizontally
   const subchainData = useMemo(() => {
@@ -1939,14 +1642,21 @@ export default function V2App() {
           {/* V2.2 Phase 7: Radiant Network (Directory Layer) + AI Shopper.
               Spec §8 anchors the Radiant Network button bottom-left; Andrew's
               Phase 7 task accepts chrome placement near the notification icon. */}
-          {V2_2_ENABLED && (
-            <>
+          {/* Radiant Network (Directory Layer) + AI Shopper chrome buttons. */}
+          <>
               <div
-                onClick={() => setV22DirectoryOpen(true)}
-                style={iconBtnStyle}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
-                title="Radiant Network — browse the Public Directory"
+                onClick={() => setV22DirectoryOpen((v) => !v)}
+                style={{
+                  ...iconBtnStyle,
+                  // Phase 8 polish #2: button reads as active when Directory
+                  // is open so the user understands clicking again closes it.
+                  background: v22DirectoryOpen ? 'color-mix(in srgb, var(--accent-amber) 18%, transparent)' : 'var(--bg-surface)',
+                  borderColor: v22DirectoryOpen ? 'var(--accent-amber)' : 'var(--border)',
+                  color: v22DirectoryOpen ? 'var(--accent-amber)' : 'var(--text-secondary)',
+                }}
+                onMouseEnter={e => { if (!v22DirectoryOpen) e.currentTarget.style.background = 'var(--bg-raised)' }}
+                onMouseLeave={e => { if (!v22DirectoryOpen) e.currentTarget.style.background = 'var(--bg-surface)' }}
+                title={v22DirectoryOpen ? 'Close the Public Directory' : 'Radiant Network — browse the Public Directory'}
               >
                 {/* Globe icon: circle + meridian + two latitude arcs. */}
                 <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
@@ -1971,8 +1681,7 @@ export default function V2App() {
                   <path d="M12 3 L12.5 4.5 L14 5 L12.5 5.5 L12 7 L11.5 5.5 L10 5 L11.5 4.5 Z" fill="currentColor" />
                 </svg>
               </div>
-            </>
-          )}
+          </>
 
           {/* Notification inbox */}
           <div ref={inboxRef} style={{ position: 'relative' }}>
@@ -2445,65 +2154,11 @@ export default function V2App() {
         </div>
       </div>
 
-      {/* V2.2 mode banner — Phase 1 placeholder. Only visible when V2_2_ENABLED is true. */}
-      {V2_2_ENABLED && (
-        <div
-          role="status"
-          aria-label="V2.2 mode active"
-          style={{
-            flexShrink: 0,
-            padding: '6px 16px',
-            borderBottom: '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--accent-indigo) 12%, var(--bg-surface))',
-            color: 'var(--text-primary)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            // Phase 6.5 #13: lower than the notification dropdown (z-index 200)
-            // so the inbox menu sits above the banner when both are visible.
-            zIndex: 10,
-            position: 'relative',
-          }}
-        >
-          <span style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: 'var(--accent-indigo)',
-            boxShadow: '0 0 6px var(--accent-indigo)',
-          }} />
-          <span>V2.2 mode active</span>
-          <span style={{ opacity: 0.6, textTransform: 'none', letterSpacing: 'normal' }}>
-            — architecture migration in progress (see v2.2-architecture-migration-spec.md)
-          </span>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            onClick={() => setV22RequestOpen(true)}
-            style={{
-              padding: '5px 12px',
-              fontSize: 10,
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--bg-deep)',
-              background: 'var(--accent-indigo)',
-              border: 'none',
-              borderRadius: 4,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.1)')}
-            onMouseLeave={e => (e.currentTarget.style.filter = 'none')}
-          >
-            Request Agreement…
-          </button>
-        </div>
-      )}
+      {/* Phase 8: the "V2.2 MODE ACTIVE — architecture migration in progress"
+          banner + its Request-Agreement shortcut were removed. Migration is
+          complete; the banner's semantics no longer apply. The Request flow
+          remains reachable via the per-Asset Detail Panel footer and via the
+          AI Shopper. */}
 
       {/* Canvas area */}
       <div style={{ flex: 1, position: 'relative' }}>
@@ -2523,7 +2178,11 @@ export default function V2App() {
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].category !== 'party' ? 480 : 0}
           onLayerChange={setLayerInfo}
-          onConnect={V2_2_ENABLED ? undefined : ((node) => setConnectNode(node))}
+          // Phase 8: onConnect was V2.1's "connect to counterparty" handler
+          // on the Asset card. V2.2 has no equivalent (request flow lives in
+          // the Detail Panel); pass undefined so the card's connect button
+          // stays hidden (AssetNode guards on typeof onConnect === 'function').
+          onConnect={undefined}
           onDisclose={(node) => setPublishNode(node)}
           onAddEvidence={(node) => {
             setEvidenceNode(node)
@@ -2613,16 +2272,64 @@ export default function V2App() {
             }
           }}
           onCreateClaim={(node) => setClaimContext(node ? { initiatingNode: node } : true)}
+          // Phase 9A item 9: single dispatch for V2.2 card-attached actions.
+          // Routes to the same handlers V22NodeDetailPanel's footer fires so
+          // the card action bar and the Detail Panel stay one-to-one.
+          onV22CardAction={(action, node) => {
+            if (!node) return
+            switch (action) {
+              case 'requestAgreement':
+                setV22RequestAnchor(node)
+                setV22RequestOpen(true)
+                return
+              case 'parseEvidence':
+                setV22ParsingAsset(node)
+                return
+              case 'createClaim':
+                // Phase 6+ is expected to wire this; today the Detail Panel
+                // footer also disables Create Claim until that lands.
+                return
+              case 'amendClaim':
+                if (node.owner === activeRole.party && node.v22Type === 'CLAIM') setV22AmendingClaimId(node.id)
+                return
+              case 'selfEvaluate':
+                if (node.owner === activeRole.party && node.v22Type === 'CLAIM') handleV22OpenSelfEvaluation(node.v22Artifact)
+                return
+              case 'runEvaluation': {
+                // Find the EA where this actor is grantee on the Claim's DA.
+                const ea = (v22View?.evaluationAgreements || []).find(e => {
+                  if (e.claimId !== node.id) return false
+                  return e.grantee?.party === activeRole.party
+                })
+                if (ea) handleV22OpenRunEvaluation(ea)
+                return
+              }
+              case 'reRunEvaluation': {
+                const er = node.v22Artifact
+                if (!er) return
+                const eaForRerun = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
+                setV22EvalContext({
+                  evaluationAgreementId: eaForRerun ? eaForRerun.id : null,
+                  claimId: er.claimId,
+                  selfEvaluation: !eaForRerun,
+                  lockedRequirementsSetId: er.requirementsSet?.id || null,
+                  priorActiveResultId: er.id,
+                })
+                return
+              }
+              default:
+                return
+            }
+          }}
           activeParty={activeRole.party}
           revealAnim={revealAnim}
           selectedEdgeId={selectedEdgeId}
-          onEdgeClick={V2_2_ENABLED ? (edgeId, anchor) => {
-            // Phase 3: edge click opens the EdgeMenu (if paired EA) or the DA panel directly (§4.3).
+          onEdgeClick={(edgeId, anchor) => {
+            // Edge click opens the EdgeMenu (if a paired EA exists) or the
+            // Disclosure Agreement panel directly. Clears node selection first
+            // so node and edge selection stay mutually exclusive.
             const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
             if (!resolved || !resolved.disclosureAgreement) return
-            // Clear node selection before setting edge state — keeps node and
-            // edge selection mutually exclusive (§4.4) without relying on a
-            // reactive effect that races with the current update batch.
             setSel(null)
             setForcePanelTab(null)
             setForceExpandSda(null)
@@ -2634,7 +2341,7 @@ export default function V2App() {
               setEdgeMenu(null)
               setOpenAgreement({ kind: 'disclosure', edgeId })
             }
-          } : undefined}
+          }}
         />
 
         {/* Subchain pill */}
@@ -2676,7 +2383,7 @@ export default function V2App() {
         )}
 
         {/* V2.2 Edge Menu — opens on edge click when paired EA exists (spec §4.3). */}
-        {V2_2_ENABLED && edgeMenu && (() => {
+        {edgeMenu && (() => {
           const resolved = resolveAgreementsForEdge(edgeMenu.edgeId, v22View, edges)
           const hasEA = !!(resolved && resolved.evaluationAgreement)
           return (
@@ -2692,7 +2399,7 @@ export default function V2App() {
         })()}
 
         {/* V2.2 Agreement Detail Panels — slide over from the right, reuse the canvas panel slot. */}
-        {V2_2_ENABLED && openAgreement && (() => {
+        {openAgreement && (() => {
           const resolved = resolveAgreementsForEdge(openAgreement.edgeId, v22View, edges)
           if (!resolved || !resolved.disclosureAgreement) return null
           const resolveNodeName = (id) => nodeMap[id]?.name || null
@@ -2749,7 +2456,7 @@ export default function V2App() {
             reached via the Radiant Network button in the chrome. Always
             mounted in V2.2 mode; internal `phase` state controls visibility
             so the reverse wipe can play. */}
-        {V2_2_ENABLED && (
+        {(
           <DirectoryLayer
             open={v22DirectoryOpen}
             activeParty={activeRole.party}
@@ -2761,7 +2468,7 @@ export default function V2App() {
         {/* V2.2 Phase 7 — AI Shopper modal (spec §9). Opens either from the
             chrome icon (user had no Directory context in mind) or from within
             the Directory Layer (user already browsing). */}
-        {V2_2_ENABLED && v22AIShopperOpen && (() => {
+        {v22AIShopperOpen && (() => {
           const shared = buildV22SharedArtifacts()
           const publicDas = shared.disclosureAgreements.filter(
             (d) => d.grantee?.party === 'Radiant Network' && d.subject?.kind === 'claim',
@@ -2801,7 +2508,7 @@ export default function V2App() {
         })()}
 
         {/* V2.2 Combined Request Modal */}
-        {V2_2_ENABLED && v22RequestOpen && (
+        {v22RequestOpen && (
           <CombinedRequestModal
             requesterParty={activeRole.party}
             requesterAsset={
@@ -2831,7 +2538,7 @@ export default function V2App() {
         )}
 
         {/* V2.2 Combined Response Modal — opens via the DA panel when a provisional request is selected. */}
-        {V2_2_ENABLED && v22RespondingTo && (() => {
+        {v22RespondingTo && (() => {
           const da = v22Provisionals.disclosureAgreements.find(d => d.id === v22RespondingTo.daId)
           if (!da) return null
           const claim = v22View?.claims.find(c => c.id === da.subject.id)
@@ -2874,7 +2581,7 @@ export default function V2App() {
         })()}
 
         {/* V2.2 Run Evaluation Modal */}
-        {V2_2_ENABLED && v22EvalContext && (() => {
+        {v22EvalContext && (() => {
           const claim = v22View?.claims.find(c => c.id === v22EvalContext.claimId)
           if (!claim) return null
           const isSelf = !!v22EvalContext.selfEvaluation
@@ -2923,11 +2630,24 @@ export default function V2App() {
                 requirements: rs.requirements || [],
                 claims: rs.claims || [],
               }))}
-              priorActiveResult={null /* the modal looks up per-Req-Set on submit; supersede is detected in the handler */}
+              priorActiveResult={
+                // Phase 9A item 6: when Re-Evaluate is launched from an Eval
+                // Result panel, the modal gets the prior result so review
+                // rows pre-populate and supersede notice fires.
+                v22EvalContext.priorActiveResultId
+                  ? (v22View?.evaluationResults || []).find((er) => er.id === v22EvalContext.priorActiveResultId) || null
+                  : null
+              }
+              lockedRequirementsSetId={v22EvalContext.lockedRequirementsSetId || null}
               existingEvalResults={
                 // Phase 6.5+ #6: feed the modal the eval results already on
                 // this Claim so it can detect exact (Req Set, evidence) duplicates.
-                (v22View?.evaluationResults || []).filter(er => er.claimId === claim.id && er.status !== 'superseded')
+                // Phase 9A: exclude the prior result we're re-evaluating
+                // against — otherwise "same Req Set, same evidence"
+                // triggers a false duplicate-block on first render.
+                (v22View?.evaluationResults || [])
+                  .filter(er => er.claimId === claim.id && er.status !== 'superseded')
+                  .filter(er => er.id !== v22EvalContext.priorActiveResultId)
               }
               onJumpToExistingEvalResult={(evalResultId) => {
                 setV22EvalContext(null)
@@ -2942,7 +2662,7 @@ export default function V2App() {
         })()}
 
         {/* V2.2 Amend Claim Modal */}
-        {V2_2_ENABLED && v22AmendingClaimId && (() => {
+        {v22AmendingClaimId && (() => {
           // Look up the latest version of the Claim (could be in provisionals).
           const claim = v22View?.claims.find(c => c.id === v22AmendingClaimId)
           if (!claim) return null
@@ -2969,7 +2689,7 @@ export default function V2App() {
         })()}
 
         {/* V2.2 Amend Disclosure Modal */}
-        {V2_2_ENABLED && v22AmendingDaId && (() => {
+        {v22AmendingDaId && (() => {
           const da = v22View?.disclosureAgreements.find(d => d.id === v22AmendingDaId)
           if (!da) return null
           const claim = v22View?.claims.find(c => c.id === da.subject.id)
@@ -3015,8 +2735,32 @@ export default function V2App() {
           )
         })()}
 
+        {/* V2.2 Parse Evidence modal (Phase 8) — opens from the Asset panel's
+            "Parse Evidence" footer action for the Asset's owner. */}
+        {v22ParsingAsset && (() => {
+          const existingParseResultTemplateIds = new Set(
+            (v22View?.parseResults || [])
+              .filter((pr) => pr.sourceAssetId === v22ParsingAsset.id)
+              .map((pr) => pr.templateId),
+          )
+          return (
+            <V22ParseEvidenceModal
+              sourceAsset={{
+                id: v22ParsingAsset.id,
+                name: v22ParsingAsset.name,
+                owner: v22ParsingAsset.owner,
+                ownerDot: v22ParsingAsset.dot,
+              }}
+              availableTemplates={pepTemplates}
+              existingParseResultIds={existingParseResultTemplateIds}
+              onSubmit={handleV22ParseSubmit}
+              onClose={() => setV22ParsingAsset(null)}
+            />
+          )
+        })()}
+
         {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel */}
-        {V2_2_ENABLED && sel && nodeMap[sel]?.v22Type && nodeMap[sel].category !== 'party' && (() => {
+        {sel && nodeMap[sel]?.v22Type && nodeMap[sel].category !== 'party' && (() => {
           const node = nodeMap[sel]
           // Phase 6.5 #16: for non-owner viewers (e.g., Bob viewing Alice's
           // Claim), resolve referenced Asset names from the shared dataset
@@ -3080,6 +2824,9 @@ export default function V2App() {
                 // Asset actions
                 onRequestAgreement={() => { setV22RequestAnchor(node); setV22RequestOpen(true) }}
                 onCreateClaim={undefined}  // Phase 6+ surfaces inline Claim creation from Asset
+                onParseEvidence={node.owner === activeRole.party && node.v22Type === 'ASSET'
+                  ? () => setV22ParsingAsset(node)
+                  : undefined}
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
@@ -3104,442 +2851,26 @@ export default function V2App() {
                 onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
                 // Parse Result actions
                 sourceAsset={sourceAsset}
-                // Eval Result actions
+                // Eval Result actions — Phase 9A item 6: Re-Evaluate locks
+                // the Req Set to the one the prior result used, and passes
+                // the prior result so the review rows pre-populate.
                 onReRunEvaluation={() => {
-                  const ea = (v22View?.evaluationAgreements || []).find(e => e.id === node.v22Artifact?.evaluationAgreementId)
-                  if (ea) handleV22OpenRunEvaluation(ea)
+                  const er = node.v22Artifact
+                  if (!er) return
+                  const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
+                  setV22EvalContext({
+                    evaluationAgreementId: ea ? ea.id : null,
+                    claimId: er.claimId,
+                    selfEvaluation: !ea,
+                    lockedRequirementsSetId: er.requirementsSet?.id || null,
+                    priorActiveResultId: er.id,
+                  })
                 }}
               />
             </div>
           )
         })()}
 
-        {/* Detail Panel overlay — V2.1 path (untouched) */}
-        {!V2_2_ENABLED && sel && nodeMap[sel] && nodeMap[sel].category !== 'party' && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: 480,
-            zIndex: 200,
-            animation: 'detail-panel-slide-in 200ms ease',
-          }}>
-            <DetailPanel
-              node={nodeMap[sel]}
-              nodes={nodes}
-              onClose={handleCloseSel}
-              onViewChain={handlePanelViewChain}
-              onExpandStack={handlePanelExpandStack}
-              onSurface={handlePanelSurface}
-              isAnchor={isAnchorSelected}
-              depth={layerInfo.depth}
-              onDisclose={() => sel && nodeMap[sel] && setPublishNode(nodeMap[sel])}
-              onConnect={() => sel && nodeMap[sel] && setConnectNode(nodeMap[sel])}
-              onAddEvidence={() => {
-                const target = sel && nodeMap[sel]
-                if (target) setEvidenceNode(target)
-              }}
-              onCreateClaim={() => {
-                const target = sel && nodeMap[sel]
-                setClaimContext(target ? { initiatingNode: target } : true)
-              }}
-              onParseEvidence={() => {
-                if (!sel || !nodeMap[sel]) return
-                const evNode = nodeMap[sel]
-                if (!evNode.isEvidence) return
-                const parentAsset = nodes.find(n => n.children?.some(c => c.id === evNode.id))
-                setParseContext({
-                  evidenceNode: evNode,
-                  parentAssetId: parentAsset?.id || null,
-                  parentAssetName: parentAsset?.name || 'Unknown Asset',
-                })
-              }}
-              onRunEvaluation={(targetNode) => {
-                const n = targetNode || nodeMap[sel]
-                if (!n) return
-                if (n.isClaim || n.category === 'claim') {
-                  const parentAsset = nodes.find(pn => pn.children?.some(c => c.id === n.id))
-                  if (!parentAsset) return
-                  const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
-                  const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
-                  const claimReqSet = requirementSets.find(rs => rs.id === n.requirementSetId)
-                    || requirementSets.find(rs => (rs.lineageId || rs.id) === n.requirementSetLineageId)
-                    || publishedRequirementSets.find(rs => rs.id === n.requirementSetId)
-                    || publishedRequirementSets.find(rs => (rs.lineageId || rs.id) === n.requirementSetLineageId)
-                  setEvalContext({ assetNode: parentAsset, claimNode: n, disclosureType, claimReqSet: claimReqSet || null })
-                  return
-                }
-                if (n.isEvidence) {
-                  const parentAsset = nodes.find(p => p.children?.some(c => c.id === n.id))
-                  if (!parentAsset) return
-                  const resolvedParsedFields = (parentAsset.children || [])
-                    .filter(c => c.isParse || c.category === 'parse')
-                    .flatMap(pn => pn.parsedFields || [])
-                  let discType = 'full'
-                  if (parentAsset.owner !== activeRole.party) {
-                    const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party)
-                    discType = sda?.type || 'full'
-                  }
-                  setEvalContext({ assetNode: parentAsset, evidenceNode: n, disclosureType: discType, parsedFields: resolvedParsedFields })
-                } else {
-                  const sda = (n.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
-                  const disclosureType = sda?.type || 'full'
-                  setEvalContext({ assetNode: n, evidenceNode: null, disclosureType })
-                }
-              }}
-              canEvaluate={(() => {
-                const n = nodeMap[sel]
-                if (!n) return false
-                if (!n.isEvidence) return false
-                // Find parent asset and check for sibling parse nodes
-                const parentAsset = nodes.find(p => p.children?.some(c => c.id === n.id))
-                if (!parentAsset) return false
-                const hasSiblingParse = parentAsset.children?.some(c => c.isParse || c.category === 'parse')
-                if (!hasSiblingParse) return false
-                const isNodeOwner = parentAsset.owner === activeRole.party
-                const hasAccess = (parentAsset.sdas || []).some(s =>
-                  s.party === activeRole.party && (s.type === 'full' || s.type === 'selective')
-                )
-                return isNodeOwner || hasAccess
-              })()}
-              onManageCascade={(sda) => sel && nodeMap[sel] && setCascadeContext({ node: nodeMap[sel], sda })}
-              isOwner={nodeMap[sel]?.owner === activeRole.party}
-              revealPhase={revealAnim?.nodeId === sel ? revealAnim.phase : null}
-              forceTab={forcePanelTab}
-              forceExpandSda={forceExpandSda}
-              onViewChild={handleViewChild}
-              onCancelRequest={(provNode) => {
-                updateRoleState(roleId, prev => ({
-                  ...prev,
-                  addedNodes: prev.addedNodes.filter(n => n.id !== provNode.id),
-                  addedEdges: prev.addedEdges.filter(e => e.to !== provNode.id && e.from !== provNode.id),
-                }))
-                const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-                if (otherRoleId) {
-                  updateRoleState(otherRoleId, prev => ({
-                    ...prev,
-                    addedRequests: (prev.addedRequests || []).filter(r =>
-                      r.asset?.pin !== provNode.pin
-                    ),
-                  }))
-                }
-                setSel(null)
-              }}
-              onSelectAsset={(pinOrId) => {
-                if (!pinOrId) return
-                const target = Object.values(nodeMap).find(n => n.pin === pinOrId || n.id === pinOrId)
-                if (target) setSel(target.id)
-              }}
-              onOpenLibrary={(setId) => {
-                setLibraryInitialSetId(setId || null)
-                setShowLibrary(true)
-              }}
-              onDismissDeclined={(provNode) => {
-                updateRoleState(roleId, prev => ({
-                  ...prev,
-                  addedNodes: prev.addedNodes.filter(n => n.id !== provNode.id),
-                  addedEdges: prev.addedEdges.filter(e => e.to !== provNode.id && e.from !== provNode.id),
-                }))
-                setSel(null)
-              }}
-              activeParty={activeRole.party}
-              onAmendEval={(ev) => {
-                const parentAsset = nodes.find(n => n.children?.some(c => c.id === ev.id))
-                if (!parentAsset) return
-                const evalChild = (parentAsset.children || []).find(c => c.id === ev.id)
-                const sda = (parentAsset.sdas || []).find(s => s.party === activeRole.party || s.partyLabel === 'internal')
-                const disclosureType = parentAsset.owner === activeRole.party ? 'full' : (sda?.type || 'full')
-
-                const claimId = evalChild?.claimId || ev.claimId
-                const claimNode = claimId ? (parentAsset.children || []).find(c => c.id === claimId) : null
-
-                if (claimNode) {
-                  const claimReqSet = requirementSets.find(rs => rs.id === claimNode.requirementSetId)
-                    || requirementSets.find(rs => (rs.lineageId || rs.id) === claimNode.requirementSetLineageId)
-                    || publishedRequirementSets.find(rs => rs.id === claimNode.requirementSetId)
-                    || null
-                  setEvalContext({
-                    assetNode: parentAsset,
-                    claimNode,
-                    disclosureType,
-                    claimReqSet,
-                    amendingEval: {
-                      id: evalChild?.id || ev.id,
-                      requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
-                      requirementSetName: evalChild?.requirementSetName || ev.requirements,
-                      claims: ev.claims || [],
-                      version: evalChild?.evalVersion || 1,
-                      selectedEvidenceIds: evalChild?.selectedEvidenceIds || ev.selectedEvidenceIds || [],
-                    },
-                  })
-                } else {
-                  setEvalContext({
-                    assetNode: parentAsset,
-                    evidenceNode: null,
-                    disclosureType,
-                    amendingEval: {
-                      id: evalChild?.id || ev.id,
-                      requirementSetId: evalChild?.requirementSetId || ev.requirementSetId,
-                      requirementSetName: evalChild?.requirementSetName || ev.requirements,
-                      claims: ev.claims || [],
-                      version: evalChild?.evalVersion || 1,
-                      selectedEvidenceIds: evalChild?.selectedEvidenceIds || ev.selectedEvidenceIds || [],
-                    },
-                  })
-                }
-              }}
-              onReviseSda={({ sda, nodeId }) => {
-                const targetNode = nodeMap[nodeId]
-                if (targetNode) setReviseContext({ sda, node: targetNode })
-              }}
-              onRevokeSda={({ sda, nodeId, message }) => {
-                const today = new Date().toISOString().slice(0, 10)
-                const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-                const clickedNode = nodeMap[nodeId]
-
-                // ===== SELF-REVOCATION: removing own asset from own network =====
-                const isInternal = sda.partyLabel === 'internal' ||
-                  (clickedNode?.owner === activeRole.party && sda.party === activeRole.party)
-
-                if (isInternal) {
-                  updateRoleState(roleId, prev => {
-                    const newState = { ...prev }
-                    const ownRoleData = getDataForRole(roleId)
-
-                    const isStatic = !!ownRoleData.nodeMap[nodeId]
-                    const isDynamic = prev.addedNodes.some(n => n.id === nodeId)
-                    if (isDynamic) {
-                      newState.addedNodes = prev.addedNodes.filter(n => n.id !== nodeId)
-                    } else if (isStatic) {
-                      newState.removedNodes = [...(prev.removedNodes || []), nodeId]
-                    }
-
-                    newState.addedEdges = prev.addedEdges.filter(e =>
-                      e.from !== nodeId && e.to !== nodeId
-                    )
-                    const staticEdgesToRemove = ownRoleData.edges
-                      .filter(e => e.from === nodeId || e.to === nodeId)
-                      .map(e => e.id)
-                    if (staticEdgesToRemove.length > 0) {
-                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
-                    }
-
-                    if (prev.addedChildren?.[nodeId]) {
-                      const { [nodeId]: _, ...rest } = prev.addedChildren
-                      newState.addedChildren = rest
-                    }
-                    if (prev.addedSDAs?.[nodeId]) {
-                      const { [nodeId]: _, ...rest2 } = prev.addedSDAs
-                      newState.addedSDAs = rest2
-                    }
-
-                    return newState
-                  })
-                  setSel(null)
-                  return
-                }
-
-                // ===== FOREIGN DISCLOSURE REVOCATION =====
-                const connectorPin = sda.assetPin
-                let connectorNode = connectorPin
-                  ? Object.values(nodeMap).find(n => n.pin === connectorPin)
-                  : null
-
-                // Fallback: find connected node via party name when assetPin is null
-                if (!connectorNode && sda.party) {
-                  connectorNode = Object.values(nodeMap).find(n =>
-                    n.name === sda.party || n.id === sda.party.toLowerCase().replace(/\s+/g, '-')
-                  ) || null
-                }
-
-                // Determine which side is "ours" and which is "theirs"
-                let ownAssetId, ownAssetPin, foreignNodeId, foreignNodePin
-
-                if (clickedNode?.owner === activeRole.party) {
-                  ownAssetId = nodeId
-                  ownAssetPin = clickedNode?.pin
-                  foreignNodeId = connectorNode?.id
-                  foreignNodePin = connectorPin
-                } else {
-                  foreignNodeId = nodeId
-                  foreignNodePin = clickedNode?.pin
-                  ownAssetId = connectorNode?.id
-                  ownAssetPin = connectorPin
-                }
-
-                // ===== STEP 1: Remove SDA from our own asset =====
-                if (ownAssetId) {
-                  updateRoleState(roleId, prev => {
-                    const addedForNode = prev.addedSDAs[ownAssetId] || []
-                    const matchIndex = addedForNode.findIndex(s =>
-                      s.party === sda.party && s.type === sda.type && s.created === sda.created
-                    )
-                    // Also try matching by type+created only (SDA party field varies by perspective)
-                    const matchIndex2 = matchIndex >= 0 ? matchIndex : addedForNode.findIndex(s =>
-                      s.type === sda.type && s.created === sda.created
-                    )
-
-                    const newState = { ...prev }
-                    if (matchIndex2 >= 0) {
-                      const updated = [...addedForNode]
-                      updated.splice(matchIndex2, 1)
-                      newState.addedSDAs = { ...prev.addedSDAs, [ownAssetId]: updated }
-                    } else {
-                      newState.removedSDAs = [...(prev.removedSDAs || []), {
-                        nodeId: ownAssetId,
-                        party: sda.party,
-                        type: sda.type,
-                        created: sda.created,
-                      }]
-                    }
-                    return newState
-                  })
-                }
-
-                // ===== STEP 1b: Remove the foreign node + edge from our own network =====
-                if (foreignNodeId) {
-                  updateRoleState(roleId, prev => {
-                    const newState = { ...prev }
-                    const ownRoleData = getDataForRole(roleId)
-
-                    // Remove edge between own asset and foreign node
-                    newState.addedEdges = prev.addedEdges.filter(e =>
-                      !((e.from === ownAssetId && e.to === foreignNodeId) || (e.from === foreignNodeId && e.to === ownAssetId))
-                    )
-                    const staticEdgesToRemove = ownRoleData.edges
-                      .filter(e =>
-                        (e.from === ownAssetId && e.to === foreignNodeId) ||
-                        (e.from === foreignNodeId && e.to === ownAssetId)
-                      )
-                      .map(e => e.id)
-                    if (staticEdgesToRemove.length > 0) {
-                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
-                    }
-
-                    // Remove SDA from the foreign node that references our asset
-                    const foreignNodeData = nodeMap[foreignNodeId]
-                    if (foreignNodeData) {
-                      const staticSda = (foreignNodeData.sdas || []).find(s => s.assetPin === ownAssetPin)
-                      if (staticSda) {
-                        newState.removedSDAs = [...(prev.removedSDAs || []), {
-                          nodeId: foreignNodeId,
-                          party: staticSda.party,
-                          type: staticSda.type,
-                          created: staticSda.created,
-                        }]
-                      }
-                      const dynamicSdas = prev.addedSDAs[foreignNodeId] || []
-                      if (dynamicSdas.length > 0) {
-                        newState.addedSDAs = {
-                          ...(newState.addedSDAs || prev.addedSDAs),
-                          [foreignNodeId]: dynamicSdas.filter(s => s.assetPin !== ownAssetPin),
-                        }
-                      }
-                    }
-
-                    // Check if foreign node has any remaining edges
-                    const allCurrentEdges = [
-                      ...ownRoleData.edges.filter(e =>
-                        !(prev.removedEdges || []).includes(e.id) && !staticEdgesToRemove.includes(e.id)
-                      ),
-                      ...newState.addedEdges,
-                    ]
-                    const remainingForeignEdges = allCurrentEdges.filter(e =>
-                      e.from === foreignNodeId || e.to === foreignNodeId
-                    )
-
-                    if (remainingForeignEdges.length === 0) {
-                      const isStaticNode = !!ownRoleData.nodeMap[foreignNodeId]
-                      const isDynamicNode = prev.addedNodes.some(n => n.id === foreignNodeId)
-                      if (isDynamicNode) {
-                        newState.addedNodes = prev.addedNodes.filter(n => n.id !== foreignNodeId)
-                      } else if (isStaticNode) {
-                        newState.removedNodes = [...(prev.removedNodes || []), foreignNodeId]
-                      }
-                    }
-
-                    return newState
-                  })
-                }
-
-                // ===== STEP 2: Cross-role — remove our asset from other role's network =====
-                if (otherRoleId && ownAssetId) {
-                  const otherRoleData = getDataForRole(otherRoleId)
-
-                  updateRoleState(otherRoleId, prev => {
-                    const newState = { ...prev }
-                    const targetNodeId = ownAssetId
-
-                    // Remove node — dynamic or static
-                    const isStatic = !!otherRoleData.nodeMap[targetNodeId]
-                    const isDynamic = prev.addedNodes.some(n => n.id === targetNodeId)
-                    if (isDynamic) {
-                      newState.addedNodes = prev.addedNodes.filter(n => n.id !== targetNodeId)
-                    } else if (isStatic) {
-                      newState.removedNodes = [...(prev.removedNodes || []), targetNodeId]
-                    }
-
-                    // Remove edges
-                    newState.addedEdges = prev.addedEdges.filter(e =>
-                      e.to !== targetNodeId && e.from !== targetNodeId
-                    )
-                    const staticEdgesToRemove = otherRoleData.edges
-                      .filter(e => e.to === targetNodeId || e.from === targetNodeId)
-                      .map(e => e.id)
-                    if (staticEdgesToRemove.length > 0) {
-                      newState.removedEdges = [...(prev.removedEdges || []), ...staticEdgesToRemove]
-                    }
-
-                    // Remove dynamic SDAs referencing our asset
-                    const updatedAddedSDAs = { ...prev.addedSDAs }
-                    Object.keys(updatedAddedSDAs).forEach(nid => {
-                      updatedAddedSDAs[nid] = (updatedAddedSDAs[nid] || []).filter(s =>
-                        s.assetPin !== ownAssetPin
-                      )
-                    })
-                    newState.addedSDAs = updatedAddedSDAs
-
-                    // Remove static SDAs on the other role's connector
-                    if (foreignNodeId) {
-                      const otherConnector = otherRoleData.nodes.find(n => n.id === foreignNodeId)
-                      if (otherConnector) {
-                        const staticSda = (otherConnector.sdas || []).find(s => s.assetPin === ownAssetPin)
-                        if (staticSda) {
-                          newState.removedSDAs = [...(prev.removedSDAs || []), {
-                            nodeId: foreignNodeId,
-                            party: staticSda.party,
-                            type: staticSda.type,
-                            created: staticSda.created,
-                          }]
-                        }
-                      }
-                    }
-
-                    // Revocation notification
-                    newState.addedRequests = [...(prev.addedRequests || []), {
-                      id: `revoke-${targetNodeId}-${Date.now().toString(36)}`,
-                      type: 'revocation',
-                      from: { name: activeRole.party, dot: activeRole.partyDot },
-                      asset: {
-                        name: nodeMap[ownAssetId]?.name || 'Unknown Asset',
-                        pin: ownAssetPin || '',
-                      },
-                      disclosureType: sda.type,
-                      message: message || '',
-                      date: today,
-                    }]
-
-                    return newState
-                  })
-                }
-
-                // Deselect after revoke (the selected node may have been removed)
-                setSel(null)
-              }}
-            />
-          </div>
-        )}
       </div>
 
       {/* Footer */}
@@ -3767,1234 +3098,32 @@ export default function V2App() {
         <V2SubgraphModal node={modalNode} onClose={handleCloseModal} />
       )} */}
 
-      {/* Disclosure modals — shared persistent backdrop */}
-      {(publishNode || connectNode || responseRequest || cascadeContext || evidenceNode || parseContext || revocationNotice || showLibrary || showPEPLibrary || evalContext || claimContext || reviseContext) && (
+      {/* Library modals — Requirements Sets + PEP Templates. Reachable from
+          the chrome icons and from the V2.2 Amend / Eval flows. */}
+      {(showLibrary || showPEPLibrary) && (
         <Backdrop onClose={() => {
-          if (reviseContext) setReviseContext(null)
-          else if (claimContext) setClaimContext(null)
-          else if (evalContext) setEvalContext(null)
-          else if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
+          if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
           else if (showPEPLibrary) setShowPEPLibrary(false)
-          else if (connectNode) setConnectNode(null)
-          else if (evidenceNode) setEvidenceNode(null)
-          else if (parseContext) setParseContext(null)
-          else if (responseRequest) setResponseRequest(null)
-          else if (publishNode) setPublishNode(null)
-          else if (cascadeContext) setCascadeContext(null)
-          else if (revocationNotice) setRevocationNotice(null)
         }}>
-      {publishNode && (
-        <PublishModal
-          node={nodeMap[publishNode.id] || publishNode}
-          onClose={() => setPublishNode(null)}
-          onComplete={({ assetId, disclosureType, selectedFields, selectedEvals, selectedEvidenceIds, expiry, customDate }) => {
-            const today = new Date().toISOString().slice(0, 10)
-            const radiantDot = makeDot('Radiant Network')
-            const publicSda = {
-              type: disclosureType,
-              party: 'Radiant Network',
-              partyDot: radiantDot,
-              created: today,
-              expires: expiry === 'no-expiry' ? null : expiry === 'custom' ? customDate : (() => {
-                const d = new Date()
-                if (expiry === '1-year') d.setFullYear(d.getFullYear() + 1)
-                if (expiry === '2-year') d.setFullYear(d.getFullYear() + 2)
-                return d.toISOString().slice(0, 10)
-              })(),
-              pins: [],
-              assetName: null,
-              assetPin: null,
-              disclosedFields: selectedFields || null,
-              selectedEvidenceIds: selectedEvidenceIds || null,
-              selectedEvals: disclosureType === 'proofonly' && selectedEvals ? selectedEvals.map(ev => ({
-                id: ev.id,
-                name: ev.requirements,
-                org: ev.org,
-                date: ev.date,
-                claimCount: ev.claims?.length || 0,
-                satisfied: ev.claims?.filter(c => c.status === 'satisfactory' || c.status === 'verified').length || 0,
-                unsatisfied: ev.claims?.filter(c => c.status === 'unsatisfactory' || c.status === 'failed' || c.status === 'contested').length || 0,
-                missing: ev.claims?.filter(c => c.status === 'missing').length || 0,
-                claims: ev.claims || [],
-              })) : null,
-              _isGrantor: true,
-            }
-
-            updateRoleState(roleId, prev => {
-              const newState = { ...prev }
-
-              // Add SDA to the asset
-              newState.addedSDAs = {
-                ...prev.addedSDAs,
-                [assetId]: [...(prev.addedSDAs[assetId] || []), publicSda],
-              }
-
-              // Check if Radiant Network node already exists
-              const radiantExists = prev.addedNodes.some(n => n.id === 'radiant-network') ||
-                nodes.some(n => n.id === 'radiant-network')
-
-              if (!radiantExists) {
-                const radiantNode = {
-                  id: 'radiant-network',
-                  pin: makePin('radiant-network'),
-                  dot: radiantDot,
-                  name: 'Radiant Network',
-                  category: 'party',
-                  owner: 'Radiant Network',
-                  parentId: null,
-                  children: [],
-                  health: { ok: 0, warn: 0, bad: 0 },
-                  childHealth: null,
-                  totalHealth: null,
-                  displayHealth: { ok: 0, warn: 0, bad: 0 },
-                  claimCount: 0,
-                  displayClaimCount: 0,
-                  hasEvidence: false,
-                  hasStack: false,
-                  childCount: 0,
-                  evidence: null,
-                  evaluations: [],
-                  sdas: [],
-                  x: (publishNode.x || 0) + 600,
-                  y: (publishNode.y || 0),
-                  parentOwner: 'Radiant Network',
-                  isCascade: false,
-                  cascadeVia: null,
-                  upstreamSda: null,
-                  upstreamAssets: null,
-                  isEvidence: false,
-                  lastEval: null,
-                  description: 'Public asset directory — all published assets are discoverable here.',
-                  isNetworkNode: true,
-                  _isNew: true,
-                }
-                newState.addedNodes = [...prev.addedNodes, radiantNode]
-              }
-
-              // Add edge from published asset to Radiant Network
-              const edgeExists = prev.addedEdges.some(e =>
-                (e.from === assetId && e.to === 'radiant-network') ||
-                (e.from === 'radiant-network' && e.to === assetId)
-              )
-              if (!edgeExists) {
-                newState.addedEdges = [...prev.addedEdges, {
-                  id: `e-${assetId}-radiant-${Date.now().toString(36)}}`,
-                  from: assetId,
-                  to: 'radiant-network',
-                  sdaType: disclosureType,
-                }]
-              }
-
-              return newState
-            })
-          }}
-          _noBackdrop
-        />
-      )}
-      {!V2_2_ENABLED && connectNode && (
-        <RequestDisclosureModal
-          contextNode={connectNode}
-          requirementSets={requirementSets}
-          publicListings={publicListings}
-          onClose={() => setConnectNode(null)}
-          onRegisterAsset={() => {
-            const ctxNode = connectNode
-            setConnectNode(null)
-            setClaimContext(ctxNode ? { initiatingNode: ctxNode } : true)
-          }}
-          onSubmitRequest={handleSubmitRequest}
-          onValidatePins={handleValidatePins}
-          _noBackdrop
-        />
-      )}
-      {!V2_2_ENABLED && responseRequest && (
-        <DisclosureResponseModal
-          request={responseRequest}
-          assetNode={nodeMap[responseRequest.node?.id]}
-          onClose={() => setResponseRequest(null)}
-          onComplete={(disclosureType, selectedFieldIds, selectedEvidenceIds, selectedEvalIds, selectedClaimIds, opts = {}) => {
-            const declineReason = opts.declineReason || null
-            const req = responseRequest
-            const reqNodeId = req.node?.id
-            const today = new Date().toISOString().slice(0, 10)
-
-            if (reqNodeId && disclosureType) {
-              // Find the other role for cross-role mutations
-              const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-
-              // Build proof-of-evaluation data for proof-only disclosures
-              let proofOnlyEvals = null
-              if (disclosureType === 'proofonly') {
-                const sourceForEvals = nodeMap[reqNodeId]
-                if (sourceForEvals?.children) {
-                  let evalChildren = sourceForEvals.children.filter(c => c.isEvaluation || c.category === 'evaluation')
-                  if (selectedEvalIds && selectedEvalIds.length > 0) {
-                    const evalIdSet = new Set(selectedEvalIds)
-                    evalChildren = evalChildren.filter(c => evalIdSet.has(c.id))
-                  }
-                  if (evalChildren.length > 0) {
-                    proofOnlyEvals = evalChildren.map(ev => ({
-                      id: ev.id,
-                      name: ev.name || ev.requirements || 'Evaluation',
-                      org: ev.owner || activeRole.party,
-                      date: ev.date || today,
-                      claimCount: ev.claims?.length || 0,
-                      satisfied: ev.claims?.filter(c => c.status === 'satisfactory' || c.status === 'verified').length || 0,
-                      unsatisfied: ev.claims?.filter(c => c.status === 'unsatisfactory' || c.status === 'failed' || c.status === 'contested').length || 0,
-                      missing: ev.claims?.filter(c => c.status === 'missing').length || 0,
-                      claims: (ev.claims || []).map(c => ({ ...c })),
-                    }))
-                  }
-                }
-              }
-
-              // 1. Create SDA on the target asset (current role)
-              const newSDA = {
-                type: disclosureType,
-                party: req.from.name,
-                partyDot: req.from.dot,
-                created: today,
-                expires: '2027-03-15',
-                pins: [],
-                assetName: req.connectTo?.name || null,
-                assetPin: req.connectTo?.pin || null,
-                selectedFieldIds: selectedFieldIds || null,
-                selectedEvidenceIds: selectedEvidenceIds || null,
-                selectedClaimIds: selectedClaimIds || null,
-                selectedEvals: proofOnlyEvals,
-                _isGrantor: true,
-              }
-              updateRoleState(roleId, prev => ({
-                ...prev,
-                addedSDAs: {
-                  ...prev.addedSDAs,
-                  [reqNodeId]: [...(prev.addedSDAs[reqNodeId] || []), newSDA],
-                },
-              }))
-
-              // 2. If connectTo exists and the node isn't already on the network, add it
-              if (req.connectTo && !nodeMap[req.connectTo.id]) {
-                const connectNodeObj = {
-                  id: req.connectTo.id,
-                  pin: req.connectTo.pin,
-                  dot: req.from.dot,
-                  name: req.connectTo.name,
-                  category: req.connectTo.category || 'product',
-                  owner: req.connectTo.owner || req.from.name,
-                  parentId: null,
-                  children: (() => {
-                    const sourceNode = nodeMap[reqNodeId]
-                    if (!sourceNode?.children) return []
-                    const claimSet = selectedClaimIds ? new Set(selectedClaimIds) : null
-                    return sourceNode.children.filter(c => {
-                      if (c.isClaim || c.category === 'claim') return !claimSet || claimSet.has(c.id)
-                      if (c.isEvidence || c.category === 'evidence') return true
-                      if (c.isParse || c.category === 'parse') return true
-                      if (c.isEvaluation || c.category === 'evaluation') {
-                        if (c.claimId && claimSet) return claimSet.has(c.claimId)
-                        return true
-                      }
-                      return true
-                    }).map(c => ({ ...c }))
-                  })(),
-                  health: { ok: 0, warn: 0, bad: 0 },
-                  childHealth: null,
-                  totalHealth: null,
-                  displayHealth: { ok: 0, warn: 0, bad: 0 },
-                  claimCount: 0,
-                  displayClaimCount: 0,
-                  hasEvidence: false,
-                  hasStack: true,
-                  childCount: 0,
-                  evidence: null,
-                  evaluations: [],
-                  sdas: [{
-                    type: disclosureType,
-                    party: activeRole.party,
-                    partyDot: activeRole.partyDot,
-                    created: today,
-                    expires: '2027-03-15',
-                    pins: [],
-                    assetName: req.asset.name,
-                    assetPin: req.node?.pin || null,
-                  }],
-                  x: (req.node?.x || 500) + 500,
-                  y: req.node?.y || 0,
-                  parentOwner: req.connectTo.owner || req.from.name,
-                  isCascade: false,
-                  cascadeVia: null,
-                  upstreamSda: null,
-                  upstreamAssets: null,
-                  isEvidence: false,
-                  lastEval: null,
-                  _isNew: true,
-                }
-                updateRoleState(roleId, prev => ({
-                  ...prev,
-                  addedNodes: [...prev.addedNodes, connectNodeObj],
-                  addedEdges: [...prev.addedEdges, {
-                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                    from: req.connectTo.id,
-                    to: reqNodeId,
-                    sdaType: disclosureType,
-                    _isNew: true,
-                    _createdAt: Date.now(),
-                  }],
-                }))
-              }
-              // If the connectTo node already exists, just add the edge + SDA
-              else if (req.connectTo && nodeMap[req.connectTo.id]) {
-                const connectSDA = {
-                  type: disclosureType,
-                  party: activeRole.party,
-                  partyDot: activeRole.partyDot,
-                  created: today,
-                  expires: '2027-03-15',
-                  pins: [],
-                  assetName: req.asset.name,
-                  assetPin: req.node?.pin || null,
-                }
-                updateRoleState(roleId, prev => ({
-                  ...prev,
-                  addedEdges: [...prev.addedEdges, {
-                    id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                    from: req.connectTo.id,
-                    to: reqNodeId,
-                    sdaType: disclosureType,
-                    _isNew: true,
-                    _createdAt: Date.now(),
-                  }],
-                  addedSDAs: {
-                    ...prev.addedSDAs,
-                    [req.connectTo.id]: [...(prev.addedSDAs[req.connectTo.id] || []), connectSDA],
-                  },
-                }))
-              }
-
-              // 3. Cross-role mutation: write to the other role's state
-              if (otherRoleId && req.connectTo) {
-                // The other role (buyer) sees: SDA on their connectTo node + SDA on the disclosed asset + edge
-                const crossSdaOnConnectTo = {
-                  type: disclosureType,
-                  party: activeRole.party,
-                  partyDot: activeRole.partyDot,
-                  created: today,
-                  expires: '2027-03-15',
-                  pins: [],
-                  assetName: req.asset.name,
-                  assetPin: req.node?.pin || null,
-                  selectedFieldIds: selectedFieldIds || null,
-                  selectedEvidenceIds: selectedEvidenceIds || null,
-                  selectedEvals: proofOnlyEvals,
-                }
-
-                const crossSdaOnAsset = {
-                  type: disclosureType,
-                  party: req.from.name,
-                  partyDot: req.from.dot,
-                  created: today,
-                  expires: '2027-03-15',
-                  pins: [],
-                  assetName: req.connectTo.name,
-                  assetPin: req.connectTo.pin || null,
-                  selectedFieldIds: selectedFieldIds || null,
-                  selectedEvidenceIds: selectedEvidenceIds || null,
-                  selectedEvals: proofOnlyEvals,
-                }
-
-                // Compute position for the disclosed node in the target role's layout
-                const otherRoleData = getDataForRole(otherRoleId)
-                const otherConnectNodeReal = otherRoleData.nodeMap[req.connectTo.id]
-                const targetParty = ROLES.find(r => r.id === otherRoleId)?.party
-                const disclosedNodes = otherRoleData.nodes.filter(n => n.owner && n.owner !== targetParty && n.owner !== null)
-                const disclosedX = disclosedNodes.length > 0
-                  ? disclosedNodes[0].x
-                  : (otherConnectNodeReal?.x || 900) + 500
-                const existingDynamic = perRoleState[otherRoleId]?.addedNodes || []
-                const allRelevantNodes = [...disclosedNodes, ...existingDynamic]
-                const nodesInColumn = allRelevantNodes.filter(n => Math.abs(n.x - disclosedX) < 100)
-                const lowestY = nodesInColumn.length > 0
-                  ? Math.max(...nodesInColumn.map(n => n.y))
-                  : (otherConnectNodeReal?.y || 0)
-                const idealY = lowestY + 300
-
-                // Collision check against the other role's full node set
-                const otherAllNodes = [...otherRoleData.nodes, ...existingDynamic]
-                const newY = findClearY(disclosedX, idealY, otherAllNodes)
-
-                // Copy children from the source asset for the disclosed node
-                const sourceAsset = nodeMap[reqNodeId]
-                let disclosedChildren = []
-
-                if (sourceAsset?.children && sourceAsset.children.length > 0) {
-                  let relevantChildren = sourceAsset.children
-
-                  // Filter by selected evidence IDs
-                  if (selectedEvidenceIds && selectedEvidenceIds.length > 0) {
-                    const evidenceSet = new Set(selectedEvidenceIds)
-                    relevantChildren = relevantChildren.filter(c => {
-                      if (c.isEvidence) return evidenceSet.has(c.id)
-                      if (c.isParse || c.category === 'parse') return evidenceSet.has(c.sourceEvidenceId)
-                      if (c.isEvaluation || c.category === 'evaluation') return false
-                      return true
-                    })
-                  }
-
-                  if (disclosureType === 'selective' && selectedFieldIds && selectedFieldIds.length > 0) {
-                    const disclosedSet = new Set(selectedFieldIds)
-                    disclosedChildren = relevantChildren.map(c => {
-                      if (!c.isParse && c.category !== 'parse') return { ...c }
-                      if (!c.parsedFields) return { ...c }
-                      return {
-                        ...c,
-                        parsedFields: c.parsedFields.filter(f => disclosedSet.has(`${c.id}::${f.id}`)),
-                        _isSelective: true,
-                      }
-                    })
-                  } else if (disclosureType === 'proofonly') {
-                    let evalChildren = relevantChildren.filter(c => c.isEvaluation || c.category === 'evaluation')
-                    if (selectedEvalIds && selectedEvalIds.length > 0) {
-                      const evalIdSet = new Set(selectedEvalIds)
-                      evalChildren = evalChildren.filter(c => evalIdSet.has(c.id))
-                    }
-                    disclosedChildren = evalChildren.map(c => ({ ...c }))
-                  } else {
-                    disclosedChildren = relevantChildren.map(c => ({ ...c }))
-                  }
-                }
-
-                // Build the disclosed asset node for the other role's network
-                const disclosedNodeForOther = {
-                  id: reqNodeId,
-                  pin: req.node?.pin || makePin(reqNodeId),
-                  dot: makeDot(activeRole.party),
-                  name: req.asset.name,
-                  category: 'product',
-                  owner: activeRole.party,
-                  parentId: null,
-                  children: disclosedChildren,
-                  health: { ok: 0, warn: 0, bad: 0 },
-                  childHealth: null,
-                  totalHealth: null,
-                  displayHealth: { ok: 0, warn: 0, bad: 0 },
-                  claimCount: 0,
-                  displayClaimCount: 0,
-                  hasEvidence: disclosedChildren.some(c => c.isEvidence),
-                  hasStack: disclosedChildren.length > 0,
-                  childCount: disclosedChildren.length,
-                  evidence: null,
-                  evaluations: [],
-                  sdas: [crossSdaOnAsset],
-                  x: disclosedX,
-                  y: newY,
-                  parentOwner: activeRole.party,
-                  isCascade: false,
-                  cascadeVia: null,
-                  upstreamSda: null,
-                  upstreamAssets: null,
-                  isEvidence: false,
-                  lastEval: null,
-                  _isNew: true,
-                  _disclosedFieldIds: selectedFieldIds || null,
-                  _isSelective: disclosureType === 'selective' ? true : undefined,
-                }
-
-                updateRoleState(otherRoleId, prev => {
-                  // Check if the asset node already exists in the other role's static or dynamic data
-                  const existsInStatic = !!otherRoleData.nodeMap[reqNodeId]
-                  const existsInDynamic = prev.addedNodes.some(n => n.id === reqNodeId && !n.provisional)
-                  const provId = `provisional-${reqNodeId}`
-                  const provisionalNode = prev.addedNodes.find(n => n.id === provId && n.provisional)
-
-                  const newState = { ...prev }
-
-                  // Add SDA on the connectTo node (buyer's asset that requested disclosure)
-                  newState.addedSDAs = {
-                    ...prev.addedSDAs,
-                    [req.connectTo.id]: [...(prev.addedSDAs[req.connectTo.id] || []), crossSdaOnConnectTo],
-                  }
-
-                  // Upgrade provisional → real, or add new node, or just add SDA
-                  if (provisionalNode) {
-                    // Replace provisional node with real disclosed node, keeping position
-                    newState.addedNodes = prev.addedNodes
-                      .filter(n => n.id !== provId)
-                      .concat({ ...disclosedNodeForOther, x: provisionalNode.x, y: provisionalNode.y, _isNew: true, _wasProvisional: true, _showAsProvisional: true })
-                    // Replace provisional edges with real disclosure edges
-                    newState.addedEdges = prev.addedEdges
-                      .filter(e => !((e.to === provId || e.from === provId) && e.sdaType === 'provisional'))
-                      .concat({
-                        id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                        from: req.connectTo.id,
-                        to: reqNodeId,
-                        sdaType: disclosureType,
-                        _showAsProvisional: true,
-                        _isNew: true,
-                        _createdAt: Date.now(),
-                      })
-                  } else if (!existsInStatic && !existsInDynamic) {
-                    newState.addedNodes = [...prev.addedNodes, disclosedNodeForOther]
-                    // Add edge between connectTo and disclosed asset
-                    newState.addedEdges = [...prev.addedEdges, {
-                      id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                      from: req.connectTo.id,
-                      to: reqNodeId,
-                      sdaType: disclosureType,
-                      _isNew: true,
-                      _createdAt: Date.now(),
-                    }]
-                  } else {
-                    // Node exists — just add the SDA to it
-                    newState.addedSDAs = {
-                      ...newState.addedSDAs,
-                      [reqNodeId]: [...(newState.addedSDAs[reqNodeId] || []), crossSdaOnAsset],
-                    }
-                    // Add edge between connectTo and disclosed asset
-                    newState.addedEdges = [...prev.addedEdges, {
-                      id: `e-dynamic-${req.connectTo.id}-${reqNodeId}`,
-                      from: req.connectTo.id,
-                      to: reqNodeId,
-                      sdaType: disclosureType,
-                      _isNew: true,
-                      _createdAt: Date.now(),
-                    }]
-                  }
-
-                  // Push disclosed children for existing static/dynamic nodes
-                  const sourceNode = nodeMap[reqNodeId]
-                  if (sourceNode?.children?.length > 0) {
-                    const claimSet = selectedClaimIds ? new Set(selectedClaimIds) : null
-                    const childrenToPush = sourceNode.children.filter(c => {
-                      if (c.isClaim || c.category === 'claim') return !claimSet || claimSet.has(c.id)
-                      if (c.isEvidence || c.category === 'evidence') return disclosureType !== 'proofonly'
-                      if (c.isParse || c.category === 'parse') return disclosureType !== 'proofonly'
-                      if (c.isEvaluation || c.category === 'evaluation') {
-                        if (c.claimId && claimSet) return claimSet.has(c.claimId)
-                        return true
-                      }
-                      return true
-                    }).map(c => ({ ...c }))
-
-                    if (childrenToPush.length > 0) {
-                      const existingAdded = newState.addedChildren?.[reqNodeId] || prev.addedChildren?.[reqNodeId] || []
-                      const existingAddedIds = new Set(existingAdded.map(c => c.id))
-                      const newChildrenToAdd = childrenToPush.filter(c => !existingAddedIds.has(c.id))
-                      if (newChildrenToAdd.length > 0) {
-                        newState.addedChildren = {
-                          ...(newState.addedChildren || prev.addedChildren || {}),
-                          [reqNodeId]: [...existingAdded, ...newChildrenToAdd],
-                        }
-                      }
-                    }
-                  }
-
-                  // Add acceptance notification to the other role's inbox
-                  newState.addedRequests = [...(newState.addedRequests || prev.addedRequests || []), {
-                    id: `accept-${reqNodeId}-${Date.now().toString(36)}`,
-                    type: 'acceptance',
-                    from: { name: activeRole.party, dot: activeRole.partyDot },
-                    asset: {
-                      name: req.asset.name,
-                      pin: req.node?.pin || '',
-                    },
-                    connectTo: {
-                      id: req.connectTo.id,
-                      pin: req.connectTo.pin,
-                    },
-                    disclosureType: disclosureType,
-                    date: today,
-                  }]
-
-                  // Track for NEW badge (works for both dynamic and static nodes)
-                  newState.newlyDisclosedIds = [...(prev.newlyDisclosedIds || []), reqNodeId]
-
-                  return newState
-                })
-              }
-            } else if (reqNodeId && !disclosureType) {
-              // DECLINE: mark provisional as declined (keep visible) and notify requester
-              const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-              if (otherRoleId) {
-                updateRoleState(otherRoleId, prev => {
-                  const provId = `provisional-${reqNodeId}`
-                  return {
-                    ...prev,
-                    addedNodes: prev.addedNodes.map(n =>
-                      n.id === provId
-                        ? { ...n, _isDeclined: true, _isNew: false, _declineReason: declineReason }
-                        : n
-                    ),
-                    addedRequests: [...(prev.addedRequests || []), {
-                      id: `decline-${reqNodeId}-${Date.now().toString(36)}`,
-                      type: 'decline',
-                      from: { name: activeRole.party, dot: activeRole.partyDot },
-                      asset: {
-                        name: req.asset.name,
-                        pin: req.node?.pin || '',
-                      },
-                      date: today,
-                      declineReason: declineReason,
-                    }],
-                  }
-                })
-              }
-            }
-
-            updateRoleState(roleId, prev => ({
-              ...prev,
-              dismissedReqs: [...prev.dismissedReqs, req.id],
-            }))
-            setResponseRequest(null)
-            if (reqNodeId && disclosureType) {
-              pendingPanRef.current = {
-                type: 'pair',
-                ownNodeId: reqNodeId,
-                ownX: nodeMap[reqNodeId]?.x ?? 0,
-                ownY: nodeMap[reqNodeId]?.y ?? 0,
-                pairedNodeId: req.connectTo?.id || null,
-              }
-            } else if (reqNodeId) {
-              setTimeout(() => setSel(reqNodeId), 100)
-            }
-          }}
-          _noBackdrop
-        />
-      )}
-      {cascadeContext && (
-        <CascadeModal
-          node={cascadeContext.node}
-          sda={cascadeContext.sda}
-          existingCascades={existingCascades || []}
-          onClose={() => setCascadeContext(null)}
-          _noBackdrop
-        />
-      )}
-      {evidenceNode && (
-        <AddEvidenceModal
-          parentNode={evidenceNode}
-          activeParty={activeRole.party}
-          onClose={() => setEvidenceNode(null)}
-          onComplete={({ name, filename }) => {
-            const parentId = evidenceNode.id
-
-            const evidenceMeta = makeEvidence(
-              parentId + '-' + Date.now().toString(36),
-              name.replace(/\s+/g, '-').toUpperCase().slice(0, 12),
-              activeRole.party + ' Lab',
-              '10 years'
-            )
-            evidenceMeta.filename = filename
-
-            const evUniqueId = `ev-${parentId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-            const evNode = makeEvidenceNode(parentId, evidenceMeta, activeRole.party, [], evUniqueId)
-            evNode.name = name || evNode.name
-            if (evidenceMeta.filename) {
-              evNode.evidence.localPath = `/${evidenceMeta.filename}`
-            }
-
-            updateRoleState(roleId, prev => {
-              const existingChildren = prev.addedChildren?.[parentId] || []
-              return {
-                ...prev,
-                addedChildren: {
-                  ...(prev.addedChildren || {}),
-                  [parentId]: [...existingChildren, evNode],
-                },
-              }
-            })
-
-            const parentNodeRef = evidenceNode
-            setEvidenceNode(null)
-
-            // If already in child layer of this parent, just select the new node
-            // The child layer sync will rebuild with the new evidence node
-            if (layerInfo.depth > 0 && layerInfo.anchorId === parentNodeRef.id) {
-              setTimeout(() => setSel(evNode.id), 200)
-            } else {
-              // Not in child layer — dive first, then select
-              setTimeout(() => {
-                if (canvasRef.current) {
-                  const updatedParent = nodeMapRef.current[parentNodeRef.id]
-                  if (updatedParent) {
-                    canvasRef.current.dive(updatedParent)
-                    setTimeout(() => setSel(evNode.id), 600)
-                  }
-                }
-              }, 150)
-            }
-          }}
-          _noBackdrop
-        />
-      )}
-      {parseContext && (
-        <ParseEvidenceModal
-          evidenceNode={parseContext.evidenceNode}
-          parentAssetName={parseContext.parentAssetName}
-          activeParty={activeRole.party}
-          pepTemplates={pepTemplates}
-          existingParseTemplateIds={(() => {
-            const parentAsset = nodeMap[parseContext.parentAssetId]
-            if (!parentAsset?.children) return new Set()
-            const existingParses = parentAsset.children.filter(c =>
-              (c.isParse || c.category === 'parse') &&
-              c.sourceEvidenceId === parseContext.evidenceNode.id
-            )
-            const ids = new Set()
-            existingParses.forEach(p => {
-              pepTemplates.forEach(t => {
-                if (t.name === p.name) ids.add(t.id)
-              })
-            })
-            return ids
-          })()}
-          onClose={() => setParseContext(null)}
-          onComplete={({ template, parsedFields, creditCost }) => {
-            const pepNode = makePepNode(
-              parseContext.parentAssetId,
-              parseContext.evidenceNode.id,
-              template.name,
-              parsedFields,
-              activeRole.party
-            )
-
-            updateRoleState(roleId, prev => {
-              const parentId = parseContext.parentAssetId
-              const existingChildren = prev.addedChildren?.[parentId] || []
-              return {
-                ...prev,
-                addedChildren: {
-                  ...(prev.addedChildren || {}),
-                  [parentId]: [...existingChildren, pepNode],
-                },
-              }
-            })
-
-            setCredits(c => c - creditCost)
-            setParseContext(null)
-            setTimeout(() => setSel(pepNode.id), 150)
-          }}
-          _noBackdrop
-        />
-      )}
-      {revocationNotice && (
-        <RevocationNoticeModal
-          notification={revocationNotice}
-          onClose={() => {
-            updateRoleState(roleId, prev => ({
-              ...prev,
-              dismissedReqs: [...prev.dismissedReqs, revocationNotice.id],
-            }))
-            setRevocationNotice(null)
-          }}
-          _noBackdrop
-        />
-      )}
-      {showLibrary && (
-        <RequirementsLibraryModal
-          requirementSets={requirementSets}
-          onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
-          onSave={handleSaveRequirementSet}
-          onPublish={handlePublishRequirementSet}
-          publishedSets={publishedRequirementSets}
-          initialSelectedId={libraryInitialSetId}
-          _noBackdrop
-        />
-      )}
-      {showPEPLibrary && (
-        <PEPLibraryModal
-          pepTemplates={pepTemplates}
-          onClose={() => setShowPEPLibrary(false)}
-          onSave={handleSavePEPTemplate}
-          _noBackdrop
-        />
-      )}
-      {evalContext && (
-        <RunEvaluationModal
-          assetNode={evalContext.assetNode}
-          evidenceNode={evalContext.evidenceNode}
-          claimNode={evalContext.claimNode || null}
-          claimReqSet={evalContext.claimReqSet || null}
-          disclosureType={evalContext.disclosureType}
-          parsedFields={evalContext.parsedFields}
-          requirementSets={requirementSets}
-          publishedSets={visiblePublishedSets}
-          activeParty={activeRole.party}
-          activeUser={activeRole.user || activeRole.party}
-          credits={credits}
-          amendingEval={evalContext.amendingEval}
-          onClose={() => setEvalContext(null)}
-          onComplete={({ requirementSet, claims, creditCost, selectedEvidenceIds: evalEvidenceIds }) => {
-            const assetNode = evalContext.assetNode
-            const previousEvalId = evalContext.amendingEval?.id || null
-
-            // Auto-supersede: if running a newer version of a lineage that already has an active eval
-            let lineageSupersededId = null
-            if (!previousEvalId) {
-              const lineageKey = requirementSet.lineageId || requirementSet.id
-              const currentRoleState = perRoleState[roleId] || {}
-              const allChildren = [
-                ...(assetNode.children || []),
-                ...(currentRoleState.addedChildren?.[assetNode.id] || []),
-              ]
-              const existingActiveEval = allChildren.find(c =>
-                (c.isEvaluation || c.category === 'evaluation') &&
-                c.status !== 'superseded' &&
-                c.evaluatorParty === activeRole.party &&
-                (c.requirementSetLineageId || c.requirementSetId) === lineageKey
-              )
-              if (existingActiveEval && (requirementSet.version || 1) > (existingActiveEval.requirementSetVersion || 1)) {
-                lineageSupersededId = existingActiveEval.id
-              }
-            }
-
-            const supersededId = previousEvalId || lineageSupersededId
-            const evalNode = makeEvalNode(
-              assetNode.id,
-              requirementSet,
-              claims,
-              activeRole.party,
-              activeRole.user || activeRole.party,
-              evalContext.disclosureType,
-              supersededId
-            )
-            evalNode.selectedEvidenceIds = evalEvidenceIds || []
-            // Set claimId if eval was triggered from a claim
-            if (evalContext.claimNode) {
-              evalNode.claimId = evalContext.claimNode.id
-              evalNode.parentId = evalContext.claimNode.id
-            }
-            if (supersededId) {
-              if (evalContext.amendingEval) {
-                evalNode.evalVersion = (evalContext.amendingEval.version || 1) + 1
-              } else if (lineageSupersededId) {
-                const currentRoleState = perRoleState[roleId] || {}
-                const allChildren = [
-                  ...(assetNode.children || []),
-                  ...(currentRoleState.addedChildren?.[assetNode.id] || []),
-                ]
-                const oldEval = allChildren.find(c => c.id === lineageSupersededId)
-                evalNode.evalVersion = (oldEval?.evalVersion || 1) + 1
-              }
-            }
-
-            // Add eval node as child of the asset
-            updateRoleState(roleId, prev => {
-              const existingChildren = prev.addedChildren?.[assetNode.id] || []
-              // If superseding (amend or lineage upgrade), mark the old eval as superseded
-              let updatedChildren = existingChildren
-              if (supersededId) {
-                updatedChildren = existingChildren.map(c =>
-                  c.id === supersededId ? { ...c, status: 'superseded' } : c
-                )
-              }
-              return {
-                ...prev,
-                addedChildren: {
-                  ...(prev.addedChildren || {}),
-                  [assetNode.id]: [...updatedChildren, evalNode],
-                },
-              }
-            })
-
-            // Also supersede static eval children on the node itself
-            if (supersededId) {
-              const n = nodeMapRef.current[assetNode.id]
-              if (n) {
-                const child = n.children?.find(c => c.id === supersededId)
-                if (child) child.status = 'superseded'
-              }
-            }
-
-            // Cross-role sync: if this asset belongs to the other party, add the eval to their view
-            const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-            if (otherRoleId && assetNode.owner !== activeRole.party) {
-              updateRoleState(otherRoleId, prev => {
-                const newState = { ...prev }
-                const staticRoleData = getDataForRole(otherRoleId)
-                const isStaticNode = staticRoleData?.nodes?.some(n => n.id === assetNode.id)
-                const isDynamicNode = prev.addedNodes.some(n => n.id === assetNode.id)
-
-                if (isStaticNode) {
-                  const existingAdded = prev.addedChildren?.[assetNode.id] || []
-                  const existingAddedIds = new Set(existingAdded.map(c => c.id))
-                  if (!existingAddedIds.has(evalNode.id)) {
-                    let updatedAdded = [...existingAdded]
-                    if (supersededId) {
-                      updatedAdded = updatedAdded.map(c => c.id === supersededId ? { ...c, status: 'superseded' } : c)
-                    }
-                    updatedAdded.push(evalNode)
-                    newState.addedChildren = { ...(prev.addedChildren || {}), [assetNode.id]: updatedAdded }
-                  }
-                } else if (isDynamicNode) {
-                  const nodeIdx = prev.addedNodes.findIndex(n => n.id === assetNode.id)
-                  if (nodeIdx >= 0) {
-                    const existingNode = prev.addedNodes[nodeIdx]
-                    let children = [...(existingNode.children || [])]
-                    if (supersededId) { children = children.map(c => c.id === supersededId ? { ...c, status: 'superseded' } : c) }
-                    children.push(evalNode)
-                    const updatedNodes = [...prev.addedNodes]
-                    updatedNodes[nodeIdx] = { ...existingNode, children, childCount: children.length, hasStack: true }
-                    newState.addedNodes = updatedNodes
-                  }
-                }
-
-                if (supersededId && isStaticNode) {
-                  const aliceNode = nodeMapRef.current[assetNode.id]
-                  if (aliceNode) {
-                    const child = aliceNode.children?.find(c => c.id === supersededId)
-                    if (child) child.status = 'superseded'
-                  }
-                }
-
-                newState.addedRequests = [...(prev.addedRequests || []), {
-                  id: `eval-notify-${evalNode.id}`,
-                  type: 'evaluation',
-                  from: { name: activeRole.party, dot: activeRole.partyDot },
-                  asset: { name: assetNode.name, pin: assetNode.pin || '' },
-                  evalName: evalNode.name,
-                  evalId: evalNode.id,
-                  assetId: assetNode.id,
-                  date: new Date().toISOString().slice(0, 10),
-                  isAmend: !!supersededId,
-                }]
-
-                return newState
-              })
-            }
-
-            // Deduct credits
-            setCredits(c => c - creditCost)
-            setEvalContext(null)
-
-            // Dive into the asset's child layer and select the eval node
-            if (layerInfo.depth > 0 && layerInfo.anchorId === assetNode.id) {
-              setTimeout(() => setSel(evalNode.id), 200)
-            } else {
-              setTimeout(() => {
-                if (canvasRef.current) {
-                  const updatedParent = nodeMapRef.current[assetNode.id]
-                  if (updatedParent) {
-                    canvasRef.current.dive(updatedParent)
-                    setTimeout(() => setSel(evalNode.id), 600)
-                  }
-                }
-              }, 150)
-            }
-          }}
-          _noBackdrop
-        />
-      )}
-      {claimContext && (
-        <CreateClaimModal
-          activeParty={activeRole.party}
-          credits={credits}
-          onClose={() => setClaimContext(null)}
-          onComplete={({ name, evidenceFiles, creditCost }) => {
-            const initiatingNode = claimContext && claimContext.initiatingNode ? nodeMap[claimContext.initiatingNode.id] || claimContext.initiatingNode : null
-            const today = new Date().toISOString().slice(0, 10)
-            const nowTime = new Date().toISOString().slice(11, 16) + ' UTC'
-            const GRID = 100 // matches V2Canvas BASE_GRID_SPACING
-            const COLUMN_OFFSET = 500 // matches existing column spacing in demo data
-
-            // Position near initiating node, grid-snapped
-            let newX, newY
-            if (initiatingNode) {
-              newX = Math.round(((initiatingNode.x || 0) + COLUMN_OFFSET) / GRID) * GRID
-              newY = Math.round((initiatingNode.y || 0) / GRID) * GRID
-              newY = findClearY(newX, newY, nodes)
-            } else {
-              // Fallback if no context — place near owned nodes
-              const ownedNodes = nodes.filter(n => n.owner === activeRole.party)
-              const avgX = ownedNodes.length > 0 ? ownedNodes.reduce((s, n) => s + (n.x || 0), 0) / ownedNodes.length : 0
-              const maxY = ownedNodes.length > 0 ? Math.max(...ownedNodes.map(n => n.y || 0)) : 0
-              newX = Math.round(avgX / GRID) * GRID
-              newY = findClearY(newX, Math.round((maxY + 300) / GRID) * GRID, nodes)
-            }
-
-            const newNode = makeRootClaim(name, evidenceFiles, activeRole.party, { x: newX, y: newY })
-            newNode._isNew = true
-
-            // Self-disclosure SDA (no assetPin — filtered from Disclosures list)
-            newNode.sdas = [{
-              type: 'full',
-              party: activeRole.party,
-              partyLabel: 'internal',
-              partyDot: activeRole.partyDot,
-              created: today,
-              createdTime: nowTime,
-              expires: null,
-              pins: [newNode.pin],
-              assetName: null,
-              assetPin: null,
-            }]
-
-            const newEdges = []
-
-            // If initiated from a node, create edge + reciprocal SDAs
-            if (initiatingNode) {
-              // SDA on new node pointing to initiating node (has assetPin, so visible in Disclosures)
-              newNode.sdas.push({
-                type: 'full',
-                party: activeRole.party,
-                partyDot: activeRole.partyDot,
-                created: today,
-                createdTime: nowTime,
-                expires: null,
-                pins: [initiatingNode.pin],
-                assetName: initiatingNode.name,
-                assetPin: initiatingNode.pin,
-              })
-
-              newEdges.push({
-                id: `e-${initiatingNode.id}-${newNode.id}`,
-                from: initiatingNode.id,
-                to: newNode.id,
-                sdaType: 'full',
-              })
-
-              // Reciprocal SDA on initiating node pointing to new node (has assetPin, so visible)
-              const reciprocalSda = {
-                type: 'full',
-                party: activeRole.party,
-                partyDot: activeRole.partyDot,
-                created: today,
-                createdTime: nowTime,
-                expires: null,
-                pins: [newNode.pin],
-                assetName: newNode.name,
-                assetPin: newNode.pin,
-              }
-              updateRoleState(roleId, prev => ({
-                ...prev,
-                addedSDAs: {
-                  ...(prev.addedSDAs || {}),
-                  [initiatingNode.id]: [...(prev.addedSDAs?.[initiatingNode.id] || []), reciprocalSda],
-                },
-              }))
-            }
-
-            updateRoleState(roleId, prev => ({
-              ...prev,
-              addedNodes: [...prev.addedNodes, newNode],
-              addedEdges: [...prev.addedEdges, ...newEdges],
-            }))
-
-            setCredits(c => c - creditCost)
-            setClaimContext(null)
-
-            // Select and pan to new node
-            setTimeout(() => setSel(newNode.id), 100)
-          }}
-          _noBackdrop
-        />
-      )}
-      {reviseContext && (
-        <ReviseDisclosureModal
-          sda={reviseContext.sda}
-          node={reviseContext.node}
-          onClose={() => setReviseContext(null)}
-          onComplete={({ selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds }) => {
-            const { sda, node: targetNode } = reviseContext
-            const today = new Date().toISOString().slice(0, 10)
-            const otherRoleId = ROLES.find(r => r.id !== roleId)?.id
-
-            // 1. Update SDA on the owner's asset
-            updateRoleState(roleId, prev => {
-              const nodeId = targetNode.id
-              const existingSDAs = prev.addedSDAs[nodeId] || []
-              const sdaIdx = existingSDAs.findIndex(s =>
-                s.party === sda.party && s.type === sda.type && s.created === sda.created
-              )
-              if (sdaIdx >= 0) {
-                const updated = [...existingSDAs]
-                updated[sdaIdx] = { ...updated[sdaIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                return { ...prev, addedSDAs: { ...prev.addedSDAs, [nodeId]: updated } }
-              }
-              return {
-                ...prev,
-                addedSDAs: {
-                  ...prev.addedSDAs,
-                  [nodeId]: [...existingSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }],
-                },
-                removedSDAs: [...(prev.removedSDAs || []), { nodeId, party: sda.party, type: sda.type, created: sda.created }],
-              }
-            })
-
-            // 2. Update cross-role disclosed node's children + SDAs
-            if (otherRoleId) {
-              updateRoleState(otherRoleId, prev => {
-                const newState = { ...prev }
-                const disclosedNodeId = targetNode.id
-                const existingIdx = prev.addedNodes.findIndex(n => n.id === disclosedNodeId)
-
-                if (existingIdx >= 0) {
-                  const existingNode = prev.addedNodes[existingIdx]
-                  // Use latest merged node from nodeMapRef (includes addedChildren)
-                  const latestSourceNode = nodeMapRef.current[targetNode.id] || targetNode
-                  const sourceChildren = latestSourceNode.children || []
-                  const evidenceSet = new Set(newEvIds || [])
-                  let relevantChildren = sourceChildren.filter(c => {
-                    if (c.isEvidence) return evidenceSet.has(c.id)
-                    if (c.isParse || c.category === 'parse') return evidenceSet.has(c.sourceEvidenceId)
-                    if (c.isEvaluation || c.category === 'evaluation') return false
-                    return true
-                  })
-                  let updatedChildren
-                  if (sda.type === 'selective' && newFieldIds && newFieldIds.length > 0) {
-                    const fieldSet = new Set(newFieldIds)
-                    updatedChildren = relevantChildren.map(c => {
-                      if (!c.isParse && c.category !== 'parse') return { ...c }
-                      if (!c.parsedFields) return { ...c }
-                      return { ...c, parsedFields: c.parsedFields.filter(f => fieldSet.has(`${c.id}::${f.id}`)), _isSelective: true }
-                    })
-                  } else if (sda.type === 'proofonly') {
-                    updatedChildren = relevantChildren.filter(c => c.isEvaluation || c.category === 'evaluation').map(c => ({ ...c }))
-                  } else {
-                    updatedChildren = relevantChildren.map(c => ({ ...c }))
-                  }
-                  const updatedNodes = [...prev.addedNodes]
-                  updatedNodes[existingIdx] = {
-                    ...existingNode,
-                    children: updatedChildren,
-                    childCount: updatedChildren.length,
-                    hasEvidence: updatedChildren.some(c => c.isEvidence),
-                    hasStack: updatedChildren.length > 0,
-                  }
-                  // Update SDAs on the disclosed node itself
-                  const updatedSDAs = (updatedNodes[existingIdx].sdas || []).map(s => {
-                    if (s.type === sda.type && (s.party === sda.party || s.assetPin === targetNode.pin || s.assetName === targetNode.name)) {
-                      return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                    }
-                    return s
-                  })
-                  updatedNodes[existingIdx] = { ...updatedNodes[existingIdx], sdas: updatedSDAs }
-                  newState.addedNodes = updatedNodes
-                } else {
-                  // Static disclosed node — use addedChildren overlay for delta only
-                  const latestSrc = nodeMapRef.current[targetNode.id] || targetNode
-                  const srcChildren = latestSrc.children || []
-                  const evidenceSet2 = new Set(newEvIds || [])
-                  let targetChildren = srcChildren.filter(c => {
-                    if (c.isEvidence) return evidenceSet2.has(c.id)
-                    if (c.isParse || c.category === 'parse') return evidenceSet2.has(c.sourceEvidenceId)
-                    if (c.isEvaluation || c.category === 'evaluation') return false
-                    return true
-                  })
-                  if (sda.type === 'selective' && newFieldIds && newFieldIds.length > 0) {
-                    const fieldSet2 = new Set(newFieldIds)
-                    targetChildren = targetChildren.map(c => {
-                      if (!c.isParse && c.category !== 'parse') return { ...c }
-                      if (!c.parsedFields) return { ...c }
-                      return { ...c, parsedFields: c.parsedFields.filter(f => fieldSet2.has(`${c.id}::${f.id}`)), _isSelective: true }
-                    })
-                  } else if (sda.type === 'proofonly') {
-                    targetChildren = targetChildren.filter(c => c.isEvaluation || c.category === 'evaluation').map(c => ({ ...c }))
-                  } else {
-                    targetChildren = targetChildren.map(c => ({ ...c }))
-                  }
-
-                  // Get Bob's static node's ORIGINAL children
-                  const bobRoleData = getDataForRole(otherRoleId)
-                  const bobStaticNode = bobRoleData?.nodes?.find(n => n.id === disclosedNodeId)
-                  const staticChildIds = new Set((bobStaticNode?.children || []).map(c => c.id))
-                  const existingAdded = prev.addedChildren?.[disclosedNodeId] || []
-                  const existingAddedIds = new Set(existingAdded.map(c => c.id))
-                  const childrenToAdd = targetChildren.filter(c => !staticChildIds.has(c.id) && !existingAddedIds.has(c.id))
-
-                  if (childrenToAdd.length > 0) {
-                    newState.addedChildren = {
-                      ...(newState.addedChildren || prev.addedChildren || {}),
-                      [disclosedNodeId]: [...existingAdded, ...childrenToAdd],
-                    }
-                  }
-
-                  // Update SDAs via addedSDAs overlay
-                  const staticSDAs = prev.addedSDAs[disclosedNodeId] || []
-                  const matchIdx = staticSDAs.findIndex(s =>
-                    s.type === sda.type && (s.assetPin === targetNode.pin || s.assetName === targetNode.name)
-                  )
-                  if (matchIdx >= 0) {
-                    const updated = [...staticSDAs]
-                    updated[matchIdx] = { ...updated[matchIdx], selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                    newState.addedSDAs = {
-                      ...(newState.addedSDAs || prev.addedSDAs || {}),
-                      [disclosedNodeId]: updated,
-                    }
-                  } else {
-                    newState.addedSDAs = {
-                      ...(newState.addedSDAs || prev.addedSDAs || {}),
-                      [disclosedNodeId]: [...staticSDAs, { ...sda, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null, party: activeRole.party }],
-                    }
-                  }
-                }
-
-                // Update addedSDAs for the disclosed node
-                const otherSDAs = prev.addedSDAs[disclosedNodeId] || []
-                if (otherSDAs.length > 0) {
-                  newState.addedSDAs = {
-                    ...(newState.addedSDAs || prev.addedSDAs),
-                    [disclosedNodeId]: otherSDAs.map(s => {
-                      if (s.type === sda.type && (s.assetPin === targetNode.pin || s.assetName === targetNode.name)) {
-                        return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                      }
-                      return s
-                    }),
-                  }
-                }
-
-                // Update SDAs on the connectTo node (Bob's requesting asset)
-                const connectToPin = sda.assetPin
-                if (connectToPin) {
-                  const connectToNode = Object.values(nodeMap).find(n => n.pin === connectToPin)
-                  if (connectToNode) {
-                    const ctSDAs = (newState.addedSDAs || prev.addedSDAs)[connectToNode.id] || []
-                    if (ctSDAs.length > 0) {
-                      newState.addedSDAs = {
-                        ...(newState.addedSDAs || prev.addedSDAs),
-                        [connectToNode.id]: ctSDAs.map(s => {
-                          if (s.assetPin === targetNode.pin || s.assetName === targetNode.name) {
-                            return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                          }
-                          return s
-                        }),
-                      }
-                    }
-                    const ctNodeIdx = (newState.addedNodes || prev.addedNodes).findIndex(n => n.id === connectToNode.id)
-                    if (ctNodeIdx >= 0) {
-                      const ctNode = (newState.addedNodes || prev.addedNodes)[ctNodeIdx]
-                      const updatedCtSDAs = (ctNode.sdas || []).map(s => {
-                        if (s.assetPin === targetNode.pin || s.assetName === targetNode.name) {
-                          return { ...s, selectedEvidenceIds: newEvIds, selectedFieldIds: newFieldIds, selectedClaimIds: newClaimIds || null }
-                        }
-                        return s
-                      })
-                      const nodes = [...(newState.addedNodes || prev.addedNodes)]
-                      nodes[ctNodeIdx] = { ...nodes[ctNodeIdx], sdas: updatedCtSDAs }
-                      newState.addedNodes = nodes
-                    }
-                  }
-                }
-
-                // Send revision notification
-                newState.addedRequests = [...(prev.addedRequests || []), {
-                  id: `revise-${disclosedNodeId}-${Date.now().toString(36)}`,
-                  type: 'revision',
-                  from: { name: activeRole.party, dot: activeRole.partyDot },
-                  asset: { name: targetNode.name, pin: targetNode.pin || '' },
-                  disclosureType: sda.type,
-                  date: today,
-                }]
-                return newState
-              })
-            }
-
-            setForceExpandSda({ party: sda.party, type: sda.type })
-            setReviseContext(null)
-            setForcePanelTab('disclosures')
-          }}
-          _noBackdrop
-        />
-      )}
+          {showLibrary && (
+            <RequirementsLibraryModal
+              requirementSets={requirementSets}
+              onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
+              onSave={handleSaveRequirementSet}
+              onPublish={handlePublishRequirementSet}
+              publishedSets={publishedRequirementSets}
+              initialSelectedId={libraryInitialSetId}
+              _noBackdrop
+            />
+          )}
+          {showPEPLibrary && (
+            <PEPLibraryModal
+              pepTemplates={pepTemplates}
+              onClose={() => setShowPEPLibrary(false)}
+              onSave={handleSavePEPTemplate}
+              _noBackdrop
+            />
+          )}
         </Backdrop>
       )}
     </div>

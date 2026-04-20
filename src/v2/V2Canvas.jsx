@@ -426,6 +426,10 @@ const V2Canvas = forwardRef(function V2Canvas({
   onRunEvaluation,
   onAmendEval,
   onCreateClaim,
+  // Phase 9A item 9: single-dispatch card-action handler for V2.2 nodes.
+  // Forwarded into `<AssetNode>`; V2App routes action names to the same
+  // handlers its Detail Panel footer uses.
+  onV22CardAction,
   activeParty,
   revealAnim,
   selectedEdgeId = null,
@@ -866,12 +870,21 @@ const V2Canvas = forwardRef(function V2Canvas({
       // 65%/+1.5px after visual testing showed the spec's values were invisible
       // on dashed/dotted edges).
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
+      // Phase 9A item 3 / Phase 9A.1 item 6: internal edges (grantor party
+      // === grantee party) de-emphasised with 50% of the default stroke
+      // (was 0.7, but imperceptible at base widths of ~2-2.5px). Selected
+      // and NEW edges keep full emphasis regardless.
+      const isInternalEdge = edge.grantorParty && edge.granteeParty
+        && edge.grantorParty === edge.granteeParty
+      const internalFactor = (isInternalEdge && !isSelectedEdge && !isNewEdge) ? 0.5 : 1.0
       const edgeColor = isNewEdge
         ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
         : isSelectedEdge
           ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.65)
           : new THREE.Color(sdaCfg.color)
-      const lineWidth = isNewEdge ? 3.0 : (isSelectedEdge ? baseWidth + 1.5 : baseWidth)
+      const lineWidth = isNewEdge
+        ? 3.0
+        : (isSelectedEdge ? baseWidth + 1.5 : baseWidth * internalFactor)
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -926,6 +939,10 @@ const V2Canvas = forwardRef(function V2Canvas({
         redacted: edge.redacted || null,
         _isNew: !!edge._isNew,
         _createdAt: edge._createdAt || null,
+        // Phase 9A.1 item 7: flag stored on userData so the select/deselect
+        // effect at the bottom of this component can restore the 0.5× factor
+        // on deselection.
+        isInternal: !!isInternalEdge,
       }
       group.add(line)
     })
@@ -2634,7 +2651,12 @@ const V2Canvas = forwardRef(function V2Canvas({
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
       const baseColor = new THREE.Color(cfg.color)
       const color = isSelected ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.65) : baseColor
-      mat.linewidth = isSelected ? baseWidth + 1.5 : baseWidth
+      // Phase 9A.1 item 7: when deselecting, restore the internal-edge factor
+      // (0.5×) so internal edges stay de-emphasised. Selected edges bump past
+      // the factor as usual.
+      const isInternal = !!line.userData?.isInternal
+      const factor = isInternal && !isSelected ? 0.5 : 1.0
+      mat.linewidth = isSelected ? baseWidth + 1.5 : baseWidth * factor
       if (mat.color) {
         mat.color.copy(color)
       }
@@ -2899,6 +2921,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                 onAmendEval={transitioning ? undefined : onAmendEval}
                 onCreateClaim={transitioning ? undefined : onCreateClaim}
+                onV22CardAction={transitioning ? undefined : onV22CardAction}
                 activeParty={activeParty}
                 revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}
               />

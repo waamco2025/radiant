@@ -40,6 +40,7 @@ export const GLOBE_ICON_PATHS = {
 
 const GOVCO_DOT = makeDot('GovCo')
 const MICROCO_DOT = makeDot('MicroCo')
+const AUDITCO_DOT = makeDot('AuditCo')
 
 export const ROLES = [
   {
@@ -59,6 +60,19 @@ export const ROLES = [
     role: 'seller',
     credits: 2400,
     vertical: 'Electronics',
+  },
+  {
+    // Phase 8.5 Bug 2: Carol has seeded Assets + Eval Results + DAs in v2_2Data
+    // (§7.3 Story 3, §12.6 Demo dataset) but was missing from the role switcher
+    // pre-Phase-8.5 — making Story 3 untestable. Matches the `carol-auditco`
+    // actor in `buildV22SharedArtifacts`.
+    id: 'carol-auditco',
+    user: 'Carol',
+    party: 'AuditCo',
+    partyDot: AUDITCO_DOT,
+    role: 'auditor',
+    credits: 2400,
+    vertical: 'Audit Services',
   },
 ]
 

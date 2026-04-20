@@ -13,15 +13,9 @@
 
 import { makePin, makeDot } from './v2Data.js'
 
-// ─── Feature flag ──────────────────────────────────────────────────────────
-// Top-level constant with optional env override (VITE_V2_2_ENABLED=true).
-// Flip FORCE_V2_2 locally to verify V2.2 mode without configuring env.
-const FORCE_V2_2 = false
-const ENV_V2_2 =
-  typeof import.meta !== 'undefined' && import.meta && import.meta.env
-    ? import.meta.env.VITE_V2_2_ENABLED === 'true'
-    : false
-export const V2_2_ENABLED = FORCE_V2_2 || ENV_V2_2
+// Phase 8 (2026-04-19): V2_2_ENABLED feature flag removed. V2.2 is the only
+// behaviour shipped now that Phases 1–7 are complete. See git history pre-Phase 8
+// for the gated V2.1 code paths if a rollback is ever needed.
 
 // ─── URI helpers ───────────────────────────────────────────────────────────
 const assetUri = (id) => `provenance://assets/${id}`
@@ -144,6 +138,9 @@ export function makeParseResult({
       name: f.name,
       value: f.value,
       confidence: f.confidence,
+      // Phase 9A item 10: preserve AI original so the Parse Result panel
+      // can render the human-edited pencil on fields the user modified.
+      _aiOriginalValue: f._aiOriginalValue,
     })),
     parseDate,
   }
@@ -445,6 +442,11 @@ export function makeEvaluationResult({
       label: r.label,
       value: r.value,
       status: r.status, // 'satisfactory' | 'unsatisfactory' | 'missing' | 'na'
+      // Phase 9A item 8 sub-3 + item 10: preserve AI confidence + the original
+      // AI-extracted value so the Detail Panel can render the confidence chip
+      // and the human-edited pencil on artifacts after they've landed.
+      confidence: r.confidence,
+      _aiOriginalValue: r._aiOriginalValue,
     })),
     evidenceUsed: [...evidenceUsed],
     evaluationDate,
@@ -1380,6 +1382,9 @@ function mergeProvisionals(shared, provisionals) {
   if (provisionals.evaluationResults?.length) {
     merged.evaluationResults = mergeById(merged.evaluationResults, provisionals.evaluationResults)
   }
+  if (provisionals.parseResults?.length) {
+    merged.parseResults = mergeById(merged.parseResults, provisionals.parseResults)
+  }
   // Phase 6: amended Claims live in provisionals.claims so the original seeded
   // Claim is replaced by the amended version (carrying its updated
   // referencedAssetIds + amendments[] history).
@@ -1477,6 +1482,11 @@ export function deriveAgreementEdges(view) {
       sdaType: da.type,
       disclosureAgreementId: da.id,
       pairedEvaluationAgreementId: pairedEa ? pairedEa.id : null,
+      // Phase 9A item 3: carry grantor/grantee party names through to the
+      // canvas so V2Canvas can de-emphasise internal (same-party) edges with
+      // a thinner stroke.
+      grantorParty: da.grantor.party,
+      granteeParty: da.grantee.party,
     })
   }
 
@@ -2128,6 +2138,60 @@ export function makeEvaluationRunArtifacts({
     ownershipDisclosureAgreement: ownershipDa,
     supersededPriorResult: supersededVersion,
   }
+}
+
+/**
+ * Phase 8: factory for a new Parse Result run, mirroring
+ * `makeEvaluationRunArtifacts`. Produces the Parse Result plus the internal
+ * Full DA that wires the new Parse Result node back to its source Asset
+ * (same shape as the seeded `parseResultRefEdges` so edge derivation treats
+ * it identically). Parse flow doesn't produce ownership or proof DAs — parsing
+ * is internal to the Asset owner.
+ */
+export function makeParseRunArtifacts({
+  ownerParty,
+  ownerDot,
+  sourceAssetId,
+  template,         // { id, name, version, fields: [{ id, name }] }
+  rows,             // [{ id, name, value, confidence }]
+}) {
+  const idSeed = `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const parseId = `parse-${sourceAssetId}-${idSeed}`
+  const parseDate = new Date().toISOString()
+
+  const parseResult = makeParseResult({
+    id: parseId,
+    owner: ownerParty,
+    ownerDot: ownerDot || makeDot(ownerParty),
+    sourceAssetId,
+    templateId: template.id,
+    templateName: template.name,
+    templateVersion: template.version ?? 1,
+    fields: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      value: r.value,
+      confidence: r.confidence,
+      // Phase 9A item 10: persist the AI's original extraction so the Parse
+      // Result's Detail Panel can render a pencil icon for rows the human
+      // edited before submitting.
+      _aiOriginalValue: r._aiOriginalValue,
+    })),
+    parseDate,
+  })
+
+  // Same shape as the seeded `parseResultRefEdges` in buildV22SharedArtifacts
+  // so edge derivation treats the new Parse Result identically.
+  const refDa = makeInternalDisclosureAgreement({
+    id: `da-parse-${parseId}`,
+    owner: ownerParty,
+    ownerDot,
+    subject: { kind: 'parseResult', id: parseId },
+    scope: { assetIds: [sourceAssetId], includeDerivatives: true },
+    terms: { createdDate: parseDate },
+  })
+
+  return { parseResult, refDisclosureAgreement: refDa }
 }
 
 /**

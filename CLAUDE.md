@@ -4,60 +4,44 @@ Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS 
 
 **Commands:**
 - `npm run dev` — development server
-- `npm run build` — must pass clean before any phase is complete
+- `npm run build` — must pass clean before shipping any change
 
 ---
 
-## Current Target: V2.2
+## Architecture
 
-All active development follows `v2.2-architecture-migration-spec.md` in the repo root. **That spec is the single source of truth** for what V2.2 is and how to build it. Read it first; return to this file only for repo conventions.
+The canonical source of truth for the platform architecture is `architecture-spec.md` in the repo root. Read it first; return to this file only for repo conventions and the phase-log history.
 
-V2.2 introduces two core corrections to V2.1: (1) Assets are distinct from Claims and exist as first-class parent-layer nodes, (2) Evaluation Agreements gate Claim visibility between parties. See spec §1 for the full summary.
+The architecture rests on two foundational rules:
 
-### Feature flag
+1. **Assets are distinct from Claims.** Claims *reference* Assets; they don't *contain* them. Assets are first-class parent-layer nodes.
+2. **Evaluation Agreements gate Claim visibility.** A Disclosure Agreement alone grants visibility; the paired Evaluation Agreement is what pulls another party's Claim onto your canvas.
 
-- `V2_2_ENABLED` controls which mode renders.
-  - `false` (default during migration) → V2.1 behavior, unchanged.
-  - `true` → V2.2 behavior per the spec.
-- V2.1 code paths remain functional until Phase 7 completes. Do not delete V2.1 code during the migration.
+There is one edge type (the Agreement Edge). Ownership, Proof-of-Evaluation, and Public Directory relationships are all modeled as implicit Disclosure Agreements on the same edge primitive. See spec §4 for the rationale.
 
 ### File layout
 
-- `src/v2/` — active V2.1 and V2.2 code. All migration work happens here and in `src/components/`.
-- `src/v3/` — archived V3 (reference for UI patterns only, not active).
-- V1 files (`src/App.jsx`, `src/data/`, `src/components/Header.jsx`, etc.) — archived, delete after Phase 7.
-- `tokens.js`, `index.css` — shared across versions.
-- Entry points: `/v2.html` (primary), `/v3.html` (reference), `/index.html` (archived V1).
+- `src/v2/` — application code (V2App, V2Canvas, DirectoryLayer, boot screen, PrimeRadiant, data model).
+- `src/v3/` — archived V3 reference (UI patterns only, not active).
+- `src/components/modals/` — modal components.
+- `src/components/DetailPanel/` — node + agreement detail panels.
+- `src/assets/`, `src/index.css` — shared styling + static assets.
+- Entry points: `v2.html` (primary), `v3.html` (archived reference).
 
-### V2.1 conventions reference
+### Demo actors
 
-For components carrying forward unchanged from V2.1 (roughly 80% of the codebase — canvas, boot, modal framework, notifications, child layer mechanics), V2.1 conventions still apply. See `CLAUDE-v2.1-archive.md` for the full V2.1 doc.
+- **Bob Donloe** @ GovCo (buyer) — DOT: `DONLOE.BOB.J.1384297560`
+- **Alice Nakamura** @ MicroCo (supplier)
+- **Carol** @ AuditCo (auditor)
+- Role switching via user menu; does not replay boot animation.
 
----
+### Boot sequence
 
-## Forbidden Changes (from spec §14.3)
-
-Do not, without explicit approval:
-
-- Add new node types beyond spec §3.
-- Add a second edge type — the Agreement Edge is the only edge type. Do not introduce separate Ownership, Proof-of-Evaluation, or Public Directory edge types; those are all modeled as implicit Disclosure Agreements on the same edge primitive.
-- Change the data model in `v2Data.js` beyond what spec §12.5 specifies.
-- Alter the boot sequence.
-- Alter child layer dive/surface behavior or delete child layer code. The child layer is intentionally retained but unused in V2.2 (see spec §5).
-- Remove or substantially rework the notification system.
-- Unify Parsing and Evaluating processes in V2.2. That's §17.1 future work; for V2.2, maintain them as separate processes with structurally identical UI.
+CAC login → Prime Radiant 3D → golden ripple → network build animation. Session storage key: `radiant-v2-booted`.
 
 ---
 
 ## Working Conventions
-
-### Autonomous workflow
-
-- Work at `xhigh` effort.
-- Perform a structured review against the phase's acceptance criteria before declaring the phase complete. Walk each criterion in the spec's Phase N section and verify it is met; surface any failures in the completion report.
-- **Runtime verification is required.** Before declaring a phase complete, start the Vite dev server (`npm run dev`) and confirm the app actually loads with no console errors. Build success and pure-data sanity scripts are insufficient for React component changes — they don't catch TDZ errors, hook-rule violations, or other init-time exceptions. If a real browser isn't reachable, run a JSDOM render check that imports `src/v2/main.jsx` through esbuild and waits one tick after `createRoot(...).render(...)` to surface init-time exceptions (Three.js / WebGL errors are expected in JSDOM and don't count as failures).
-- When you hit a genuine ambiguity (an actual contradiction between spec sections, or a missing piece of information you need to make a correct decision), **stop and surface it.** Do not guess.
-- Review happens at phase boundaries, not mid-phase. Andrew reviews completed phases against their acceptance criteria.
 
 ### Code style
 
@@ -66,24 +50,20 @@ Do not, without explicit approval:
 - Timestamps use `date` + `dateTime` fields. Display format: `YYYY-MM-DD · HH:MM UTC`.
 - Escape key handling: input/textarea focused → blur only; editor mode → exit to view; nothing focused → close modal.
 - Click-to-copy on all PIN displays with visual feedback.
-- No category labels on node cards (PRODUCT, PROCESS, etc.). Type labels (`ASSET`, `CLAIM`, `PARSE RESULT`, `EVAL RESULT`) in mono font, informational only — see spec §3.
+- Type labels (`ASSET`, `CLAIM`, `PARSE RESULT`, `EVAL RESULT`) in mono font, informational only — see spec §3. State badges (`PROVISIONAL` / `DECLINED` / `SUPERSEDED` / `NEW`) render as separate inline badges.
 
-### Demo actors
+### Autonomous workflow
 
-- **Bob Donloe** @ GovCo (buyer) — DOT: `DONLOE.BOB.J.1384297560`
-- **Alice Nakamura** @ MicroCo (supplier)
-- **Carol** @ AuditCo (auditor) — added in V2.2
-- Role switching via user menu; does not replay boot animation.
-
-### Boot sequence
-
-CAC login → Prime Radiant 3D → golden ripple → network build animation. Session storage key: `radiant-v2-booted`. Shared across V2.1 and V2.2.
+- Work at `xhigh` effort.
+- Perform a structured review against the task's acceptance criteria before declaring a change complete.
+- **Runtime verification is required** for any change that touches a React component. Start the Vite dev server (`npm run dev`), confirm the app loads with no console errors, and exercise the affected flow. Build success and pure-data sanity scripts are insufficient — they don't catch TDZ errors, hook-rule violations, or other init-time exceptions. If a real browser isn't reachable, fall back to a JSDOM render check.
+- When you hit a genuine ambiguity (a contradiction in the spec, a missing piece of information required for a correct decision), **stop and surface it.** Do not guess.
 
 ---
 
-## Phase Status
+## Phase log
 
-Track progress here as phases complete. Format: `[ ]` pending, `[x]` complete, `[~]` in progress.
+V2.2 migration ran in eight phases, 2026-04-17 through 2026-04-19. All complete.
 
 - [x] Phase 1: Data Model Foundation
 - [x] Phase 2: Parent Layer Restructure
@@ -92,8 +72,9 @@ Track progress here as phases complete. Format: `[ ]` pending, `[x]` complete, `
 - [x] Phase 5: Evaluation Flow + Eval Results on Parent Layer
 - [x] Phase 6: Amendment Flows
 - [x] Phase 7: Directory Layer + AI Shopper
+- [x] Phase 8: Consolidation + Cleanup
 
-On phase completion, update this checklist and note any deviations from the spec in a phase completion comment.
+Per-phase completion notes below capture what shipped plus any deviations from the spec.
 
 ### Phase 1 completion notes (2026-04-17)
 
@@ -304,3 +285,107 @@ Three carry-over fixes plus Phase 7 own scope (spec §8 Directory Layer, §9 AI 
 - *Clickable dots.* Spec §8.2 states "no hover details, no Detail Panels" in V2.2. We render dots as visual-only. Underlying public-directory Claim artifacts are reachable, so a later phase can wire per-dot interactivity without a schema change. Tracked as polish item #43.
 - *Mock AI Shopper.* The "agent" is a deterministic scoring function that always returns publicly-disclosed Claims ranked by name/prompt token overlap. Placeholder-grade per the Phase 7 task.
 - *Radiant Network node on canvas.* Spec §3.6 says the node appears only if the user has publicly-disclosed Claims. Not wired in Phase 7; Bob has no public disclosures today, so no node appears. Alice DOES have 3 public DAs; the node still doesn't render on her canvas — derivation rule is there in `deriveAgreementEdges` but the Actor node itself isn't added to her view. Tracked as polish item #44.
+
+### Phase 8 completion notes (2026-04-19) — Consolidation + Cleanup
+
+Final migration phase: Phase 7 visual polish, missing V2.2 parse flow, feature-flag removal, V2.1 + V1 deletion, documentation finalization.
+
+**Phase 7 carry-over polish:**
+
+1. *Symmetric circular wipe on Directory open.* `DirectoryLayer.jsx` now plays the clip-path wipe on entry too — mount in an `'opening'` phase with `clip-path: circle(0% at 0% 100%)`, then `requestAnimationFrame` flips to `'in'` (expanded) so the CSS transition has a from-state. Previous implementation jumped straight to `'in'`, skipping the entry animation.
+2. *Globe icon toggles Directory Layer.* V2App chrome button is now `onClick={() => setV22DirectoryOpen((v) => !v)}`. Button also reads as active (amber background + amber border + amber icon color) when the Directory is open, so it reads as a layer-toggle button.
+3. *AI Shopper progress uses PrimeRadiant.* `MockProgress` in `AIShopperModal.jsx` swapped the generic glowing orb for the `<PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.3} />` pattern + progress bar used by `V22RunEvaluationModal` and `V22ParseEvidenceModal`. The three processing stages now feel like siblings.
+4. *AI Shopper results polish.* Candidate cards grew a 30px MATCH score (was 22px), the PIN now uses `<CopyBadge value={pin} truncated />` for V2.1-consistent PIN display, and per-result rationale varies by score band: top result names the strongest match reason ("Direct match on {Req Set} terms" / "Semantic match against your prompt" / "Aligns topically with {Req Set}"), second line cycles through disclosure-type / owner / peer-score hint.
+5. *AI Shopper Req Set picker.* Retired the native `<select>` in favour of the same flat card-list pattern `V22RunEvaluationModal` uses — clickable rows with name + id/version + indigo selection, keyboard-accessible (`role="radiogroup"` + Enter/Space handling), click-outside-to-close not needed since the list is inline. Fixes the Phase 7 "disabled Launch button trap" where the `<select>` visually showed the first option while state was empty.
+
+**Missing V2.2 Parse flow (spec §11.8, new):**
+
+- `src/components/modals/V22ParseEvidenceModal.jsx` (new). Three-stage flow mirroring `V22RunEvaluationModal`: (1) select Parse Template (card list with ALREADY PARSED lockouts for templates already run on the Asset), (2) processing with PrimeRadiant + 1.5s progress bar, (3) review + edit parsed field values with `ConfidenceBadge` that cycles high/medium/low on click. Required fields validated at submit; empty required field blocks. Keyboard-accessible throughout (radio group on the template list).
+- `src/v2/v2_2Data.js` — new `makeParseRunArtifacts({ ownerParty, ownerDot, sourceAssetId, template, rows })` factory producing `{ parseResult, refDisclosureAgreement }`. The ref DA is an internal Full DA with `subject={kind:'parseResult', id}` + `scope.assetIds=[sourceAssetId]` — same shape as the seeded `parseResultRefEdges` so edge derivation treats it identically. `mergeProvisionals` extended to carry provisional parse results into the view.
+- `V22AssetPanel` footer — new **Parse Evidence** action for Asset owners, alongside Request Agreement and Create Claim. Wired via `onParseEvidence` prop that V2App fills with `() => setV22ParsingAsset(node)` for Asset type + owner.
+- V2App handler `handleV22ParseSubmit` creates the Parse Result + ref DA, appends both to `v22Provisionals`, selects the new Parse Result, pans to it, and tags it with `_isNew` for the reveal animation (cleared on selection change per Phase 7 rule #1).
+- Spec §11.8 added (see architecture-spec.md changelog).
+
+**Code consolidation:**
+
+6. *Feature flag removed.* `FORCE_V2_2`, `ENV_V2_2`, `V2_2_ENABLED` exports deleted from `src/v2/v2_2Data.js`; `.env.local` deleted. Every `{V2_2_ENABLED && …}` gate in V2App.jsx collapsed to unconditional rendering via `sed 's/{V2_2_ENABLED && /{/g'`. Every `V2_2_ENABLED ?` ternary flattened to its V2.2 branch. The V2.2 banner ("V2.2 MODE ACTIVE — architecture migration in progress") was removed entirely — migration is no longer in progress.
+7. *V2.1 modal files deleted.* 13 files under `src/components/modals/` removed: `RequestDisclosureModal.jsx`, `DisclosureResponseModal.jsx`, `ReviseDisclosureModal.jsx`, `RunEvaluationModal.jsx` (V2.1), `ParseEvidenceModal.jsx` (V2.1), `RegisterAssetModal.jsx`, `AddEvidenceModal.jsx`, `CascadeModal.jsx`, `UpstreamPicker.jsx`, `CreateClaimModal.jsx`, `QualifiedStoragePicker.jsx`, `RevocationNoticeModal.jsx`, `PublishModal.jsx`.
+8. *V2.1 DetailPanel files deleted.* 10 files under `src/components/DetailPanel/` + `shared/` removed: `index.jsx`, `PanelShell.jsx`, `ChildrenTab.jsx`, `DisclosuresTab.jsx`, `EvalPanel.jsx`, `EvaluationsTab.jsx`, `EvidenceBlock.jsx`, `ParsedFieldsTab.jsx`, `ClaimsTable.jsx`, `constants.js`, plus all of `shared/` except `CopyBadge.jsx` (which V2.2 panels still import). Only `V22NodeDetailPanel.jsx`, `DisclosureAgreementDetailPanel.jsx`, `EvaluationAgreementDetailPanel.jsx`, and `shared/CopyBadge.jsx` remain.
+9. *V2.1 state + merge pipeline deleted from V2App.jsx.* The ~270-line V2.1 `data = {...roleData}` merge-and-rollup pipeline (`addedNodes` / `addedSDAs` / `addedEdges` / `addedChildren` / `removedX` filters, health rollup, selective-disclosure field filtering) was removed. `emptyRoleState` now holds only `dismissedReqs`, `addedRequests`, `requirementSets`, `pepTemplates`, `newlyDisclosedIds` — the V2.2-relevant fields. `publicListings` memo removed. V2.1 `_isNew` clearing effect removed (V2.2 has its own). `onConnect` on V2Canvas now passes `undefined` since V2.2 has no equivalent action. V2App imports trimmed from ~15 V2.1 modal imports down to the 7 V2.2 modals + library modals.
+10. *V1 files deleted.* All V1 files under `src/` removed: `src/App.jsx`, `src/App.css`, `src/main.jsx`, `src/ia-map-entry.jsx`, `src/data/` (entire directory — `dataset.js`, `generateDataset.js`, `generateAutoCo.js` / `generateGovCo.js` / `generateFastCo.js` / `generateMicroCo.js`, `generateEvents.js`, `verticals.js`, `tokens.js`, `platformAssets.js`, `mkhash.js`), `src/reference/` (entire), plus every file at `src/components/` root (Header, Footer, NetGraph, Sidebar, OverviewTab, ClaimsTab, EvalsTab, DetailPanel.jsx, InvitationDetailPanel, InviteSupplierModal, SupplierDashboard, SupplierNetGraph, SupplierSidebar, SupplierAssetSection, OrgNodeContent, CreditsModal, AttestationCard, AttestationTestPanel, ClaimTimeline, TimelineTab, RiskMatrix, SearchResultsModal, AssetDirectoryModal, AssetRegistrationModal, AssetRegistrationStandaloneModal, EvaluationModal, EvidenceModal, HealthDot, InvitationModal, NetworkEventsNotification, NodeIcon, RadiantLogo, RequirementsLibraryModal (V1 duplicate), SDACreationModal, SubgraphModal, SvgMark, SystemCreationModal, WorldMap, detailPanelUtils.jsx). Only `src/components/modals/` and `src/components/DetailPanel/` remain.
+11. *`index.html` deleted* (V1 root entry). `vite.config.js` updated to drop the `main` input; builds now output `v2.html` + `v3.html` only.
+12. *`src/v2/` rename deferred* to polish backlog. The directory name is vestigial now that there's only one version shipped, but the cascading import-path changes across every file is a high-risk post-deletion operation best done with a dedicated atomic pass.
+
+**Documentation finalization:**
+
+- `v2.2-architecture-migration-spec.md` → `architecture-spec.md` (renamed). Content trimmed to remove migration-in-progress language while preserving the changelog as historical record.
+- `v2.2-polish-backlog.md` → `polish-backlog.md` (renamed). Phase 8 items marked complete.
+- CLAUDE.md restructured: `Current Target: V2.2` header replaced with `Architecture`; `Feature flag` subsection removed; `Forbidden Changes` list removed (phase-specific, no longer load-bearing); `File layout` updated for post-deletion state; Phase 7 + Phase 8 notes added.
+
+**Bundle impact:** v2 chunk dropped from 638 kB → 345 kB (46% shrinkage, 142 kB → 83 kB gzip). No regressions in the build.
+
+**Runtime verification:**
+- Build passes clean at every checkpoint (after flag removal, after modal deletion, after V1 deletion).
+- Dev server boots; v2.html loads; boot screen renders; canvas + nodes + edges render correctly; chrome icons (globe, AI Shopper, notification bell, theme toggle, library, PEP library) all functional.
+- Story 2 walkthrough (Phase 7 regression): chrome globe → Directory Layer wipes in → Launch AI Shopper → fill prompt → see results → Request Agreement → CombinedRequestModal pre-populated → send → Alice receives v22-request notification. Still works end-to-end.
+- Story 1 walkthrough: Asset panel → Request Agreement → CombinedRequestModal → response from Alice → Run Evaluation → eval result on both canvases.
+- Story 3 walkthrough: amend flows + notifications still work.
+- V2.2 Parse flow: Asset panel → Parse Evidence → template picker → processing → review + edit → Save → Parse Result node appears on canvas with NEW badge.
+
+**Known scope boundaries (not bugs):**
+- *`src/v2/` rename deferred.* Filed as polish item.
+- *V3 archive (`src/v3/`, `v3.html`) kept.* Task didn't specify deletion; it's not wired into V2.2 and adds no runtime cost beyond the tiny v3.js bundle.
+- *`README.md` untouched.* Task didn't specify.
+- *V2App.jsx still contains some V2.1-era handler names* (`handlePanelViewChain`, `setClaimContext`, etc.) that are now dead code — setters called but state never consumed. Kept in place to minimise edit surface during the cleanup pass; filed as polish backlog item for a dedicated dead-code sweep.
+
+### Phase 9A completion notes (2026-04-19) — static visual polish + card/UX upgrades
+
+Ten-item polish pass across AssetNode (visuals + card action bar), V2Canvas + v2_2Data (edge stroke metadata), V22NodeDetailPanel (Parse/Eval row rendering), V22RunEvaluationModal (review-stage UX), V22ParseEvidenceModal (human-edited indicator), and CombinedResponseModal (help text). Phase 9B (expanded tables, exports, edge hover overhaul) is intentionally not touched.
+
+**Visual + card items (1-5):**
+
+1. *Warmer node borders.* Default border is now `color-mix(in srgb, var(--accent-indigo) 22%, var(--border))` — a cool indigo-grey that stops node terminations from fading into the dark canvas without competing with the indigo edge palette. Red UNSAT border treatment unchanged. Value surfaced in the completion summary per task instruction: **22% accent-indigo blended into var(--border)**.
+2. *Counterparty tint.* Cards where `node.owner !== activeParty` (excluding Actor nodes) render a muted background tint: `color-mix(in srgb, var(--bg-card) 82%, var(--bg-deep))`. Subtle flattening, no opacity or chip changes.
+3. *Thinner internal edges.* `deriveAgreementEdges` now stamps `grantorParty` + `granteeParty` onto each edge; V2Canvas reads them and multiplies the default stroke width by 0.7 when they match (internal / ownership edges). Selected and NEW edges keep their full emphasis regardless.
+4. *Card cleanup.* Three sub-fixes in AssetNode:
+   - Claim and Eval Result names wrap to two lines via `-webkit-line-clamp: 2` (Actor + Asset stay on one line with ellipsis).
+   - Inner content wrapper is now a flex column with `justify-content: space-between`; the top rows (type badge, name, owner) group together and the health minibar pins to the bottom edge, equalising the whitespace.
+   - Type-badge row has `marginBottom: 7` (was 2) so the name no longer crowds the `CLAIM` / `ASSET` / `EVAL RESULT` pill.
+5. *Edge-endpoint glow.* `v22DataWithReveal` memo in V2App resolves `selectedEdgeId` → the two touched node ids and stamps `_isEdgeEndpoint: true` on each. AssetNode renders a static indigo glow via `box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-indigo) 35%, transparent)` — offset 5px outside the card border. Suppressed when the node is ALSO the selected node (the amber border wins so the two states stay visually distinct per spec).
+
+**Action + entry-point items (6, 7, 9):**
+
+6. *Re-Evaluate with locked Req Set.* V22RunEvaluationModal accepts a new `lockedRequirementsSetId` prop. When set, the Req Set picker is replaced by a read-only indigo card with a LOCKED pill + the explainer "To change Requirements Set, start a new evaluation from the Claim." V22EvalResultPanel's Re-run Evaluation footer (already owner-only) now fires a handler that sets `v22EvalContext.lockedRequirementsSetId` + `v22EvalContext.priorActiveResultId`. V2App's modal mount also feeds the prior result as `priorActiveResult` so the review rows pre-populate (item #8 sub-2). The existing free-choice entry from Claim panel is untouched.
+7. *Full-disclosure last-Asset help text.* CombinedResponseModal's Step 2 Full branch still blocks Continue when zero Assets are selected (unchanged); now also renders an amber italic inline help line ("Select at least one Asset to continue.") beneath the count footer when the selection is empty. No snap-back behaviour.
+9. *Card action parity with Detail Panel footer.* New `V22ActionBar` component in AssetNode.jsx replaces the V2.1 ActionBar for V2.2 nodes. Per-type button set:
+   - ASSET (owner): Request Agreement, Parse Evidence, Create Claim (Phase 6+)
+   - CLAIM (owner, non-provisional, non-declined): Amend Claim, Self-Evaluate
+   - CLAIM (non-owner + active EA): Run Evaluation
+   - EVAL RESULT (owner, not superseded): Re-run Evaluation
+   - PARSE RESULT / ACTOR: no actions
+   
+   Single-dispatch prop `onV22CardAction(actionName, node)` threads from V2Canvas into AssetNode; V2App routes action names to the same handlers its Detail Panel footer fires. `v22DataWithReveal` now also decorates Claim nodes with `_evaluationAgreementForActor` (the EA where the current actor is grantee) so the ActionBar can show Run Evaluation on counterparty Claim cards without re-plumbing.
+
+**Run Evaluation review-stage upgrades (8):**
+
+- *Full status words with flanking chevrons.* New `StatusChevronPicker` renders `◂ SATISFACTORY ▸` (or UNSATISFACTORY / MISSING / N/A — full words). Left chevron cycles back, right chevron + word cycle forward. `cycleStatus` now takes a direction (+1 / -1). `STATUS_CFG` added `short` labels so Detail Panel and elsewhere can keep the 3-letter abbreviations; exported as `REVIEW_STATUS_CFG` for reuse.
+- *Supersede pre-population.* When `priorActiveResult` is set on the modal (fires from the Re-Evaluate flow or when `lockedRequirementsSetId` matches a prior result's Req Set), review rows pre-populate `value`, `status`, and `confidence` from the prior result (was hard-coded `0.9`). Each row's `_aiOriginalValue` snapshots the prior `value` so any subsequent human edit is detected.
+- *AI confidence chip per row.* `ConfidenceBadge` now renders an `AWAITING AI` pill in muted grey when `confidence == null`, so every row always has a visible confidence slot. Fresh evaluations start with `confidence: null` (was `0.0` producing a LOW chip). Confidence is persisted on the submitted payload.
+
+**Human-edited pencil (10):**
+
+`_aiOriginalValue` is tracked per row in both modals from initialization (set to the AI's extracted value, or empty string for fresh rows). When `row.value !== row._aiOriginalValue` a small amber pencil SVG renders next to the ConfidenceBadge with the tooltip "Human-edited from AI's original extraction." Persisted onto both `parseResult.fields[i]._aiOriginalValue` and `evaluationResult.results[i]._aiOriginalValue` so V22NodeDetailPanel's Parse Result + Eval Result panels render the pencil when viewing the artifact later. AI confidence remains unchanged by human edits (the Phase 8.5 rule).
+
+**Build impact:** v2 bundle 345 kB → 350 kB (+5 kB for the new action bar, chevron picker, pencil icon, confidence AWAITING AI state, and adapter decorations). No runtime regressions.
+
+**Runtime verification:** exercised each item in Chrome against `http://localhost:5173/`.
+- Borders: warmer indigo-grey on all Asset/Claim/Eval Result cards across all three roles.
+- Counterparty tint: visible when switching to Bob and comparing his own Asset card to Alice's Claim pulled in.
+- Internal edges: thinner on Alice's own Actor → Asset → Claim chain compared to inter-party edges.
+- Card cleanup: Claim / Eval Result names wrap on two lines; health minibar sits mid-card; type pill no longer crowds the name.
+- Edge-endpoint glow: clicking an edge highlights both endpoints with the indigo outer ring; different from the selected-node amber border.
+- Re-Evaluate: Re-run from an Eval Result panel opens the modal with the LOCKED Req Set card + pre-populated rows.
+- Full help text: Deselecting all Assets in Full disclosure shows the amber hint.
+- Status picker: ◂ SATISFACTORY ▸ chevrons + word all cycle as expected.
+- Card actions: per-role walk-through confirmed one-to-one with Detail Panel footer for Asset/Claim/Eval Result/Parse Result.
+- Human-edited pencil: appears next to the confidence chip after typing in a value; persists into the Parse Result panel.
