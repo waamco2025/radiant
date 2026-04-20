@@ -2879,10 +2879,12 @@ export default function V2App() {
             .map(a => ({ id: a.id, name: a.name, file: a.file }))
           return (
             <AmendClaimModal
+              activeParty={activeRole.party}
               claim={claim}
               candidateAssets={candidateAssets}
               alreadyReferencedAssets={alreadyReferencedAssets}
               onSubmit={handleV22AmendClaimSubmit}
+              onNestedAssetCreated={handleV22NestedAssetCreated}
               onClose={() => setV22AmendingClaimId(null)}
             />
           )

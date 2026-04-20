@@ -263,10 +263,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Phase 9A.4 scope:** Assets only (not Claims). Recipient acceptance required. Produces a new DOT that supersedes the previous owner's DOT on the Asset. Matches client's "DOT as car title" ownership-transfer model. Brings the Transferring process from "❌ Missing" → demo-complete, closing out the 7-process table.
 
 ### 34. Register new Asset during Amend Claim flow
-- **Source:** Phase 6.5 #9 review — when the Amend Claim modal shows "no Assets available," the user must back out, register a new Asset elsewhere, then re-open the modal.
-- **Scope:** Medium
-- **Context:** AmendClaimModal currently only lists Assets the user already owns that aren't already referenced. There's no inline path to register a new Asset and immediately add it.
-- **Proposed fix:** Add a "Register new Asset…" CTA inside AmendClaimModal that opens the (yet-to-be-built V2.2) CreateAssetModal as a nested modal; on successful registration, append the new Asset id to the modal's `selected` set and close the nested modal.
+- **Status:** ✅ Complete (Phase 9A.3 Gate B). V22CreateAssetModal is the V2.2 Asset-registration flow. AmendClaimModal and V22CreateClaimModal both expose an inline "+ Register new Asset…" CTA that opens V22CreateAssetModal nested; on submit V2App builds the Asset via `makeAssetRegistrationArtifacts`, returns the new id to the parent modal, and the parent auto-selects it in its picker. Nested modal sits on its own backdrop so the parent stays dimmed until the user either cancels or completes.
 
 ### 37. Full Disclosure last-Asset deselect handling
 - **Status:** ✅ Complete (Phase 9A). Deselecting all Assets no longer snaps back; an amber italic inline help line ("Select at least one Asset to continue.") renders beneath the count footer when the selection is empty. Continue button stays disabled (existing behaviour).
