@@ -870,17 +870,20 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
     >
       {/* Phase 9A.2 item 2: dot-LOD edge-endpoint indicator — hollow indigo
           ring around the dot when _isEdgeEndpoint is set. Suppressed when
-          the dot is itself selected (amber selection ring below wins). */}
+          the dot is itself selected (amber selection ring below wins).
+          Phase 9A.3 backlog #62(a): ring was sized to the 16px wrapper, not
+          the 8px inner dot (which sits with margin: 4). Ring now centres on
+          the inner dot's centre (wrapper coords 8,8) with a 2px gap. */}
       {node._isEdgeEndpoint && !isSelected && (
         <div style={{
           position: 'absolute',
-          width: 18,
-          height: 18,
+          width: 14,
+          height: 14,
           borderRadius: '50%',
           border: '1.5px solid var(--accent-indigo)',
           boxSizing: 'border-box',
-          top: -1,
-          left: -1,
+          top: 1,
+          left: 1,
           pointerEvents: 'none',
         }} />
       )}

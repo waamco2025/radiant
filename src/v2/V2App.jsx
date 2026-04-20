@@ -1874,6 +1874,10 @@ export default function V2App() {
 
           {/* Notification inbox */}
           <div ref={inboxRef} style={{ position: 'relative' }}>
+            {/* Phase 9A.3 backlog #62(b): bell chrome button lacked a tooltip.
+                Suppress the tooltip while the inbox is open (it obscures the
+                dropdown; Tooltip's own disabled prop handles that). */}
+            <Tooltip content={showInbox ? null : (visibleRequests.length > 0 ? `Notifications (${visibleRequests.length})` : 'Notifications')}>
             <button
               onClick={() => { setShowInbox(v => !v); setShowCredits(false); setShowAcct(false) }}
               onMouseEnter={() => setBellHover(true)}
@@ -1903,6 +1907,7 @@ export default function V2App() {
                 }}>{visibleRequests.length}</span>
               )}
             </button>
+            </Tooltip>
 
             {showInbox && (
               <div style={{

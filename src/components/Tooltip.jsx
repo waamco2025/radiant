@@ -119,7 +119,11 @@ const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, posit
 
   const baseStyle = {
     position: 'fixed',
-    zIndex: 6000,
+    // Phase 9A.3 backlog #62(c)/(d): bumped from 6000 so tooltips anchored
+    // inside a Modal (Backdrop zIndex 10000) still render above the modal.
+    // The chrome tooltips don't regress — background hover is blocked when
+    // a modal is open.
+    zIndex: 10100,
     left: clampedX,
     top: above
       ? anchorRect.top - GAP - ARROW_SIZE

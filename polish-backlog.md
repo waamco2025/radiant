@@ -115,14 +115,10 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Context:** Today edge hover shows a raycaster-driven floating tooltip; edge click opens a separate `EdgeMenu` that overlays at the click point. These are two surfaces for the same relationship. Target: unify into a single hover-tooltip-that-is-also-the-menu — on hover, a small dot indicator appears on the edge itself at the raycaster hit point, the tooltip shows SDA type + endpoints + actionable rows (View DA / View EA), and clicking pins the tooltip so it persists through mouse-move (keeps the rich content accessible without the cursor-follow jitter). Phase 9A.2 left the existing edge hover on its ad-hoc implementation specifically so 9B has a clean base to extend.
 
 ### 62. Carry-over defects from 9A.2
-- **Source:** Phase 9A.2 carry-over. **High — carry into 9A.3.**
-- **Scope:** Small
-- **Context:** Four defects surfaced during Phase 9A.2 visual review that didn't block the phase but should be fixed opportunistically during Phase 9A.3 main scope if room:
-  - (a) Dot-LOD endpoint ring (Phase 9A.2 item 2) renders off-center relative to the dot. Visually clear but not perfectly concentric — probably an offset miscalculation between the 16px outer wrapper and the 8px inner dot.
-  - (b) Notification chrome icon tooltip missing. The bell button lacks a `<Tooltip>` wrapper in V2App's chrome row.
-  - (c) Run Evaluation review-stage pencil icon tooltip not appearing. The `HumanEditedIcon` in `V22RunEvaluationModal` is wrapped in `<Tooltip>` but hover doesn't fire the tooltip — likely the wrapper span's `inline-flex` is being collapsed by the surrounding layout and the mouseenter doesn't register.
-  - (d) Run Evaluation chevron tooltips not appearing. Same symptom as (c), affecting `StatusChevronPicker`'s three tooltip wrappers (◂ / label / ▸).
-- **Proposed fix:** (a) recompute ring offset relative to inner-dot centroid; (b) wrap the notification bell in Tooltip; (c)(d) inspect hover region of inline-flex wrappers inside the modals — may need a `wrapperStyle={{ display: 'inline-block' }}` override or to move the ref/handler down onto the existing anchor span rather than an extra wrapper.
+- **Status:** ✅ Complete (Phase 9A.3 Gate C). All four defects addressed:
+  - (a) Dot-LOD endpoint ring — re-geometred around the inner 8px dot (wrapper centre at 8,8) instead of the 16px wrapper. New dims `14×14` at `top: 1, left: 1` give a clean 3px halo.
+  - (b) Bell chrome button wrapped in `<Tooltip content="Notifications (N)">`; content suppressed when the inbox dropdown is open so the tooltip doesn't obscure the list.
+  - (c) (d) Root cause was Tooltip's TooltipBody `zIndex: 6000` sitting *below* the Modal Backdrop's `zIndex: 10000`. Tooltips anchored inside a modal rendered, but under the modal's darkening backdrop — invisible to the user. Bumped to `10100`; chrome tooltips still work (canvas-level z doesn't regress) and in-modal tooltips now appear on top of the modal content.
 
 ---
 
