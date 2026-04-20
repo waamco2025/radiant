@@ -3569,7 +3569,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.4.0 &middot; Changelog
+          v0.9.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3616,6 +3616,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.0', date: '2026-04-20', label: 'Phase 9A.4', items: [
+                  'Transferring process shipped — seventh and final platform process, completing the 7-process demo',
+                  'Asset ownership can now be transferred between parties via Transfer action on Asset cards/panels',
+                  'Recipient receives notification, accepts or declines; transfers recorded on Asset\'s provenance chain',
+                  'Structured DOT data model aligned with client canon — every Asset, Claim, and Eval Result carries a DOT with identity, hash, owner DID, and lineage',
+                  'PIN resolution on transfer: catches self, Radiant Network, and unknown-PIN rejection cases',
+                  'Sender-side TRANSFERRING badge while pending; cancel-while-pending supported',
+                ]},
                 { version: '0.8.0', date: '2026-04-12', label: 'Round 12', items: [
                   'V2.1 Claims Migration — nodes are now Claims backed by evidence, replacing the old asset/container model',
                   'Category-free node cards — removed category icons, labels, and color tinting from all LOD levels',
