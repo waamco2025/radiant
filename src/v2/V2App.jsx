@@ -791,6 +791,160 @@ export default function V2App() {
     setV22PanToClaimId(asset.id)
   }, [v22TransferringAsset, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
+  // ── Phase 9A.4 Gate C: accept / decline handlers ────────────────────
+  //
+  // Accept: re-emit the Asset with updated DOT (ownerDid flipped to
+  // recipient + accepted transfer record appended to dot.lineage[]) and
+  // clear the provisional transfer record. The view builder will now
+  // surface the Asset on the recipient's canvas; the sender's view
+  // removes it automatically (filter by owner === party).
+  //
+  // Decline: re-emit the Asset with a declined transfer record appended
+  // to dot.lineage[] (ownership stays) and clear the provisional. Sender
+  // receives a v22-transfer-declined notification with the reason.
+  const handleV22TransferAccept = useCallback((notif) => {
+    if (!notif || !notif.transferId || !notif.assetId) return
+    // Phase 9A.4 Gate C: resolve the transfer + asset SYNCHRONOUSLY from the
+    // current render's v22Provisionals, not from inside the setState updater.
+    // The updater runs during the next render — by the time the downstream
+    // `if (!transfer) return` runs it's still null, and the whole flow
+    // (notification dismiss, sender notification, pan) would short-circuit.
+    const transfer = (v22Provisionals.transfers || []).find((t) => t.id === notif.transferId)
+    if (!transfer) return
+    const seededAssets = buildV22SharedArtifacts().assets
+    const assetForTransfer = (v22Provisionals.assets || []).find((a) => a.id === transfer.assetId)
+      || seededAssets.find((a) => a.id === transfer.assetId)
+    if (!assetForTransfer) return
+    const acceptedTimestamp = new Date().toISOString()
+    const transferRecord = makeTransferRecord({
+      fromOwnerDid: transfer.fromOwnerDid,
+      toOwnerDid: transfer.toOwnerDid,
+      initiatedTimestamp: transfer.initiatedTimestamp,
+      acceptedTimestamp,
+      status: 'accepted',
+      declineReason: null,
+    })
+    // Re-emit the Asset with updated DOT. `makeAsset` accepts an explicit
+    // `dot` override so we carry the appended lineage forward.
+    const newDot = makeDotObject({
+      pin: assetForTransfer.dot?.pin || assetForTransfer.pin,
+      hash: assetForTransfer.dot?.hash ?? (assetForTransfer.file?.hash ?? null),
+      ownerDid: transfer.toOwnerDid,
+      registrationTimestamp: assetForTransfer.dot?.registrationTimestamp || assetForTransfer.registrationDate,
+      metadata: assetForTransfer.dot?.metadata || { fileUri: assetForTransfer.file?.uri, filename: assetForTransfer.file?.filename },
+      lineage: [...(assetForTransfer.dot?.lineage || []), transferRecord],
+    })
+    const transferredAsset = makeAsset({
+      id: assetForTransfer.id,
+      owner: transfer.toParty,
+      ownerDot: transfer.toOwnerDid,
+      name: assetForTransfer.name,
+      description: assetForTransfer.description,
+      file: assetForTransfer.file,
+      registrationDate: assetForTransfer.registrationDate,
+      parseResultIds: assetForTransfer.parseResultIds || [],
+      dot: newDot,
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      transfers: (prev.transfers || []).filter((t) => t.id !== notif.transferId),
+      assets: [
+        ...((prev.assets || []).filter((a) => a.id !== assetForTransfer.id)),
+        transferredAsset,
+      ],
+    }))
+    // Dismiss the v22-transfer-request on the recipient's inbox.
+    updateRoleState(roleId, (prevState) => ({
+      ...prevState,
+      dismissedReqs: [...(prevState.dismissedReqs || []), notif.id],
+    }))
+    // Reveal the Asset on the recipient's canvas (standard NEW badge path).
+    setV22RecentlyAcceptedAssetId(assetForTransfer.id)
+    setSel(assetForTransfer.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(assetForTransfer.id)
+    // Fire v22-transfer-accepted notification to the sender.
+    const senderRole = ROLES.find((r) => r.party === transfer.fromParty)
+    if (senderRole) {
+      enqueueV22NotificationForRequester(senderRole.id, {
+        id: `v22-transfer-accepted-${transfer.id}`,
+        type: 'v22-transfer-accepted',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: transfer.assetName, pin: assetForTransfer.pin },
+        connectTo: null,
+        transferId: transfer.id,
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, roleId, updateRoleState, enqueueV22NotificationForRequester])
+
+  const handleV22TransferDecline = useCallback((notif, reason) => {
+    if (!notif || !notif.transferId || !notif.assetId) return
+    // Resolve synchronously from current render state (same fix as the
+    // accept path above).
+    const transfer = (v22Provisionals.transfers || []).find((t) => t.id === notif.transferId)
+    if (!transfer) return
+    const seededAssets = buildV22SharedArtifacts().assets
+    const assetForTransfer = (v22Provisionals.assets || []).find((a) => a.id === transfer.assetId)
+      || seededAssets.find((a) => a.id === transfer.assetId)
+    if (!assetForTransfer) return
+    const declinedRecord = makeTransferRecord({
+      fromOwnerDid: transfer.fromOwnerDid,
+      toOwnerDid: transfer.toOwnerDid,
+      initiatedTimestamp: transfer.initiatedTimestamp,
+      acceptedTimestamp: null,
+      status: 'declined',
+      declineReason: (reason || '').trim() || null,
+    })
+    const newDot = makeDotObject({
+      pin: assetForTransfer.dot?.pin || assetForTransfer.pin,
+      hash: assetForTransfer.dot?.hash ?? (assetForTransfer.file?.hash ?? null),
+      ownerDid: assetForTransfer.dot?.ownerDid || assetForTransfer.ownerDot,
+      registrationTimestamp: assetForTransfer.dot?.registrationTimestamp || assetForTransfer.registrationDate,
+      metadata: assetForTransfer.dot?.metadata || {},
+      lineage: [...(assetForTransfer.dot?.lineage || []), declinedRecord],
+    })
+    const declinedAsset = makeAsset({
+      id: assetForTransfer.id,
+      owner: assetForTransfer.owner,
+      ownerDot: assetForTransfer.ownerDot,
+      name: assetForTransfer.name,
+      description: assetForTransfer.description,
+      file: assetForTransfer.file,
+      registrationDate: assetForTransfer.registrationDate,
+      parseResultIds: assetForTransfer.parseResultIds || [],
+      dot: newDot,
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      transfers: (prev.transfers || []).filter((t) => t.id !== transfer.id),
+      assets: [
+        ...((prev.assets || []).filter((a) => a.id !== assetForTransfer.id)),
+        declinedAsset,
+      ],
+    }))
+    // Dismiss the v22-transfer-request on the recipient's inbox.
+    updateRoleState(roleId, (prevState) => ({
+      ...prevState,
+      dismissedReqs: [...(prevState.dismissedReqs || []), notif.id],
+    }))
+    // Fire v22-transfer-declined notification to the sender with the reason.
+    const senderRole = ROLES.find((r) => r.party === transfer.fromParty)
+    if (senderRole) {
+      enqueueV22NotificationForRequester(senderRole.id, {
+        id: `v22-transfer-declined-${transfer.id}`,
+        type: 'v22-transfer-declined',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: transfer.assetName, pin: null },
+        connectTo: null,
+        transferId: transfer.id,
+        declineReason: (reason || '').trim() || null,
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, roleId, updateRoleState, enqueueV22NotificationForRequester])
+
   const handleV22CancelTransfer = useCallback((assetId) => {
     let cancelledTransfer = null
     setV22Provisionals((prev) => {
@@ -1221,6 +1375,10 @@ export default function V2App() {
   const [registerNode, setRegisterNode] = useState(null)
   const [responseRequest, setResponseRequest] = useState(null)
   const [showInbox, setShowInbox] = useState(false)
+  // Phase 9A.4 Gate C: when the recipient clicks Decline on a transfer
+  // request, swap the notification row into a "reason" sub-form.
+  //   Shape: { notifId, reason } — notif metadata + live textarea value.
+  const [v22DecliningTransfer, setV22DecliningTransfer] = useState(null)
   const [cascadeContext, setCascadeContext] = useState(null)
   const [evidenceNode, setEvidenceNode] = useState(null)
   const [parseContext, setParseContext] = useState(null)
@@ -2052,8 +2210,14 @@ export default function V2App() {
                     const isV22Request = req.type === 'v22-request'
                     const isV22Amendment = req.type === 'v22-amendment'
                     const isV22Evaluation = req.type === 'v22-evaluation'
-                    const badgeColor = isRevocation || isDecline ? 'var(--accent-red)' : isAcceptance ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : 'REQUEST'
+                    // Phase 9A.4 Gate C: four new Transferring notification types.
+                    const isV22TransferRequest = req.type === 'v22-transfer-request'
+                    const isV22TransferAccepted = req.type === 'v22-transfer-accepted'
+                    const isV22TransferDeclined = req.type === 'v22-transfer-declined'
+                    const isV22TransferCancelled = req.type === 'v22-transfer-cancelled'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : 'REQUEST'
+                    const isDecliningThisTransfer = isV22TransferRequest && v22DecliningTransfer?.notifId === req.id
                     return (
                     <div
                       key={req.id}
@@ -2167,6 +2331,18 @@ export default function V2App() {
                             setSel(targetNode.id)
                             canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
                           }
+                        } else if (req.type === 'v22-transfer-request') {
+                          // Phase 9A.4 Gate C: do NOT dismiss on click — the
+                          // notification resolves only on Accept or Decline.
+                          // Actions render inline inside the row, so clicking
+                          // the body chrome is a no-op (keeps the inbox open).
+                          setShowInbox(true)
+                        } else if (req.type === 'v22-transfer-accepted' || req.type === 'v22-transfer-declined' || req.type === 'v22-transfer-cancelled') {
+                          // Informational notifications — clicking dismisses.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
                         } else {
                           ensureParentLayer(() => {
                             const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -2230,9 +2406,100 @@ export default function V2App() {
                                   ? `Declined disclosure to ${req.asset?.name}`
                                   : isPublishedStandard
                                     ? `Published ${req.standardName} v${req.standardVersion} to the Radiant Network`
-                                    : req.asset?.name || ''
+                                    : isV22TransferRequest
+                                      ? `${req.from.name} is offering to transfer ${req.asset?.name} to you.`
+                                      : isV22TransferAccepted
+                                        ? `${req.asset?.name} has been transferred to ${req.from.name}.`
+                                        : isV22TransferDeclined
+                                          ? (req.declineReason ? `Transfer declined by ${req.from.name} — "${req.declineReason}"` : `Transfer of ${req.asset?.name} declined by ${req.from.name}.`)
+                                          : isV22TransferCancelled
+                                            ? `${req.from.name} cancelled the transfer of ${req.asset?.name}.`
+                                            : req.asset?.name || ''
                         }
+                        {/* Phase 9A.4 Gate C: inline note preview on a pending transfer request. */}
+                        {isV22TransferRequest && req.note && !isDecliningThisTransfer && (
+                          <div style={{
+                            marginTop: 6, padding: '6px 8px',
+                            background: 'var(--bg-raised)', borderRadius: 4,
+                            fontSize: 10, color: 'var(--text-secondary)', fontStyle: 'italic',
+                          }}>"{req.note}"</div>
+                        )}
                       </div>
+                      {/* Phase 9A.4 Gate C: Accept/Decline action buttons on a
+                          v22-transfer-request, OR the decline-reason sub-form
+                          when the user has clicked Decline. */}
+                      {isV22TransferRequest && !isDecliningThisTransfer && (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10, paddingLeft: 30 }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleV22TransferAccept(req) }}
+                            style={{
+                              flex: 1, padding: '6px 12px', borderRadius: 4,
+                              border: '1px solid var(--accent-green)',
+                              background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+                              color: 'var(--accent-green)',
+                              fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              letterSpacing: '0.06em', cursor: 'pointer',
+                            }}
+                          >ACCEPT</button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setV22DecliningTransfer({ notifId: req.id, reason: '' }) }}
+                            style={{
+                              flex: 1, padding: '6px 12px', borderRadius: 4,
+                              border: '1px solid var(--border)',
+                              background: 'transparent',
+                              color: 'var(--text-tertiary)',
+                              fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              letterSpacing: '0.06em', cursor: 'pointer',
+                            }}
+                          >DECLINE</button>
+                        </div>
+                      )}
+                      {isDecliningThisTransfer && (
+                        <div style={{ marginTop: 10, paddingLeft: 30 }}>
+                          <textarea
+                            value={v22DecliningTransfer.reason}
+                            onChange={(e) => setV22DecliningTransfer((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                            placeholder="Reason (optional)"
+                            rows={2}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: '100%', padding: '6px 8px', borderRadius: 4,
+                              border: '1px solid var(--border)', background: 'var(--bg-card)',
+                              color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 11,
+                              outline: 'none', resize: 'vertical', lineHeight: 1.5,
+                            }}
+                          />
+                          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setV22DecliningTransfer(null) }}
+                              style={{
+                                flex: 1, padding: '6px 12px', borderRadius: 4,
+                                border: '1px solid var(--border)', background: 'transparent',
+                                color: 'var(--text-tertiary)',
+                                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                letterSpacing: '0.06em', cursor: 'pointer',
+                              }}
+                            >BACK</button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const reason = v22DecliningTransfer.reason
+                                setV22DecliningTransfer(null)
+                                handleV22TransferDecline(req, reason)
+                              }}
+                              style={{
+                                flex: 1, padding: '6px 12px', borderRadius: 4,
+                                border: '1px solid var(--accent-red)',
+                                background: 'color-mix(in srgb, var(--accent-red) 12%, transparent)',
+                                color: 'var(--accent-red)',
+                                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                letterSpacing: '0.06em', cursor: 'pointer',
+                              }}
+                            >CONFIRM DECLINE</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     )
                   })
