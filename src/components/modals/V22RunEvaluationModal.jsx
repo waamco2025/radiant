@@ -409,7 +409,14 @@ export default function V22RunEvaluationModal({
                   No Requirements Sets in your library. Add one before running an evaluation.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16,
+                  // Phase 9A.6 Gate C (#91): scroll container for the
+                  // Requirements Sets picker — matches the Parse Template
+                  // picker treatment, per the CLAUDE.md picker convention.
+                  maxHeight: 300, overflowY: 'auto',
+                  paddingRight: 2,
+                }}>
                   {availableRequirementsSets.map((rs) => {
                     const selected = selectedReqSetId === rs.id
                     const suggested = suggestedSetIds.has(rs.id)

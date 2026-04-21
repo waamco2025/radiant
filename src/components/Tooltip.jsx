@@ -40,6 +40,16 @@ export default function Tooltip({
   const hasContent = content != null && content !== ''
   const shouldRender = hasContent && !disabled
 
+  // Phase 9A.6 Gate C (#90): when the Tooltip becomes non-renderable (content
+  // cleared externally, e.g., V2App nulls the bell tooltip while the inbox
+  // is open), clear any lingering `visible` state so the tooltip doesn't
+  // pop back the moment content reappears. Without this reset, the bell
+  // tooltip would persist visually because mouseleave never fires on an
+  // unmounted wrapper.
+  useEffect(() => {
+    if (!shouldRender && visible) setVisible(false)
+  }, [shouldRender, visible])
+
   // Recompute on scroll/resize while visible so tooltip tracks the anchor.
   useEffect(() => {
     if (!visible) return
@@ -77,6 +87,12 @@ export default function Tooltip({
     setVisible(true)
   }
   const handleMouseLeave = () => setVisible(false)
+  // Phase 9A.6 Gate C (#90): click on the wrapped anchor dismisses the
+  // tooltip. Pattern: clicking a button usually opens a dropdown/modal that
+  // either covers the anchor (mouseleave fires) or replaces it (mouseleave
+  // won't fire because the wrapper moves). Either way, clearing visible on
+  // mousedown is the user-expected behaviour.
+  const handleMouseDown = () => setVisible(false)
 
   // Wrap children in an inline-block span. Avoids the fragility of
   // cloneElement+forwardRef (some existing components don't forward refs)
@@ -88,6 +104,7 @@ export default function Tooltip({
         ref={anchorRef}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onMouseDown={handleMouseDown}
         style={{ display: 'inline-flex', alignItems: 'center', ...(wrapperStyle || null) }}
       >
         {children}

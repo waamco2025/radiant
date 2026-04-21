@@ -288,7 +288,14 @@ export default function V22ParseEvidenceModal({
                     No PEP Templates in your library. Add one via the Template Library before parsing.
                   </div>
                 ) : (
-                  <div role="radiogroup" aria-label="Parse Template" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div role="radiogroup" aria-label="Parse Template" style={{
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                    // Phase 9A.6 Gate C (#91): scroll container sized per the
+                    // CLAUDE.md picker convention so lists of N>>10 templates
+                    // don't break the modal layout.
+                    maxHeight: 300, overflowY: 'auto',
+                    paddingRight: 2,
+                  }}>
                     {availableTemplates.map((t) => {
                       const selected = selectedTemplateId === t.id
                       const alreadyParsed = existingParseResultIds.has?.(t.id) || (Array.isArray(existingParseResultIds) && existingParseResultIds.includes(t.id))

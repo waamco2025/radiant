@@ -202,7 +202,10 @@ function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAsset
         <>
           <Section title="Party">
             <Row label="Name" value={node.name} />
-            <Row label="DOT" value={node.dot} mono />
+            {/* Phase 9A.6 Gate C (#89): Actor DOT as truncated CopyBadge,
+                matching the treatment applied to Asset / Claim / Eval Result
+                panels in the 9A.4 preamble. */}
+            <Row label="DOT" value={node.dot ? <CopyBadge value={node.dot} truncated /> : '—'} />
             {actor?.role && <Row label="Role" value={actor.role} />}
             {actor?.vertical && <Row label="Vertical" value={actor.vertical} />}
             {actor?.user && <Row label="User" value={actor.user} />}
