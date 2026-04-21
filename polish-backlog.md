@@ -73,7 +73,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Status:** ✅ Complete (Phase 9A.1.5). `WARM_BORDER` (40% indigo blend) extended to mini and dot LOD renderings — mini cards now match full cards; dots grow a 1px indigo ring so they don't fade into canvas at zoom-out. Red UNSAT borders unchanged.
 
 ### 100. Mini/dot LOD action buttons on hover
-- **Status:** ✅ Complete (Phase 9A.6.1 Fix 4). V22ActionBar now renders on hover at mini AND dot LODs, not just full-card LOD. Root cause: AssetNodeMini and AssetNodeDot forwarded only legacy handlers (`onAddEvidence` / `onParseEvidence` / etc.) to their hover-tooltip AssetNode renderings; `onV22CardAction` was missing, so even when the tooltip rendered, V22ActionBar had no dispatcher. Additionally, the tooltip's inner AssetNode was only action-barred when selected. Fix: added `onV22CardAction` prop to both dot/mini components, forwarded to the tooltip card, plus a new `forceActionBar` prop on AssetNode that overrides the internal `isSelected || hovered` check when the tooltip is visible. V2Canvas now passes `onV22CardAction` to both LOD components.
+- **Status:** ✅ Complete (9A.6.1; reverted to click-only behavior in 9A.6.1.1 — hover-to-show was visually present but impractical as the pointer couldn't reach the buttons before they dismissed). Action bar renders at mini/dot LODs on node selection, matching full-card LOD behavior. `onV22CardAction` threading through AssetNodeMini + AssetNodeDot from 9A.6.1 is retained — that plumbing remains needed for click-selected action bar dispatch. The `forceActionBar` prop on AssetNode was removed.
 
 ---
 
@@ -147,16 +147,13 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Status:** ✅ Verified (Phase 9A.5 Gate C). No code change required. The expanded Detail Panel modal referenced in the original task (an `ExpandedArtifactModal`-style surface with a raw-JSON tab) does not exist in the current V2.2 codebase — it was removed during Phase 8 cleanup. Data layer confirmed correct: `dot.lineage[]` populates properly on transfer accept + decline (verified via `makeDotObject` + `makeTransferRecord` exercise). Lineage rendering in Detail Panels is already tracked separately as #74 (Provenance lineage UI) — that's the surface where the lineage will actually render. When #74 is picked up, the implementer should use `JSON.stringify(asset.dot.lineage, null, 2)` (or an equivalent structured list) to surface lineage entries.
 
 ### 89. Actor Detail Panel DOT click-to-copy
-- **Status:** ✅ Complete (9A.6 initial; field reference corrected in 9A.6.1). V22ActorPanel DOT row renders `<CopyBadge value={node.partyDot} truncated />`. The initial 9A.6 ship wrote `node.dot`, which Actor nodes don't consistently carry — the party-level DOT lives on `partyDot` (populated via `makeActor` in v2_2Data.js). `actorToNode` in the canvas adapter now surfaces both `dot` (V2.1 compat alias) and `partyDot` (canonical) so either read works.
+- **Status:** ✅ Complete (resolved by removal in Phase 9A.6.1.1). The DOT row has been removed from the Actor panel entirely. DOTs per canon X.1 identify data elements (Assets / Claims / Eval Results), not actors — actors have DIDs per canon X.2. Our `partyDot` field is a misnomer carried forward from V2.1 and we shouldn't surface it as "DOT" on the Actor Detail Panel. The Actor's PIN in the panel header serves as the user-facing identifier. Earlier 9A.6 + 9A.6.1 work on this row (CopyBadge wrapping, `partyDot` read fix) is superseded.
 
 ### 64. Asset DOT / hash / URI click-to-copy badge
 - **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Matches the PIN treatment used elsewhere in the app. Null-value guard (`value ? <CopyBadge ... /> : '—'`) handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation. Per spec §3.2 the Asset has no distinct DOT — the file hash is the true per-Asset cryptographic identifier; the "DOT" label on the Asset panel refers to the party-level owner DOT.
 
 ### 101. Actor Detail Panel narrative fields cleanup
-- **Source:** Phase 9A.6.1 QA.
-- **Scope:** Small
-- **Priority:** Low
-- **Context:** V22ActorPanel currently renders Role, Vertical, and User rows under the Party section. These are V2.1 narrative fields that don't carry meaningful information at the party level in V2.2's model (the platform knows parties, not people or roles — see the 9A.5 resolved-box convention). Drop all three from the Actor panel; keep the role label ("buyer" / "seller" / "auditor") in the user-menu role switcher only.
+- **Status:** ✅ Complete (Phase 9A.6.1.1 Fix 1). Role, Vertical, and User rows removed from V22ActorPanel body. Role labels remain in the user-menu role switcher. The `role` / `vertical` / `user` fields stay on `makeActor` in v2_2Data.js for now (may be referenced elsewhere; removing from the data model is a separate cleanup).
 
 ### 103. Referenced Assets missing from Claim Detail Panel on counterparty canvas
 - **Source:** Phase 9A.6.1 QA — regression.

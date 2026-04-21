@@ -313,11 +313,6 @@ export default function AssetNode({
   onV22CardAction,
   activeParty,
   revealPhase,
-  // Phase 9A.6.1 Fix 4: when true, force the action bar to render regardless
-  // of the local hovered/isSelected state. Used by dot- and mini-LOD hover
-  // tooltips so the action bar is discoverable without first selecting the
-  // node.
-  forceActionBar = false,
 }) {
   const [hovered, setHovered] = useState(false)
   const [flipMidpoint, setFlipMidpoint] = useState(false)
@@ -416,7 +411,7 @@ export default function AssetNode({
   // apart from "this is an endpoint of the selected edge".
   const isEdgeEndpoint = !!node._isEdgeEndpoint && !isSelected
 
-  const showActionBar = isSelected || hovered || forceActionBar
+  const showActionBar = isSelected || hovered
 
   return (
     <div
@@ -982,7 +977,6 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             onCreateClaim={isSelected ? onCreateClaim : undefined}
             onV22CardAction={onV22CardAction}
             activeParty={activeParty}
-            forceActionBar
           />
         </div>,
         document.body
@@ -1213,7 +1207,6 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
             onCreateClaim={isSelected ? onCreateClaim : undefined}
             onV22CardAction={onV22CardAction}
             activeParty={activeParty}
-            forceActionBar
           />
         </div>,
         document.body

@@ -3213,6 +3213,19 @@ export default function V2App() {
               return asset ? { id: asset.id, name: asset.name, file: asset.file } : null
             })
             .filter(Boolean)
+          // TODO: remove after 9A.6.2 diagnoses #103
+          // Phase 9A.6.1.1 Fix 3: diagnostic instrumentation for backlog #103
+          // (counterparty Run Evaluation evidence list filtering mismatch).
+          // Prints: Claim id + referenced Asset count, the DA's scope.assetIds,
+          // and the ids rendered in the modal's evidence list.
+          console.log('[9A.6.2 diag #103] Run Evaluation modal evidence scope', {
+            claim: { id: claim.id, referencedAssetCount: (claim.referencedAssetIds || []).length, referencedAssetIds: claim.referencedAssetIds },
+            disclosureAgreement: da ? { id: da.id, scopeAssetIds: da.scope?.assetIds || null } : null,
+            isSelfEvaluation: isSelf,
+            scopeAssetIds,
+            evidenceAssetIdsRendered: evidenceAssets.map(a => a.id),
+            missingFromLibrary: scopeAssetIds.filter(id => !allAssetSources.some(a => a.id === id)),
+          })
           // Library is the requester's full library; the EA's suggested ids
           // surface as a "SUGGESTED" chip per spec §10.5 (advisory).
           return (

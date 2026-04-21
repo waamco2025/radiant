@@ -193,26 +193,21 @@ function PanelLayout({ header, body, footer }) {
 // anything in the conventional sense. Counterparty Actor nodes don't
 // render on the canvas in V2.2 so we don't need to branch for them here.
 function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAssetCount = 0 }) {
-  const actor = node.v22Artifact
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
     <PanelLayout
       header={<PanelHeader typeLabel="ACTOR" name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
+          {/* Phase 9A.6.1.1 Fix 1: stripped DOT, Role, Vertical, User rows.
+              DOTs per canon X.1 identify data elements (Assets / Claims /
+              Eval Results), not actors — actors have DIDs per canon X.2.
+              Role / Vertical / User are V2.1 narrative fields without real
+              platform meaning. The Actor's PIN in the header serves as the
+              user-facing identifier; role labels remain in the user-menu
+              role switcher. See backlog #89, #101. */}
           <Section title="Party">
             <Row label="Name" value={node.name} />
-            {/* Phase 9A.6 Gate C (#89): Actor DOT as truncated CopyBadge.
-                Phase 9A.6.1 Fix 2: field reference was `node.dot`, which is
-                unset on Actor nodes (only Asset/Claim/Eval Result nodes
-                carry a nested `dot` object). Actors carry `partyDot` —
-                the top-level party-level identifier populated by `makeActor`
-                in v2_2Data.js and stamped onto the canvas node via the
-                adapter. */}
-            <Row label="DOT" value={node.partyDot ? <CopyBadge value={node.partyDot} truncated /> : '—'} />
-            {actor?.role && <Row label="Role" value={actor.role} />}
-            {actor?.vertical && <Row label="Vertical" value={actor.vertical} />}
-            {actor?.user && <Row label="User" value={actor.user} />}
           </Section>
           <Section title="Assets">
             <Row label="Registered" value={ownedAssetCount} />
