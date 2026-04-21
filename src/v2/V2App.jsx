@@ -13,6 +13,7 @@ import {
   makeParseRunArtifacts,
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   makeTransferRecord, makeAsset, makeDotObject,
+  makeInternalDisclosureAgreement,
   buildV22SharedArtifacts,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
@@ -845,12 +846,27 @@ export default function V2App() {
       parseResultIds: assetForTransfer.parseResultIds || [],
       dot: newDot,
     })
+    // Phase 9A.5 #76: replace the Asset's ownership DA so grantor becomes the
+    // recipient. Without this, `buildViewForActor` filters the seeded DA
+    // (grantor = sender) out of the recipient's view and no Actor → Asset
+    // ownership edge renders on the recipient's canvas.
+    const replacementOwnershipDa = makeInternalDisclosureAgreement({
+      id: `da-own-${assetForTransfer.id}`,
+      owner: transfer.toParty,
+      ownerDot: transfer.toOwnerDid,
+      subject: { kind: 'asset', id: assetForTransfer.id },
+      terms: { createdDate: acceptedTimestamp },
+    })
     setV22Provisionals((prev) => ({
       ...prev,
       transfers: (prev.transfers || []).filter((t) => t.id !== notif.transferId),
       assets: [
         ...((prev.assets || []).filter((a) => a.id !== assetForTransfer.id)),
         transferredAsset,
+      ],
+      disclosureAgreements: [
+        ...((prev.disclosureAgreements || []).filter((d) => d.id !== replacementOwnershipDa.id)),
+        replacementOwnershipDa,
       ],
     }))
     // Dismiss the v22-transfer-request on the recipient's inbox.
