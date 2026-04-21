@@ -3572,7 +3572,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.1 &middot; Changelog
+          v0.9.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3619,6 +3619,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.2', date: '2026-04-20', label: 'Phase 9A.6', items: [
+                  'Register multiple Assets in a single flow — each file becomes its own Asset with editable display name',
+                  'Local Storage tab in the file picker — drag-and-drop or click to upload from your machine (simulated upload into Qualified Storage)',
+                  'Per-file hashing sequence visible on each file before registration; mock SHA-256 appears as a click-to-copy badge',
+                  'Credit cost for Registering (5 credits/Asset) and Claiming (25 credits/Claim); Insufficient Credits state blocks submit',
+                  'Actor Detail Panel DOT is now click-to-copy',
+                  'Notification bell tooltip no longer sticks after click; Parse Template + Requirements Set pickers scale to long lists',
+                ]},
                 { version: '0.9.1', date: '2026-04-20', label: 'Phase 9A.5', items: [
                   'Transfer accept now draws ownership edge to the recipient\'s Actor node (demo-blocking fix)',
                   'Transfer accept/decline moved into V22TransferResponseModal — inline notification buttons replaced by modal response (matches Disclosure Request pattern)',

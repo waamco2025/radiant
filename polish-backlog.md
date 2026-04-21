@@ -121,11 +121,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
   - (c) (d) Root cause was Tooltip's TooltipBody `zIndex: 6000` sitting *below* the Modal Backdrop's `zIndex: 10000`. Tooltips anchored inside a modal rendered, but under the modal's darkening backdrop — invisible to the user. Bumped to `10100`; chrome tooltips still work (canvas-level z doesn't regress) and in-modal tooltips now appear on top of the modal content.
 
 ### 68. Hashing / processing sequence UI per file
-- **Source:** Phase 9A.3 QA — restore from V2.1 backups.
-- **Scope:** Medium
-- **Priority:** Medium
-- **Context:** After a file is selected (from Qualified Storage or local upload), show a brief visual sequence representing the file being hashed on the network and registered as immutable. The V2.1 implementation had this step between picker-close and review-card render; it was lost during V2.2 migration. Pairs with #66 (multi-file registration) and #67 (local-upload tab).
-- **Proposed fix:** Pattern-match the V2.1 hashing sequence from reference backups. Drop it into V22CreateAssetModal between the picker step and the review step. Likely a small animation component with a progress bar + hash-display reveal.
+- **Status:** ✅ Complete (Phase 9A.6 Gate B). See Process Flows #68 below for completion notes.
 
 ### 71. Restore provisional → disclosed card transform animation
 - **Source:** Phase 9A.3 QA — existed in V2.1, lost during migration cleanup.
@@ -146,6 +142,9 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 
 ### 87. Raw JSON tab on expanded Detail Panel modal
 - **Status:** ✅ Verified (Phase 9A.5 Gate C). No code change required. The expanded Detail Panel modal referenced in the original task (an `ExpandedArtifactModal`-style surface with a raw-JSON tab) does not exist in the current V2.2 codebase — it was removed during Phase 8 cleanup. Data layer confirmed correct: `dot.lineage[]` populates properly on transfer accept + decline (verified via `makeDotObject` + `makeTransferRecord` exercise). Lineage rendering in Detail Panels is already tracked separately as #74 (Provenance lineage UI) — that's the surface where the lineage will actually render. When #74 is picked up, the implementer should use `JSON.stringify(asset.dot.lineage, null, 2)` (or an equivalent structured list) to surface lineage entries.
+
+### 89. Actor Detail Panel DOT click-to-copy
+- **Status:** ✅ Complete (Phase 9A.6 Gate C). V22ActorPanel DOT row wrapped in `<CopyBadge value={node.dot} truncated />`, matching the treatment applied to Asset / Claim / Eval Result panels in the 9A.4 preamble.
 
 ### 64. Asset DOT / hash / URI click-to-copy badge
 - **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Matches the PIN treatment used elsewhere in the app. Null-value guard (`value ? <CopyBadge ... /> : '—'`) handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation. Per spec §3.2 the Asset has no distinct DOT — the file hash is the true per-Asset cryptographic identifier; the "DOT" label on the Asset panel refers to the party-level owner DOT.
@@ -216,11 +215,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 ## Data Model & Content
 
 ### 65. Credit charge for Asset registration + Claim creation
-- **Source:** Phase 9A.3 QA — client requirement.
-- **Scope:** Small
-- **Priority:** **High**
-- **Context:** Phase 9A.3 shipped V22CreateAssetModal + V22CreateClaimModal without credit cost (matched the V2.2 no-credit pattern of ParseEvidence / RunEvaluation / CombinedRequest). Client considers credit accounting core to the Registering + Claiming processes. Re-add a credit cost: V2.1 precedent was 25 credits per Claim; pick a proportional value for Assets (5 or 10 credits looks right given evidence-file cost vs. full-Claim cost).
-- **Proposed fix:** Reuse V2App's existing `credits` + `setCredits` state. Add a `CREDITS_PER_ASSET` + `CREDITS_PER_CLAIM` constant set near the top of the file. Gate submit on sufficient credits in both modals; render a credit-cost row in the review step matching V2.1's treatment. V2.2's other unilateral flows (Parse, self-evaluate) remain free per current behaviour; only Registering + Claiming get charged.
+- **Status:** ✅ Complete (Phase 9A.6 Gate A). `CREDITS_PER_ASSET = 5`, `CREDITS_PER_CLAIM = 25` constants in V2App.jsx. `CreditCostRow` shared component in ModalShared (teal on sufficient, red on insufficient). Submit disabled + label flips to "Insufficient Credits" when under-funded. Asset modal charges `CREDITS_PER_ASSET * N` for multi-file batches. Other V2.2 flows (ParseEvidence / RunEvaluation / CombinedRequest) remain free per client model.
 
 ### 70. Asset hierarchy — Asset-from-Asset registration
 - **Source:** Phase 9A.3 QA — surfaces supply-chain / Program modelling needs. #84 consolidated into this item in 9A.5 (V1-era "register an Asset off another Asset" pattern is the same requirement in a different vocabulary).
@@ -289,25 +284,16 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 ## Process Flows
 
 ### 66. Multi-file Asset registration in single flow
-- **Source:** Phase 9A.3 QA.
-- **Scope:** Medium
-- **Priority:** Medium
-- **Context:** V22CreateAssetModal currently registers exactly one Asset per flow (one file). Surveyors / operators onboarding a batch of evidence files (say, a whole program folder) have to run the flow N times. Enable multi-select in the QS picker + per-file rows in the review step → submit produces N Asset artifacts in one shot, all attached to the parent context (Actor, or the Asset picker that launched the nested flow). Pairs with #67 (local-upload tab) and #68 (per-file hashing sequence).
-- **Proposed fix:** Reuse V22QualifiedStoragePicker's existing `mode="multi"` path (already implemented, unused in 9A.3). Extend V22CreateAssetModal with a per-file list step (each row shows filename + editable label per #69 + confidence badge). V2App's handler iterates and calls `makeAssetRegistrationArtifacts` once per file.
+- **Status:** ✅ Complete (Phase 9A.6 Gate B). V22CreateAssetModal rebuilt as a 3-step flow: Pick → Per-file review → Final review. Picker runs in `mode="multi"`; each selected file becomes its own Asset. Nested callers (V22CreateClaimModal + AmendClaimModal) receive array of new Asset ids and auto-select all N in their picker. Single-file is just N=1 — no separate code path.
 
 ### 67. Local-storage upload tab in QS picker
-- **Source:** Phase 9A.3 QA.
-- **Scope:** Medium
-- **Priority:** Medium
-- **Context:** Today the picker only shows files pre-existing in Qualified Storage (mocked). Real users will want to upload from their machine. Add a tabbed UI: `[Qualified Storage | Local Storage]`. Local Storage path uploads the selected file through the app to the user's QS as a demo function, then proceeds through the normal Asset registration flow.
-- **Proposed fix:** Tab switcher at the picker header. Local tab renders `<input type="file" multiple>` + drag-drop zone. On file select, a fake "uploading to QS" progress step runs, then the file gets inserted into the mock QS bucket (in-memory), then the user continues through the Asset-registration review step as if they'd picked it from QS. Pairs with #66 and #68.
+- **Status:** ✅ Complete (Phase 9A.6 Gate B). V22QualifiedStoragePicker gains a tab header: Qualified Storage | Local Storage. Local tab renders a drag+drop zone + file input, simulates upload (500–800ms per file with per-row progress bar), then the uploaded files are selectable alongside QS picks. On confirm, both sources merge into the payload. Mock URI synthesized under `{bucket}/uploads/{filename}`; file bytes are not actually stored (demo-only).
+
+### 68. Hashing / processing sequence UI per file
+- **Status:** ✅ Complete (Phase 9A.6 Gate B). Each file row in V22CreateAssetModal's per-file review step plays a hashing sequence: pending → hashing (900ms, rotating border spinner + scrolling hex chars) → complete (truncated CopyBadge with mock sha256). Hashes are deterministic from `filename+size` so the same file always produces the same mock value. Continue is disabled while any row is still hashing. No V2.1 HashingSequence reference file was placed in `/references/` before the phase — motion/timing pattern-matched to V2.2 processing UIs (V22RunEvaluationModal). `@keyframes spin` added to `index.css`.
 
 ### 69. User-editable Asset label
-- **Source:** Phase 9A.3 QA — pairs with #68's per-file row UI.
-- **Scope:** Small
-- **Priority:** Medium
-- **Context:** V22CreateAssetModal currently derives the Asset's display name from the filename stem (`power-supply-spec.pdf` → `power supply spec`). In the multi-file / batch flow (#66) each file should land with an editable label. Single-file flow could also benefit — user may want "Sentinel-4 PSU Spec" instead of the filename-stem default.
-- **Proposed fix:** Add an editable text input to the review step, pre-populated with the derived label. Pass the user's final value through `makeAssetRegistrationArtifacts`'s `name` param. Spec §3.2 — name is already a field on the Asset schema (even though the Asset has no separate field today, makeAsset's `name` param is the slot).
+- **Status:** ✅ Complete (Phase 9A.6 Gate B). Each per-file row in V22CreateAssetModal renders an editable text input pre-populated with the filename-stem derivation. 100-char max, trimmed on submit. Empty label turns the input border red and blocks Continue. Value flows through `makeAssetRegistrationArtifacts`'s `name` param. Spec §3.2 updated to document `asset.name` as the user-facing display name with filename-stem default.
 
 ### 20. Selective Disclosure: fields vs. assets scope
 - **Source:** Phase 4 open question #5
@@ -407,6 +393,18 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Scope:** Large
 - **Context:** The mock agent returns results in a single 2.2s batch. A real LLM-backed shopper would stream candidates as the search runs. Keep the split-screen pattern, but let rows appear one at a time with a short delay, each with a per-row confidence score that updates as more context is gathered. UI shape is already designed to absorb this — `results` array just needs incremental append instead of single assignment in `runMockSearch`.
 
+### 90. Notification bell tooltip persistence
+- **Status:** ✅ Complete (Phase 9A.6 Gate C). Tooltip state persisted when `shouldRender` transitioned to false — V2App nulls the bell tooltip content while the inbox is open, the wrapper span unmounts (so mouseleave never fires) but `visible` stayed true. When content reappeared the tooltip popped back without a fresh hover. Fix: effect that clears `visible` when `shouldRender` becomes false, plus mousedown on the wrapper clears `visible` synchronously so clicking the bell dismisses the tooltip as expected.
+
+### 91. Parse Template picker scroll box
+- **Status:** ✅ Complete (Phase 9A.6 Gate C). V22ParseEvidenceModal's template list now renders inside a scroll container (`maxHeight: 300, overflowY: 'auto'`), matching the CLAUDE.md picker convention. Audited V22RunEvaluationModal's Requirements Set picker concurrently — applied same treatment. Other pickers (V22CreateClaimModal, AmendClaimModal, AmendDisclosureModal) already scroll.
+
+### 88. Transfer cascade — Parse Results and dependent Claims on sender side
+- **Source:** Phase 9A.5 QA — data integrity concern from 9A.4.
+- **Scope:** Medium
+- **Priority:** **Medium — data integrity**
+- **Context:** When an Asset transfers out, its Parse Results orphan on the sender's canvas (should transfer with the Asset — they're derivatives per canon). Claims referencing only the transferred Asset are broken (need user decision in the transfer review step — warn / auto-revise to drop reference / block). Related to #73 (transfer constraint on disclosed Claims) but distinct: #73 is about the counterparty's visibility of disclosed Claims post-transfer, #88 is about the sender's own orphaned derivatives and broken Claim references.
+
 ### 55. Error states + edge-case review
 - **Source:** Phase 9A.3 preamble — handoff roster.
 - **Scope:** Medium
@@ -502,3 +500,4 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-20: Phase 9A.4 preamble — added items #64–71 (9A.3 QA surfaces + client DOT-badge request); #64 shipped in same session. Two 9A.3 defects fixed in same commit: nested QS picker z-index (surfaces 3 & 4 in QA), dot-LOD endpoint ring alignment (QA 8.1). Item #10 wording tightened to distinguish NEW badge (persists to deselection) from 900ms reveal (initial fade-in animation). Item #62(a) annotated with the 9A.4 follow-on fix (the 9A.3 ring geometry was mathematically correct, but the `data-card-id` wrapper had a 4px line-box offset that shifted the child dot down — wrapper now locked to `width/height: 16, display: flex`).
 - 2026-04-20: Phase 9A.4 main — Transferring process shipped (Assets only); structured DOT data model added (`makeDotObject`, `makeTransferRecord`) with backward-compat aliases on existing factories; 7-process demo complete. Backlog: #33 ✅ Complete; added #72 (Claim + Eval Result transfer), #73 (transfer constraint on disclosed Claims), #74 (provenance lineage UI), #75 (transfer timeage). Runtime verified: Alice → Bob accept path + Alice → Carol decline path + sender cancel path + PIN resolution rejecting self / Radiant Network / unknown.
 - 2026-04-20: Phase 9A.5 — fast-follower polish after 9A.4 demo completion. Eight items shipped (#76 transfer accept ownership edge, #77 transfer response modal, #78 resolved-box party-only, #79 PIN error split, #83 Claim-owner edge removal, #85 Asset-picker zero-default, #86 DID glossary, #87 raw-JSON tab verified); four items filed for future phases (#80 accepted-transfer animation, #81 reciprocal notification audit, #82 Parse Result DOT + layer placement, plus #84 consolidated into #70). Three cross-cutting UX conventions added to CLAUDE.md (accept-in-modal, picker-defaults + scroll, reciprocal notifications). Demo-blocking transfer accept edge regression resolved in Gate A.
+- 2026-04-20: Phase 9A.6 — Asset registration batch. Shipped #65 (credits: `CREDITS_PER_ASSET = 5`, `CREDITS_PER_CLAIM = 25`, CreditCostRow shared component), #66 (multi-file Asset registration — 3-step flow with per-file rows, nested callers auto-select all N), #67 (Local Storage tab in QS picker with mock upload simulation), #68 (hashing sequence per file — 900ms rotating spinner + hex dance, deterministic mock sha256, spec §3.2 updated for `asset.name`), #69 (editable per-file label), #89 (Actor DOT CopyBadge), #90 (notification bell tooltip persistence — effect clearing `visible` when `shouldRender` goes false + mousedown dismissal), #91 (Parse Template + Requirements Set picker scroll). Filed #88 (transfer cascade — Parse Results + dependent Claims on sender side — data integrity concern from 9A.5 QA). No V2.1 HashingSequence reference file was placed before the phase; visual/timing pattern-matched to V2.2 processing UIs.
