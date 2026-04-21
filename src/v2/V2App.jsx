@@ -30,6 +30,7 @@ import V22RunEvaluationModal from '../components/modals/V22RunEvaluationModal.js
 import V22CreateAssetModal from '../components/modals/V22CreateAssetModal.jsx'
 import V22CreateClaimModal from '../components/modals/V22CreateClaimModal.jsx'
 import V22TransferAssetModal from '../components/modals/V22TransferAssetModal.jsx'
+import V22TransferResponseModal from '../components/modals/V22TransferResponseModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
@@ -1391,10 +1392,10 @@ export default function V2App() {
   const [registerNode, setRegisterNode] = useState(null)
   const [responseRequest, setResponseRequest] = useState(null)
   const [showInbox, setShowInbox] = useState(false)
-  // Phase 9A.4 Gate C: when the recipient clicks Decline on a transfer
-  // request, swap the notification row into a "reason" sub-form.
-  //   Shape: { notifId, reason } — notif metadata + live textarea value.
-  const [v22DecliningTransfer, setV22DecliningTransfer] = useState(null)
+  // Phase 9A.5 Gate B (#77): recipient-side transfer response surface is a
+  // modal, not inline notification UI. Stores the pending notification when
+  // the user clicks a v22-transfer-request row; null when no modal is open.
+  const [v22TransferResponding, setV22TransferResponding] = useState(null)
   const [cascadeContext, setCascadeContext] = useState(null)
   const [evidenceNode, setEvidenceNode] = useState(null)
   const [parseContext, setParseContext] = useState(null)
@@ -2233,7 +2234,6 @@ export default function V2App() {
                     const isV22TransferCancelled = req.type === 'v22-transfer-cancelled'
                     const badgeColor = isRevocation || isDecline || isV22TransferDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : 'REQUEST'
-                    const isDecliningThisTransfer = isV22TransferRequest && v22DecliningTransfer?.notifId === req.id
                     return (
                     <div
                       key={req.id}
@@ -2348,11 +2348,12 @@ export default function V2App() {
                             canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
                           }
                         } else if (req.type === 'v22-transfer-request') {
-                          // Phase 9A.4 Gate C: do NOT dismiss on click — the
-                          // notification resolves only on Accept or Decline.
-                          // Actions render inline inside the row, so clicking
-                          // the body chrome is a no-op (keeps the inbox open).
-                          setShowInbox(true)
+                          // Phase 9A.5 Gate B (#77): notification is the entry
+                          // point; the decision happens in V22TransferResponseModal
+                          // following the Disclosure Response pattern. Do NOT
+                          // dismiss on click — the notification resolves only
+                          // when Accept or Decline is confirmed inside the modal.
+                          setV22TransferResponding(req)
                         } else if (req.type === 'v22-transfer-accepted' || req.type === 'v22-transfer-declined' || req.type === 'v22-transfer-cancelled') {
                           // Informational notifications — clicking dismisses.
                           updateRoleState(roleId, prev => ({
@@ -2432,8 +2433,9 @@ export default function V2App() {
                                             ? `${req.from.name} cancelled the transfer of ${req.asset?.name}.`
                                             : req.asset?.name || ''
                         }
-                        {/* Phase 9A.4 Gate C: inline note preview on a pending transfer request. */}
-                        {isV22TransferRequest && req.note && !isDecliningThisTransfer && (
+                        {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
+                            (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
+                        {isV22TransferRequest && req.note && (
                           <div style={{
                             marginTop: 6, padding: '6px 8px',
                             background: 'var(--bg-raised)', borderRadius: 4,
@@ -2441,81 +2443,6 @@ export default function V2App() {
                           }}>"{req.note}"</div>
                         )}
                       </div>
-                      {/* Phase 9A.4 Gate C: Accept/Decline action buttons on a
-                          v22-transfer-request, OR the decline-reason sub-form
-                          when the user has clicked Decline. */}
-                      {isV22TransferRequest && !isDecliningThisTransfer && (
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10, paddingLeft: 30 }}>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleV22TransferAccept(req) }}
-                            style={{
-                              flex: 1, padding: '6px 12px', borderRadius: 4,
-                              border: '1px solid var(--accent-green)',
-                              background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
-                              color: 'var(--accent-green)',
-                              fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                              letterSpacing: '0.06em', cursor: 'pointer',
-                            }}
-                          >ACCEPT</button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setV22DecliningTransfer({ notifId: req.id, reason: '' }) }}
-                            style={{
-                              flex: 1, padding: '6px 12px', borderRadius: 4,
-                              border: '1px solid var(--border)',
-                              background: 'transparent',
-                              color: 'var(--text-tertiary)',
-                              fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                              letterSpacing: '0.06em', cursor: 'pointer',
-                            }}
-                          >DECLINE</button>
-                        </div>
-                      )}
-                      {isDecliningThisTransfer && (
-                        <div style={{ marginTop: 10, paddingLeft: 30 }}>
-                          <textarea
-                            value={v22DecliningTransfer.reason}
-                            onChange={(e) => setV22DecliningTransfer((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
-                            placeholder="Reason (optional)"
-                            rows={2}
-                            autoFocus
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              width: '100%', padding: '6px 8px', borderRadius: 4,
-                              border: '1px solid var(--border)', background: 'var(--bg-card)',
-                              color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 11,
-                              outline: 'none', resize: 'vertical', lineHeight: 1.5,
-                            }}
-                          />
-                          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setV22DecliningTransfer(null) }}
-                              style={{
-                                flex: 1, padding: '6px 12px', borderRadius: 4,
-                                border: '1px solid var(--border)', background: 'transparent',
-                                color: 'var(--text-tertiary)',
-                                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                                letterSpacing: '0.06em', cursor: 'pointer',
-                              }}
-                            >BACK</button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                const reason = v22DecliningTransfer.reason
-                                setV22DecliningTransfer(null)
-                                handleV22TransferDecline(req, reason)
-                              }}
-                              style={{
-                                flex: 1, padding: '6px 12px', borderRadius: 4,
-                                border: '1px solid var(--accent-red)',
-                                background: 'color-mix(in srgb, var(--accent-red) 12%, transparent)',
-                                color: 'var(--accent-red)',
-                                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                                letterSpacing: '0.06em', cursor: 'pointer',
-                              }}
-                            >CONFIRM DECLINE</button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                     )
                   })
@@ -3415,6 +3342,29 @@ export default function V2App() {
             onComplete={handleV22TransferSubmit}
           />
         )}
+
+        {/* V2.2 Transfer Response modal (Phase 9A.5 Gate B #77) — opens from
+            the v22-transfer-request notification. Recipient accepts or
+            declines (with optional reason). Replaces the inline accept/
+            decline buttons that used to live in the notification row. */}
+        {v22TransferResponding && (() => {
+          const notif = v22TransferResponding
+          const seededAssets = buildV22SharedArtifacts().assets
+          const assetForNotif = (v22Provisionals.assets || []).find((a) => a.id === notif.assetId)
+            || seededAssets.find((a) => a.id === notif.assetId)
+          return (
+            <V22TransferResponseModal
+              notif={notif}
+              asset={assetForNotif || { name: notif.asset?.name }}
+              senderParty={notif.from?.name}
+              senderDate={notif.date}
+              note={notif.note}
+              onAccept={handleV22TransferAccept}
+              onDecline={handleV22TransferDecline}
+              onClose={() => setV22TransferResponding(null)}
+            />
+          )
+        })()}
 
         {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel.
             Phase 9A.3: ACTOR nodes now render the panel too (V22ActorPanel)

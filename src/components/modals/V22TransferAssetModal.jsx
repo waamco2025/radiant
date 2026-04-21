@@ -38,14 +38,18 @@ function resolutionState(pinInput, activeParty) {
     return { resolvedActor: null, tone: 'neutral', message: 'PINs start with "PIN-0x…" — keep typing…' }
   }
   const r = resolveActorByPin(trimmed, { activeParty })
-  if (!r.actor) {
-    return { resolvedActor: null, tone: 'error', message: 'Unknown PIN. Check the recipient and try again.' }
-  }
+  // Phase 9A.5 #79: split resolution errors into three semantically distinct
+  // messages. Self + Radiant Network cases can be specific without leaking
+  // information — the sender already knows their own PIN and the Radiant
+  // Network PIN is a pseudo-constant. Unknown PIN stays generic.
   if (r.isSelf) {
-    return { resolvedActor: null, tone: 'error', message: 'Cannot transfer to yourself — you already own this Asset.' }
+    return { resolvedActor: null, tone: 'error', message: 'You cannot transfer an Asset to yourself.' }
   }
   if (r.isNetwork) {
-    return { resolvedActor: null, tone: 'error', message: 'Cannot transfer to the Radiant Network (public directory). Use Disclosure to publish instead.' }
+    return { resolvedActor: null, tone: 'error', message: 'Assets cannot be transferred to the Radiant Network.' }
+  }
+  if (!r.actor) {
+    return { resolvedActor: null, tone: 'error', message: 'No actor was found at this PIN. Check the recipient and try again.' }
   }
   return { resolvedActor: r.actor, tone: 'success', message: null }
 }
@@ -84,14 +88,11 @@ export default function V22TransferAssetModal({
           lineHeight: 1, flexShrink: 0,
         }}>✓</span>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Phase 9A.5 #78: show party only. The platform knows parties, not
+              users or roles — surfacing "Bob @ GovCo / buyer" over-specifies. */}
           <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
-            Resolved: {resolvedActor.user || resolvedActor.party} @ {resolvedActor.party}
+            Resolved: {resolvedActor.party}
           </div>
-          {resolvedActor.role && (
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-              {resolvedActor.role}
-            </div>
-          )}
         </div>
       </div>
     )
@@ -200,7 +201,7 @@ export default function V22TransferAssetModal({
                 <InfoRow label="Current owner" value={asset?.owner || activeParty} />
                 <InfoRow label="Recipient" value={
                   <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>
-                    {resolvedActor?.user || resolvedActor?.party} @ {resolvedActor?.party}
+                    {resolvedActor?.party}
                   </span>
                 } />
                 {note.trim() && <InfoRow label="Note" value={<span style={{ fontStyle: 'italic' }}>"{note.trim()}"</span>} />}
