@@ -1,27 +1,34 @@
-// V22CreateAssetModal — Phase 9A.3.
+// V22CreateAssetModal — Phase 9A.3, rebuilt in Phase 9A.6 Gate B.
 //
-// Registers a new V2.2 Asset from a single file picked out of the actor's
-// Qualified Storage bucket. Per spec §3.2 an Asset = exactly one evidence
-// file; the filename is the display name (no separate name field).
+// Registers N Assets (N >= 1) in one flow. Each selected file becomes its
+// own V2.2 Asset. Per spec §3.2 an Asset = exactly one evidence file.
 //
-// Two-step flow:
-//   0  Select file  — opens V22QualifiedStoragePicker (mode="single")
-//   1  Review       — filename, size, mime, owner, registration timestamp
+// Three-step flow:
+//   0  Select files       — opens V22QualifiedStoragePicker (mode="multi").
+//                            Picker returns array of payloads; QS picks + local
+//                            uploads merge. Single-file is just N=1.
+//   1  Per-file review    — editable label per file, mime badge + size,
+//                            per-file hashing sequence (9A.6 #68), remove.
+//   2  Final review       — per-file summary list + aggregate credit cost.
 //
-// Nested-modal support: passing `nested` suppresses the backdrop and bumps
-// the QS picker's z-index so the parent modal's own z-index doesn't mask
-// the picker. Used by V22CreateClaimModal's inline "+ Register new Asset"
-// CTA (backlog #34 / Gate B).
+// Each Asset gets:
+//   • a filename-stem default display name (editable in step 1)
+//   • a mock sha256 hash computed during step 1's hashing sequence
+//   • its own _isNew reveal on the recipient canvas
 //
-// Submit: callers receive `{ file }` where file is the V22QualifiedStoragePicker
-// payload (uri/filename/size/mimeType/hash + display* siblings). V2App turns
-// that into a V2.2 Asset artifact via `makeAsset` + the ownership DA. The
-// modal itself doesn't mint ids or call factories — it stays a pure form.
+// Nested-modal support: `nested` suppresses the backdrop and bumps the QS
+// picker's z-index. V22CreateClaimModal and AmendClaimModal use this mode
+// for their inline "+ Register new Asset…" CTA.
+//
+// Submit: `onComplete({ files: [{ file, displayName, hash }] })`. The caller
+// (V2App) iterates and produces one Asset per entry via
+// `makeAssetRegistrationArtifacts`. Legacy single-file callers (none after
+// 9A.6, but preserved) can use the first entry.
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, FieldLabel, InfoRow, StepDots, CreditCostRow,
+  Btn, FieldLabel, InfoRow, StepDots, CreditCostRow, CopyBadge,
 } from './ModalShared'
 import V22QualifiedStoragePicker from './V22QualifiedStoragePicker.jsx'
 
@@ -33,11 +40,6 @@ function displaySize(file) {
   return `${(file.size / (1024 * 1024)).toFixed(2)} MB`
 }
 
-// Derive a display name from the filename: strip the extension, replace
-// separators with spaces. Assets in the seeded dataset use curated names
-// ("Power Regulation Module Datasheet" for `powerregulationmodule-datasheet.pdf`)
-// but Phase 9A.3's scope deliberately omits a separate name field — the
-// filename stem is what the user reads on the card.
 function derivedNameFromFilename(filename) {
   if (!filename) return ''
   return filename
@@ -47,63 +49,166 @@ function derivedNameFromFilename(filename) {
     .trim()
 }
 
+// Deterministic mock sha256-looking hex, seeded from filename + size so the
+// same file always produces the same mock hash. Real implementation would
+// hash file bytes — this is demo-grade per the 9A.6 task.
+function mockHashFor(file) {
+  const seed = `${file.filename || file.name || ''}::${file.size ?? file.bytes ?? 0}`
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = Math.imul(31, h) + seed.charCodeAt(i) | 0
+  // Expand 32-bit seed into 64-char hex via a tiny xorshift.
+  let state = h >>> 0 || 1
+  let out = ''
+  for (let i = 0; i < 64; i++) {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5
+    out += (state & 0xf).toString(16)
+  }
+  return `sha256:${out}`
+}
+
+// Phase 9A.6 Gate B (#68): per-file hashing sequence. Timing + motion
+// pattern-matches the V2.2 processing UIs (V22RunEvaluationModal's
+// processing stage), since no dedicated V2.1 HashingSequence reference
+// was provided for this phase.
+const HASH_DURATION_MS = 900
+
+function HashingRow({ phase, hashValue, onComplete, file }) {
+  const tickRef = useRef(null)
+  useEffect(() => {
+    if (phase !== 'hashing') return
+    const start = Date.now()
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      const elapsed = Date.now() - start
+      if (elapsed >= HASH_DURATION_MS) {
+        onComplete(mockHashFor(file))
+        return
+      }
+      // Rotate the scrolling hex chars for motion feel
+      tickRef.current = requestAnimationFrame(tick)
+    }
+    tickRef.current = requestAnimationFrame(tick)
+    return () => { cancelled = true; if (tickRef.current) cancelAnimationFrame(tickRef.current) }
+    // onComplete is intentionally excluded — the setter closure is stable for
+    // the duration we care about (one hashing tick).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
+
+  if (phase === 'pending') {
+    return (
+      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+        Pending
+      </span>
+    )
+  }
+  if (phase === 'hashing') {
+    // Motion: spinning hex dots + scrolling hex characters
+    const scroll = 'abcdef0123456789'
+    const offset = Math.floor((Date.now() / 80) % scroll.length)
+    const hexDance = scroll.slice(offset) + scroll.slice(0, offset)
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+      }}>
+        <span style={{
+          display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+          border: '1.5px solid var(--accent-indigo)',
+          borderTopColor: 'transparent',
+          animation: 'spin 600ms linear infinite',
+        }} />
+        <span style={{ letterSpacing: '0.04em', opacity: 0.75 }}>
+          HASHING {hexDance.slice(0, 6)}…
+        </span>
+      </span>
+    )
+  }
+  // complete
+  return (
+    <CopyBadge value={hashValue} truncated />
+  )
+}
+
 export default function V22CreateAssetModal({
   activeParty,
-  credits = Infinity,      // Phase 9A.6 Gate A (#65). Infinity when caller doesn't gate.
+  credits = Infinity,
   creditsPerAsset = 0,
-  nested = false,          // true when opened from inside another modal (Gate B)
+  nested = false,
   onClose,
-  onComplete,              // ({ file, displayName }) => void — V2App builds artifacts
+  onComplete,              // ({ files }) => void — files: [{ file, displayName, hash }]
 }) {
   const [step, setStep] = useState(0)
-  const [file, setFile] = useState(null)
+  // Each row: { id, file, label, hashPhase: 'pending'|'hashing'|'complete', hash }
+  const [rows, setRows] = useState([])
   const [showPicker, setShowPicker] = useState(false)
 
-  const displayName = derivedNameFromFilename(file?.filename)
+  const handlePickerSelect = (payload) => {
+    setShowPicker(false)
+    // Picker returns array in multi-mode; wrap singles for consistency.
+    const files = Array.isArray(payload) ? payload : [payload]
+    const newRows = files.map((f, i) => ({
+      id: `row-${Date.now()}-${i}-${(f.filename || 'file').replace(/[^\w.-]+/g, '_')}`,
+      file: f,
+      label: derivedNameFromFilename(f.filename),
+      hashPhase: 'hashing', // start hashing immediately after selection
+      hash: null,
+    }))
+    setRows(newRows)
+    setStep(1)
+  }
 
-  // QS picker overlay — the picker is itself a fixed full-screen surface,
-  // so rendering it as a sibling of the modal content is fine. Phase 9A.4
-  // preamble (defect 1): the previous `nested ? 10010 : 9999` ternary broke
-  // down in the nested case because the parent modal's Backdrop (z-index
-  // 10000) kept intercepting events even though V22CreateAssetModal
-  // short-circuits its own Backdrop while `showPicker` is true. Unconditional
-  // 10010 puts the picker above any plausible parent stack (Backdrop = 10000,
-  // nested modal = 10000 + modal-up animation, Tooltip body = 10100 which
-  // still wins because tooltips shouldn't land under picker chrome either).
+  const setRowLabel = (id, label) => {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, label: label.slice(0, 100) } : r))
+  }
+
+  const setRowHash = (id, hash) => {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, hashPhase: 'complete', hash } : r))
+  }
+
+  const removeRow = (id) => {
+    setRows(prev => prev.filter(r => r.id !== id))
+  }
+
   if (showPicker) {
     return (
       <V22QualifiedStoragePicker
         activeParty={activeParty}
-        mode="single"
-        onSelect={(payload) => {
-          setFile(payload)
-          setShowPicker(false)
-        }}
+        mode="multi"
+        onSelect={handlePickerSelect}
         onCancel={() => setShowPicker(false)}
         zIndex={10010}
       />
     )
   }
 
-  const canReview = !!file
-  const totalCost = creditsPerAsset
+  const allHashed = rows.length > 0 && rows.every(r => r.hashPhase === 'complete')
+  const allLabeled = rows.every(r => r.label.trim().length > 0)
+  const canReview = rows.length > 0 && allHashed && allLabeled
+  const totalCost = creditsPerAsset * rows.length
   const hasSufficientCredits = credits >= totalCost
 
   const handleRegister = () => {
-    if (!file) return
+    if (!canReview) return
     if (!hasSufficientCredits) return
-    onComplete?.({ file, displayName })
+    onComplete?.({
+      files: rows.map(r => ({
+        file: { ...r.file, hash: r.hash },
+        displayName: r.label.trim(),
+        hash: r.hash,
+      })),
+    })
   }
 
   const content = (
-    <Modal width={620}>
+    <Modal width={720}>
       <ModalHeader
-        title="Register Asset"
+        title={rows.length > 1 ? `Register ${rows.length} Assets` : 'Register Asset'}
         subtitle={
-          <>Register a new Asset under <strong style={{ color: 'var(--text-primary)' }}>{activeParty}</strong> from a file in Qualified Storage.</>
+          <>Register {rows.length > 1 ? `${rows.length} new Assets` : 'a new Asset'} under <strong style={{ color: 'var(--text-primary)' }}>{activeParty}</strong> from files in Qualified Storage.</>
         }
         step={step + 1}
-        totalSteps={2}
+        totalSteps={3}
         onClose={onClose}
       />
       <ModalBody>
@@ -115,82 +220,139 @@ export default function V22CreateAssetModal({
               border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
               fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
             }}>
-              Every V2.2 Asset references exactly one evidence file from Qualified Storage.
-              The file's filename becomes the Asset's display name; you can create Claims and
-              run parses against the new Asset immediately after registration.
+              Every V2.2 Asset references exactly one evidence file. Select one or many
+              — each file becomes its own Asset. You'll be able to edit display names
+              and watch each file get hashed before final confirmation.
             </div>
-
-            <FieldLabel label="Evidence file" required />
-
-            {file ? (
-              <div style={{
-                padding: '12px 14px', borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-card)',
-                display: 'flex', alignItems: 'center', gap: 12,
-              }}>
-                <span style={{
-                  fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                  padding: '3px 6px', borderRadius: 3, letterSpacing: '0.06em',
-                  color: 'var(--accent-green)',
-                  background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
-                }}>
-                  {(file.displayType || file.mimeType?.split('/')[1] || 'FILE').toUpperCase()}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {file.filename}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                    {displaySize(file)}{file.displayDate ? ` · ${file.displayDate}` : ''}
-                  </div>
-                </div>
-                <button
-                  onClick={() => { setFile(null); setShowPicker(true) }}
-                  style={{
-                    background: 'transparent', border: '1px solid var(--border)',
-                    borderRadius: 4, padding: '5px 10px', fontSize: 10,
-                    fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-                    cursor: 'pointer', letterSpacing: '0.04em',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--border-hover)' }}
-                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
-                >
-                  ✕ Change file
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowPicker(true)}
-                style={{
-                  width: '100%', padding: '20px 0', borderRadius: 8, cursor: 'pointer',
-                  border: '1.5px dashed var(--border)',
-                  background: 'var(--bg-card)', color: 'var(--text-tertiary)',
-                  fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  transition: 'border-color 150ms, color 150ms, background 150ms',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = 'var(--accent-green)'
-                  e.currentTarget.style.color = 'var(--accent-green)'
-                  e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = 'var(--border)'
-                  e.currentTarget.style.color = 'var(--text-tertiary)'
-                  e.currentTarget.style.background = 'var(--bg-card)'
-                }}
-              >
-                <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 11.5a3.5 3.5 0 01-.5-6.96A5 5 0 0113 6a4 4 0 01-1 7.9H4z" />
-                </svg>
-                Select from Qualified Storage
-              </button>
-            )}
+            <FieldLabel label="Evidence files" required />
+            <button
+              onClick={() => setShowPicker(true)}
+              style={{
+                width: '100%', padding: '20px 0', borderRadius: 8, cursor: 'pointer',
+                border: '1.5px dashed var(--border)',
+                background: 'var(--bg-card)', color: 'var(--text-tertiary)',
+                fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                transition: 'border-color 150ms, color 150ms, background 150ms',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--accent-green)'
+                e.currentTarget.style.color = 'var(--accent-green)'
+                e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-green) 4%, transparent)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-tertiary)'
+                e.currentTarget.style.background = 'var(--bg-card)'
+              }}
+            >
+              <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 11.5a3.5 3.5 0 01-.5-6.96A5 5 0 0113 6a4 4 0 01-1 7.9H4z" />
+              </svg>
+              Open Qualified Storage
+            </button>
           </>
         )}
 
         {step === 1 && (
+          <>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+              {rows.length} file{rows.length === 1 ? '' : 's'} selected. Each file's display name
+              defaults to its filename stem — edit to taste. The hash is computed as each file
+              registers.
+            </div>
+            <div style={{
+              maxHeight: 380, overflowY: 'auto',
+              border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--bg-card)',
+            }}>
+              {rows.map((r, i) => (
+                <div
+                  key={r.id}
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: i < rows.length - 1 ? '1px solid var(--border-faint)' : 'none',
+                    display: 'flex', flexDirection: 'column', gap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      padding: '3px 6px', borderRadius: 3, letterSpacing: '0.06em',
+                      color: 'var(--accent-green)',
+                      background: 'color-mix(in srgb, var(--accent-green) 12%, transparent)',
+                    }}>
+                      {(r.file.displayType || r.file.mimeType?.split('/')[1] || 'FILE').toUpperCase()}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.file.filename}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                        {displaySize(r.file)}{r.file.source === 'local' ? ' · Uploaded' : ''}
+                      </div>
+                    </div>
+                    <HashingRow
+                      phase={r.hashPhase}
+                      hashValue={r.hash}
+                      file={r.file}
+                      onComplete={(h) => setRowHash(r.id, h)}
+                    />
+                    <button
+                      onClick={() => removeRow(r.id)}
+                      style={{
+                        background: 'transparent', border: 'none',
+                        color: 'var(--text-dim)', cursor: 'pointer',
+                        fontSize: 14, padding: '0 4px', lineHeight: 1,
+                      }}
+                      title="Remove this file from the batch"
+                      aria-label="Remove"
+                    >✕</button>
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={r.label}
+                      onChange={(e) => setRowLabel(r.id, e.target.value)}
+                      placeholder="Display name"
+                      maxLength={100}
+                      style={{
+                        width: '100%', padding: '7px 10px', borderRadius: 6,
+                        border: `1px solid ${r.label.trim() ? 'var(--border)' : 'var(--accent-red)'}`,
+                        background: 'var(--bg-deep)',
+                        color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontSize: 12,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {!allHashed && (
+              <div style={{
+                marginTop: 10, fontSize: 11, color: 'var(--accent-amber)',
+                fontStyle: 'italic', lineHeight: 1.5,
+              }}>
+                Hashing in progress — Continue enables when every file is hashed.
+              </div>
+            )}
+            <button
+              onClick={() => setShowPicker(true)}
+              style={{
+                width: '100%', padding: '9px 14px', marginTop: 10, borderRadius: 6, cursor: 'pointer',
+                border: '1px dashed var(--accent-green)',
+                background: 'transparent',
+                color: 'var(--accent-green)',
+                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}
+            >
+              + Add more files…
+            </button>
+          </>
+        )}
+
+        {step === 2 && (
           <div>
             <div style={{
               padding: 18, borderRadius: 8,
@@ -200,47 +362,79 @@ export default function V22CreateAssetModal({
                 fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 letterSpacing: '0.12em', color: 'var(--text-tertiary)',
                 marginBottom: 10,
-              }}>NEW ASSET</div>
-              <div style={{
-                fontSize: 15, fontWeight: 700, color: 'var(--text-primary)',
-                marginBottom: 14, lineHeight: 1.3,
-              }}>
-                {displayName || file?.filename || '—'}
-              </div>
-
-              <InfoRow label="Filename" value={file?.filename} />
-              <InfoRow label="Size" value={displaySize(file)} />
-              <InfoRow label="MIME" value={file?.mimeType || '—'} />
+              }}>{rows.length > 1 ? 'NEW ASSETS' : 'NEW ASSET'}</div>
+              <InfoRow label="Count" value={String(rows.length)} />
               <InfoRow label="Owner" value={activeParty} />
               <InfoRow label="Registration" value="On submit" />
+            </div>
+            <div style={{
+              marginTop: 12,
+              borderRadius: 6, overflow: 'hidden',
+              border: '1px solid var(--border)', background: 'var(--bg-deep)',
+            }}>
+              {rows.map((r, i) => (
+                <div key={r.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 10px',
+                  borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                    background: 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)',
+                    color: 'var(--accent-indigo)', fontFamily: 'var(--font-mono)',
+                  }}>ASSET</span>
+                  <span style={{
+                    fontSize: 11, color: 'var(--text-primary)', flex: 1,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {r.label.trim() || r.file.filename}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                  }}>
+                    {displaySize(r.file)}
+                  </span>
+                </div>
+              ))}
             </div>
             {creditsPerAsset > 0 && (
               <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
             )}
             <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-              The Asset will render on your canvas with a NEW badge and connect to you
-              via an internal (Full) Disclosure Agreement. No counterparty acceptance is
-              required — Asset registration is unilateral.
+              {rows.length > 1 ? 'Each Asset' : 'The Asset'} will render on your canvas with a NEW badge
+              and connect to you via an internal (Full) Disclosure Agreement. No counterparty
+              acceptance is required — Asset registration is unilateral.
             </div>
           </div>
         )}
       </ModalBody>
       <ModalFooter>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step > 0 && <Btn label="← Back" onClick={() => setStep(0)} />}
-          <StepDots current={step} total={2} />
+          {step > 0 && <Btn label="← Back" onClick={() => setStep(s => Math.max(0, s - 1))} />}
+          <StepDots current={step} total={3} />
         </div>
         {step === 0 && (
           <Btn
             label="Review →"
             accent
-            disabled={!canReview}
+            disabled={rows.length === 0}
             onClick={() => setStep(1)}
           />
         )}
         {step === 1 && (
           <Btn
-            label={hasSufficientCredits ? 'Register Asset' : 'Insufficient Credits'}
+            label="Review →"
+            accent
+            disabled={!canReview}
+            onClick={() => setStep(2)}
+          />
+        )}
+        {step === 2 && (
+          <Btn
+            label={
+              !hasSufficientCredits ? 'Insufficient Credits'
+                : rows.length > 1 ? `Register ${rows.length} Assets` : 'Register Asset'
+            }
             accent
             disabled={!hasSufficientCredits}
             onClick={handleRegister}

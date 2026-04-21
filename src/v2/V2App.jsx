@@ -673,33 +673,52 @@ export default function V2App() {
   // pan-to via the standard reveal pipeline. Returns the new Asset id so
   // nested callers (Create Claim's inline Register-new-Asset CTA) can
   // auto-select the fresh row.
-  const handleV22CreateAssetSubmit = useCallback(({ file, displayName, _nested = false } = {}) => {
-    if (!file) return null
-    const artifacts = makeAssetRegistrationArtifacts({
-      ownerParty: activeRole.party,
-      ownerDot: activeRole.partyDot,
-      file,
-      name: displayName,
-    })
+  // Phase 9A.6 Gate B (#66): multi-file Asset registration. Payload now
+  // `{ files: [{ file, displayName, hash }] }`. Single-file remains the
+  // N=1 special case — the legacy shape `{ file, displayName }` is still
+  // accepted for callers that haven't migrated. Returns the first new
+  // Asset id (legacy) or an array of ids when nested (for Claim/Amend
+  // pickers that auto-select all N new Assets).
+  const handleV22CreateAssetSubmit = useCallback((payload) => {
+    if (!payload) return null
+    const files = Array.isArray(payload.files)
+      ? payload.files
+      : payload.file
+        ? [{ file: payload.file, displayName: payload.displayName, hash: payload.hash }]
+        : []
+    if (files.length === 0) return null
+    const _nested = !!payload._nested
+    const newAssets = []
+    const newOwnershipDAs = []
+    for (const row of files) {
+      const fileWithHash = row.hash ? { ...row.file, hash: row.hash } : row.file
+      const artifacts = makeAssetRegistrationArtifacts({
+        ownerParty: activeRole.party,
+        ownerDot: activeRole.partyDot,
+        file: fileWithHash,
+        name: row.displayName,
+      })
+      newAssets.push(artifacts.asset)
+      newOwnershipDAs.push(artifacts.ownershipDa)
+    }
     setV22Provisionals((prev) => ({
       ...prev,
-      assets: [...(prev.assets || []), artifacts.asset],
-      disclosureAgreements: [...prev.disclosureAgreements, artifacts.ownershipDa],
+      assets: [...(prev.assets || []), ...newAssets],
+      disclosureAgreements: [...prev.disclosureAgreements, ...newOwnershipDAs],
     }))
-    // Phase 9A.6 Gate A (#65): debit credits on registration. Modal gates the
-    // submit button on sufficient credits so this should never go negative,
-    // but Math.max guards against race conditions with the "reset to 0" affordance.
-    setCredits(c => Math.max(0, c - CREDITS_PER_ASSET))
+    // Phase 9A.6 Gate A (#65): debit per Asset. Math.max safety net.
+    setCredits(c => Math.max(0, c - CREDITS_PER_ASSET * newAssets.length))
     setV22RegisteringAsset(null)
-    // Suppress pan when nested inside Create Claim — user is still in a modal.
+    const firstId = newAssets[0].id
+    // Suppress pan when nested — user is still in a modal.
     if (!_nested) {
-      setSel(artifacts.asset.id)
+      setSel(firstId)
       setForcePanelTab(null)
       setForceExpandSda(null)
-      setV22PanToClaimId(artifacts.asset.id)
-      setV22RecentlyAcceptedAssetId(artifacts.asset.id)
+      setV22PanToClaimId(firstId)
+      setV22RecentlyAcceptedAssetId(firstId)
     }
-    return artifacts.asset.id
+    return newAssets.length > 1 ? newAssets.map(a => a.id) : firstId
   }, [activeRole.party, activeRole.partyDot])
 
   // Phase 9A.3: V2.2 Claim creation. Produces a new Claim + Actor→Claim

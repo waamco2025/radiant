@@ -35,12 +35,18 @@ export default function AmendClaimModal({
 
   const handleNestedAssetComplete = (payload) => {
     setShowNestedRegister(false)
-    const newAssetId = onNestedAssetCreated?.(payload)
-    // V2App's parent render may not yet include the new Asset in
-    // candidateAssets by the time we check; set selected optimistically so the
-    // user sees their new Asset ticked as soon as the parent re-renders.
-    if (newAssetId) {
-      setSelected((p) => (p.includes(newAssetId) ? p : [...p, newAssetId]))
+    const newIds = onNestedAssetCreated?.(payload)
+    // Phase 9A.6 Gate B (#66): may be an array for multi-file nested registers.
+    const ids = Array.isArray(newIds) ? newIds : (newIds ? [newIds] : [])
+    if (ids.length > 0) {
+      // V2App's parent render may not yet include the new Assets in
+      // candidateAssets by the time we check; set selected optimistically so
+      // the user sees their new Assets ticked as soon as the parent re-renders.
+      setSelected((p) => {
+        const next = [...p]
+        for (const id of ids) if (!next.includes(id)) next.push(id)
+        return next
+      })
     }
   }
 

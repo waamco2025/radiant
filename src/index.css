@@ -407,6 +407,12 @@ body {
   background: rgba(212, 175, 55, 0.06);
 }
 
+/* Phase 9A.6 Gate B (#68): hashing-row spinner. */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ═══ Detail Panel slide-in ═══ */
 @keyframes detail-panel-slide-in {
   from { transform: translateX(100%); opacity: 0; }

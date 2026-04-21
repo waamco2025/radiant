@@ -112,7 +112,8 @@ A registered evidence file. Contains the file's URI, hash, size, MIME type, and 
 
 - Visual label: `ASSET` (small mono tag in card header).
 - Identity: anchored by a DOT object (see §2.6). The Detail Panel's "DOT" row surfaces `asset.dot.pin` (the Asset's own DOT identifier). The "Hash" row surfaces `asset.file.hash` (identical to `asset.dot.hash` for Assets). The "URI" row surfaces `asset.file.uri`. `asset.dot.ownerDid` is also accessible on the artifact but not rendered in the panel UI yet — provenance lineage is a future phase.
-- Key JSON fields: `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`, `dot`.
+- Display name: `asset.name` — the user-facing display name rendered on the card and panel header. Default is the filename stem (e.g., `power-supply-spec.pdf` → `power supply spec`); the registration modal exposes an editable per-file input so the user can refine the default before committing.
+- Key JSON fields: `name`, `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`, `dot`.
 - Child layer: intentionally empty in V2.2 (child layer code retained but unused — see §5).
 - Can be referenced by: one or more Claims owned by the same actor.
 - Cannot be disclosed directly — only Claims can be disclosed.

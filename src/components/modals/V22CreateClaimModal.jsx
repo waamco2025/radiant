@@ -82,15 +82,17 @@ export default function V22CreateClaimModal({
   }
 
   // Inline "Register new Asset" nested flow. On completion, V2App hands
-  // back the new Asset id via `onNestedAssetCreated` so we can auto-select
-  // it here without the user having to tick a checkbox.
+  // back either a single new Asset id (single-file) or an array of ids
+  // (multi-file, Phase 9A.6 Gate B #66). Auto-select all new Assets in the
+  // picker so the user doesn't need to tick them manually.
   const handleNestedAssetComplete = (payload) => {
     setShowNestedRegister(false)
-    const newAssetId = onNestedAssetCreated?.(payload)
-    if (newAssetId) {
+    const newIds = onNestedAssetCreated?.(payload)
+    const ids = Array.isArray(newIds) ? newIds : (newIds ? [newIds] : [])
+    if (ids.length > 0) {
       setSelected(prev => {
         const next = new Set(prev)
-        next.add(newAssetId)
+        for (const id of ids) next.add(id)
         return next
       })
     }

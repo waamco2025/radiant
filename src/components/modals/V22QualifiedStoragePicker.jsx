@@ -193,6 +193,153 @@ function selectedFileToV22Payload(file) {
   }
 }
 
+/* ─── Local Storage panel (Phase 9A.6 Gate B / #67) ─── */
+function LocalStoragePanel({ localFiles, selected, mode, onChoose, onToggle, onRemove }) {
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useCallback((el) => { if (el) el.value = '' }, [])
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (e.dataTransfer?.files?.length) onChoose(e.dataTransfer.files)
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)' }}>
+        <label
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 8, padding: '28px 20px', borderRadius: 10, cursor: 'pointer',
+            border: `1.5px dashed ${dragOver ? 'var(--accent-indigo)' : 'var(--border)'}`,
+            background: dragOver
+              ? 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)'
+              : 'var(--bg-card)',
+            transition: 'all 150ms',
+          }}
+        >
+          <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="var(--accent-indigo)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+            Drop files here or click to upload
+          </div>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+            Files will be uploaded to your Qualified Storage and then registered as Assets.
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => e.target.files?.length && onChoose(e.target.files)}
+          />
+        </label>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 24px' }}>
+        {localFiles.length === 0 ? (
+          <div style={{
+            padding: '40px 0', textAlign: 'center', fontSize: 12,
+            color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+          }}>
+            No uploaded files yet. Drop files above to get started.
+          </div>
+        ) : (
+          localFiles.map(file => {
+            const isSelected = selected.has(file.id)
+            const isReady = file.status === 'ready'
+            return (
+              <div
+                key={file.id}
+                onClick={() => isReady && onToggle(file.id)}
+                style={{
+                  padding: '10px 0', display: 'flex', alignItems: 'center', gap: 10,
+                  borderBottom: '1px solid var(--border)',
+                  cursor: isReady ? 'pointer' : 'default',
+                  opacity: isReady ? 1 : 0.7,
+                  background: isSelected ? 'color-mix(in srgb, var(--accent-green) 4%, transparent)' : 'transparent',
+                  transition: 'background 100ms',
+                }}
+              >
+                {isReady && mode === 'single' ? (
+                  <div style={{
+                    width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                    border: `2px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />}
+                  </div>
+                ) : isReady ? (
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                    border: `1.5px solid ${isSelected ? 'var(--accent-green)' : 'var(--border)'}`,
+                    background: isSelected ? 'var(--accent-green)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && <span style={{ fontSize: 11, color: '#fff', lineHeight: 1 }}>✓</span>}
+                  </div>
+                ) : (
+                  <div style={{ width: 18, height: 18, flexShrink: 0 }} />
+                )}
+                <FileIcon type={(file.name.split('.').pop() || '').toLowerCase()} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {file.name}
+                  </div>
+                  {!isReady && (
+                    <div style={{
+                      width: '100%', height: 3, marginTop: 6, borderRadius: 2,
+                      background: 'var(--bg-raised)', overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        width: `${Math.round(file.progress * 100)}%`, height: '100%',
+                        background: 'var(--accent-indigo)',
+                        transition: 'width 60ms linear',
+                      }} />
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', width: 80, textAlign: 'right' }}>
+                  {file.size}
+                </span>
+                {isReady ? (
+                  <span style={{
+                    fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '2px 6px', borderRadius: 3,
+                    letterSpacing: '0.06em',
+                    color: 'var(--accent-indigo)',
+                    background: 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)',
+                  }}>JUST UPLOADED</span>
+                ) : (
+                  <span style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-dim)',
+                  }}>uploading…</span>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove(file.id) }}
+                  style={{
+                    background: 'transparent', border: 'none',
+                    color: 'var(--text-dim)', cursor: 'pointer',
+                    fontSize: 14, padding: '0 4px', lineHeight: 1,
+                  }}
+                  aria-label="Remove"
+                >✕</button>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════════════ */
@@ -208,6 +355,13 @@ export default function V22QualifiedStoragePicker({
   const [currentPath, setCurrentPath] = useState('/')
   const [selected, setSelected] = useState(new Set())
   const [previewFile, setPreviewFile] = useState(null)
+
+  // Phase 9A.6 Gate B (#67): Local Storage tab. Tab state + in-session
+  // in-memory "uploaded" files. Real implementation would push to the
+  // user's QS bucket; demo just synthesizes metadata + a mock uri.
+  const [source, setSource] = useState('qs') // 'qs' | 'local'
+  const [localFiles, setLocalFiles] = useState([])
+  // Each localFile entry: { id, name, size, type, status: 'uploading'|'ready', progress: 0..1 }
 
   const folders = data.folders[currentPath] || []
   const allFiles = data.files[currentPath] || []
@@ -264,13 +418,82 @@ export default function V22QualifiedStoragePicker({
     path: `${data.bucket}${currentPath}/${f.name}`,
   }))
 
+  // Phase 9A.6 Gate B (#67): local files selected alongside QS picks.
+  // Local-file ids are prefixed `local-` so they don't collide with QS
+  // filenames in the `selected` Set.
+  const selectedLocalFiles = localFiles.filter(f => f.status === 'ready' && selected.has(f.id))
+
+  const handleFilesChosen = useCallback((fileList) => {
+    const newFiles = Array.from(fileList).map((f, i) => {
+      const ext = (f.name.split('.').pop() || '').toLowerCase()
+      const displayType = ext || 'FILE'
+      const sizeKb = Math.max(1, Math.round(f.size / 1024))
+      const displaySize = sizeKb >= 1024
+        ? `${(sizeKb / 1024).toFixed(1)} MB`
+        : `${sizeKb} KB`
+      return {
+        id: `local-${Date.now()}-${i}-${f.name.replace(/[^\w.-]+/g, '_')}`,
+        name: f.name,
+        size: displaySize,
+        bytes: f.size,
+        type: displayType,
+        date: new Date().toISOString().slice(0, 10),
+        status: 'uploading',
+        progress: 0,
+      }
+    })
+    if (newFiles.length === 0) return
+    setLocalFiles(prev => [...prev, ...newFiles])
+    // Simulate upload — 500–800ms per file, staggered progress updates.
+    newFiles.forEach((entry) => {
+      const durationMs = 500 + Math.round(Math.random() * 300)
+      const started = Date.now()
+      const tick = () => {
+        const elapsed = Date.now() - started
+        const p = Math.min(1, elapsed / durationMs)
+        setLocalFiles(prev => prev.map(f =>
+          f.id === entry.id
+            ? (p >= 1 ? { ...f, status: 'ready', progress: 1 } : { ...f, progress: p })
+            : f,
+        ))
+        if (p < 1) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+  }, [])
+
+  const removeLocalFile = useCallback((id) => {
+    setLocalFiles(prev => prev.filter(f => f.id !== id))
+    setSelected(prev => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }, [])
+
+  const selectedCount = selected.size
+
   const handleSelect = useCallback(() => {
-    if (selectedFiles.length === 0) return
-    const payloads = selectedFiles.map(selectedFileToV22Payload)
-    // 'single' mode hands back the lone payload (unwrapped); 'multi' hands
-    // back the array. Matches the V2.1 picker's convention.
-    onSelect(mode === 'single' ? payloads[0] : payloads)
-  }, [selectedFiles, onSelect, mode])
+    if (selectedCount === 0) return
+    // Map QS picks
+    const qsPayloads = selectedFiles.map(selectedFileToV22Payload)
+    // Map local picks — synthesize a demo URI under the party's bucket /uploads.
+    const bucketUploadBase = `${data.bucket}/uploads`
+    const localPayloads = selectedLocalFiles.map(f => ({
+      uri: `${bucketUploadBase}/${f.name}`,
+      filename: f.name,
+      size: f.bytes,
+      mimeType: MIME_BY_EXT[(f.name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream',
+      hash: null,
+      displaySize: f.size,
+      displayType: f.type,
+      displayDate: f.date,
+      source: 'local',
+    }))
+    const all = [...qsPayloads, ...localPayloads]
+    onSelect(mode === 'single' ? all[0] : all)
+  }, [selectedFiles, selectedLocalFiles, data.bucket, onSelect, mode, selectedCount])
 
   // Escape handler — captures at document level so nested picker-inside-
   // modal usage still escapes the picker before the modal's own Backdrop
@@ -354,6 +577,61 @@ export default function V22QualifiedStoragePicker({
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
+          {/* Phase 9A.6 Gate B (#67): Source tabs — Qualified Storage + Local Storage */}
+          <div style={{
+            display: 'flex', gap: 2, padding: '8px 8px 0',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-deep)',
+            flexShrink: 0,
+          }}>
+            {[
+              { id: 'qs', label: 'Qualified Storage', color: 'var(--accent-green)' },
+              { id: 'local', label: 'Local Storage', color: 'var(--accent-indigo)' },
+            ].map(tab => {
+              const active = source === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setSource(tab.id)}
+                  style={{
+                    padding: '10px 18px', border: 'none',
+                    background: active ? 'var(--bg-surface)' : 'transparent',
+                    color: active ? tab.color : 'var(--text-dim)',
+                    fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: active ? 700 : 500,
+                    letterSpacing: '0.04em', cursor: 'pointer',
+                    borderTopLeftRadius: 6, borderTopRightRadius: 6,
+                    borderBottom: active ? `2px solid ${tab.color}` : '2px solid transparent',
+                    transition: 'all 120ms',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.color = 'var(--text-secondary)' }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.color = 'var(--text-dim)' }}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+          {source === 'local' ? (
+            <LocalStoragePanel
+              localFiles={localFiles}
+              selected={selected}
+              mode={mode}
+              onChoose={handleFilesChosen}
+              onToggle={(id) => {
+                setSelected(prev => {
+                  const next = new Set(prev)
+                  if (mode === 'single') {
+                    if (next.has(id)) { next.delete(id) } else { next.clear(); next.add(id) }
+                  } else {
+                    if (next.has(id)) { next.delete(id) } else { next.add(id) }
+                  }
+                  return next
+                })
+              }}
+              onRemove={removeLocalFile}
+            />
+          ) : (
+          <>
           {/* Breadcrumb */}
           <div style={{
             padding: '10px 24px',
@@ -623,6 +901,8 @@ export default function V22QualifiedStoragePicker({
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
 
