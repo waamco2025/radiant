@@ -3535,7 +3535,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.0 &middot; Changelog
+          v0.9.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3582,6 +3582,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.1', date: '2026-04-20', label: 'Phase 9A.5', items: [
+                  'Transfer accept now draws ownership edge to the recipient\'s Actor node (demo-blocking fix)',
+                  'Transfer accept/decline moved into V22TransferResponseModal — inline notification buttons replaced by modal response (matches Disclosure Request pattern)',
+                  'Transfer "Resolved" chip now shows party name only; PIN errors split into three distinct messages (self / Radiant Network / unknown)',
+                  'Redundant Actor → Claim edge removed (ownership cascades through referenced Assets)',
+                  'Disclosure Response Asset picker now defaults to zero-selected',
+                  'architecture-spec.md §2.6 expands "DID" (Decentralized Identifier) on first use',
+                ]},
                 { version: '0.9.0', date: '2026-04-20', label: 'Phase 9A.4', items: [
                   'Transferring process shipped — seventh and final platform process, completing the 7-process demo',
                   'Asset ownership can now be transferred between parties via Transfer action on Asset cards/panels',

@@ -134,9 +134,18 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Context:** Card-level animation that played when a provisional node transitioned to disclosed (active). Distinct from backlog #9 (edge dashed-to-solid animation) — this is the node-card transform/reveal. Pairing both would give a full-fidelity provisional→active transition. Reference V2.1 backups for the original implementation.
 - **Proposed fix:** Reinstate the V2.1 card transform keyframes in `AssetNode.jsx` (or CSS sibling). Trigger on `_showAsProvisional` flipping false after `handleV22Accept`.
 
+### 76. Transfer accept — ownership edge on recipient canvas
+- **Status:** ✅ Complete (Phase 9A.5 Gate A). On transfer accept, `handleV22TransferAccept` now emits a replacement ownership DA (`da-own-<assetId>`) with grantor = recipient. Previously the seeded DA still had grantor = sender, so `buildViewForActor` filtered it out of the recipient's view and no Actor → Asset edge derived. `mergeById` in `mergeProvisionals` handles id-based replacement. Runtime-verified against `getV22DataForRole` — pre-fix: null ownership edge; post-fix: `actor-govco → asset-prm-thermal`.
+
+### 83. Claim-to-owner edge redundancy
+- **Status:** ✅ Complete (Phase 9A.5 Gate C). Removed the Actor → Claim ownership edge branch from `deriveAgreementEdges`. Ownership cascades through referenced Assets (spec §3.4 requires `referencedAssetIds.length >= 1` on every Claim), so the Actor → Claim edge was visually redundant. Ownership DA stays in state for provenance; it just no longer draws a canvas edge. Verified: Alice's canvas now has 0 Actor → Claim edges.
+
 ---
 
 ## Detail Panels
+
+### 87. Raw JSON tab on expanded Detail Panel modal
+- **Status:** ✅ Verified (Phase 9A.5 Gate C). No code change required. The expanded Detail Panel modal referenced in the original task (an `ExpandedArtifactModal`-style surface with a raw-JSON tab) does not exist in the current V2.2 codebase — it was removed during Phase 8 cleanup. Data layer confirmed correct: `dot.lineage[]` populates properly on transfer accept + decline (verified via `makeDotObject` + `makeTransferRecord` exercise). Lineage rendering in Detail Panels is already tracked separately as #74 (Provenance lineage UI) — that's the surface where the lineage will actually render. When #74 is picked up, the implementer should use `JSON.stringify(asset.dot.lineage, null, 2)` (or an equivalent structured list) to surface lineage entries.
 
 ### 64. Asset DOT / hash / URI click-to-copy badge
 - **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Matches the PIN treatment used elsewhere in the app. Null-value guard (`value ? <CopyBadge ... /> : '—'`) handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation. Per spec §3.2 the Asset has no distinct DOT — the file hash is the true per-Asset cryptographic identifier; the "DOT" label on the Asset panel refers to the party-level owner DOT.
@@ -214,15 +223,21 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Proposed fix:** Reuse V2App's existing `credits` + `setCredits` state. Add a `CREDITS_PER_ASSET` + `CREDITS_PER_CLAIM` constant set near the top of the file. Gate submit on sufficient credits in both modals; render a credit-cost row in the review step matching V2.1's treatment. V2.2's other unilateral flows (Parse, self-evaluate) remain free per current behaviour; only Registering + Claiming get charged.
 
 ### 70. Asset hierarchy — Asset-from-Asset registration
-- **Source:** Phase 9A.3 QA — surfaces supply-chain / Program modelling needs.
+- **Source:** Phase 9A.3 QA — surfaces supply-chain / Program modelling needs. #84 consolidated into this item in 9A.5 (V1-era "register an Asset off another Asset" pattern is the same requirement in a different vocabulary).
 - **Scope:** Medium
 - **Priority:** **Blocked on design decision**
-- **Context:** Enables structures like "Sentinel-4 Program" as a parent Asset with sub-Assets (individual modules, subsystems, mission-critical items). Today Assets are flat — all siblings under the Actor. Hierarchy would let users model Programs / Missions / supply chains with first-class parent→child Asset relationships.
+- **Context:** Enables structures like "Sentinel-4 Program" as a parent Asset with sub-Assets (individual modules, subsystems, mission-critical items). Today Assets are flat — all siblings under the Actor. Hierarchy would let users model Programs / Missions / supply chains with first-class parent→child Asset relationships. Concrete UX requirement from V1-era behaviour: a user should be able to open an existing Asset's panel and register a new Asset "beneath" it (the child Asset inherits the parent relationship automatically).
 - **Design decision needed before build.** Three candidate models:
   - (a) Add `parentAssetId` field to Asset schema (spec §3.2 extension). Canvas renders parent-first, child indented. Query: all Assets with this parent.
   - (b) View-layer grouping only — no data-model change. Assets stay flat in storage, but the view builder groups them by `asset.metadata.parentAssetId` if present. Minimal blast radius.
   - (c) New edge type: `ParentAsset` edge. Fits the existing "everything is an edge" principle. Requires edge-derivation + rendering work.
 - **Andrew to choose before scoping implementation.**
+
+### 82. Parse Result DOT + layer placement
+- **Source:** Phase 9A.5 planning — deferred due to missing architectural decision.
+- **Scope:** Medium
+- **Priority:** **Design blocker**
+- **Context:** Parse Results today are parent-layer nodes without a DOT (only Assets, Claims, and Eval Results carry `dot` per spec §2.6). Open questions: (a) should Parse Results also have DOTs (would make them first-class identity-anchored artifacts, enabling Parse Result transfer + provenance lineage)? (b) should Parse Results live on a child layer under their source Asset rather than the parent layer (they're always derived, never standalone)? Both questions blocked on client decision — DOT semantics touch canon X.1–X.10 and layer placement touches the canvas density story.
 
 ### 17. Terminology reconciliation with client canon
 - **Source:** Andrew's client feedback post-spec-review
@@ -341,11 +356,35 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Priority:** Low
 - **Context:** Demo behaviour: pending transfers stay pending until the recipient accepts / declines or the sender cancels. Real implementation would need a configurable timeout (e.g., 14 days) after which pending transfers auto-decline. Also: a UI cue in the sender's TRANSFERRING badge showing days-until-timeout.
 
+### 77. Transfer accept/decline response modal
+- **Status:** ✅ Complete (Phase 9A.5 Gate B). New `V22TransferResponseModal.jsx` replaces the inline notification Accept/Decline buttons + decline-reason textarea. Matches the established V2.2 convention (notification is the entry point; the decision happens in a modal following `CombinedResponseModal`). Two phases: Decide → Reason (decline path only). Removed `v22DecliningTransfer` state and the inline UI blocks from the notification row. Spec §11.7 updated accordingly.
+
+### 78. Transfer modal "Resolved" box shows party only
+- **Status:** ✅ Complete (Phase 9A.5 Gate B). `V22TransferAssetModal`'s resolved-recipient chip now shows "Resolved: {party}" only — not "{user} @ {party}" + role. The platform knows parties, not people or roles. Review-step InfoRow also updated. CombinedRequestModal's resolution chip was already party-only.
+
+### 79. PIN resolution error messaging split
+- **Status:** ✅ Complete (Phase 9A.5 Gate B). `V22TransferAssetModal` now surfaces three semantically distinct messages for PIN resolution failures: (self) "You cannot transfer an Asset to yourself."; (Radiant Network) "Assets cannot be transferred to the Radiant Network."; (unknown) "No actor was found at this PIN. Check the recipient and try again." Self + Radiant Network cases are safe to message specifically because they're about the sender's own data; the unknown case stays generic to preserve the no-info-leak principle.
+
+### 80. Accepted-transfer animation sequence on both canvases
+- **Source:** Phase 9A.5 planning — deferred. Pairs with #71 and the broader animation-restoration phase.
+- **Scope:** Medium–Large
+- **Priority:** Medium
+- **Context:** On transfer accept, the recipient-side reveal (pan-to + NEW badge) works; the sender-side UX is abrupt — the Asset vanishes from the sender's canvas without a retreat animation. Target: choreographed sequence on both canvases — sender canvas shows the Asset fading out with a short "transferred" micro-animation; recipient canvas shows the Asset arriving with a reveal pulse. Inventory V2.1 backup animations before rebuilding; there may be reusable patterns from V2.1's provisional → disclosed transform (#71) and the acceptance reveal path.
+
+### 81. Reciprocal acceptance notification audit
+- **Source:** Phase 9A.5 planning — pairs with animation work (#80). Explicit known gap: Disclosure Request acceptance doesn't currently notify the requester; the notification is the trigger for the provisional → whole-node transformation animation (#71).
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** Inventory every party-to-party action that should reciprocally notify (Disclosure accept, Disclosure decline, Amend Claim, Amend Disclosure, Run Evaluation, Cancel Request, Transfer accept/decline/cancel, etc.) and verify each fires both directions. CLAUDE.md now codifies this as a convention ("Reciprocal notifications for all party-to-party actions") so new work should comply; this audit item closes the gap for existing flows. Known missing: Disclosure Request accept fires to grantee only (via `handleV22Accept`), not back to requester.
+
 ### 34. Register new Asset during Amend Claim flow
 - **Status:** ✅ Complete (Phase 9A.3 Gate B). V22CreateAssetModal is the V2.2 Asset-registration flow. AmendClaimModal and V22CreateClaimModal both expose an inline "+ Register new Asset…" CTA that opens V22CreateAssetModal nested; on submit V2App builds the Asset via `makeAssetRegistrationArtifacts`, returns the new id to the parent modal, and the parent auto-selects it in its picker. Nested modal sits on its own backdrop so the parent stays dimmed until the user either cancels or completes.
 
 ### 37. Full Disclosure last-Asset deselect handling
 - **Status:** ✅ Complete (Phase 9A). Deselecting all Assets no longer snaps back; an amber italic inline help line ("Select at least one Asset to continue.") renders beneath the count footer when the selection is empty. Continue button stays disabled (existing behaviour).
+
+### 85. Disclosure Request Response + all Asset pickers: zero-default + scroll
+- **Status:** ✅ Complete (Phase 9A.5 Gate C). `CombinedResponseModal`'s Full-disclosure Asset picker now defaults to zero selected (was priming all referenced Assets on step entry). Scroll container already present (`maxHeight: 260, overflowY: 'auto'`). Amber inline help text + disabled Continue unchanged. Audited peer pickers: `V22CreateClaimModal` already zero-default (or 1-preselect when opened from an Asset), scroll container present. `AmendClaimModal` already zero-default (additions-only), scroll present. `AmendDisclosureModal` pre-selects current scope intentionally — amendment semantics require that baseline. `V22RunEvaluationModal`'s evidence picker pre-selects all evidence but evidence is optional (self-attestation), so kept. `V22ParseEvidenceModal` single-select for templates — default-first is acceptable.
 
 ### 38. Run Evaluation review-stage UX improvements
 - **Status:** ✅ Complete (Phase 9A). Three sub-items shipped: (1) `StatusChevronPicker` renders ◂ SATISFACTORY ▸ with full words, left chevron cycles back, right chevron + word cycle forward; (2) on supersede / re-evaluate, rows pre-populate `value`, `status`, AND `confidence` from the prior result (was hard-coded 0.9); (3) every row renders a confidence chip — null confidence shows `AWAITING AI` instead of the previous "chip missing" state.
@@ -382,6 +421,9 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Scope:** Small
 - **Context:** Spec specifies 40% white blend + 0.5px stroke increase; implementation empirically required 65% / +1.5px for visibility on dashed/dotted edges. Update spec to reflect shipped values.
 - **Status:** Scheduled as part of Phase 5's "also update spec" addendum.
+
+### 86. DID glossary entry in architecture-spec.md §2.6
+- **Status:** ✅ Complete (Phase 9A.5 Gate C). §2.6 now expands DID on first use: "Decentralized Identifier (DID) — a W3C-standardized format for verifiable digital identities" with a link to [w3.org/TR/did-core/](https://www.w3.org/TR/did-core/).
 
 ---
 
@@ -458,4 +500,5 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-19: Phase 9A.2 — three defect fixes + new Tooltip primitive + app-wide sweep. **Defects:** (1) mini-LOD edge-endpoint indicator — 2px vertical indigo line at 3px offset on the mini card's inside edge, proportional to the full card's 3px/4px. (2) dot-LOD endpoint indicator — hollow 1.5px indigo ring around the dot, 4px wider than the dot's outer edge, suppressed when the dot is selected. (3) Edge brightening on selection regression fix — V2Canvas.jsx:2642 selection useEffect had `[selectedEdgeId]` deps but not the edge-rebuild triggers, so zooming or layer-changing wiped the selected-edge styling. Added `currentLayer.edges` and `zoom` to the deps so the brightening + stroke bump reapplies after every rebuild. **Tooltip primitive:** new `src/components/Tooltip.jsx` — portal-rendered, zero-delay, auto-positions above (flips below on viewport overflow), arrow pointer, `var(--bg-card)` / `var(--border)` / 6px radius / 6px 10px padding / 11px font / max 260px wrap / `pointer-events: none` / z-index 6000. API: `content` (string or JSX, empty → no-op), `position`, `mono`, `width`, `disabled`, `wrapperStyle` (preserves flex children). Wrapper span uses `display: inline-flex` so wrapped buttons/icons keep their layout. **Sweep:** replaced every `title=` attribute on interactive elements (V22NodeDetailPanel FooterButton + HumanEditedIcon; V22RunEvaluationModal HumanEditedIcon + StatusChevronPicker chevrons; V22ParseEvidenceModal HumanEditedIcon + confidence cycle; DisclosureAgreementDetailPanel + EvaluationAgreementDetailPanel amend buttons; CopyBadge in both `shared/CopyBadge.jsx` and `modals/ModalShared.jsx`; AmendClaimModal already-referenced row; AmendDisclosureModal evaluated-locked row; V2App chrome icons — theme toggle, Requirements Library, PEP Template Library, Radiant Network globe, AI Shopper magnifier, "Discovered via Public Directory" notification marker; DirectoryLayer exit-corner node). PortalTooltip in AssetNode.jsx deleted; StackBadge / GlobeBadge / EvidenceClip / ActionButton all now wrap with the shared primitive. `<Section title=...>` and `<ModalHeader title=...>` (component label props, not HTML tooltips) left untouched. **Known gap:** V2Canvas edge hover tooltip (raycaster-driven, cursor-tracking, multi-line rich content) left as-is per the task note that 9B will overhaul edge hover UX; LayerPill's tooltip also untouched since V2.2 never renders child layers. Browser spot-check verified three tooltip sites (chrome globe, Requirements Library icon, FooterButton "Request Agreement") render with `rgb(13,16,23)` background, 6px radius, 6px 10px padding, 11px font — zero delay on hover.
 - 2026-04-19 (late): Phase 9A.3 preamble hygiene — added items #53–62 (handoff roster + 9A.2 defect carry-over) plus one new ✅ item (#63) for mini/dot LOD warmer borders; removed 4 unscoped exploratory items (Timeline view, Satellite view, AI-led metadata search, EvA character concept); bumped #33 Transferring from Exploratory to Process Flows (Phase 9A.4 target). Structural: merged Phase 6.5 / 7 / 8 / 8.5 Discoveries sections into categorical homes; numbers preserved, sort by number ascending within each section.
 - 2026-04-20: Phase 9A.4 preamble — added items #64–71 (9A.3 QA surfaces + client DOT-badge request); #64 shipped in same session. Two 9A.3 defects fixed in same commit: nested QS picker z-index (surfaces 3 & 4 in QA), dot-LOD endpoint ring alignment (QA 8.1). Item #10 wording tightened to distinguish NEW badge (persists to deselection) from 900ms reveal (initial fade-in animation). Item #62(a) annotated with the 9A.4 follow-on fix (the 9A.3 ring geometry was mathematically correct, but the `data-card-id` wrapper had a 4px line-box offset that shifted the child dot down — wrapper now locked to `width/height: 16, display: flex`).
-- 2026-04-20: Phase 9A.4 main — Transferring process shipped (Assets only); structured DOT data model added (`makeDotObject`, `makeTransferRecord`) with backward-compat aliases on existing factories; 7-process demo complete. Backlog: #33 ✅ Complete; added #72 (Claim + Eval Result transfer), #73 (transfer constraint on disclosed Claims), #74 (provenance lineage UI), #75 (transfer timeout). Runtime verified: Alice → Bob accept path + Alice → Carol decline path + sender cancel path + PIN resolution rejecting self / Radiant Network / unknown.
+- 2026-04-20: Phase 9A.4 main — Transferring process shipped (Assets only); structured DOT data model added (`makeDotObject`, `makeTransferRecord`) with backward-compat aliases on existing factories; 7-process demo complete. Backlog: #33 ✅ Complete; added #72 (Claim + Eval Result transfer), #73 (transfer constraint on disclosed Claims), #74 (provenance lineage UI), #75 (transfer timeage). Runtime verified: Alice → Bob accept path + Alice → Carol decline path + sender cancel path + PIN resolution rejecting self / Radiant Network / unknown.
+- 2026-04-20: Phase 9A.5 — fast-follower polish after 9A.4 demo completion. Eight items shipped (#76 transfer accept ownership edge, #77 transfer response modal, #78 resolved-box party-only, #79 PIN error split, #83 Claim-owner edge removal, #85 Asset-picker zero-default, #86 DID glossary, #87 raw-JSON tab verified); four items filed for future phases (#80 accepted-transfer animation, #81 reciprocal notification audit, #82 Parse Result DOT + layer placement, plus #84 consolidated into #70). Three cross-cutting UX conventions added to CLAUDE.md (accept-in-modal, picker-defaults + scroll, reciprocal notifications). Demo-blocking transfer accept edge regression resolved in Gate A.
