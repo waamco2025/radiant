@@ -14,7 +14,7 @@ import {
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   makeTransferRecord, makeAsset, makeDotObject,
   makeInternalDisclosureAgreement,
-  buildV22SharedArtifacts,
+  buildV22SharedArtifacts, mergeProvisionals,
 } from './v2_2Data.js'
 import EdgeMenu from './EdgeMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -362,7 +362,10 @@ export default function V2App() {
       claimIdForReveal = provisionalDa.subject.id
       requesterPartyForNotif = provisionalDa.grantee.party
       anchorIdForNotif = provisionalDa.granteeAssetId
-      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === provisionalDa.subject.id)
+      // Phase 9A.6.2.1 #103 fix: merge provisionals so user-created Claims
+      // (via V22CreateClaimModal) resolve their name/pin for the acceptance
+      // notification. Seeded-only lookup missed them.
+      const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), prev).claims.find((c) => c.id === provisionalDa.subject.id)
       if (sharedClaim) {
         claimNameForNotif = sharedClaim.name
         claimPinForNotif = sharedClaim.pin
@@ -425,7 +428,9 @@ export default function V2App() {
       const declineRecord = makeDeclineRecord({ provisionalDa, reason })
       requesterPartyForNotif = provisionalDa.grantee.party
       anchorIdForNotif = provisionalDa.granteeAssetId
-      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === provisionalDa.subject.id)
+      // Phase 9A.6.2.1 #103 fix: merge provisionals for user-created Claim
+      // name/pin resolution on decline notifications (mirror of accept path).
+      const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), prev).claims.find((c) => c.id === provisionalDa.subject.id)
       if (sharedClaim) {
         claimNameForNotif = sharedClaim.name
         claimPinForNotif = sharedClaim.pin
@@ -600,7 +605,9 @@ export default function V2App() {
     // (skip self-eval, where evaluator === claim owner).
     if (!selfEvaluation) {
       const claimOwnerRole = ROLES.find((r) => r.party === ea.grantor.party)
-      const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === claimId)
+      // Phase 9A.6.2.1 #103 fix: merge provisionals for user-created Claim
+      // name/pin resolution on eval-completed notification.
+      const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals).claims.find((c) => c.id === claimId)
       if (claimOwnerRole && sharedClaim) {
         enqueueV22NotificationForRequester(claimOwnerRole.id, {
           id: `v22-evaluation-${artifacts.evaluationResult.id}`,
@@ -746,27 +753,12 @@ export default function V2App() {
     if (!name || !name.trim() || !Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
       return null
     }
-    // TODO: remove after 9A.6.2 diagnoses #103
-    // Phase 9A.6.2 Issue 1 diagnostic: confirm handler receives every id the
-    // modal sent, and report the factory's output.
-    console.log('[9A.6.2 diag #103] handleV22CreateClaimSubmit entry', {
-      name,
-      referencedAssetIdsReceivedLen: referencedAssetIds.length,
-      referencedAssetIdsReceived: referencedAssetIds,
-    })
     const artifacts = makeClaimCreationArtifacts({
       ownerParty: activeRole.party,
       ownerDot: activeRole.partyDot,
       name,
       description,
       referencedAssetIds,
-    })
-    // TODO: remove after 9A.6.2 diagnoses #103
-    console.log('[9A.6.2 diag #103] handleV22CreateClaimSubmit factory output', {
-      claimId: artifacts.claim.id,
-      factoryReferencedAssetIdsLen: artifacts.claim.referencedAssetIds.length,
-      factoryReferencedAssetIds: artifacts.claim.referencedAssetIds,
-      claimRefDaCount: artifacts.claimRefDas.length,
     })
     setV22Provisionals((prev) => ({
       ...prev,
@@ -1074,7 +1066,9 @@ export default function V2App() {
     if (!existing) return
     const counterpartyParty = existing.grantee.party
     const claimIdForPan = existing.subject.id
-    const sharedClaim = buildV22SharedArtifacts().claims.find((c) => c.id === existing.subject.id)
+    // Phase 9A.6.2.1 #103 fix: merge provisionals for user-created Claim
+    // name/pin resolution on amend-DA notification.
+    const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals).claims.find((c) => c.id === existing.subject.id)
     const claimNameForNotif = sharedClaim?.name || null
     const claimPinForNotif = sharedClaim?.pin || null
     const amended = makeAmendedDisclosureAgreement({ disclosureAgreement: existing, scope, note })
@@ -3214,7 +3208,12 @@ export default function V2App() {
           // shared artifact dataset (incl. provisionals). Phase 6.5 polish
           // backlog tracks Option B: bring disclosed Assets onto the grantee's
           // canvas when an active Agreement covers them.
-          const sharedForEval = buildV22SharedArtifacts()
+          // Phase 9A.6.2.1 #103 fix: include provisionals so newly-registered
+          // Assets (not yet merged into the seeded bundle) resolve correctly
+          // in the counterparty's evidence list. Comment on this block
+          // already said "(incl. provisionals)" — now the implementation
+          // actually does that.
+          const sharedForEval = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const allAssetSources = [
             ...sharedForEval.assets,
             ...(v22View?.assets || []),
@@ -3228,19 +3227,6 @@ export default function V2App() {
               return asset ? { id: asset.id, name: asset.name, file: asset.file } : null
             })
             .filter(Boolean)
-          // TODO: remove after 9A.6.2 diagnoses #103
-          // Phase 9A.6.1.1 Fix 3: diagnostic instrumentation for backlog #103
-          // (counterparty Run Evaluation evidence list filtering mismatch).
-          // Prints: Claim id + referenced Asset count, the DA's scope.assetIds,
-          // and the ids rendered in the modal's evidence list.
-          console.log('[9A.6.2 diag #103] Run Evaluation modal evidence scope', {
-            claim: { id: claim.id, referencedAssetCount: (claim.referencedAssetIds || []).length, referencedAssetIds: claim.referencedAssetIds },
-            disclosureAgreement: da ? { id: da.id, scopeAssetIds: da.scope?.assetIds || null } : null,
-            isSelfEvaluation: isSelf,
-            scopeAssetIds,
-            evidenceAssetIdsRendered: evidenceAssets.map(a => a.id),
-            missingFromLibrary: scopeAssetIds.filter(id => !allAssetSources.some(a => a.id === id)),
-          })
           // Library is the requester's full library; the EA's suggested ids
           // surface as a "SUGGESTED" chip per spec §10.5 (advisory).
           return (
@@ -3471,7 +3457,12 @@ export default function V2App() {
           // Claim), resolve referenced Asset names from the shared dataset
           // limited to those legitimately in scope under an active DA. Owner
           // viewers see all referenced Assets (they own them).
-          const sharedForPanel = buildV22SharedArtifacts()
+          // Phase 9A.6.2.1 #103 fix: include provisionals so newly-registered
+          // Assets resolve their names correctly in the counterparty's
+          // Referenced Assets list. Without the merge, the find() call below
+          // returns undefined for user-created Assets and .filter(Boolean)
+          // silently drops them from the rendered list.
+          const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const isOwnerViewing = node.v22Type === 'CLAIM' && node.owner === activeRole.party
           let referencedAssetNames = []
           if (node.v22Artifact?.referencedAssetIds) {
@@ -3630,7 +3621,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.3 &middot; Changelog
+          v0.9.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3677,6 +3668,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.4', date: '2026-04-21', label: 'Phase 9A.6.2.1', items: [
+                  'Fixed: newly-registered Assets now visible in counterparty Claim Detail Panels and Run Evaluation modals. Previously 2 newly-created Assets were missing from a 7-Asset Claim on the counterparty\'s side.',
+                ]},
                 { version: '0.9.3', date: '2026-04-20', label: 'Phase 9A.6.1', items: [
                   'Multi-file Asset registration now shows the NEW badge on every Asset, not just the first',
                   'Actor Detail Panel DOT row now displays the party DOT (was showing empty)',

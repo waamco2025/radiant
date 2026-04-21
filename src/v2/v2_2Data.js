@@ -1536,7 +1536,7 @@ export function buildCarolView(shared) {
  * All fields optional. Matching ids on existing artifacts REPLACE (used to
  * supersede prior eval results / flip provisional DAs to active).
  */
-function mergeProvisionals(shared, provisionals) {
+export function mergeProvisionals(shared, provisionals) {
   if (!provisionals) return shared
   const merged = { ...shared }
   const mergeById = (existing, incoming) => {

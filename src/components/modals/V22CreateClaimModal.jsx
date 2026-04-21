@@ -74,20 +74,10 @@ export default function V22CreateClaimModal({
   const handleComplete = () => {
     if (!canReview) return
     if (!hasSufficientCredits) return
-    const referencedAssetIds = Array.from(selected)
-    // TODO: remove after 9A.6.2 diagnoses #103
-    // Phase 9A.6.2 Issue 1 diagnostic: confirm modal submit sends every
-    // ticked Asset's id downstream.
-    console.log('[9A.6.2 diag #103] V22CreateClaimModal submit', {
-      selectedCount: selected.size,
-      selectedIds: Array.from(selected),
-      referencedAssetIdsSent: referencedAssetIds,
-      ownedAssetIdsInPicker: ownedAssets.map(a => a.id),
-    })
     onComplete?.({
       name: name.trim(),
       description: description.trim(),
-      referencedAssetIds,
+      referencedAssetIds: Array.from(selected),
     })
   }
 
