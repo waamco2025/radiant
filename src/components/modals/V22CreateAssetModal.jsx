@@ -21,7 +21,7 @@
 import { useState } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, FieldLabel, InfoRow, StepDots,
+  Btn, FieldLabel, InfoRow, StepDots, CreditCostRow,
 } from './ModalShared'
 import V22QualifiedStoragePicker from './V22QualifiedStoragePicker.jsx'
 
@@ -49,6 +49,8 @@ function derivedNameFromFilename(filename) {
 
 export default function V22CreateAssetModal({
   activeParty,
+  credits = Infinity,      // Phase 9A.6 Gate A (#65). Infinity when caller doesn't gate.
+  creditsPerAsset = 0,
   nested = false,          // true when opened from inside another modal (Gate B)
   onClose,
   onComplete,              // ({ file, displayName }) => void — V2App builds artifacts
@@ -84,9 +86,12 @@ export default function V22CreateAssetModal({
   }
 
   const canReview = !!file
+  const totalCost = creditsPerAsset
+  const hasSufficientCredits = credits >= totalCost
 
   const handleRegister = () => {
     if (!file) return
+    if (!hasSufficientCredits) return
     onComplete?.({ file, displayName })
   }
 
@@ -209,6 +214,9 @@ export default function V22CreateAssetModal({
               <InfoRow label="Owner" value={activeParty} />
               <InfoRow label="Registration" value="On submit" />
             </div>
+            {creditsPerAsset > 0 && (
+              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
+            )}
             <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
               The Asset will render on your canvas with a NEW badge and connect to you
               via an internal (Full) Disclosure Agreement. No counterparty acceptance is
@@ -232,8 +240,9 @@ export default function V22CreateAssetModal({
         )}
         {step === 1 && (
           <Btn
-            label="Register Asset"
+            label={hasSufficientCredits ? 'Register Asset' : 'Insufficient Credits'}
             accent
+            disabled={!hasSufficientCredits}
             onClick={handleRegister}
           />
         )}

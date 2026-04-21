@@ -192,6 +192,38 @@ export function InfoRow({ label, value }) {
   )
 }
 
+// Phase 9A.6 Gate A (#65): credit-cost review-step row, shared between
+// V22CreateAssetModal and V22CreateClaimModal. `cost` is the total for the
+// operation (cost-per-Asset × N, or cost-per-Claim). Teal when sufficient,
+// red when insufficient — matches V2.1 precedent.
+export function CreditCostRow({ cost, credits, sufficient }) {
+  return (
+    <div style={{
+      marginTop: 14, padding: '12px 14px', borderRadius: 8,
+      background: sufficient
+        ? 'color-mix(in srgb, var(--accent-teal, #2dd4bf) 6%, transparent)'
+        : 'color-mix(in srgb, var(--accent-red) 6%, transparent)',
+      border: `1px solid color-mix(in srgb, ${sufficient ? 'var(--accent-teal, #2dd4bf)' : 'var(--accent-red)'} 25%, transparent)`,
+      display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <span style={{
+        fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        color: sufficient ? 'var(--accent-teal, #2dd4bf)' : 'var(--accent-red)',
+        letterSpacing: '0.06em',
+      }}>CREDIT COST</span>
+      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+        {cost} credit{cost === 1 ? '' : 's'}
+      </span>
+      <span style={{
+        fontSize: 11, fontFamily: 'var(--font-mono)',
+        color: sufficient ? 'var(--text-dim)' : 'var(--accent-red)',
+      }}>
+        {sufficient ? `${credits} available` : `Only ${credits} available`}
+      </span>
+    </div>
+  )
+}
+
 export function CopyBadge({ value, truncated }) {
   const [copied, setCopied] = useState(false)
   const display = truncated && value && value.length > 24

@@ -15,6 +15,8 @@ import V22CreateAssetModal from './V22CreateAssetModal.jsx'
 
 export default function AmendClaimModal({
   activeParty,                 // Phase 9A.3 Gate B — required when `onNestedAssetCreated` is passed
+  credits = Infinity,          // Phase 9A.6 Gate A (#65) — forwarded to nested Register-new-Asset
+  creditsPerAsset = 0,
   claim,                       // { id, name, description, referencedAssetIds }
   candidateAssets = [],        // [{ id, name, file: { filename } }] — Assets owned by the active actor that aren't already referenced
   alreadyReferencedAssets = [], // [{ id, name, file: { filename } }] — for the read-only "already referenced" panel
@@ -189,6 +191,8 @@ export default function AmendClaimModal({
     {showNestedRegister && (
       <V22CreateAssetModal
         activeParty={activeParty}
+        credits={credits}
+        creditsPerAsset={creditsPerAsset}
         onClose={() => setShowNestedRegister(false)}
         onComplete={handleNestedAssetComplete}
       />

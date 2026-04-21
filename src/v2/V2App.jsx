@@ -40,6 +40,10 @@ import { getRequirementSetsForRole } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
+// Phase 9A.6 Gate A (#65): credit cost constants for unilateral Register +
+// Claim flows. Other V2.2 flows (ParseEvidence, RunEvaluation, CombinedRequest)
+// remain free per the client model — only Registering + Claiming are charged.
+const CREDITS_PER_ASSET = 5
 const CREDITS_PER_CLAIM = 25
 
 function findClearY(targetX, idealY, allNodes, spacingY = 300, toleranceX = 150) {
@@ -682,6 +686,10 @@ export default function V2App() {
       assets: [...(prev.assets || []), artifacts.asset],
       disclosureAgreements: [...prev.disclosureAgreements, artifacts.ownershipDa],
     }))
+    // Phase 9A.6 Gate A (#65): debit credits on registration. Modal gates the
+    // submit button on sufficient credits so this should never go negative,
+    // but Math.max guards against race conditions with the "reset to 0" affordance.
+    setCredits(c => Math.max(0, c - CREDITS_PER_ASSET))
     setV22RegisteringAsset(null)
     // Suppress pan when nested inside Create Claim — user is still in a modal.
     if (!_nested) {
@@ -717,6 +725,9 @@ export default function V2App() {
         ...artifacts.claimRefDas,
       ],
     }))
+    // Phase 9A.6 Gate A (#65): debit credits on Claim creation. Gated by the
+    // modal's submit button — Math.max mirrors the Asset handler's safety net.
+    setCredits(c => Math.max(0, c - CREDITS_PER_CLAIM))
     setV22CreatingClaim(null)
     setSel(artifacts.claim.id)
     setForcePanelTab(null)
@@ -3217,6 +3228,8 @@ export default function V2App() {
           return (
             <AmendClaimModal
               activeParty={activeRole.party}
+              credits={credits}
+              creditsPerAsset={CREDITS_PER_ASSET}
               claim={claim}
               candidateAssets={candidateAssets}
               alreadyReferencedAssets={alreadyReferencedAssets}
@@ -3306,6 +3319,8 @@ export default function V2App() {
         {v22RegisteringAsset && (
           <V22CreateAssetModal
             activeParty={activeRole.party}
+            credits={credits}
+            creditsPerAsset={CREDITS_PER_ASSET}
             onClose={() => setV22RegisteringAsset(null)}
             onComplete={handleV22CreateAssetSubmit}
           />
@@ -3321,6 +3336,9 @@ export default function V2App() {
           return (
             <V22CreateClaimModal
               activeParty={activeRole.party}
+              credits={credits}
+              creditsPerClaim={CREDITS_PER_CLAIM}
+              creditsPerAsset={CREDITS_PER_ASSET}
               ownedAssets={ownedAssets}
               initialAssetIds={v22CreatingClaim.initialAssetIds || []}
               onClose={() => setV22CreatingClaim(null)}

@@ -23,7 +23,7 @@
 import { useState } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, FieldLabel, InfoRow, StepDots,
+  Btn, FieldLabel, InfoRow, StepDots, CreditCostRow,
 } from './ModalShared'
 import V22CreateAssetModal from './V22CreateAssetModal.jsx'
 
@@ -36,6 +36,9 @@ function formatBytes(bytes) {
 
 export default function V22CreateClaimModal({
   activeParty,
+  credits = Infinity,          // Phase 9A.6 Gate A (#65).
+  creditsPerClaim = 0,
+  creditsPerAsset = 0,         // forwarded to the nested Register-new-Asset modal
   ownedAssets = [],            // [{ id, name, file: { filename, size, mimeType } }]
   initialAssetIds = [],        // pre-selected when opened from an Asset's panel/card
   onClose,
@@ -65,9 +68,12 @@ export default function V22CreateClaimModal({
 
   const canReview = name.trim().length > 0 && selected.size > 0
   const selectedList = ownedAssets.filter(a => selected.has(a.id))
+  const totalCost = creditsPerClaim
+  const hasSufficientCredits = credits >= totalCost
 
   const handleComplete = () => {
     if (!canReview) return
+    if (!hasSufficientCredits) return
     onComplete?.({
       name: name.trim(),
       description: description.trim(),
@@ -309,6 +315,9 @@ export default function V22CreateClaimModal({
               </div>
             </div>
 
+            {creditsPerClaim > 0 && (
+              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
+            )}
             <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
               The Claim will render on your canvas with a NEW badge and connect to each
               referenced Asset via an internal (Full) Disclosure Agreement. Claim
@@ -332,8 +341,9 @@ export default function V22CreateClaimModal({
         )}
         {step === 1 && (
           <Btn
-            label="Create Claim"
+            label={hasSufficientCredits ? 'Create Claim' : 'Insufficient Credits'}
             accent
+            disabled={!hasSufficientCredits}
             onClick={handleComplete}
           />
         )}
@@ -350,6 +360,8 @@ export default function V22CreateClaimModal({
       {showNestedRegister && (
         <V22CreateAssetModal
           activeParty={activeParty}
+          credits={credits}
+          creditsPerAsset={creditsPerAsset}
           onClose={() => setShowNestedRegister(false)}
           onComplete={handleNestedAssetComplete}
         />
