@@ -154,10 +154,14 @@ export default function V2App() {
   // Declared before `v22DataWithReveal` so that memo can read `selectedEdgeId`
   // without hitting a TDZ (Phase 9A item 5 wires edge endpoints into the memo).
   const [selectedEdgeId, setSelectedEdgeId] = useState(null)
-  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor } — pinned menu after click
+  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor: { x, y }, worldX, worldY }
   // Phase 9B §2/§3: hover state for the cursor-following rich menu tooltip.
   // Separate from edgeMenu so selection-pinned state doesn't race with hover.
   const [edgeHover, setEdgeHover] = useState(null) // { edgeId, sdaType, x, y } | null
+  // Phase 9B.1 §4: projected screen-space anchor for the pinned tooltip —
+  // updated each animation frame while the pan/zoom framing runs so the
+  // tooltip follows its world-space click point.
+  const [edgeMenuProjected, setEdgeMenuProjected] = useState(null) // { x, y } | null
   const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
   const v22DataWithReveal = useMemo(() => {
@@ -1453,6 +1457,32 @@ export default function V2App() {
   const [showAcct, setShowAcct] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
+  // Phase 9B.1 §4: while a pinned edge menu is open AND we have a captured
+  // world-space click point, re-project each frame so the tooltip tracks the
+  // edge through the pan/zoom framing animation. Stops ticking when the
+  // menu closes or there's no world anchor.
+  useEffect(() => {
+    if (!edgeMenu) {
+      setEdgeMenuProjected(null)
+      return
+    }
+    if (edgeMenu.worldX == null || edgeMenu.worldY == null) return
+    let rafId
+    const tick = () => {
+      const proj = canvasRef.current?.projectToViewport?.(edgeMenu.worldX, edgeMenu.worldY)
+      if (proj) {
+        setEdgeMenuProjected((prev) => {
+          if (prev && Math.abs(prev.x - proj.x) < 0.5 && Math.abs(prev.y - proj.y) < 0.5) {
+            return prev
+          }
+          return proj
+        })
+      }
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => { if (rafId) cancelAnimationFrame(rafId) }
+  }, [edgeMenu])
   const footerTipRef = useRef(null)
   const pendingPanRef = useRef(null)
   const [showFooterTip, setShowFooterTip] = useState(false)
@@ -2938,13 +2968,22 @@ export default function V2App() {
             // point. The menu always renders (View DA row is always there,
             // View EA row conditional on a paired EA). Clears node selection
             // first so node and edge selection stay mutually exclusive.
+            // Phase 9B.1 §4: capture the world-space hit point alongside the
+            // screen coords so the tooltip can track that point through the
+            // pan/zoom framing animation.
             const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
             if (!resolved || !resolved.disclosureAgreement) return
             setSel(null)
             setForcePanelTab(null)
             setForceExpandSda(null)
             setSelectedEdgeId(edgeId)
-            setEdgeMenu({ edgeId, anchor })
+            setEdgeMenu({
+              edgeId,
+              anchor: { x: anchor.x, y: anchor.y },
+              worldX: anchor.worldX ?? null,
+              worldY: anchor.worldY ?? null,
+            })
+            setEdgeMenuProjected({ x: anchor.x, y: anchor.y })
             setOpenAgreement(null)
             setEdgeHover(null)
           }}
@@ -3004,11 +3043,15 @@ export default function V2App() {
           const edgeObj = edges?.find(e => e.id === edgeMenu.edgeId)
           const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
           const toNode = edgeObj ? nodeMap[edgeObj.to] : null
+          // Phase 9B.1 §4: pinned anchor follows the projected world-space
+          // point when available; falls back to original click coords until
+          // the first projection ticks.
+          const anchorPt = edgeMenuProjected || edgeMenu.anchor
           return (
             <EdgeHoverMenu
               mode="pinned"
-              anchorX={edgeMenu.anchor.x}
-              anchorY={edgeMenu.anchor.y}
+              anchorX={anchorPt.x}
+              anchorY={anchorPt.y}
               sdaType={da.type || 'full'}
               fromNode={fromNode}
               toNode={toNode}
@@ -3668,7 +3711,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.5 &middot; Changelog
+          v0.9.6 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3715,6 +3758,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.6', date: '2026-04-21', label: 'Phase 9B.1', items: [
+                  'Edge hover/selection menu refined with clearer hover-vs-click affordances',
+                  'Cursor-centered dot bumped to 24px so it reads as a clear indicator',
+                  'Tooltip now follows the clicked edge point as the canvas pans and zooms',
+                  'Cleaned up outdated Requirements Sets display in Evaluation Agreement panel',
+                ]},
                 { version: '0.9.5', date: '2026-04-21', label: 'Phase 9B', items: [
                   'Edge hover brightens the edge line itself (weaker variant of selection brightening)',
                   'Cursor-centered dot appears under the cursor when hovering an edge, colored by SDA type',

@@ -1996,6 +1996,17 @@ const V2Canvas = forwardRef(function V2Canvas({
       dirtyRef.current = true
     },
     animatedPanToWithZoom: (x, y, z, duration) => animatedPanToWithZoom(x, y, z, duration),
+    // Phase 9B.1 §4: project world coords to VIEWPORT (fixed) coords so the
+    // pinned edge tooltip can track its world-space anchor through pan/zoom.
+    // `worldToScreen` alone returns canvas-local coords; add the container's
+    // viewport rect so callers using `position: fixed` get correct numbers.
+    projectToViewport: (worldX, worldY) => {
+      const container = containerRef.current
+      if (!container) return null
+      const rect = container.getBoundingClientRect()
+      const sp = worldToScreen(worldX, worldY)
+      return { x: sp.x + rect.left, y: sp.y + rect.top }
+    },
     animateNewEdges: () => animateNewEdges(),
     fadeOutCards: (duration = 180) => {
       const cards = overlayRef.current?.querySelectorAll('[data-card-id]')
@@ -2588,7 +2599,15 @@ const V2Canvas = forwardRef(function V2Canvas({
         if (intersects.length > 0) {
           const edgeId = intersects[0].object.userData?.edgeId
           if (edgeId) {
-            onEdgeClick(edgeId, { x: e.clientX, y: e.clientY })
+            // Phase 9B.1 §4: capture the world-space hit point so the pinned
+            // tooltip can track it through the pan/zoom framing animation.
+            const hitPoint = intersects[0].point
+            onEdgeClick(edgeId, {
+              x: e.clientX,
+              y: e.clientY,
+              worldX: hitPoint.x,
+              worldY: hitPoint.y,
+            })
             return
           }
         }
@@ -2973,17 +2992,18 @@ const V2Canvas = forwardRef(function V2Canvas({
       </div>{/* close scene layer wrapper */}
 
 
-      {/* Phase 9B §2: cursor-centered dot under the cursor while hovering an edge.
-          Colored by SDA type, ~70% opacity, no stroke, pointer-events: none so
-          the cursor can keep interacting with the edge. Rich tooltip content
-          lives in EdgeHoverMenu (rendered by V2App via the onEdgeHover emit). */}
+      {/* Phase 9B §2 / 9B.1 §1: cursor-centered dot under the cursor while
+          hovering an edge. 24px (was 12px — felt too close to cursor size);
+          SDA-type fill, 70% opacity, no stroke, pointer-events: none so the
+          cursor can keep interacting with the edge. Rich tooltip content lives
+          in EdgeHoverMenu (rendered by V2App via the onEdgeHover emit). */}
       {hoveredEdge && edgeTooltipPos && hoveredEdgeSdaType && !selectedEdgeId && createPortal(
         <div style={{
           position: 'fixed',
-          left: edgeTooltipPos.x - 6,
-          top: edgeTooltipPos.y - 6,
-          width: 12,
-          height: 12,
+          left: edgeTooltipPos.x - 12,
+          top: edgeTooltipPos.y - 12,
+          width: 24,
+          height: 24,
           borderRadius: '50%',
           background: SDA_EDGE_CSS[hoveredEdgeSdaType] || SDA_EDGE_CSS.full,
           opacity: 0.7,

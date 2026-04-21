@@ -136,21 +136,14 @@ export default function EvaluationAgreementDetailPanel({
           )}
         </Section>
 
-        <Section title="Authorized Requirements Sets">
-          {Array.isArray(agreement.authorizedRequirementsSetIds) && agreement.authorizedRequirementsSetIds.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {agreement.authorizedRequirementsSetIds.map((id) => (
-                <div key={id} style={{
-                  fontSize: 11, fontFamily: 'var(--font-mono)',
-                  color: 'var(--text-primary)', padding: '4px 6px',
-                  background: 'var(--bg-raised)', borderRadius: 3,
-                }}>{id}</div>
-              ))}
-            </div>
-          ) : (
-            <Row label="—" value="None authorized" />
-          )}
-        </Section>
+        {/* Phase 9B.1 §5: "Authorized Requirements Sets" section removed.
+            The Requirements Sets a grantee proposed in their original
+            request are advisory (spec §10.5) — not binding — and labelling
+            them "Authorized" implied enforcement that doesn't exist.
+            Amendments also change what's in play without a visible log,
+            creating stale-data risk. Omitted entirely; agreement.
+            authorizedRequirementsSetIds still exists on the data model
+            for future phases that want to surface it differently. */}
 
         <Section title="Restrictions">
           <Row
