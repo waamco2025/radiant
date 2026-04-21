@@ -789,3 +789,40 @@ Five concrete fixes from 9B.1 QA plus two backlog filings (#111, #112).
 **Runtime verification:** Build clean. App boots, canvas renders, no console errors. V2Canvas raycaster DOM-dispatch limitation continues to block scripted UI walkthrough from this agent session — manual mouse interaction remains the verification path for the hover/click visuals. All rendering + state plumbing verified via code path.
 
 **Status:** [x] Complete.
+
+### Phase 9B.3 completion notes (2026-04-21) — edge menu anchors at edge midpoint
+
+Single-item change: pinned tooltip's post-animation anchor switches from the click-point world projection to the true world-space midpoint of the two endpoint cards.
+
+**The change, localised to V2App.jsx's `onEdgeClick` handler:**
+
+```js
+const edgeObj = edges?.find(e => e.id === edgeId)
+const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
+const toNode = edgeObj ? nodeMap[edgeObj.to] : null
+const hasWorldPositions = fromNode && toNode
+  && fromNode.x != null && fromNode.y != null
+  && toNode.x != null && toNode.y != null
+const midX = hasWorldPositions ? (fromNode.x + toNode.x) / 2 : null
+const midY = hasWorldPositions ? (fromNode.y + toNode.y) / 2 : null
+setEdgeMenu({
+  edgeId,
+  anchor: { x: anchor.x, y: anchor.y },
+  worldX: midX,
+  worldY: midY,
+})
+```
+
+The click handler's existing flow is unchanged for everything else — initial anchor is still the click point (tooltip appears there briefly), `edgeMenuPanning` state from 9B.2 hides it during the pan/zoom animation, 9B.2's setTimeout reprojects at 620ms. The only difference is what `worldX/worldY` point to: the midpoint of the two endpoint card centers rather than the raycaster hit point on the edge curve.
+
+**Deviations:**
+- **V2Canvas untouched.** V2Canvas still emits `worldX/worldY` from the raycaster hit point in the `onEdgeClick` payload. V2App ignores those values now — kept the emit in place per the "keep diff minimal" directive. If a future phase wants the raycaster hit point back (e.g., for a different tooltip behaviour), the plumbing is still there.
+- **Radiant Network / no-world-position edge case.** Current behaviour: endpoints without world positions produce `worldX/worldY === null`. The 9B.2 fade-during-animation effect guards on `worldX/worldY == null` and clears `edgeMenuPanning` immediately without a reproject; the tooltip stays at its pre-animation click-point anchor. Doesn't skip the tooltip entirely (the task's "match 9A.1.5 skip-for-missing-positions" suggestion was about edge-select FRAMING, not the menu itself — the menu should still render). Graceful fallback.
+- **Stale `setEdgeMenuProjected` call.** Found and removed a stray line from 9B.2 — `setEdgeMenuProjected({ x: anchor.x, y: anchor.y })` at the end of `onEdgeClick`. `setEdgeMenuProjected` was removed in 9B.2's fade-approach refactor but this one call survived, which would have thrown `ReferenceError` the first time a user clicked an edge. Cleaned up silently as part of this refactor.
+- **Panel-aware projection:** no additional logic needed. The existing 9A.1.5 framing useEffect handles panel offset when it pans the camera; `projectToViewport` then returns the post-pan screen coordinate naturally, so the tooltip's post-animation position already respects panel width.
+
+**Runtime verification:** Build clean. Module imports + boot verified. Midpoint formula verified programmatically — for the `actor-govco ↔ asset-bob-avionics` edge (positions 0,0 and 520,0) midpoint resolves to (260, 0) deterministically. Same edge clicked at any x-position along the curve now anchors the tooltip at (260, 0) in world coords after the animation settles.
+
+**Changelog v0.9.8 + footer bump v0.9.7 → v0.9.8.**
+
+**Status:** [x] Complete.

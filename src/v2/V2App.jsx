@@ -2974,15 +2974,28 @@ export default function V2App() {
           revealAnim={revealAnim}
           selectedEdgeId={selectedEdgeId}
           onEdgeClick={(edgeId, anchor) => {
-            // Phase 9B §5: edge click pins the rich hover menu at the click
-            // point. The menu always renders (View DA row is always there,
-            // View EA row conditional on a paired EA). Clears node selection
-            // first so node and edge selection stay mutually exclusive.
-            // Phase 9B.1 §4: capture the world-space hit point alongside the
-            // screen coords so the tooltip can track that point through the
-            // pan/zoom framing animation.
+            // Phase 9B §5: edge click pins the rich hover menu. The menu
+            // always renders (View DA row always; View EA row conditional on
+            // a paired EA). Clears node selection first so node and edge
+            // selection stay mutually exclusive.
+            // Phase 9B.3: tooltip anchors at the world-space MIDPOINT of the
+            // two endpoint cards (not the click point — midpoint is
+            // deterministic per edge). Click point still used as the initial
+            // screen anchor pre-animation; the fade-during-animation effect
+            // reprojects to midpoint on completion.
             const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
             if (!resolved || !resolved.disclosureAgreement) return
+            const edgeObj = edges?.find(e => e.id === edgeId)
+            const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
+            const toNode = edgeObj ? nodeMap[edgeObj.to] : null
+            // Skip edges with an endpoint that has no world position (e.g.
+            // Radiant Network pseudo-actor) — matches 9A.1.5 edge-select
+            // framing behavior.
+            const hasWorldPositions = fromNode && toNode
+              && fromNode.x != null && fromNode.y != null
+              && toNode.x != null && toNode.y != null
+            const midX = hasWorldPositions ? (fromNode.x + toNode.x) / 2 : null
+            const midY = hasWorldPositions ? (fromNode.y + toNode.y) / 2 : null
             setSel(null)
             setForcePanelTab(null)
             setForceExpandSda(null)
@@ -2990,10 +3003,9 @@ export default function V2App() {
             setEdgeMenu({
               edgeId,
               anchor: { x: anchor.x, y: anchor.y },
-              worldX: anchor.worldX ?? null,
-              worldY: anchor.worldY ?? null,
+              worldX: midX,
+              worldY: midY,
             })
-            setEdgeMenuProjected({ x: anchor.x, y: anchor.y })
             setOpenAgreement(null)
             setEdgeHover(null)
           }}
@@ -3723,7 +3735,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.7 &middot; Changelog
+          v0.9.8 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3770,6 +3782,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.8', date: '2026-04-21', label: 'Phase 9B.3', items: [
+                  'Edge menu now appears at the midpoint between endpoint cards — position is consistent regardless of where on the edge you clicked',
+                ]},
                 { version: '0.9.7', date: '2026-04-21', label: 'Phase 9B.2', items: [
                   'Improved edge hover visibility on Selective, Proof-only, and Provisional (dashed) disclosures',
                   'Fixed edge highlight persistence — selected edge stays bright through pan/zoom and re-renders',
