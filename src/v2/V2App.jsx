@@ -158,10 +158,12 @@ export default function V2App() {
   // Phase 9B §2/§3: hover state for the cursor-following rich menu tooltip.
   // Separate from edgeMenu so selection-pinned state doesn't race with hover.
   const [edgeHover, setEdgeHover] = useState(null) // { edgeId, sdaType, x, y } | null
-  // Phase 9B.1 §4: projected screen-space anchor for the pinned tooltip —
-  // updated each animation frame while the pan/zoom framing runs so the
-  // tooltip follows its world-space click point.
-  const [edgeMenuProjected, setEdgeMenuProjected] = useState(null) // { x, y } | null
+  // Phase 9B.2 Fix 3: tooltip fade-during-animation (replaces 9B.1 RAF
+  // world-space tracking, which drifted and appeared over nodes during
+  // zoom). While the pan/zoom framing is running, the tooltip is hidden;
+  // on animation complete it reprojects to the new screen-space position
+  // of its world-space click point and fades back in.
+  const [edgeMenuPanning, setEdgeMenuPanning] = useState(false)
   const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
   const v22DataWithReveal = useMemo(() => {
@@ -1457,32 +1459,40 @@ export default function V2App() {
   const [showAcct, setShowAcct] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
-  // Phase 9B.1 §4: while a pinned edge menu is open AND we have a captured
-  // world-space click point, re-project each frame so the tooltip tracks the
-  // edge through the pan/zoom framing animation. Stops ticking when the
-  // menu closes or there's no world anchor.
+  // Phase 9B.2 Fix 3: fade-during-animation tooltip handling. When edgeMenu
+  // becomes set, the pan/zoom framing animation (animatedPanToWithZoom,
+  // 600ms) is about to start. We hide the tooltip while it runs and
+  // reposition on completion. Use setTimeout matching the animation duration
+  // since animatedPanToWithZoom doesn't expose a completion callback.
   useEffect(() => {
     if (!edgeMenu) {
-      setEdgeMenuProjected(null)
+      setEdgeMenuPanning(false)
       return
     }
-    if (edgeMenu.worldX == null || edgeMenu.worldY == null) return
-    let rafId
-    const tick = () => {
+    if (edgeMenu.worldX == null || edgeMenu.worldY == null) {
+      // No world-point capture — skip the fade dance and keep the tooltip
+      // at its click-point anchor.
+      setEdgeMenuPanning(false)
+      return
+    }
+    // Hide the tooltip immediately; the 9A.1.5 framing useEffect will kick
+    // the pan/zoom animation on the same render. 150ms is the spec opacity
+    // transition — the hide state itself is cleared at animation end.
+    setEdgeMenuPanning(true)
+    const ANIM_MS = 600
+    const t = setTimeout(() => {
+      // Reposition the anchor to the projected world point after the
+      // camera has settled, then fade back in.
       const proj = canvasRef.current?.projectToViewport?.(edgeMenu.worldX, edgeMenu.worldY)
       if (proj) {
-        setEdgeMenuProjected((prev) => {
-          if (prev && Math.abs(prev.x - proj.x) < 0.5 && Math.abs(prev.y - proj.y) < 0.5) {
-            return prev
-          }
-          return proj
-        })
+        setEdgeMenu((prev) => prev ? { ...prev, anchor: { x: proj.x, y: proj.y } } : prev)
       }
-      rafId = requestAnimationFrame(tick)
-    }
-    rafId = requestAnimationFrame(tick)
-    return () => { if (rafId) cancelAnimationFrame(rafId) }
-  }, [edgeMenu])
+      setEdgeMenuPanning(false)
+    }, ANIM_MS + 20) // small tail-buffer so the last frame settles before we reproject
+    return () => clearTimeout(t)
+    // edgeMenu.edgeId changes when a different edge is clicked — re-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeMenu?.edgeId])
   const footerTipRef = useRef(null)
   const pendingPanRef = useRef(null)
   const [showFooterTip, setShowFooterTip] = useState(false)
@@ -3043,13 +3053,15 @@ export default function V2App() {
           const edgeObj = edges?.find(e => e.id === edgeMenu.edgeId)
           const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
           const toNode = edgeObj ? nodeMap[edgeObj.to] : null
-          // Phase 9B.1 §4: pinned anchor follows the projected world-space
-          // point when available; falls back to original click coords until
-          // the first projection ticks.
-          const anchorPt = edgeMenuProjected || edgeMenu.anchor
+          // Phase 9B.2 Fix 3: anchor comes straight from edgeMenu.anchor,
+          // which starts at the click point and is re-projected by the
+          // fade-during-animation effect once the pan/zoom settles. The
+          // `hidden` prop drives the fade.
+          const anchorPt = edgeMenu.anchor
           return (
             <EdgeHoverMenu
               mode="pinned"
+              hidden={edgeMenuPanning}
               anchorX={anchorPt.x}
               anchorY={anchorPt.y}
               sdaType={da.type || 'full'}
@@ -3711,7 +3723,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.6 &middot; Changelog
+          v0.9.7 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3758,6 +3770,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.7', date: '2026-04-21', label: 'Phase 9B.2', items: [
+                  'Improved edge hover visibility on Selective, Proof-only, and Provisional (dashed) disclosures',
+                  'Fixed edge highlight persistence — selected edge stays bright through pan/zoom and re-renders',
+                  'Tooltip now fades during canvas animation instead of drifting above nodes',
+                  'Larger cursor indicator (32px) on edge hover; appears more reliably under rapid cursor movement',
+                ]},
                 { version: '0.9.6', date: '2026-04-21', label: 'Phase 9B.1', items: [
                   'Edge hover/selection menu refined with clearer hover-vs-click affordances',
                   'Cursor-centered dot bumped to 24px so it reads as a clear indicator',

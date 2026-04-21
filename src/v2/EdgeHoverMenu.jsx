@@ -32,7 +32,11 @@ const SDA_TYPE_STYLE = {
 
 const MENU_WIDTH = 320
 const MENU_OFFSET = 12
-const OPTION_RIGHT_PADDING = 48 // Phase 9B.1 §2: reserves space for "View →" in pinned state so layout doesn't shift
+// Phase 9B.1 §2: reserves space for "View →" in pinned state so layout
+// doesn't shift. Phase 9B.2 Fix 4: bumped 48→80px because "View →" was
+// overlapping endpoint text like "Power Regulation Module Assembly
+// (MicroCo) → Avionics Module (GovCo)".
+const OPTION_RIGHT_PADDING = 80
 
 function SdaEdgeIllustration({ sdaType }) {
   const style = SDA_TYPE_STYLE[sdaType] || SDA_TYPE_STYLE.full
@@ -121,7 +125,8 @@ function OptionCard({ children, onClick, clickable, showViewArrow, accent }) {
 
 export default function EdgeHoverMenu({
   mode,                     // 'hover' | 'pinned'
-  anchorX, anchorY,         // cursor or projected world-point screen coords
+  hidden = false,           // Phase 9B.2 Fix 3: fade-out while pan/zoom animation runs
+  anchorX, anchorY,         // cursor or click-point screen coords
   sdaType,
   fromNode, toNode,         // { name }
   grantorParty, granteeParty,
@@ -174,9 +179,13 @@ export default function EdgeHoverMenu({
         zIndex: 6000,
         overflow: 'hidden',
         userSelect: 'none',
-        pointerEvents: isPinned ? 'auto' : 'none',
+        pointerEvents: isPinned && !hidden ? 'auto' : 'none',
         fontFamily: 'var(--font-display)',
         padding: 10,
+        // Phase 9B.2 Fix 3: fade out during pan/zoom animation, fade back
+        // in at the new anchor position on completion.
+        opacity: hidden ? 0 : 1,
+        transition: 'opacity 150ms ease',
       }}
     >
       {/* Phase 9B.1 §2: hover-mode header. Omitted in pinned mode. */}

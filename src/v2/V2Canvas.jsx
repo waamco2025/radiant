@@ -2278,6 +2278,11 @@ const V2Canvas = forwardRef(function V2Canvas({
       })
     }
 
+    // Phase 9B.2 Fix 2: reapply selection/hover brightening AT the end of
+    // the rebuild effect. Closes the race window where a separate
+    // useEffect could skip a render and leave the edge rebuilt-but-unbright.
+    applyEdgeStylingRef.current?.()
+
     dirtyRef.current = true
   }, [currentLayer, currentNodeMap, buildEdges, zoom, chainNodeIds, threeReady])
 
@@ -2677,43 +2682,68 @@ const V2Canvas = forwardRef(function V2Canvas({
   const edgeHideTimeout = useRef(null)
   const raycasterRef = useRef(null)
 
-  useEffect(() => {
+  // Phase 9B.2 Fix 2: ref-backed selection state + pure helper. Previously
+  // the selection/brightening logic lived only in a separate useEffect that
+  // ran AFTER the rebuild effect at line 2200. Any render where React
+  // reordered or skipped that second effect left the edge rebuilt without
+  // selection styling, which manifested as the "click-state reverses
+  // unexpectedly" bug. Fix: expose the logic as a helper that reads from
+  // refs (always current values), and call it BOTH from the useEffect
+  // (cheap updates on state change) AND directly at the end of the
+  // buildEdges rebuild effect (closes the race).
+  const selectedEdgeIdRef = useRef(selectedEdgeId)
+  const hoveredEdgeRef = useRef(hoveredEdge)
+  useEffect(() => { selectedEdgeIdRef.current = selectedEdgeId }, [selectedEdgeId])
+  useEffect(() => { hoveredEdgeRef.current = hoveredEdge }, [hoveredEdge])
+  const applyEdgeStylingRef = useRef(() => {})
+  applyEdgeStylingRef.current = () => {
     const group = edgeGroupRef.current
     if (!group) return
+    const selId = selectedEdgeIdRef.current
+    const hovId = hoveredEdgeRef.current
     group.children.forEach((line) => {
       const mat = line.material
       if (!mat) return
       const effectiveSdaType = line.userData?.sdaType || 'full'
       const cfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
-      const isSelected = !!selectedEdgeId && line.userData?.edgeId === selectedEdgeId
+      const isSelected = !!selId && line.userData?.edgeId === selId
       // Phase 9B §1: hover brightening — weaker version of selection's 65%
       // blend. Selection wins when both apply on the same edge.
-      const isHovered = !isSelected && !!hoveredEdge && line.userData?.edgeId === hoveredEdge
+      // Phase 9B.2 Fix 1: type-aware hover blend. Dashed/dotted edges
+      // need a stronger blend (50%) to read as hovered through the dash
+      // gaps; solid edges stay at 30%.
+      const isHovered = !isSelected && !!hovId && line.userData?.edgeId === hovId
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
       const baseColor = new THREE.Color(cfg.color)
+      const hoverBlend = (cfg.dash || 0) > 0 ? 0.5 : 0.3
       const color = isSelected
         ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.65)
         : isHovered
-          ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.3)
+          ? baseColor.clone().lerp(new THREE.Color('#ffffff'), hoverBlend)
           : baseColor
-      // Phase 9A.1 item 7: when deselecting, restore the internal-edge factor
-      // (0.5×) so internal edges stay de-emphasised. Selected edges bump past
-      // the factor as usual.
+      // Phase 9A.1 item 7: internal edges de-emphasised to 0.5× when not
+      // selected; selected edges bump past that factor as usual.
       const isInternal = !!line.userData?.isInternal
       const factor = isInternal && !isSelected ? 0.5 : 1.0
       mat.linewidth = isSelected ? baseWidth + 1.5 : baseWidth * factor
-      if (mat.color) {
-        mat.color.copy(color)
-      }
+      if (mat.color) mat.color.copy(color)
       mat.needsUpdate = true
     })
     dirtyRef.current = true
+  }
+
+  useEffect(() => {
+    applyEdgeStylingRef.current()
   }, [selectedEdgeId, hoveredEdge, currentLayer.edges, zoom])
 
-  // Initialize raycaster for Line2 edge hover
+  // Initialize raycaster for Line2 edge hover.
+  // Phase 9B.2 Fix 5b: bumped threshold 8 → 12. The dot was flickering
+  // during rapid cursor movement because tight hit detection dropped edges
+  // between frames. 12px is still well within the visual stroke width so
+  // the raycaster doesn't start hitting unrelated edges.
   useEffect(() => {
     const rc = new THREE.Raycaster()
-    rc.params.Line2 = { threshold: 8 }
+    rc.params.Line2 = { threshold: 12 }
     raycasterRef.current = rc
   }, [])
 
@@ -2761,7 +2791,9 @@ const V2Canvas = forwardRef(function V2Canvas({
       }
     }
 
-    // No hit — debounced hide
+    // No hit — debounced hide.
+    // Phase 9B.2 Fix 5b: bumped 80 → 150ms so the dot doesn't flicker on
+    // rapid cursor movement across adjacent edges or near edge boundaries.
     if (hoveredEdge && !edgeHideTimeout.current) {
       edgeHideTimeout.current = setTimeout(() => {
         setHoveredEdge(null)
@@ -2769,7 +2801,7 @@ const V2Canvas = forwardRef(function V2Canvas({
         setHoveredEdgeSdaType(null)
         onEdgeHover?.(null)
         edgeHideTimeout.current = null
-      }, 80)
+      }, 150)
     }
   }, [hoveredEdge, onEdgeHover])
 
@@ -2992,18 +3024,20 @@ const V2Canvas = forwardRef(function V2Canvas({
       </div>{/* close scene layer wrapper */}
 
 
-      {/* Phase 9B §2 / 9B.1 §1: cursor-centered dot under the cursor while
-          hovering an edge. 24px (was 12px — felt too close to cursor size);
+      {/* Cursor-centered dot under the cursor while hovering an edge.
+          Phase 9B §2 (initial), 9B.1 §1 (12 → 24), 9B.2 Fix 5a (24 → 32px).
           SDA-type fill, 70% opacity, no stroke, pointer-events: none so the
-          cursor can keep interacting with the edge. Rich tooltip content lives
-          in EdgeHoverMenu (rendered by V2App via the onEdgeHover emit). */}
+          cursor can keep interacting with the edge. Rich tooltip content
+          lives in EdgeHoverMenu (rendered by V2App via the onEdgeHover
+          emit). Raycaster threshold + hide debounce also bumped for
+          reliability (Fix 5b). */}
       {hoveredEdge && edgeTooltipPos && hoveredEdgeSdaType && !selectedEdgeId && createPortal(
         <div style={{
           position: 'fixed',
-          left: edgeTooltipPos.x - 12,
-          top: edgeTooltipPos.y - 12,
-          width: 24,
-          height: 24,
+          left: edgeTooltipPos.x - 16,
+          top: edgeTooltipPos.y - 16,
+          width: 32,
+          height: 32,
           borderRadius: '50%',
           background: SDA_EDGE_CSS[hoveredEdgeSdaType] || SDA_EDGE_CSS.full,
           opacity: 0.7,
