@@ -52,6 +52,12 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 - Click-to-copy on all PIN displays with visual feedback.
 - Type labels (`ASSET`, `CLAIM`, `PARSE RESULT`, `EVAL RESULT`) in mono font, informational only — see spec §3. State badges (`PROVISIONAL` / `DECLINED` / `SUPERSEDED` / `NEW`) render as separate inline badges.
 
+### UX patterns
+
+- **Accept/decline in modals, not notifications.** Party-to-party action responses (accept, decline, amend, etc.) open a modal for the user's decision. The notification is the *entry point* — it surfaces that an action is required — but the decision itself happens in a modal following the Disclosure Response pattern (`CombinedResponseModal`). Do not embed accept/decline buttons inline within notification rows. When declining, the decline-reason textarea lives inside the modal, not inline.
+- **Picker defaults + scroll containers.** Multi-select artifact pickers that require at least one selection (Assets, Claims, Requirements Sets, Eval Results, etc.) default to zero selected — force the user to make an explicit choice. Empty-state help text uses amber italic inline styling and states the requirement ("Select at least one Asset to continue."). Picker lists render inside scroll containers (`max-height` + `overflow-y: auto`, typically 240–320px) so they scale to N>>10 without breaking the modal layout. Optional pickers (e.g., evaluation evidence, which can be run as self-attestation) may sensibly pre-select, but default to zero whenever selection is required.
+- **Reciprocal notifications for all party-to-party actions.** Every party-to-party action that requires counterparty acknowledgment (accept, decline, cancel, amend, etc.) MUST fire reciprocal notifications on each state change. A transfer request creates `v22-transfer-request` on the recipient; acceptance creates `v22-transfer-accepted` on the sender; decline creates `v22-transfer-declined`; cancellation creates `v22-transfer-cancelled`. Both sides see every transition in their notification chrome. Missing reciprocal notifications are bugs regardless of whether the state change is visible elsewhere in the UI.
+
 ### Autonomous workflow
 
 - Work at `xhigh` effort.

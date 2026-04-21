@@ -1690,8 +1690,12 @@ export function deriveAgreementEdges(view) {
       continue
     }
     if (kind === 'claim' && internal && !hasScopeAssets) {
-      // Actor → Claim ownership.
-      pushEdge(grantorActorId, id, da)
+      // Phase 9A.5 #83: Claim → owner Actor edge suppressed. Ownership
+      // cascades through referenced Assets (every Claim has
+      // referencedAssetIds.length >= 1 per spec §3.4), so the Actor → Claim
+      // edge was visually redundant and added density without information.
+      // The ownership DA itself stays in state for provenance; we just stop
+      // drawing it as a canvas edge.
       continue
     }
     if (kind === 'claim' && internal && hasScopeAssets) {

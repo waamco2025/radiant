@@ -82,7 +82,7 @@ For the prototype, QS is mocked: a fake file picker shows pre-populated files pe
 
 ### 2.6 DOTs and Identity
 
-Every registered data element — Asset, Claim, Evaluation Result — is anchored by a **DOT** (Data Object Title). The DOT is a cryptographically verifiable identity object: it carries a PIN (the everyday identifier, printed on the DOT), the content hash where applicable, the current owner's DID, the registration timestamp, free-form metadata, and an append-only ownership lineage. This structure follows client canon X.1–X.10.
+Every registered data element — Asset, Claim, Evaluation Result — is anchored by a **DOT** (Data Object Title). The DOT is a cryptographically verifiable identity object: it carries a PIN (the everyday identifier, printed on the DOT), the content hash where applicable, the current owner's **DID** (Decentralized Identifier — a W3C-standardized format for verifiable digital identities, see [w3.org/TR/did-core/](https://www.w3.org/TR/did-core/)), the registration timestamp, free-form metadata, and an append-only ownership lineage. This structure follows client canon X.1–X.10.
 
 **The car-title analogy.** A DOT is to a data element what a vehicle title is to a car. The PIN is the VIN — it's printed on the title and used as the everyday identifier, but the title (the DOT) is the thing that establishes and transfers ownership. Transferring a car doesn't move the car; it re-registers the title to a new owner and records the state change on the back. Transferring an Asset on the platform works the same way: the file doesn't move, but the DOT updates (the `ownerDid` field flips to the recipient) and an immutable transfer record is appended to `lineage[]` as a verifiable provenance chain (canon X.5).
 

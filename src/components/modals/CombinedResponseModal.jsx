@@ -50,17 +50,13 @@ export default function CombinedResponseModal({
   // unchanged and are forwarded as the EA's `authorizedRequirementsSetIds` field
   // (preserved for context only). See Phase 6 carry-over #1.
 
-  // Phase 9A.1 item 10: prime selected Assets ONCE when the user enters the
-  // Full disclosure step — default to all referenced Assets. Do NOT re-prime
-  // on subsequent selection changes; that was a deselect trap (clicking the
-  // last Asset to deselect it instantly snapped back to all-selected). The
-  // user can now deselect all Assets; Continue stays disabled + help text
-  // renders from Phase 9A item 7.
+  // Phase 9A.5 #85: Asset picker defaults to zero-selected. Forces the user
+  // to explicitly select Assets to disclose — matches the picker-defaults
+  // convention in CLAUDE.md. Reset selection whenever the disclosure action
+  // changes so switching Full → Selective → Full doesn't carry stale state.
   useEffect(() => {
-    if (action === 'full') {
-      setSelectedAssetIds(referencedAssets.map((a) => a.id))
-    }
-  }, [action, referencedAssets])
+    setSelectedAssetIds([])
+  }, [action])
 
   const totalSteps = action === 'decline' ? 2 : action ? 4 : 1
   const isDecline = action === 'decline'
@@ -207,7 +203,7 @@ export default function CombinedResponseModal({
                 <>
                   <FieldLabel label="Select Assets to disclose" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    Assets in scope will have their <strong>evidence files</strong> revealed to {request.requesterParty}. Pick which referenced Assets to include — all are pre-selected by default.
+                    Assets in scope will have their <strong>evidence files</strong> revealed to {request.requesterParty}. Pick which referenced Assets to include.
                   </div>
                   {referencedAssets.length === 0 ? (
                     <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
