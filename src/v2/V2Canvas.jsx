@@ -434,6 +434,7 @@ const V2Canvas = forwardRef(function V2Canvas({
   revealAnim,
   selectedEdgeId = null,
   onEdgeClick,
+  onEdgeHover,                // Phase 9B: ({ edgeId, sdaType, x, y }) | null
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -2645,6 +2646,18 @@ const V2Canvas = forwardRef(function V2Canvas({
   // layer or zoom changes, which wipes the selection brightening from the
   // previous render. Re-running this effect after each rebuild re-applies
   // the brightening so selection persists through zoom + layer changes.
+  // Edge hover state for tooltip (raycaster-based).
+  // Phase 9B §1: declared BEFORE the selection/brightening effect below so
+  // the effect can depend on `hoveredEdge` without a TDZ. (V2Canvas useState
+  // order is stable — React just needs the identifier in scope for the deps
+  // array evaluation on each render.)
+  const [hoveredEdge, setHoveredEdge] = useState(null)
+  const [edgeTooltipPos, setEdgeTooltipPos] = useState(null)
+  // Phase 9B §2: track SDA type for the cursor-centered dot colour.
+  const [hoveredEdgeSdaType, setHoveredEdgeSdaType] = useState(null)
+  const edgeHideTimeout = useRef(null)
+  const raycasterRef = useRef(null)
+
   useEffect(() => {
     const group = edgeGroupRef.current
     if (!group) return
@@ -2654,9 +2667,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       const effectiveSdaType = line.userData?.sdaType || 'full'
       const cfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const isSelected = !!selectedEdgeId && line.userData?.edgeId === selectedEdgeId
+      // Phase 9B §1: hover brightening — weaker version of selection's 65%
+      // blend. Selection wins when both apply on the same edge.
+      const isHovered = !isSelected && !!hoveredEdge && line.userData?.edgeId === hoveredEdge
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
       const baseColor = new THREE.Color(cfg.color)
-      const color = isSelected ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.65) : baseColor
+      const color = isSelected
+        ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.65)
+        : isHovered
+          ? baseColor.clone().lerp(new THREE.Color('#ffffff'), 0.3)
+          : baseColor
       // Phase 9A.1 item 7: when deselecting, restore the internal-edge factor
       // (0.5×) so internal edges stay de-emphasised. Selected edges bump past
       // the factor as usual.
@@ -2669,13 +2689,7 @@ const V2Canvas = forwardRef(function V2Canvas({
       mat.needsUpdate = true
     })
     dirtyRef.current = true
-  }, [selectedEdgeId, currentLayer.edges, zoom])
-
-  // Edge hover state for tooltip (raycaster-based)
-  const [hoveredEdge, setHoveredEdge] = useState(null)
-  const [edgeTooltipPos, setEdgeTooltipPos] = useState(null)
-  const edgeHideTimeout = useRef(null)
-  const raycasterRef = useRef(null)
+  }, [selectedEdgeId, hoveredEdge, currentLayer.edges, zoom])
 
   // Initialize raycaster for Line2 edge hover
   useEffect(() => {
@@ -2700,6 +2714,8 @@ const V2Canvas = forwardRef(function V2Canvas({
       if (target && overlay.contains(target)) {
         setHoveredEdge(null)
         setEdgeTooltipPos(null)
+        setHoveredEdgeSdaType(null)
+        onEdgeHover?.(null)
         return
       }
     }
@@ -2715,10 +2731,13 @@ const V2Canvas = forwardRef(function V2Canvas({
     if (intersects.length > 0) {
       const hit = intersects[0].object
       const edgeId = hit.userData?.edgeId
+      const sdaType = hit.userData?.sdaType || 'full'
       if (edgeId) {
         if (edgeHideTimeout.current) { clearTimeout(edgeHideTimeout.current); edgeHideTimeout.current = null }
         setHoveredEdge(edgeId)
         setEdgeTooltipPos({ x: e.clientX, y: e.clientY })
+        setHoveredEdgeSdaType(sdaType)
+        onEdgeHover?.({ edgeId, sdaType, x: e.clientX, y: e.clientY })
         return
       }
     }
@@ -2728,10 +2747,12 @@ const V2Canvas = forwardRef(function V2Canvas({
       edgeHideTimeout.current = setTimeout(() => {
         setHoveredEdge(null)
         setEdgeTooltipPos(null)
+        setHoveredEdgeSdaType(null)
+        onEdgeHover?.(null)
         edgeHideTimeout.current = null
       }, 80)
     }
-  }, [hoveredEdge])
+  }, [hoveredEdge, onEdgeHover])
 
   const isDot = zoom < MID_LOD_THRESHOLD
   const isMidLOD = zoom >= MID_LOD_THRESHOLD && zoom < LOD_THRESHOLD
@@ -2952,61 +2973,25 @@ const V2Canvas = forwardRef(function V2Canvas({
       </div>{/* close scene layer wrapper */}
 
 
-      {/* Edge hover tooltip (portal, raycaster-driven) */}
-      {hoveredEdge && edgeTooltipPos && (() => {
-        // Look up edge metadata from Line2 userData
-        const edgeGroup = edgeGroupRef.current
-        if (!edgeGroup) return null
-        const hitLine = edgeGroup.children.find(c => c.userData?.edgeId === hoveredEdge)
-        if (!hitLine) return null
-        const sdaType = hitLine.userData.sdaType || 'full'
-        const cfg = SDA_EDGE_CONFIG[sdaType]
-        const fromNode = currentNodeMap[hitLine.userData.from]
-        const toNode = currentNodeMap[hitLine.userData.to]
-        return createPortal(
-          <div style={{
-            position: 'fixed',
-            left: edgeTooltipPos.x + 12,
-            top: edgeTooltipPos.y - 8,
-            zIndex: 9999,
-            padding: '6px 10px',
-            background: 'var(--bg-surface)',
-            border: `1px solid ${SDA_EDGE_CSS[sdaType]}`,
-            borderRadius: 6,
-            fontSize: 10,
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-secondary)',
-            pointerEvents: 'none',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-            whiteSpace: 'nowrap',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{
-                width: 18,
-                height: 2,
-                background: SDA_EDGE_CSS[sdaType],
-                borderRadius: 1,
-                display: 'inline-block',
-              }} />
-              <span style={{ color: SDA_EDGE_CSS[sdaType], fontWeight: 600 }}>
-                {cfg.label}
-              </span>
-            </div>
-            <div style={{ color: 'var(--text-tertiary)' }}>
-              {fromNode?.name || hitLine.userData.from} → {toNode?.name || hitLine.userData.to}
-            </div>
-            {sdaType === 'cascade' && hitLine.userData.discloser && (
-              <div style={{ color: 'var(--text-tertiary)', fontSize: 9 }}>
-                via {hitLine.userData.discloser}{hitLine.userData.cascadePolicy ? ` · ${hitLine.userData.cascadePolicy}` : ''}
-              </div>
-            )}
-          </div>,
-          document.body
-        )
-      })()}
+      {/* Phase 9B §2: cursor-centered dot under the cursor while hovering an edge.
+          Colored by SDA type, ~70% opacity, no stroke, pointer-events: none so
+          the cursor can keep interacting with the edge. Rich tooltip content
+          lives in EdgeHoverMenu (rendered by V2App via the onEdgeHover emit). */}
+      {hoveredEdge && edgeTooltipPos && hoveredEdgeSdaType && !selectedEdgeId && createPortal(
+        <div style={{
+          position: 'fixed',
+          left: edgeTooltipPos.x - 6,
+          top: edgeTooltipPos.y - 6,
+          width: 12,
+          height: 12,
+          borderRadius: '50%',
+          background: SDA_EDGE_CSS[hoveredEdgeSdaType] || SDA_EDGE_CSS.full,
+          opacity: 0.7,
+          pointerEvents: 'none',
+          zIndex: 5900,
+        }} />,
+        document.body,
+      )}
 
       {/* Layer border highlight */}
       <LayerBorder

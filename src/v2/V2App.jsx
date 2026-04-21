@@ -16,7 +16,7 @@ import {
   makeInternalDisclosureAgreement,
   buildV22SharedArtifacts, mergeProvisionals,
 } from './v2_2Data.js'
-import EdgeMenu from './EdgeMenu.jsx'
+import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
 import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
 import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
@@ -154,7 +154,10 @@ export default function V2App() {
   // Declared before `v22DataWithReveal` so that memo can read `selectedEdgeId`
   // without hitting a TDZ (Phase 9A item 5 wires edge endpoints into the memo).
   const [selectedEdgeId, setSelectedEdgeId] = useState(null)
-  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor }
+  const [edgeMenu, setEdgeMenu] = useState(null) // { edgeId, anchor } — pinned menu after click
+  // Phase 9B §2/§3: hover state for the cursor-following rich menu tooltip.
+  // Separate from edgeMenu so selection-pinned state doesn't race with hover.
+  const [edgeHover, setEdgeHover] = useState(null) // { edgeId, sdaType, x, y } | null
   const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
   const v22DataWithReveal = useMemo(() => {
@@ -2931,22 +2934,24 @@ export default function V2App() {
           revealAnim={revealAnim}
           selectedEdgeId={selectedEdgeId}
           onEdgeClick={(edgeId, anchor) => {
-            // Edge click opens the EdgeMenu (if a paired EA exists) or the
-            // Disclosure Agreement panel directly. Clears node selection first
-            // so node and edge selection stay mutually exclusive.
+            // Phase 9B §5: edge click pins the rich hover menu at the click
+            // point. The menu always renders (View DA row is always there,
+            // View EA row conditional on a paired EA). Clears node selection
+            // first so node and edge selection stay mutually exclusive.
             const resolved = resolveAgreementsForEdge(edgeId, v22View, edges)
             if (!resolved || !resolved.disclosureAgreement) return
             setSel(null)
             setForcePanelTab(null)
             setForceExpandSda(null)
             setSelectedEdgeId(edgeId)
-            if (resolved.evaluationAgreement) {
-              setEdgeMenu({ edgeId, anchor })
-              setOpenAgreement(null)
-            } else {
-              setEdgeMenu(null)
-              setOpenAgreement({ kind: 'disclosure', edgeId })
-            }
+            setEdgeMenu({ edgeId, anchor })
+            setOpenAgreement(null)
+            setEdgeHover(null)
+          }}
+          onEdgeHover={(info) => {
+            // Phase 9B §2/§3: cursor-tracked hover state. Suppressed while a
+            // pinned menu is open so we don't double-render.
+            setEdgeHover(info)
           }}
         />
 
@@ -2988,18 +2993,60 @@ export default function V2App() {
           </div>
         )}
 
-        {/* V2.2 Edge Menu — opens on edge click when paired EA exists (spec §4.3). */}
+        {/* Phase 9B: unified rich hover/pinned edge menu. Pinned wins over
+            hover when selectedEdgeId is set so the two tooltips never
+            stack. Hover-mode is pointer-events:none; pinned-mode is
+            clickable with hover-highlighted rows. */}
         {edgeMenu && (() => {
           const resolved = resolveAgreementsForEdge(edgeMenu.edgeId, v22View, edges)
-          const hasEA = !!(resolved && resolved.evaluationAgreement)
+          if (!resolved || !resolved.disclosureAgreement) return null
+          const da = resolved.disclosureAgreement
+          const edgeObj = edges?.find(e => e.id === edgeMenu.edgeId)
+          const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
+          const toNode = edgeObj ? nodeMap[edgeObj.to] : null
           return (
-            <EdgeMenu
-              open
-              anchor={edgeMenu.anchor}
-              hasEvaluationAgreement={hasEA}
-              onViewDisclosure={() => setOpenAgreement({ kind: 'disclosure', edgeId: edgeMenu.edgeId })}
-              onViewEvaluation={() => setOpenAgreement({ kind: 'evaluation', edgeId: edgeMenu.edgeId })}
-              onClose={() => setEdgeMenu(null)}
+            <EdgeHoverMenu
+              mode="pinned"
+              anchorX={edgeMenu.anchor.x}
+              anchorY={edgeMenu.anchor.y}
+              sdaType={da.type || 'full'}
+              fromNode={fromNode}
+              toNode={toNode}
+              grantorParty={da.grantor?.party}
+              granteeParty={da.grantee?.party}
+              disclosureAgreement={da}
+              evaluationAgreement={resolved.evaluationAgreement || null}
+              onViewDisclosure={() => {
+                setOpenAgreement({ kind: 'disclosure', edgeId: edgeMenu.edgeId })
+                setEdgeMenu(null)
+              }}
+              onViewEvaluation={() => {
+                setOpenAgreement({ kind: 'evaluation', edgeId: edgeMenu.edgeId })
+                setEdgeMenu(null)
+              }}
+            />
+          )
+        })()}
+        {/* Phase 9B §3: hover menu — only when no pinned menu is open. */}
+        {!edgeMenu && edgeHover && (() => {
+          const resolved = resolveAgreementsForEdge(edgeHover.edgeId, v22View, edges)
+          if (!resolved || !resolved.disclosureAgreement) return null
+          const da = resolved.disclosureAgreement
+          const edgeObj = edges?.find(e => e.id === edgeHover.edgeId)
+          const fromNode = edgeObj ? nodeMap[edgeObj.from] : null
+          const toNode = edgeObj ? nodeMap[edgeObj.to] : null
+          return (
+            <EdgeHoverMenu
+              mode="hover"
+              anchorX={edgeHover.x}
+              anchorY={edgeHover.y}
+              sdaType={edgeHover.sdaType}
+              fromNode={fromNode}
+              toNode={toNode}
+              grantorParty={da.grantor?.party}
+              granteeParty={da.grantee?.party}
+              disclosureAgreement={da}
+              evaluationAgreement={resolved.evaluationAgreement || null}
             />
           )
         })()}
@@ -3621,7 +3668,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.4 &middot; Changelog
+          v0.9.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3668,6 +3715,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.5', date: '2026-04-21', label: 'Phase 9B', items: [
+                  'Edge hover brightens the edge line itself (weaker variant of selection brightening)',
+                  'Cursor-centered dot appears under the cursor when hovering an edge, colored by SDA type',
+                  'Hover tooltip moved to top-left of cursor (was bottom-right); flips to bottom-right at viewport edges',
+                  'Edge click pins a rich menu at the click point: View Disclosure Agreement + View Evaluation Agreement rows',
+                  'Menu shows SDA type illustration, endpoints with party owners, and EA expiration date when present',
+                  'Whole-row hover highlights on menu items; selection persists with existing brightness + stroke treatment',
+                ]},
                 { version: '0.9.4', date: '2026-04-21', label: 'Phase 9A.6.2.1', items: [
                   'Fixed: newly-registered Assets now visible in counterparty Claim Detail Panels and Run Evaluation modals. Previously 2 newly-created Assets were missing from a 7-Asset Claim on the counterparty\'s side.',
                 ]},
