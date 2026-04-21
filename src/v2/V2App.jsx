@@ -746,12 +746,27 @@ export default function V2App() {
     if (!name || !name.trim() || !Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
       return null
     }
+    // TODO: remove after 9A.6.2 diagnoses #103
+    // Phase 9A.6.2 Issue 1 diagnostic: confirm handler receives every id the
+    // modal sent, and report the factory's output.
+    console.log('[9A.6.2 diag #103] handleV22CreateClaimSubmit entry', {
+      name,
+      referencedAssetIdsReceivedLen: referencedAssetIds.length,
+      referencedAssetIdsReceived: referencedAssetIds,
+    })
     const artifacts = makeClaimCreationArtifacts({
       ownerParty: activeRole.party,
       ownerDot: activeRole.partyDot,
       name,
       description,
       referencedAssetIds,
+    })
+    // TODO: remove after 9A.6.2 diagnoses #103
+    console.log('[9A.6.2 diag #103] handleV22CreateClaimSubmit factory output', {
+      claimId: artifacts.claim.id,
+      factoryReferencedAssetIdsLen: artifacts.claim.referencedAssetIds.length,
+      factoryReferencedAssetIds: artifacts.claim.referencedAssetIds,
+      claimRefDaCount: artifacts.claimRefDas.length,
     })
     setV22Provisionals((prev) => ({
       ...prev,
