@@ -202,10 +202,14 @@ function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAsset
         <>
           <Section title="Party">
             <Row label="Name" value={node.name} />
-            {/* Phase 9A.6 Gate C (#89): Actor DOT as truncated CopyBadge,
-                matching the treatment applied to Asset / Claim / Eval Result
-                panels in the 9A.4 preamble. */}
-            <Row label="DOT" value={node.dot ? <CopyBadge value={node.dot} truncated /> : '—'} />
+            {/* Phase 9A.6 Gate C (#89): Actor DOT as truncated CopyBadge.
+                Phase 9A.6.1 Fix 2: field reference was `node.dot`, which is
+                unset on Actor nodes (only Asset/Claim/Eval Result nodes
+                carry a nested `dot` object). Actors carry `partyDot` —
+                the top-level party-level identifier populated by `makeActor`
+                in v2_2Data.js and stamped onto the canvas node via the
+                adapter. */}
+            <Row label="DOT" value={node.partyDot ? <CopyBadge value={node.partyDot} truncated /> : '—'} />
             {actor?.role && <Row label="Role" value={actor.role} />}
             {actor?.vertical && <Row label="Vertical" value={actor.vertical} />}
             {actor?.user && <Row label="User" value={actor.user} />}

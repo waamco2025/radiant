@@ -25,7 +25,7 @@
 // `makeAssetRegistrationArtifacts`. Legacy single-file callers (none after
 // 9A.6, but preserved) can use the first entry.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, FieldLabel, InfoRow, StepDots, CreditCostRow, CopyBadge,
@@ -70,63 +70,69 @@ function mockHashFor(file) {
 // pattern-matches the V2.2 processing UIs (V22RunEvaluationModal's
 // processing stage), since no dedicated V2.1 HashingSequence reference
 // was provided for this phase.
-const HASH_DURATION_MS = 900
+// Phase 9A.6.1 Fix 3: reconcile the hashing sequence with V2.1's
+// AddEvidenceModal canonical pattern. State machine per file:
+//   pending  → initial state (pre-queue).
+//   hashing  → "Hashing file..." in amber, spinner. ~1000ms.
+//   endorsing → "Endorsing on ledger..." in blue, spinner. ~1200ms.
+//   done     → ✓ "Hashed" in green + hash badge to the right. Final.
+// Multi-file stagger: 600ms between files so the animations are visibly
+// offset rather than firing simultaneously.
+const HASH_MS = 1000
+const ENDORSE_MS = 1200
+const STAGGER_MS = 600
 
-function HashingRow({ phase, hashValue, onComplete, file }) {
-  const tickRef = useRef(null)
+function HashingRow({ phase, hashValue, onAdvance, file }) {
+  // Schedule the next transition whenever phase is an active state.
   useEffect(() => {
-    if (phase !== 'hashing') return
-    const start = Date.now()
-    let cancelled = false
-    const tick = () => {
-      if (cancelled) return
-      const elapsed = Date.now() - start
-      if (elapsed >= HASH_DURATION_MS) {
-        onComplete(mockHashFor(file))
-        return
-      }
-      // Rotate the scrolling hex chars for motion feel
-      tickRef.current = requestAnimationFrame(tick)
+    if (phase === 'hashing') {
+      const t = setTimeout(() => onAdvance('endorsing'), HASH_MS)
+      return () => clearTimeout(t)
     }
-    tickRef.current = requestAnimationFrame(tick)
-    return () => { cancelled = true; if (tickRef.current) cancelAnimationFrame(tickRef.current) }
-    // onComplete is intentionally excluded — the setter closure is stable for
-    // the duration we care about (one hashing tick).
+    if (phase === 'endorsing') {
+      const t = setTimeout(() => onAdvance('done', mockHashFor(file)), ENDORSE_MS)
+      return () => clearTimeout(t)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
   if (phase === 'pending') {
     return (
       <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-        Pending
+        Queued
       </span>
     )
   }
-  if (phase === 'hashing') {
-    // Motion: spinning hex dots + scrolling hex characters
-    const scroll = 'abcdef0123456789'
-    const offset = Math.floor((Date.now() / 80) % scroll.length)
-    const hexDance = scroll.slice(offset) + scroll.slice(0, offset)
+  if (phase === 'hashing' || phase === 'endorsing') {
+    const color = phase === 'hashing' ? 'var(--accent-amber)' : 'var(--accent-blue)'
+    const label = phase === 'hashing' ? 'Hashing file...' : 'Endorsing on ledger...'
     return (
       <span style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-indigo)',
+        fontSize: 11, fontFamily: 'var(--font-mono)', color,
       }}>
         <span style={{
           display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-          border: '1.5px solid var(--accent-indigo)',
+          border: `1.5px solid ${color}`,
           borderTopColor: 'transparent',
           animation: 'spin 600ms linear infinite',
         }} />
-        <span style={{ letterSpacing: '0.04em', opacity: 0.75 }}>
-          HASHING {hexDance.slice(0, 6)}…
-        </span>
+        <span>{label}</span>
       </span>
     )
   }
-  // complete
+  // done
   return (
-    <CopyBadge value={hashValue} truncated />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-green)',
+      }}>
+        <span style={{ fontSize: 13, lineHeight: 1 }}>✓</span>
+        Hashed
+      </span>
+      <CopyBadge value={hashValue} truncated />
+    </span>
   )
 }
 
@@ -139,7 +145,7 @@ export default function V22CreateAssetModal({
   onComplete,              // ({ files }) => void — files: [{ file, displayName, hash }]
 }) {
   const [step, setStep] = useState(0)
-  // Each row: { id, file, label, hashPhase: 'pending'|'hashing'|'complete', hash }
+  // Each row: { id, file, label, hashPhase: 'pending'|'hashing'|'endorsing'|'done', hash }
   const [rows, setRows] = useState([])
   const [showPicker, setShowPicker] = useState(false)
 
@@ -151,19 +157,31 @@ export default function V22CreateAssetModal({
       id: `row-${Date.now()}-${i}-${(f.filename || 'file').replace(/[^\w.-]+/g, '_')}`,
       file: f,
       label: derivedNameFromFilename(f.filename),
-      hashPhase: 'hashing', // start hashing immediately after selection
+      hashPhase: 'pending',
       hash: null,
     }))
     setRows(newRows)
     setStep(1)
+    // Phase 9A.6.1 Fix 3: stagger the hashing start per file so multi-file
+    // registrations animate visibly across slightly offset timings rather
+    // than firing simultaneously (V2.1 AddEvidenceModal parallel-staggered
+    // pattern).
+    newRows.forEach((r, i) => {
+      setTimeout(() => {
+        setRows(prev => prev.map(x => x.id === r.id && x.hashPhase === 'pending' ? { ...x, hashPhase: 'hashing' } : x))
+      }, i * STAGGER_MS)
+    })
   }
 
   const setRowLabel = (id, label) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, label: label.slice(0, 100) } : r))
   }
 
-  const setRowHash = (id, hash) => {
-    setRows(prev => prev.map(r => r.id === id ? { ...r, hashPhase: 'complete', hash } : r))
+  const advanceRow = (id, nextPhase, hash) => {
+    setRows(prev => prev.map(r => r.id === id
+      ? { ...r, hashPhase: nextPhase, hash: hash != null ? hash : r.hash }
+      : r
+    ))
   }
 
   const removeRow = (id) => {
@@ -182,7 +200,7 @@ export default function V22CreateAssetModal({
     )
   }
 
-  const allHashed = rows.length > 0 && rows.every(r => r.hashPhase === 'complete')
+  const allHashed = rows.length > 0 && rows.every(r => r.hashPhase === 'done')
   const allLabeled = rows.every(r => r.label.trim().length > 0)
   const canReview = rows.length > 0 && allHashed && allLabeled
   const totalCost = creditsPerAsset * rows.length
@@ -296,7 +314,7 @@ export default function V22CreateAssetModal({
                       phase={r.hashPhase}
                       hashValue={r.hash}
                       file={r.file}
-                      onComplete={(h) => setRowHash(r.id, h)}
+                      onAdvance={(nextPhase, hash) => advanceRow(r.id, nextPhase, hash)}
                     />
                     <button
                       onClick={() => removeRow(r.id)}
@@ -333,7 +351,7 @@ export default function V22CreateAssetModal({
                 marginTop: 10, fontSize: 11, color: 'var(--accent-amber)',
                 fontStyle: 'italic', lineHeight: 1.5,
               }}>
-                Hashing in progress — Continue enables when every file is hashed.
+                Hashing and endorsing in progress — Continue enables when every file is ready.
               </div>
             )}
             <button

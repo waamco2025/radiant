@@ -638,6 +638,8 @@ Alice transfers an Asset she owns to another actor. Canon X.5: the transfer is r
 
 **No cascading state.** The transferred Asset arrives "clean" on the recipient's canvas — existing Parse Results, Evaluation Results, and Disclosure Agreements against the Asset stay with Alice. Production cascade semantics (do derived Parse Results transfer too? what happens to Claims referencing the Asset on Alice's side?) are deferred. Similarly, transferring an Asset that is the sole evidence backing an active disclosed Claim is permitted in the demo but has no guardrail UI — backlog #73.
 
+**File custody on transfer.** The DOT canon (X.1) specifies that the DOT contains the file's hash but not the file itself, leaving file custody as an implementation question. This prototype assumes a **replication model**: on transfer acceptance, the file is replicated from the sender's qualified storage to the recipient's qualified storage, both copies hashing identically. The DOT lineage records the transfer; the file content is independently held under each owner's custody. The alternative — a pointer model where the recipient's DOT references the sender's still-hosted file — is cryptographically valid but operationally fragile (sender deletion or modification breaks the recipient's reference). The prototype does not actually move file bytes; the mock URI travels with the DOT for demonstration purposes. Production semantics should be confirmed with the client; this section will be updated accordingly. (Andrew's call — surfaced for client review; tracked as backlog #93.)
+
 ### 11.8 Parse flow
 
 Alice parses an Asset she owns to extract structured fields into a Parse Result artifact. Parsing is a prerequisite for Selective Disclosure (§2.3).

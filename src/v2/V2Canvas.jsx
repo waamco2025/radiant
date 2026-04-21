@@ -2819,6 +2819,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onParseEvidence={transitioning ? undefined : onParseEvidence}
                   onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                   onCreateClaim={transitioning ? undefined : onCreateClaim}
+                  onV22CardAction={transitioning ? undefined : onV22CardAction}
                   activeParty={activeParty}
                 />
               </div>
@@ -2889,6 +2890,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onParseEvidence={transitioning ? undefined : onParseEvidence}
                   onRunEvaluation={transitioning ? undefined : onRunEvaluation}
                   onCreateClaim={transitioning ? undefined : onCreateClaim}
+                  onV22CardAction={transitioning ? undefined : onV22CardAction}
                   activeParty={activeParty}
                 />
               </div>

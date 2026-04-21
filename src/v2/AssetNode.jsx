@@ -313,6 +313,11 @@ export default function AssetNode({
   onV22CardAction,
   activeParty,
   revealPhase,
+  // Phase 9A.6.1 Fix 4: when true, force the action bar to render regardless
+  // of the local hovered/isSelected state. Used by dot- and mini-LOD hover
+  // tooltips so the action bar is discoverable without first selecting the
+  // node.
+  forceActionBar = false,
 }) {
   const [hovered, setHovered] = useState(false)
   const [flipMidpoint, setFlipMidpoint] = useState(false)
@@ -411,7 +416,7 @@ export default function AssetNode({
   // apart from "this is an endpoint of the selected edge".
   const isEdgeEndpoint = !!node._isEdgeEndpoint && !isSelected
 
-  const showActionBar = isSelected || hovered
+  const showActionBar = isSelected || hovered || forceActionBar
 
   return (
     <div
@@ -837,7 +842,7 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
 
 // LOD dot: shown when zoom < LOD_THRESHOLD
 // Hover shows full AssetNode card as tooltip via portal
-export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, activeParty }) {
+export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, onV22CardAction, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const dotRef = useRef(null)
@@ -975,7 +980,9 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             onParseEvidence={isSelected ? onParseEvidence : undefined}
             onRunEvaluation={isSelected ? onRunEvaluation : undefined}
             onCreateClaim={isSelected ? onCreateClaim : undefined}
+            onV22CardAction={onV22CardAction}
             activeParty={activeParty}
+            forceActionBar
           />
         </div>,
         document.body
@@ -985,7 +992,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
 }
 
 // ─── Mid-LOD Mini Card ───
-export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, activeParty }) {
+export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, onV22CardAction, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const miniRef = useRef(null)
@@ -1204,7 +1211,9 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
             onParseEvidence={isSelected ? onParseEvidence : undefined}
             onRunEvaluation={isSelected ? onRunEvaluation : undefined}
             onCreateClaim={isSelected ? onCreateClaim : undefined}
+            onV22CardAction={onV22CardAction}
             activeParty={activeParty}
+            forceActionBar
           />
         </div>,
         document.body

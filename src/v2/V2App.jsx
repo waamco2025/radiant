@@ -109,7 +109,10 @@ export default function V2App() {
   const [v22AmendingClaimId, setV22AmendingClaimId] = useState(null) // claim id being amended
   const [v22AmendingDaId, setV22AmendingDaId] = useState(null) // disclosure agreement id being amended
   const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives reveal
-  const [v22RecentlyAcceptedAssetId, setV22RecentlyAcceptedAssetId] = useState(null) // drives Alice-side reveal on the pulled-in counterparty Asset
+  // Phase 9A.6.1 Fix 1: holds null, a single id, or an array of ids. Array
+  // form supports multi-file Asset registration where all N new Assets need
+  // the NEW badge. Consumers normalise via `toIdArray(...)` below.
+  const [v22RecentlyAcceptedAssetId, setV22RecentlyAcceptedAssetId] = useState(null)
   const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
   // V2.2 Phase 7 — Directory Layer + AI Shopper (spec §8 / §9)
   const [v22DirectoryOpen, setV22DirectoryOpen] = useState(false)
@@ -156,7 +159,13 @@ export default function V2App() {
 
   const v22DataWithReveal = useMemo(() => {
     if (!v22Data) return v22Data
-    const flagged = new Set([v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId].filter(Boolean))
+    // Phase 9A.6.1 Fix 1: v22RecentlyAcceptedAssetId may be a single id OR an
+    // array of ids (multi-file registration). Flatten into the flagged set so
+    // every newly-created Asset gets the _isNew reveal, not just the first.
+    const assetReveal = Array.isArray(v22RecentlyAcceptedAssetId)
+      ? v22RecentlyAcceptedAssetId
+      : v22RecentlyAcceptedAssetId ? [v22RecentlyAcceptedAssetId] : []
+    const flagged = new Set([v22RecentlyAcceptedClaimId, ...assetReveal].filter(Boolean))
     // Phase 9A item 5: compute the endpoint set for the currently-selected
     // edge so AssetNode can render a glow on the two connected nodes.
     // Phase 9A.1.5 item 4: also compute which side of each endpoint card
@@ -710,13 +719,22 @@ export default function V2App() {
     setCredits(c => Math.max(0, c - CREDITS_PER_ASSET * newAssets.length))
     setV22RegisteringAsset(null)
     const firstId = newAssets[0].id
+    // Phase 9A.6.1 Fix 1: stamp ALL new Assets for the NEW badge reveal, not
+    // just the first. Multi-file registrations were landing with only one
+    // flagged — _isNew was derived off the single-id state.
+    const newIds = newAssets.map(a => a.id)
     // Suppress pan when nested — user is still in a modal.
     if (!_nested) {
       setSel(firstId)
       setForcePanelTab(null)
       setForceExpandSda(null)
       setV22PanToClaimId(firstId)
-      setV22RecentlyAcceptedAssetId(firstId)
+      setV22RecentlyAcceptedAssetId(newIds.length > 1 ? newIds : firstId)
+    } else {
+      // Nested flows still need the reveal flags even though pan-to is skipped
+      // (the parent modal closes on its own and the revealed Assets should
+      // light up when the user lands on the canvas).
+      setV22RecentlyAcceptedAssetId(newIds.length > 1 ? newIds : firstId)
     }
     return newAssets.length > 1 ? newAssets.map(a => a.id) : firstId
   }, [activeRole.party, activeRole.partyDot])
@@ -1246,7 +1264,19 @@ export default function V2App() {
     const prevSel = prevSelRef.current
     if (!prevSel || prevSel === sel) return
     if (v22RecentlyAcceptedClaimId === prevSel) setV22RecentlyAcceptedClaimId(null)
-    if (v22RecentlyAcceptedAssetId === prevSel) setV22RecentlyAcceptedAssetId(null)
+    // Phase 9A.6.1 Fix 1: Asset reveal id may be array form. If the deselected
+    // node was one of the revealed Assets, drop it from the array (preserving
+    // the remaining badges); if the array empties, reset to null.
+    if (Array.isArray(v22RecentlyAcceptedAssetId)) {
+      if (v22RecentlyAcceptedAssetId.includes(prevSel)) {
+        const remaining = v22RecentlyAcceptedAssetId.filter(id => id !== prevSel)
+        setV22RecentlyAcceptedAssetId(
+          remaining.length === 0 ? null : remaining.length === 1 ? remaining[0] : remaining
+        )
+      }
+    } else if (v22RecentlyAcceptedAssetId === prevSel) {
+      setV22RecentlyAcceptedAssetId(null)
+    }
   }, [sel, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId])
 
   // Phase 8: keep prevSelRef in sync with `sel` for the V2.2 reveal-clear
@@ -3572,7 +3602,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.2 &middot; Changelog
+          v0.9.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3619,6 +3649,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.3', date: '2026-04-20', label: 'Phase 9A.6.1', items: [
+                  'Multi-file Asset registration now shows the NEW badge on every Asset, not just the first',
+                  'Actor Detail Panel DOT row now displays the party DOT (was showing empty)',
+                  'Hashing sequence finalized to match V2.1: amber Hashing... → blue Endorsing on ledger... → green ✓ Hashed + hash badge, staggered across files',
+                  'Action buttons now appear on hover at mini and dot zoom levels (previously required selecting the node first)',
+                  'Spec §11.7 documents the prototype\'s file-custody assumption (replication model)',
+                ]},
                 { version: '0.9.2', date: '2026-04-20', label: 'Phase 9A.6', items: [
                   'Register multiple Assets in a single flow — each file becomes its own Asset with editable display name',
                   'Local Storage tab in the file picker — drag-and-drop or click to upload from your machine (simulated upload into Qualified Storage)',

@@ -72,6 +72,9 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 ### 63. Mini/dot LOD warmer borders
 - **Status:** ✅ Complete (Phase 9A.1.5). `WARM_BORDER` (40% indigo blend) extended to mini and dot LOD renderings — mini cards now match full cards; dots grow a 1px indigo ring so they don't fade into canvas at zoom-out. Red UNSAT borders unchanged.
 
+### 100. Mini/dot LOD action buttons on hover
+- **Status:** ✅ Complete (Phase 9A.6.1 Fix 4). V22ActionBar now renders on hover at mini AND dot LODs, not just full-card LOD. Root cause: AssetNodeMini and AssetNodeDot forwarded only legacy handlers (`onAddEvidence` / `onParseEvidence` / etc.) to their hover-tooltip AssetNode renderings; `onV22CardAction` was missing, so even when the tooltip rendered, V22ActionBar had no dispatcher. Additionally, the tooltip's inner AssetNode was only action-barred when selected. Fix: added `onV22CardAction` prop to both dot/mini components, forwarded to the tooltip card, plus a new `forceActionBar` prop on AssetNode that overrides the internal `isSelected || hovered` check when the tooltip is visible. V2Canvas now passes `onV22CardAction` to both LOD components.
+
 ---
 
 ## Edge Interactions
@@ -144,10 +147,28 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Status:** ✅ Verified (Phase 9A.5 Gate C). No code change required. The expanded Detail Panel modal referenced in the original task (an `ExpandedArtifactModal`-style surface with a raw-JSON tab) does not exist in the current V2.2 codebase — it was removed during Phase 8 cleanup. Data layer confirmed correct: `dot.lineage[]` populates properly on transfer accept + decline (verified via `makeDotObject` + `makeTransferRecord` exercise). Lineage rendering in Detail Panels is already tracked separately as #74 (Provenance lineage UI) — that's the surface where the lineage will actually render. When #74 is picked up, the implementer should use `JSON.stringify(asset.dot.lineage, null, 2)` (or an equivalent structured list) to surface lineage entries.
 
 ### 89. Actor Detail Panel DOT click-to-copy
-- **Status:** ✅ Complete (Phase 9A.6 Gate C). V22ActorPanel DOT row wrapped in `<CopyBadge value={node.dot} truncated />`, matching the treatment applied to Asset / Claim / Eval Result panels in the 9A.4 preamble.
+- **Status:** ✅ Complete (9A.6 initial; field reference corrected in 9A.6.1). V22ActorPanel DOT row renders `<CopyBadge value={node.partyDot} truncated />`. The initial 9A.6 ship wrote `node.dot`, which Actor nodes don't consistently carry — the party-level DOT lives on `partyDot` (populated via `makeActor` in v2_2Data.js). `actorToNode` in the canvas adapter now surfaces both `dot` (V2.1 compat alias) and `partyDot` (canonical) so either read works.
 
 ### 64. Asset DOT / hash / URI click-to-copy badge
 - **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Matches the PIN treatment used elsewhere in the app. Null-value guard (`value ? <CopyBadge ... /> : '—'`) handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation. Per spec §3.2 the Asset has no distinct DOT — the file hash is the true per-Asset cryptographic identifier; the "DOT" label on the Asset panel refers to the party-level owner DOT.
+
+### 101. Actor Detail Panel narrative fields cleanup
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Low
+- **Context:** V22ActorPanel currently renders Role, Vertical, and User rows under the Party section. These are V2.1 narrative fields that don't carry meaningful information at the party level in V2.2's model (the platform knows parties, not people or roles — see the 9A.5 resolved-box convention). Drop all three from the Actor panel; keep the role label ("buyer" / "seller" / "auditor") in the user-menu role switcher only.
+
+### 103. Referenced Assets missing from Claim Detail Panel on counterparty canvas
+- **Source:** Phase 9A.6.1 QA — regression.
+- **Scope:** Medium
+- **Priority:** **High — functional regression.**
+- **Context:** On the counterparty canvas (e.g., Bob viewing Alice's disclosed Claim), the Claim Detail Panel's Referenced Assets section is empty. Related: Run Evaluation modal's evidence list is also empty in the same view. Likely view-builder regression in `buildViewForActor` — counterparty Assets aren't being pulled in for display even when the disclosed Claim references them. **9A.6.2 is the dedicated diagnostic phase for this pair of symptoms.**
+
+### 104. Click-to-jump navigation from Detail Panel association lists
+- **Source:** Phase 9A.6.1 QA — V2.1 capability lost in V2.2 migration.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** V2.1 Detail Panels supported clicking a node listed by association (e.g., a Referenced Asset in a Claim panel, an Eval Result in an Asset panel, etc.) to jump the canvas to that node and select it. V2.2 panels render these lists as static text. Restore the click-to-jump pattern: each associated-node item becomes a clickable row that calls the existing pan-to-selection helper (`canvasRef.current?.animatedPanToWithZoom`) and sets `sel`. Affects V22NodeDetailPanel and possibly the Agreement panels too.
 
 ### 11. Two-tab Overview/Artifact layout for DA and EA Detail Panels
 - **Source:** Phase 3 visual review
@@ -209,6 +230,12 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 ### 16. Deep-linking from notifications
 - **Source:** Phase 4 open question #4
 - **Status:** Scheduled for Phase 5.
+
+### 102. Disclosure amendment notifications missing on counterparty side
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** **High — UX confusion.**
+- **Context:** When Alice amends a Claim, Bob (counterparty) sees a NEW badge on the amended Claim without any notification context — he has no idea why the badge appeared. `handleV22AmendClaimSubmit` / `handleV22AmendDisclosureSubmit` should fire `v22-amendment` notifications to every counterparty with an active Disclosure Agreement on the affected Claim. Related to the CLAUDE.md "Reciprocal notifications for all party-to-party actions" convention added in 9A.5 — this is one of the known gaps that convention was supposed to cover. *(Filed — to be handled in a dedicated notifications-focused phase.)*
 
 ---
 
@@ -290,7 +317,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Status:** ✅ Complete (Phase 9A.6 Gate B). V22QualifiedStoragePicker gains a tab header: Qualified Storage | Local Storage. Local tab renders a drag+drop zone + file input, simulates upload (500–800ms per file with per-row progress bar), then the uploaded files are selectable alongside QS picks. On confirm, both sources merge into the payload. Mock URI synthesized under `{bucket}/uploads/{filename}`; file bytes are not actually stored (demo-only).
 
 ### 68. Hashing / processing sequence UI per file
-- **Status:** ✅ Complete (Phase 9A.6 Gate B). Each file row in V22CreateAssetModal's per-file review step plays a hashing sequence: pending → hashing (900ms, rotating border spinner + scrolling hex chars) → complete (truncated CopyBadge with mock sha256). Hashes are deterministic from `filename+size` so the same file always produces the same mock value. Continue is disabled while any row is still hashing. No V2.1 HashingSequence reference file was placed in `/references/` before the phase — motion/timing pattern-matched to V2.2 processing UIs (V22RunEvaluationModal). `@keyframes spin` added to `index.css`.
+- **Status:** ✅ Complete (9A.6 initial; reconciled with V2.1 pattern in 9A.6.1). Each file row now plays a three-state sequence — `pending` (queued) → `hashing` (amber "Hashing file..." + spinner, ~1000ms) → `endorsing` (blue "Endorsing on ledger..." + spinner, ~1200ms) → `done` (green ✓ "Hashed" + truncated CopyBadge with mock sha256). Multi-file stagger: 600ms between files so animations are visibly offset, matching V2.1's AddEvidenceModal parallel-staggered pattern. Hashes deterministic from `filename+size`. Continue disabled until every row reaches `done`.
 
 ### 69. User-editable Asset label
 - **Status:** ✅ Complete (Phase 9A.6 Gate B). Each per-file row in V22CreateAssetModal renders an editable text input pre-populated with the filename-stem derivation. 100-char max, trimmed on submit. Empty label turns the input border red and blocks Continue. Value flows through `makeAssetRegistrationArtifacts`'s `name` param. Spec §3.2 updated to document `asset.name` as the user-facing display name with filename-stem default.
@@ -405,6 +432,54 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Priority:** **Medium — data integrity**
 - **Context:** When an Asset transfers out, its Parse Results orphan on the sender's canvas (should transfer with the Asset — they're derivatives per canon). Claims referencing only the transferred Asset are broken (need user decision in the transfer review step — warn / auto-revise to drop reference / block). Related to #73 (transfer constraint on disclosed Claims) but distinct: #73 is about the counterparty's visibility of disclosed Claims post-transfer, #88 is about the sender's own orphaned derivatives and broken Claim references.
 
+### 94. QS picker preview pane multi-select summary
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** When multiple files are selected in the QS picker, the right-hand preview pane currently only shows the first-clicked file. For multi-select flows, replace the single-file preview with a summary: count ("3 files selected"), date range ("2026-03-10 to 2026-03-20"), aggregate total size, and a generic multi-doc icon. Keeps single-select behaviour unchanged.
+
+### 95. QS picker re-add files preserves custom labels
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** In the Asset registration per-file review step, clicking "+ Add more files…" re-opens the picker. If the user already edited a custom label on an existing row, the current logic replaces the row set entirely on re-pick — labels reset to filename-stem defaults. Fix: merge the new picks into the existing row list (preserving `label` for rows whose file is re-picked, and appending new rows for newly-picked files). Removed files should still be removable via the ✕.
+
+### 96. Local Storage tab: indicate destination folder for uploads
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Low
+- **Context:** Local Storage uploads synthesise a URI under `{bucket}/uploads/{filename}`. Surface a small informational chip near the drop zone: "Uploading to s3://{bucket}/uploads/" so the user understands where the file "goes" after upload. Informational only — not full file-manager UX.
+
+### 97. Local Storage uploads default-checked + Select All toggle
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** Local-uploaded files currently require the user to explicitly check each one before confirming. When someone drops 10 files, ticking each is friction. Default-check newly-uploaded files on upload complete, and expose a Select All / Deselect All toggle between the drop area and the file list. Matches `mode="multi"`'s QS picker toggle-all affordance.
+
+### 98. Credit warning copy + add-credits modal link
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** When credits are insufficient, the CreditCostRow shows "Only 0 available" in red. Replace with "0 available" (drop the "Only") plus a small "Add credits →" link that opens a separate modal (layered above the current modal, on its own Backdrop). The sub-modal would offer demo credit grants (reuse V2App's existing +100 / reset credits affordances). Keeps the user in the Register/Claim flow rather than forcing a cancel-retry loop.
+
+### 99. Create Claim picker: pre-selected + newly-registered Assets at top with NEW badges
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** In V22CreateClaimModal's Asset picker, pre-selected Assets (via `initialAssetIds` or nested Register auto-select) should float to the top of the list with a NEW badge so they're obvious. Clear the NEW badge after the user goes through a select-then-deselect cycle (confirming they've seen and considered the Asset). Pairs with the nested Register flow — freshly-created Assets land ticked but currently get lost in the full Asset list.
+
+### 105. Run Evaluation modal: empty-evidence copy update
+- **Source:** Phase 9A.6.1 QA.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** When a Claim has no evidence (no referenced Assets or no parseable content), the Run Evaluation modal's evidence pane shows a generic empty state. Split by role: owner: "There is no evidence associated with this Claim. Add evidence to self-evaluate."; non-owner: "There is no evidence associated with this Claim. Ask the owner of this Claim to add evidence to evaluate." Surfaces the right next step.
+
+### 106. Remove evidence picker from Run Evaluation modal
+- **Source:** Phase 9A.6.1 QA — larger design question.
+- **Scope:** Medium
+- **Priority:** Medium
+- **Context:** Evaluations are Claim-level, not Asset-level. Bob evaluates the Claim against requirements; all in-scope evidence is automatically included. When Alice amends the Claim (adds/removes Assets), Bob's evaluation is marked stale and re-runs against ALL evidence — no partial/selective combinations. Proposal: remove the evidence picker from V22RunEvaluationModal entirely; the modal becomes a review-rows-only surface. Pairs with #88 (transfer cascade) — both deal with Claim-vs-evidence boundary semantics and should be scoped together.
+
 ### 55. Error states + edge-case review
 - **Source:** Phase 9A.3 preamble — handoff roster.
 - **Scope:** Medium
@@ -422,6 +497,12 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 
 ### 86. DID glossary entry in architecture-spec.md §2.6
 - **Status:** ✅ Complete (Phase 9A.5 Gate C). §2.6 now expands DID on first use: "Decentralized Identifier (DID) — a W3C-standardized format for verifiable digital identities" with a link to [w3.org/TR/did-core/](https://www.w3.org/TR/did-core/).
+
+### 93. Transfer file custody semantics (Model 1 pointer vs Model 2 replication)
+- **Status:** ✅ Spec note shipped (Phase 9A.6.1 Fix 5). architecture-spec.md §11.7 now documents the prototype's working assumption: replication model — on accept, the file is independently held in each owner's qualified storage, both copies hashing identically. The alternative pointer model is acknowledged as cryptographically valid but operationally fragile. Design conversation pending with client to confirm production semantics.
+- **Source:** Phase 9A.6.1 QA — arose from "how does the file actually move on transfer?" question.
+- **Scope:** Small (spec note shipped; implementation follow-up is a future phase).
+- **Priority:** Low (documentation complete; implementation implications can wait).
 
 ---
 
@@ -501,3 +582,4 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-20: Phase 9A.4 main — Transferring process shipped (Assets only); structured DOT data model added (`makeDotObject`, `makeTransferRecord`) with backward-compat aliases on existing factories; 7-process demo complete. Backlog: #33 ✅ Complete; added #72 (Claim + Eval Result transfer), #73 (transfer constraint on disclosed Claims), #74 (provenance lineage UI), #75 (transfer timeage). Runtime verified: Alice → Bob accept path + Alice → Carol decline path + sender cancel path + PIN resolution rejecting self / Radiant Network / unknown.
 - 2026-04-20: Phase 9A.5 — fast-follower polish after 9A.4 demo completion. Eight items shipped (#76 transfer accept ownership edge, #77 transfer response modal, #78 resolved-box party-only, #79 PIN error split, #83 Claim-owner edge removal, #85 Asset-picker zero-default, #86 DID glossary, #87 raw-JSON tab verified); four items filed for future phases (#80 accepted-transfer animation, #81 reciprocal notification audit, #82 Parse Result DOT + layer placement, plus #84 consolidated into #70). Three cross-cutting UX conventions added to CLAUDE.md (accept-in-modal, picker-defaults + scroll, reciprocal notifications). Demo-blocking transfer accept edge regression resolved in Gate A.
 - 2026-04-20: Phase 9A.6 — Asset registration batch. Shipped #65 (credits: `CREDITS_PER_ASSET = 5`, `CREDITS_PER_CLAIM = 25`, CreditCostRow shared component), #66 (multi-file Asset registration — 3-step flow with per-file rows, nested callers auto-select all N), #67 (Local Storage tab in QS picker with mock upload simulation), #68 (hashing sequence per file — 900ms rotating spinner + hex dance, deterministic mock sha256, spec §3.2 updated for `asset.name`), #69 (editable per-file label), #89 (Actor DOT CopyBadge), #90 (notification bell tooltip persistence — effect clearing `visible` when `shouldRender` goes false + mousedown dismissal), #91 (Parse Template + Requirements Set picker scroll). Filed #88 (transfer cascade — Parse Results + dependent Claims on sender side — data integrity concern from 9A.5 QA). No V2.1 HashingSequence reference file was placed before the phase; visual/timing pattern-matched to V2.2 processing UIs.
+- 2026-04-20: Phase 9A.6.1 — corrective fixes after 9A.6 QA. Five fixes shipped: multi-file NEW badge regression (Fix 1 — reveal-id state extended to array form, all N assets now flagged), Actor DOT row empty (Fix 2 — V22ActorPanel now reads `node.partyDot`; actorToNode also exposes `partyDot` as a canonical alias), hashing sequence reconciled against V2.1's AddEvidenceModal (Fix 3 — three-state machine amber `Hashing file...` → blue `Endorsing on ledger...` → green ✓ `Hashed` + hash badge, 600ms stagger across files), mini/dot LOD action buttons on hover (Fix 4 — `onV22CardAction` now forwarded through both LOD components; new `forceActionBar` prop on AssetNode), transfer file custody spec note in architecture-spec.md §11.7 (Fix 5 — replication model documented as prototype assumption). Filed 14 new items #93–106 from 9A.6 QA surfaces. Items #68 and #89 retain ✅ Complete status with revision notes.

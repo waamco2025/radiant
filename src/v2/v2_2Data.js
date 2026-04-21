@@ -1819,6 +1819,11 @@ function actorToNode(actor, x, y) {
     id: isDirectory ? RADIANT_NETWORK_ACTOR.id : actorNodeIdForParty(actor.party),
     pin: actor.pin || makePin(actor.id),
     dot: actor.partyDot,
+    // Phase 9A.6.1 Fix 2: also surface the party-level DOT under its canonical
+    // name so V22ActorPanel can read `node.partyDot` (the alias `node.dot` is
+    // retained for V2Canvas compat — V2.1 code paths read it for non-actor
+    // nodes too, where `dot` and `partyDot` would mean different things).
+    partyDot: actor.partyDot,
     name: actor.party,
     category: 'party',
     owner: null,
