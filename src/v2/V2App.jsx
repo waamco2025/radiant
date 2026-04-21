@@ -3120,17 +3120,43 @@ export default function V2App() {
 
         {/* V2.2 Agreement Detail Panels — slide over from the right, reuse the canvas panel slot. */}
         {openAgreement && (() => {
-          const resolved = resolveAgreementsForEdge(openAgreement.edgeId, v22View, edges)
+          // Phase 9C: rows in the node-panel Agreements Section open agreement
+          // panels with an agreementId (edgeId may be null for suppressed internal
+          // DAs). Edge-click entry still passes edgeId. Resolve both paths.
+          let resolved = openAgreement.edgeId
+            ? resolveAgreementsForEdge(openAgreement.edgeId, v22View, edges)
+            : null
+          if (!resolved && openAgreement.disclosureAgreementId) {
+            const da = v22View?.disclosureAgreements.find((d) => d.id === openAgreement.disclosureAgreementId)
+            if (da) {
+              const ea = openAgreement.evaluationAgreementId
+                ? v22View?.evaluationAgreements.find((e) => e.id === openAgreement.evaluationAgreementId)
+                : v22View?.evaluationAgreements.find((e) => e.disclosureAgreementId === da.id)
+              resolved = { edge: null, disclosureAgreement: da, evaluationAgreement: ea || null }
+            }
+          }
+          if (!resolved && openAgreement.evaluationAgreementId) {
+            const ea = v22View?.evaluationAgreements.find((e) => e.id === openAgreement.evaluationAgreementId)
+            if (ea) {
+              const da = v22View?.disclosureAgreements.find((d) => d.id === ea.disclosureAgreementId)
+              if (da) resolved = { edge: null, disclosureAgreement: da, evaluationAgreement: ea }
+            }
+          }
           if (!resolved || !resolved.disclosureAgreement) return null
           const resolveNodeName = (id) => nodeMap[id]?.name || null
           const close = () => {
             setOpenAgreement(null)
             setSelectedEdgeId(null)
           }
+          const preserve = {
+            edgeId: openAgreement.edgeId,
+            disclosureAgreementId: resolved.disclosureAgreement.id,
+            evaluationAgreementId: resolved.evaluationAgreement?.id,
+          }
           const swapToEvaluation = resolved.evaluationAgreement
-            ? () => setOpenAgreement({ kind: 'evaluation', edgeId: openAgreement.edgeId })
+            ? () => setOpenAgreement({ kind: 'evaluation', ...preserve })
             : undefined
-          const swapToDisclosure = () => setOpenAgreement({ kind: 'disclosure', edgeId: openAgreement.edgeId })
+          const swapToDisclosure = () => setOpenAgreement({ kind: 'disclosure', ...preserve })
           return (
             <div style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
@@ -3621,6 +3647,90 @@ export default function V2App() {
           const sourceAsset = node.v22Artifact?.sourceAssetId
             ? (v22View?.assets || []).find(a => a.id === node.v22Artifact.sourceAssetId)
             : null
+
+          // ── Phase 9C: Agreements Section derivation ────────────────────
+          // Filter DAs + EAs relevant to this node. Uses v22View (already
+          // merged with provisionals via getV22DataForRole) so user-created
+          // agreements appear without a #103-style regression. sharedForPanel
+          // (also merged) covers subject-name lookups for public-directory DAs
+          // and similar edge cases where the artifact may not be on the
+          // active actor's canvas.
+          const allDas = v22View?.disclosureAgreements || []
+          const allEas = v22View?.evaluationAgreements || []
+          let disclosureAgreementsForNode = []
+          let evaluationAgreementsForNode = []
+          if (node.v22Type === 'ACTOR') {
+            const party = node.name
+            disclosureAgreementsForNode = allDas.filter((d) =>
+              d.grantor.party === party || d.grantee.party === party,
+            )
+            evaluationAgreementsForNode = allEas.filter((e) =>
+              e.grantor.party === party || e.grantee.party === party,
+            )
+          } else if (node.v22Type === 'ASSET') {
+            disclosureAgreementsForNode = allDas.filter((d) =>
+              (Array.isArray(d.scope?.assetIds) && d.scope.assetIds.includes(node.id)) ||
+              d.granteeAssetId === node.id ||
+              (d.subject?.kind === 'asset' && d.subject.id === node.id),
+            )
+            evaluationAgreementsForNode = allEas.filter((e) => e.granteeAssetId === node.id)
+          } else if (node.v22Type === 'CLAIM') {
+            disclosureAgreementsForNode = allDas.filter((d) =>
+              d.subject?.kind === 'claim' && d.subject.id === node.id,
+            )
+            evaluationAgreementsForNode = allEas.filter((e) => e.claimId === node.id)
+          }
+          const resolveSubjectName = (subject) => {
+            if (!subject) return null
+            const pools = {
+              asset: sharedForPanel.assets,
+              claim: sharedForPanel.claims,
+              evalResult: sharedForPanel.evaluationResults,
+              parseResult: sharedForPanel.parseResults,
+            }
+            const pool = pools[subject.kind]
+            if (!pool) return null
+            const artifact = pool.find((a) => a.id === subject.id)
+            if (!artifact) return null
+            return artifact.name || artifact.templateName || artifact.id
+          }
+          const resolveClaimName = (claimId) => {
+            const c = sharedForPanel.claims.find((x) => x.id === claimId)
+            return c ? c.name : null
+          }
+          const handleAgreementRowClick = (kind, agreement) => {
+            setSel(null)
+            setEdgeMenu(null)
+            setForcePanelTab(null)
+            setForceExpandSda(null)
+            // Find corresponding edge so we get the pan/zoom framing. Multiple
+            // edges may share a DA (e.g., internal claim-ref with multi-asset
+            // scope); first match is fine for framing purposes.
+            let edgeId = null
+            if (kind === 'disclosure') {
+              edgeId = edges?.find((e) => e.disclosureAgreementId === agreement.id)?.id || null
+            } else {
+              edgeId = edges?.find((e) => e.pairedEvaluationAgreementId === agreement.id)?.id || null
+            }
+            if (edgeId) setSelectedEdgeId(edgeId)
+            setOpenAgreement({
+              kind,
+              edgeId,
+              disclosureAgreementId: kind === 'disclosure' ? agreement.id : undefined,
+              evaluationAgreementId: kind === 'evaluation' ? agreement.id : undefined,
+            })
+          }
+          const handleAmendDaFromRow = (da) => {
+            if (da.grantor.party !== activeRole.party) return
+            if (da.type === 'provisional') {
+              setV22RespondingTo({ daId: da.id })
+            } else {
+              setV22AmendingDaId(da.id)
+            }
+            // Close the node Detail Panel so the modal has a clean stage.
+            setSel(null)
+          }
+
           return (
             <div style={{
               position: 'absolute', top: 0, right: 0, bottom: 0,
@@ -3691,6 +3801,13 @@ export default function V2App() {
                     priorActiveResultId: er.id,
                   })
                 }}
+                // Phase 9C — Agreements Section (backlog #111)
+                disclosureAgreementsForNode={disclosureAgreementsForNode}
+                evaluationAgreementsForNode={evaluationAgreementsForNode}
+                resolveSubjectName={resolveSubjectName}
+                resolveClaimName={resolveClaimName}
+                onAgreementRowClick={handleAgreementRowClick}
+                onAmendDa={handleAmendDaFromRow}
               />
             </div>
           )
@@ -3735,7 +3852,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.8 &middot; Changelog
+          v0.9.9 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3782,6 +3899,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.9', date: '2026-04-21', label: 'Phase 9C', items: [
+                  'New: Agreements section in Actor, Asset, and Claim Detail Panels — lists all Disclosure and Evaluation Agreements for the selected node',
+                  'Click any agreement row to jump to its edge on the canvas and open the agreement\'s details',
+                  'Amend available directly from the row (for grantors of Disclosure Agreements); Revoke placeholder pending next release',
+                ]},
                 { version: '0.9.8', date: '2026-04-21', label: 'Phase 9B.3', items: [
                   'Edge menu now appears at the midpoint between endpoint cards — position is consistent regardless of where on the edge you clicked',
                 ]},

@@ -192,7 +192,15 @@ function PanelLayout({ header, body, footer }) {
 // directory pseudo-actor) has no footer actions — it isn't an owner of
 // anything in the conventional sense. Counterparty Actor nodes don't
 // render on the canvas in V2.2 so we don't need to branch for them here.
-function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAssetCount = 0 }) {
+function V22ActorPanel({
+  node, activeParty, onClose, onRegisterAsset, ownedAssetCount = 0,
+  disclosureAgreementsForNode = [],
+  evaluationAgreementsForNode = [],
+  resolveSubjectName,
+  resolveClaimName,
+  onAgreementRowClick,
+  onAmendDa,
+}) {
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
     <PanelLayout
@@ -212,6 +220,15 @@ function V22ActorPanel({ node, activeParty, onClose, onRegisterAsset, ownedAsset
           <Section title="Assets">
             <Row label="Registered" value={ownedAssetCount} />
           </Section>
+          <AgreementsSection
+            disclosureAgreements={disclosureAgreementsForNode}
+            evaluationAgreements={evaluationAgreementsForNode}
+            activeParty={activeParty}
+            resolveSubjectName={resolveSubjectName}
+            resolveClaimName={resolveClaimName}
+            onRowClick={onAgreementRowClick}
+            onAmendDa={onAmendDa}
+          />
         </>
       }
       footer={
@@ -229,6 +246,12 @@ function V22AssetPanel({
   onRequestAgreement, onCreateClaim, onParseEvidence,
   onTransferAsset, onCancelTransfer,
   parseResultsForAsset = [],
+  disclosureAgreementsForNode = [],
+  evaluationAgreementsForNode = [],
+  resolveSubjectName,
+  resolveClaimName,
+  onAgreementRowClick,
+  onAmendDa,
 }) {
   const asset = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -279,6 +302,15 @@ function V22AssetPanel({
               )}
             </Section>
           )}
+          <AgreementsSection
+            disclosureAgreements={disclosureAgreementsForNode}
+            evaluationAgreements={evaluationAgreementsForNode}
+            activeParty={activeParty}
+            resolveSubjectName={resolveSubjectName}
+            resolveClaimName={resolveClaimName}
+            onRowClick={onAgreementRowClick}
+            onAmendDa={onAmendDa}
+          />
         </>
       }
       footer={
@@ -309,6 +341,12 @@ function V22ClaimPanel({
   referencedAssetNames = [],
   evaluationResultsForClaim = [],
   evaluationAgreementForActor,
+  disclosureAgreementsForNode = [],
+  evaluationAgreementsForNode = [],
+  resolveSubjectName,
+  resolveClaimName,
+  onAgreementRowClick,
+  onAmendDa,
 }) {
   const claim = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -463,6 +501,15 @@ function V22ClaimPanel({
               </div>
             )}
           </Section>
+          <AgreementsSection
+            disclosureAgreements={disclosureAgreementsForNode}
+            evaluationAgreements={evaluationAgreementsForNode}
+            activeParty={activeParty}
+            resolveSubjectName={resolveSubjectName}
+            resolveClaimName={resolveClaimName}
+            onRowClick={onAgreementRowClick}
+            onAmendDa={onAmendDa}
+          />
         </>
       }
       footer={
@@ -597,6 +644,293 @@ const STATUS_CFG = {
   unsatisfactory: { label: 'UNSAT',   color: 'var(--accent-red)' },
   missing:        { label: 'MISSING', color: 'var(--accent-amber)' },
   na:             { label: 'N/A',     color: 'var(--text-dim)' },
+}
+
+/* ─── Agreements Section (Phase 9C — backlog #111) ────────────────────── */
+// Shared sub-panel for Actor / Asset / Claim Detail Panels. Surfaces the
+// DAs + EAs relevant to the node being viewed with Amend / Revoke action
+// labels on the right side of each row. Primary UX path for agreement
+// management; edge-click (9B) is the secondary path.
+//
+// Row click (anywhere except Amend/Revoke text) selects the agreement's
+// edge on the canvas and opens its Detail Panel — same semantics as the
+// edge-tooltip "View" actions.
+
+const SDA_TYPE_CFG = {
+  full:        { color: 'var(--accent-indigo)', label: 'Full Disclosure',      dasharray: null },
+  selective:   { color: 'var(--accent-amber)',  label: 'Selective Disclosure', dasharray: '6 3' },
+  proofonly:   { color: 'var(--accent-green)',  label: 'Proof-Only Disclosure', dasharray: '2 3' },
+  provisional: { color: 'var(--text-dim)',      label: 'Provisional',          dasharray: '5 4' },
+}
+
+function SdaLine({ type }) {
+  const cfg = SDA_TYPE_CFG[type] || SDA_TYPE_CFG.full
+  return (
+    <svg width={22} height={8} viewBox="0 0 22 8" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <line x1="1" y1="4" x2="21" y2="4" stroke={cfg.color} strokeWidth="2"
+            strokeLinecap="round" strokeDasharray={cfg.dasharray || undefined} />
+    </svg>
+  )
+}
+
+function formatShortDate(iso) {
+  if (!iso) return null
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toISOString().slice(0, 10)
+  } catch { return null }
+}
+
+function truncate(s, n) {
+  if (!s) return '—'
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
+}
+
+function ActionLabel({ label, onClick, disabled, title }) {
+  const span = (
+    <span
+      role={onClick && !disabled ? 'button' : undefined}
+      tabIndex={onClick && !disabled ? 0 : undefined}
+      onClick={onClick && !disabled ? (e) => { e.stopPropagation(); onClick() } : (e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (!onClick || disabled) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick() }
+      }}
+      onMouseEnter={(e) => {
+        if (disabled) return
+        e.currentTarget.style.color = 'var(--accent-indigo)'
+      }}
+      onMouseLeave={(e) => {
+        if (disabled) return
+        e.currentTarget.style.color = 'var(--text-primary)'
+      }}
+      style={{
+        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        color: disabled ? 'var(--text-dim)' : 'var(--text-primary)',
+        cursor: disabled ? 'default' : (onClick ? 'pointer' : 'default'),
+        transition: 'color 120ms',
+        userSelect: 'none',
+      }}
+    >{label}</span>
+  )
+  return title ? <Tooltip content={title} width={260}>{span}</Tooltip> : span
+}
+
+function AgreementRow({ children, onClick }) {
+  return (
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (!onClick) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() }
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 85%, var(--text-primary) 15%)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'var(--bg-raised)'
+      }}
+      style={{
+        display: 'flex', alignItems: 'stretch', gap: 12,
+        padding: '8px 10px', borderRadius: 4,
+        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--border-faint, var(--border))',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'background 120ms',
+      }}
+    >{children}</div>
+  )
+}
+
+function DisclosureAgreementRow({
+  da, activeParty, subjectName, onRowClick, onAmendDa,
+}) {
+  const isInternal = da.grantor.party === da.grantee.party
+  const isProofOfEval = da.subject?.kind === 'evalResult'
+  const isGrantor = activeParty === da.grantor.party
+  const isProvisional = da.type === 'provisional'
+  const isDeclined = !!da._declineMeta
+  const typeKey = isProvisional ? 'provisional' : (da.type || 'full')
+  const cfg = SDA_TYPE_CFG[typeKey] || SDA_TYPE_CFG.full
+
+  // Counterparty label.
+  let counterpartyLabel
+  if (isInternal) counterpartyLabel = 'Internal'
+  else if (da.grantor.party === activeParty) counterpartyLabel = `with ${da.grantee.party}`
+  else if (da.grantee.party === activeParty) counterpartyLabel = `with ${da.grantor.party}`
+  else counterpartyLabel = `${da.grantor.party} → ${da.grantee.party}`
+
+  // Status label.
+  let statusLabel
+  let statusColor = 'var(--text-tertiary)'
+  if (isDeclined) { statusLabel = 'Declined'; statusColor = 'var(--accent-red)' }
+  else if (isProvisional) { statusLabel = 'Provisional'; statusColor = 'var(--accent-amber)' }
+  else { statusLabel = 'Active'; statusColor = 'var(--accent-green)' }
+  const dateStr = formatShortDate(da.terms?.createdDate)
+
+  // Action visibility gating. Internal + proof-of-eval DAs hide both actions.
+  const actionsHidden = isInternal || isProofOfEval
+  const showAmend = !actionsHidden && isGrantor && !isDeclined
+  const showRevoke = !actionsHidden && isGrantor && !isProvisional && !isDeclined
+  const amendLabel = isProvisional ? 'Respond' : 'Amend'
+
+  return (
+    <AgreementRow onClick={onRowClick}>
+      {/* Left: type illustration + type label (Row 1) / subject name (Row 2) */}
+      <div style={{ flex: '1.2 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SdaLine type={typeKey} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+            {cfg.label}
+          </span>
+        </div>
+        <div style={{
+          fontSize: 11, color: 'var(--text-secondary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }} title={subjectName || undefined}>
+          {truncate(subjectName, 32)}
+        </div>
+      </div>
+      {/* Middle: counterparty / status+date */}
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', textAlign: 'right' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }} title={counterpartyLabel}>
+          {counterpartyLabel}
+        </span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: statusColor, letterSpacing: '0.04em' }}>
+          {statusLabel}{dateStr ? ` · ${dateStr}` : ''}
+        </span>
+      </div>
+      {/* Right: actions (stacked) */}
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 52 }}>
+        {showAmend ? (
+          <ActionLabel
+            label={amendLabel}
+            onClick={onAmendDa ? () => onAmendDa(da) : undefined}
+            title={isProvisional ? 'Open the response flow for this pending request' : 'Amend this Disclosure Agreement'}
+          />
+        ) : <span style={{ height: 14 }} />}
+        {showRevoke ? (
+          <ActionLabel
+            label="Revoke"
+            disabled
+            title="Revocation coming soon (Phase 9D)"
+          />
+        ) : <span style={{ height: 14 }} />}
+      </div>
+    </AgreementRow>
+  )
+}
+
+function EvaluationAgreementRow({
+  ea, activeParty, claimName, onRowClick,
+}) {
+  const isGrantor = activeParty === ea.grantor.party
+  const isInternal = ea.grantor.party === ea.grantee.party
+  let counterpartyLabel
+  if (isInternal) counterpartyLabel = 'Internal'
+  else if (ea.grantor.party === activeParty) counterpartyLabel = `with ${ea.grantee.party}`
+  else if (ea.grantee.party === activeParty) counterpartyLabel = `with ${ea.grantor.party}`
+  else counterpartyLabel = `${ea.grantor.party} → ${ea.grantee.party}`
+
+  const expiresIso = ea.terms?.resultExpiry || ea.terms?.expires || null
+  const expiresStr = expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'Never expires'
+
+  const showAmend = isGrantor && !isInternal
+  const showRevoke = isGrantor && !isInternal
+
+  return (
+    <AgreementRow onClick={onRowClick}>
+      <div style={{ flex: '1.2 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
+          Evaluation Agreement
+        </div>
+        <div style={{
+          fontSize: 11, color: 'var(--text-secondary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }} title={claimName || undefined}>
+          {truncate(claimName, 32)}
+        </div>
+      </div>
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', textAlign: 'right' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }} title={counterpartyLabel}>
+          {counterpartyLabel}
+        </span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+          {expiresStr}
+        </span>
+      </div>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 52 }}>
+        {showAmend ? (
+          <ActionLabel label="Amend" disabled title="Amend Evaluation Agreements coming soon" />
+        ) : <span style={{ height: 14 }} />}
+        {showRevoke ? (
+          <ActionLabel label="Revoke" disabled title="Revocation coming soon (Phase 9D)" />
+        ) : <span style={{ height: 14 }} />}
+      </div>
+    </AgreementRow>
+  )
+}
+
+function AgreementsSection({
+  disclosureAgreements = [],
+  evaluationAgreements = [],
+  activeParty,
+  resolveSubjectName,
+  resolveClaimName,
+  onRowClick,
+  onAmendDa,
+}) {
+  const das = disclosureAgreements
+  const eas = evaluationAgreements
+  if (das.length === 0 && eas.length === 0) return null
+
+  const subHeadingStyle = {
+    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+    letterSpacing: '0.08em', color: 'var(--text-tertiary)',
+    marginBottom: 6, marginTop: 4, textTransform: 'uppercase',
+  }
+
+  return (
+    <Section title="Agreements">
+      {das.length > 0 && (
+        <div style={{ marginBottom: eas.length > 0 ? 14 : 0 }}>
+          <div style={subHeadingStyle}>Disclosure Agreements ({das.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {das.map((da) => (
+              <DisclosureAgreementRow
+                key={da.id}
+                da={da}
+                activeParty={activeParty}
+                subjectName={resolveSubjectName ? resolveSubjectName(da.subject) : null}
+                onRowClick={onRowClick ? () => onRowClick('disclosure', da) : undefined}
+                onAmendDa={onAmendDa}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {eas.length > 0 && (
+        <div>
+          <div style={subHeadingStyle}>Evaluation Agreements ({eas.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {eas.map((ea) => (
+              <EvaluationAgreementRow
+                key={ea.id}
+                ea={ea}
+                activeParty={activeParty}
+                claimName={resolveClaimName ? resolveClaimName(ea.claimId) : null}
+                onRowClick={onRowClick ? () => onRowClick('evaluation', ea) : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </Section>
+  )
 }
 
 /* ─── Router ──────────────────────────────────────────────────────────── */
