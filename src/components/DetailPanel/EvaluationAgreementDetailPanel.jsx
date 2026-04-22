@@ -60,11 +60,16 @@ export default function EvaluationAgreementDetailPanel({
   activeParty,
   onClose,
   onAmend,
+  onRevoke, // Phase 9D.1.1 (Fix 4): opens V22RevocationConfirmModal
   onViewDisclosureAgreement,
 }) {
   if (!agreement) return null
 
   const isGrantor = activeParty && activeParty === agreement.grantor.party
+  // Phase 9D.1.1 (Fix 3 + Fix 4): grantee may revoke the EA.
+  const isGrantee = activeParty && activeParty === agreement.grantee.party
+  const isInternal = agreement.grantor.party === agreement.grantee.party
+  const isRevoked = !!agreement._revokedMeta
   const claimName = resolveNodeName?.(agreement.claimId) || agreement.claimId
   const granteeAssetName = agreement.granteeAssetId
     ? (resolveNodeName?.(agreement.granteeAssetId) || agreement.granteeAssetId)
@@ -238,6 +243,43 @@ export default function EvaluationAgreementDetailPanel({
             Amend Evaluation Agreement
           </button>
         </Tooltip>
+        {/* Phase 9D.1.1 (Fix 4): Revoke EA — either party, non-internal,
+            non-revoked, active. */}
+        {(() => {
+          const canRevoke = (isGrantor || isGrantee) && !isInternal
+            && !isRevoked && agreement.status === 'active'
+          if (!canRevoke) return null
+          return (
+            <Tooltip content="Revoke this Evaluation Agreement — removes evaluation rights for both sides. Historical results are preserved." width={280} wrapperStyle={{ flex: 1 }}>
+              <button
+                type="button"
+                onClick={onRevoke}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  background: 'transparent',
+                  border: '1px solid var(--accent-red)',
+                  borderRadius: 4,
+                  color: 'var(--accent-red)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-red) 10%, transparent)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                Revoke
+              </button>
+            </Tooltip>
+          )
+        })()}
       </div>
     </div>
   )

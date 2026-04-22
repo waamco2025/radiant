@@ -1298,7 +1298,10 @@ function buildViewForActor(actor, shared) {
   const ownedAssets = shared.assets.filter((a) => a.owner === party)
   const ownedClaims = shared.claims.filter((c) => c.owner === party)
   const ownedParseResults = shared.parseResults.filter((p) => p.owner === party)
-  const ownedEvaluationResults = shared.evaluationResults.filter((e) => e.owner === party)
+  // Phase 9D.1.1 (#112 Fix 6): dismissed-revoked Eval Results are invisible
+  // owner-side too. Seeded ERs are never dismissed (flag only lands via the
+  // provisional update path).
+  const ownedEvaluationResults = shared.evaluationResults.filter((e) => e.owner === party && !e._dismissedRevoked)
 
   // Disclosure Agreements where this actor is grantor or grantee.
   // Counterparty internal DAs are included only if *both* endpoints are visible on
@@ -1309,14 +1312,20 @@ function buildViewForActor(actor, shared) {
   // between them renders from the pre-existing DA rather than requiring a pulled-in
   // Carol Actor node (which would conflict with §6.4's "counterparty internals are
   // private" principle).
+  // Phase 9D.1.1 (#112 Fix 6): dismissed-revoked items stay in provisionals
+  // for audit (their presence shadows the seeded row via mergeProvisionals)
+  // but are invisible in every view-layer output — both the active and the
+  // revoked-meta arrays. Applied as a pre-filter on the party-scoped
+  // agreement + result sets so downstream visibility, pull-in, and edge
+  // derivation never encounters them.
   const partyDisclosureAgreements = shared.disclosureAgreements.filter(
-    (d) => d.grantor.party === party || d.grantee.party === party,
+    (d) => (d.grantor.party === party || d.grantee.party === party) && !d._dismissedRevoked,
   )
   const disclosureAgreements = [...partyDisclosureAgreements]
 
   // Evaluation Agreements where this actor is grantor or grantee.
   const evaluationAgreements = shared.evaluationAgreements.filter(
-    (e) => e.grantor.party === party || e.grantee.party === party,
+    (e) => (e.grantor.party === party || e.grantee.party === party) && !e._dismissedRevoked,
   )
 
   // Pulled-in Claims — the grantee side sees the grantor's Claim as a parent-layer
@@ -1346,7 +1355,7 @@ function buildViewForActor(actor, shared) {
     }
   }
   const visibleEvaluationResults = shared.evaluationResults.filter(
-    (e) => e.owner === party || proofDaEvalResultIds.has(e.id),
+    (e) => (e.owner === party || proofDaEvalResultIds.has(e.id)) && !e._dismissedRevoked,
   )
 
   // Parse Results that belong to visible Assets' source, or that the actor owns.

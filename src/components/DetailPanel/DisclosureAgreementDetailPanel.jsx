@@ -89,6 +89,7 @@ export default function DisclosureAgreementDetailPanel({
   activeParty,
   onClose,
   onAmend,
+  onRevoke, // Phase 9D.1.1 (Fix 4): opens V22RevocationConfirmModal
   onViewEvaluationAgreement, // passed when a paired EA exists
 }) {
   if (!agreement) return null
@@ -97,6 +98,10 @@ export default function DisclosureAgreementDetailPanel({
   const isPublic = agreement.grantee.party === 'Radiant Network'
   const isProofOfEval = agreement.subject.kind === 'evalResult' && !isInternal
   const isGrantor = activeParty && activeParty === agreement.grantor.party
+  // Phase 9D.1.1 (Fix 3 + Fix 4): grantee may revoke; agreement row already
+  // reflects this. The DA Detail Panel footer now mirrors that symmetry.
+  const isGrantee = activeParty && activeParty === agreement.grantee.party
+  const isRevoked = !!agreement._revokedMeta
 
   // Header label — what kind of disclosure this is.
   const kindLabel = isInternal
@@ -294,6 +299,45 @@ export default function DisclosureAgreementDetailPanel({
             {amendLabel}
           </button>
         </Tooltip>
+        {/* Phase 9D.1.1 (Fix 4): Revoke button. Gating mirrors the
+            Agreements Section row: either party may revoke; internals,
+            proof-of-eval, provisional, already-revoked, non-active
+            agreements all hide the button. */}
+        {(() => {
+          const canRevoke = (isGrantor || isGrantee) && !isInternal && !isProofOfEval
+            && !isRevoked && !isProvisional && agreement.status === 'active'
+          if (!canRevoke) return null
+          return (
+            <Tooltip content="Revoke this Disclosure Agreement — terminates visibility for both sides." width={280} wrapperStyle={{ flex: 1 }}>
+              <button
+                type="button"
+                onClick={onRevoke}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  background: 'transparent',
+                  border: '1px solid var(--accent-red)',
+                  borderRadius: 4,
+                  color: 'var(--accent-red)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-red) 10%, transparent)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                Revoke
+              </button>
+            </Tooltip>
+          )
+        })()}
       </div>
     </div>
   )

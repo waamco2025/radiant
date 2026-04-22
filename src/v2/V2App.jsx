@@ -826,8 +826,15 @@ export default function V2App() {
   }, [v22Revoking, v22Provisionals, activeRole.party, activeRole.partyDot, findPairedEa, findCascadedEvalResults, enqueueV22NotificationForRequester])
 
   // Dismiss handler for revoked claims (grantee side, grantor-initiated DA
-  // path). Drops the revoked DA, paired revoked EA, and cascade-revoked Eval
-  // Results from provisionals — removing the Claim from the grantee's canvas.
+  // path). Phase 9D.1.1 (#112 Fix 6): annotate dismissed items with
+  // `_dismissedRevoked: true` rather than filtering them out of provisionals.
+  // Rationale: filtering out a revoked provisional DA would let its seeded
+  // (non-revoked) version reappear via `mergeProvisionals`'s mergeById —
+  // the Claim would come back un-revoked. Annotation keeps the provisional
+  // override in place (still shadowing the seeded row) while
+  // `buildViewForActor` pre-filters all `_dismissedRevoked` items out of
+  // every view-layer output. Audit records in `revocationRecords` are
+  // unaffected.
   const handleV22DismissRevoked = useCallback((claimId) => {
     setV22Provisionals((prev) => {
       const revokedDaIds = new Set(
@@ -842,10 +849,16 @@ export default function V2App() {
       )
       return {
         ...prev,
-        disclosureAgreements: prev.disclosureAgreements.filter((d) => !revokedDaIds.has(d.id)),
-        evaluationAgreements: prev.evaluationAgreements.filter((e) => !revokedEaIds.has(e.id)),
-        evaluationResults: prev.evaluationResults.filter((er) =>
-          !(er._revokedMeta && er.claimId === claimId && er.owner === activeRole.party),
+        disclosureAgreements: prev.disclosureAgreements.map((d) =>
+          revokedDaIds.has(d.id) ? { ...d, _dismissedRevoked: true } : d,
+        ),
+        evaluationAgreements: prev.evaluationAgreements.map((e) =>
+          revokedEaIds.has(e.id) ? { ...e, _dismissedRevoked: true } : e,
+        ),
+        evaluationResults: prev.evaluationResults.map((er) =>
+          (er._revokedMeta && er.claimId === claimId && er.owner === activeRole.party)
+            ? { ...er, _dismissedRevoked: true }
+            : er,
         ),
       }
     })
@@ -2824,12 +2837,17 @@ export default function V2App() {
                               setSel(targetNode.id)
                               canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
                             }
-                            // Only set the notice-section state on the grantor
-                            // side (where no `_revokedMeta` lives on the
-                            // targetNode). Detecting by `targetNode._revokedMeta`
-                            // covers both the DA and EA variants.
-                            const isGranteeSide = !!(targetNode && (targetNode.isRevoked || targetNode._isRevoked))
-                            if (!isGranteeSide) {
+                            // Phase 9D.1.1 (Fix 5): set the notice-section
+                            // state whenever the target Claim is NOT in the
+                            // REVOKED state on this viewer's canvas. The
+                            // REVOKED branch owns its own rendering (Case
+                            // A). This covers:
+                            //   • Case B (grantor sees DA revoked by grantee)
+                            //   • Case C (grantee sees EA revoked by grantor
+                            //     — Claim still visible via DA)
+                            //   • Case D (grantor sees EA revoked by grantee)
+                            const isRevokedOnThisCanvas = !!(targetNode && (targetNode.isRevoked || targetNode._isRevoked))
+                            if (!isRevokedOnThisCanvas) {
                               setV22ActiveRevocationNotice({
                                 notification: req,
                                 targetClaimId: claimId,
@@ -3553,6 +3571,14 @@ export default function V2App() {
                       close()
                     }
                   }}
+                  // Phase 9D.1.1 (Fix 4): Revoke button wired to same handler
+                  // the Agreements Section uses. Panel gates visibility; this
+                  // just dispatches to the Confirm modal.
+                  onRevoke={() => {
+                    const da = resolved.disclosureAgreement
+                    close()
+                    handleOpenRevocationConfirm(da, 'DA')
+                  }}
                   onViewEvaluationAgreement={swapToEvaluation}
                 />
               ) : (
@@ -3562,6 +3588,12 @@ export default function V2App() {
                   activeParty={activeRole.party}
                   onClose={close}
                   onAmend={() => { /* Phase 6 wires up amendment flow */ }}
+                  // Phase 9D.1.1 (Fix 4): Revoke EA via same handler.
+                  onRevoke={() => {
+                    const ea = resolved.evaluationAgreement
+                    close()
+                    handleOpenRevocationConfirm(ea, 'EA')
+                  }}
                   onViewDisclosureAgreement={swapToDisclosure}
                 />
               )}
@@ -4090,16 +4122,16 @@ export default function V2App() {
             )
             revokedEvaluationAgreementsForNode = allRevokedEas.filter((e) => e.claimId === node.id)
           }
-          // Phase 9D.1 (#112 UX redo): grantor-side revocation notice payload.
-          // Non-null only when (a) a v22-da-revoked / v22-ea-revoked notification
-          // was clicked AND (b) this panel is for the targeted Claim AND (c) the
-          // active viewer is the Claim owner (grantor side — grantee side uses
-          // the REVOKED branch instead). Resolves cascade counts + DA type from
-          // the notification payload; revokerParty is `notification.from.name`.
+          // Phase 9D.1.1 (Fix 5): revocation notice payload renders on the
+          // standard panel for both grantor and grantee viewers — the gate
+          // on `activeRole.party === node.owner` was dropped. Case A still
+          // uses the REVOKED branch (driven by `_revokedMeta`); Cases B /
+          // C / D all route through this payload. Case routing inside the
+          // section uses `viewerIsGrantor` derived per-panel from the
+          // active party vs claim owner.
           let revocationNoticeForPanel = null
           if (v22ActiveRevocationNotice && node.v22Type === 'CLAIM'
-              && v22ActiveRevocationNotice.targetClaimId === node.id
-              && activeRole.party === node.owner) {
+              && v22ActiveRevocationNotice.targetClaimId === node.id) {
             const notif = v22ActiveRevocationNotice.notification
             // daType derivation: look up the referenced DA in the shared pool.
             // For EA notifications, daType is the type of the paired DA (used
@@ -4355,6 +4387,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-22', label: 'Phase 9D.1.1', items: [
+                  'Fixed: Dismissing a revoked Claim now actually dismisses it — previously the seeded agreement would reappear after dismiss',
+                  'Revoked agreements now show the revocation date (not the original created date)',
+                  'Grantees can now revoke agreements from both the Agreements section and the Agreement Detail Panel footer — previously only grantors could',
+                  'Added Revoke button to Disclosure + Evaluation Agreement Detail Panel footers',
+                  'Evaluation-Agreement-only revocations now show a notice to the viewer on their Claim (Case C was silently swallowed)',
+                  'Revocation notice section redesigned to match the standard Detail Panel look',
+                  'Dismiss button is now a single, consistent footer action (removed duplicate inline)',
+                ]},
                 { version: '0.9.10', date: '2026-04-22', label: 'Phase 9D.1', items: [
                   'Revocation notifications no longer open a modal — clicking a revocation notification now opens the Detail Panel with a new revocation notice section inline',
                   'Four case-routed copy variants (grantor/grantee-initiated, Disclosure/Evaluation Agreement) replace the one-size-fits-all modal copy',

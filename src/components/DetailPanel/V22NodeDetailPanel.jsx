@@ -366,7 +366,6 @@ function RevocationNoticeSection({
   reason,
   cascadeEa,
   cascadeEvalResultCount,
-  onDismiss,
 }) {
   const isDa = kind === 'DA'
   const DA_TYPE_LABEL = { full: 'full', selective: 'selective', proofonly: 'proof-only' }
@@ -437,101 +436,49 @@ function RevocationNoticeSection({
     } catch { return '' }
   })()
 
+  // Phase 9D.1.1 (Fix 1 + Fix 7): Section + Row layout matching the declined
+  // branch's pattern rather than the modal-ported centered callout. Inline
+  // Dismiss button removed — Dismiss is surfaced via the panel footer
+  // (REVOKED branch footer for grantee Case A; added to the standard footer
+  // when `revocationNotice` is active for Cases B / C / D).
   return (
-    <div style={{
-      marginBottom: 18, borderRadius: 8, overflow: 'hidden',
-      border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
-    }}>
-      {/* Red-accented header callout */}
-      <div style={{
-        padding: '20px', textAlign: 'center',
-        background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
-        borderBottom: '1px solid color-mix(in srgb, var(--accent-red) 15%, transparent)',
-      }}>
+    <>
+      <Section title="Revocation Notice">
+        <Row label="From" value={revokerParty} />
+        <Row label="Date" value={dateLabel || '—'} />
+        {cascadeLine && <Row label="Cascade" value={cascadeLine} />}
         <div style={{
-          width: 44, height: 44, borderRadius: '50%',
-          background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-          border: '2px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 12px', fontSize: 18, color: 'var(--accent-red)',
-        }}>✕</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-          Access Revoked
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, padding: '0 4px' }}>
-          {headerSummary}
-        </div>
-        {dateLabel && (
+          marginTop: 10, padding: '10px 12px',
+          background: 'color-mix(in srgb, var(--accent-red) 8%, transparent)',
+          borderRadius: 6,
+          border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
+        }}>
           <div style={{
-            fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-            marginTop: 8, letterSpacing: '0.04em',
+            fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 6,
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+            fontFamily: 'var(--font-mono)',
           }}>
-            {dateLabel}
+            Summary
           </div>
-        )}
-      </div>
-
-      {/* Message from revoker */}
-      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{
-          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-          color: 'var(--text-dim)', letterSpacing: '0.04em', marginBottom: 6,
-          textTransform: 'uppercase',
-        }}>
-          Message from {revokerParty}
+          <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+            {headerSummary}
+          </div>
+          <div style={{
+            fontSize: 11, marginTop: 8,
+            color: reason ? 'var(--text-secondary)' : 'var(--text-dim)',
+            fontStyle: 'italic', lineHeight: 1.5,
+          }}>
+            {reason ? `"${reason}"` : '(No reason given)'}
+          </div>
         </div>
-        <div style={{
-          fontSize: 12, lineHeight: 1.6, fontStyle: 'italic',
-          color: reason ? 'var(--text-secondary)' : 'var(--text-dim)',
-        }}>
-          {reason ? `"${reason}"` : '(No reason given)'}
-        </div>
-      </div>
-
-      {/* Cascade summary — only when non-zero */}
-      {cascadeLine && (
-        <div style={{
-          padding: '10px 16px', borderBottom: '1px solid var(--border)',
-          background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
-          fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5,
-        }}>
-          <span style={{
-            fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-            color: 'var(--accent-amber)', letterSpacing: '0.06em',
-            textTransform: 'uppercase', marginRight: 6,
-          }}>Cascade</span>
-          {cascadeLine}
-        </div>
-      )}
-
-      {/* What this means */}
+      </Section>
       <div style={{
-        padding: '12px 16px', fontSize: 11,
-        color: 'var(--text-dim)', lineHeight: 1.6,
+        fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6,
+        marginBottom: 18, marginTop: -6,
       }}>
         {consequence}
       </div>
-
-      {/* Inline Dismiss CTA */}
-      <div style={{
-        padding: '10px 16px', borderTop: '1px solid var(--border)',
-        background: 'var(--bg-raised)', display: 'flex', justifyContent: 'flex-end',
-      }}>
-        <button
-          type="button"
-          onClick={onDismiss}
-          style={{
-            padding: '6px 14px', fontSize: 11, fontFamily: 'var(--font-mono)',
-            fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: 'var(--bg-deep)', background: 'var(--accent-indigo)',
-            border: '1px solid var(--accent-indigo)', borderRadius: 4,
-            cursor: 'pointer',
-          }}
-        >
-          Dismiss
-        </button>
-      </div>
-    </div>
+    </>
   )
 }
 
@@ -702,7 +649,6 @@ function V22ClaimPanel({
               reason={revokeRecord?.reason}
               cascadeEa={cascadeEaPresent}
               cascadeEvalResultCount={cascadeEvalResultCount}
-              onDismiss={onDismissRevoked}
             />
             <Section title="Claim">
               <Row label="Owner" value={node.owner} />
@@ -728,28 +674,29 @@ function V22ClaimPanel({
   }
 
   // ── Standard Claim panel ────────────────────────────────────────────
-  // Phase 9D.1: grantor-side revocation notice (Cases B / D) — shown at the
-  // top of the body when the user clicked a `v22-da-revoked` /
-  // `v22-ea-revoked` notification for this Claim. Cleared on Dismiss. The
-  // Claim itself is NOT revoked on this viewer's side (the grantor's Claim
-  // remains theirs); only the counterparty's access is gone.
-  const noticeForGrantor = revocationNotice && (activeParty === node.owner) ? revocationNotice : null
+  // Phase 9D.1.1 (Fix 5): revocation notice renders on the standard panel
+  // for both grantor and grantee viewers (Cases B / C / D). The prior
+  // `activeParty === node.owner` gate rejected Case C (grantor-initiated
+  // EA revocation seen by the grantee on a still-visible Claim). The
+  // section's case-routing derives from `viewerIsGrantor` + `kind` and
+  // handles all three cases correctly.
+  const noticeForPanel = revocationNotice || null
+  const panelViewerIsGrantor = activeParty === node.owner
   return (
     <PanelLayout
       header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
-          {noticeForGrantor && (
+          {noticeForPanel && (
             <RevocationNoticeSection
-              viewerIsGrantor
-              kind={noticeForGrantor.kind || 'DA'}
-              daType={noticeForGrantor.daType || 'full'}
-              revokerParty={noticeForGrantor.revokerParty}
-              revokedDate={noticeForGrantor.revokedDate}
-              reason={noticeForGrantor.reason}
-              cascadeEa={!!noticeForGrantor.cascadeEa}
-              cascadeEvalResultCount={noticeForGrantor.cascadeEvalResultCount || 0}
-              onDismiss={onDismissRevocationNotice}
+              viewerIsGrantor={panelViewerIsGrantor}
+              kind={noticeForPanel.kind || 'DA'}
+              daType={noticeForPanel.daType || 'full'}
+              revokerParty={noticeForPanel.revokerParty}
+              revokedDate={noticeForPanel.revokedDate}
+              reason={noticeForPanel.reason}
+              cascadeEa={!!noticeForPanel.cascadeEa}
+              cascadeEvalResultCount={noticeForPanel.cascadeEvalResultCount || 0}
             />
           )}
           {claim?.description && (
@@ -815,20 +762,35 @@ function V22ClaimPanel({
           />
         </>
       }
-      footer={
-        // Owner: Amend Claim + (optional) Self-Evaluate.
-        // Non-owner with active EA: Run Evaluation.
-        isOwner ? (
+      footer={(() => {
+        // Phase 9D.1.1 (Fix 1): Dismiss lives in the footer when a
+        // revocation notice is active — the inline section-level Dismiss
+        // button was removed. Dismiss coexists with the normal owner /
+        // evaluator actions so the viewer can dismiss the notice without
+        // losing access to their Claim actions.
+        // Owner: Amend Claim + (optional) Self-Evaluate (+ Dismiss).
+        // Non-owner with active EA: Run Evaluation (+ Dismiss).
+        const hasOwnerActions = isOwner
+        const hasEvalAction = !isOwner && !!evaluationAgreementForActor
+        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction) return null
+        return (
           <>
-            <FooterButton label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
-            {onSelfEvaluate && (
-              <FooterButton label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+            {noticeForPanel && (
+              <FooterButton label="Dismiss" onClick={onDismissRevocationNotice} title="Dismiss this revocation notice. Your Claim and any remaining agreements are unaffected." />
             )}
+            {hasOwnerActions ? (
+              <>
+                <FooterButton label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
+                {onSelfEvaluate && (
+                  <FooterButton label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+                )}
+              </>
+            ) : hasEvalAction ? (
+              <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+            ) : null}
           </>
-        ) : evaluationAgreementForActor ? (
-          <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
-        ) : null
-      }
+        )
+      })()}
     />
   )
 }
@@ -1055,6 +1017,7 @@ function DisclosureAgreementRow({
   const isInternal = da.grantor.party === da.grantee.party
   const isProofOfEval = da.subject?.kind === 'evalResult'
   const isGrantor = activeParty === da.grantor.party
+  const isGrantee = activeParty === da.grantee.party
   const isProvisional = da.type === 'provisional'
   const isDeclined = !!da._declineMeta
   // Phase 9D.1 (#112 UX redo): revoked DAs appear in the Agreements Section
@@ -1079,13 +1042,21 @@ function DisclosureAgreementRow({
   else if (isDeclined) { statusLabel = 'Declined'; statusColor = 'var(--accent-red)' }
   else if (isProvisional) { statusLabel = 'Provisional'; statusColor = 'var(--accent-amber)' }
   else { statusLabel = 'Active'; statusColor = 'var(--accent-green)' }
-  const dateStr = formatShortDate(da.terms?.createdDate)
+  // Phase 9D.1.1 (Fix 2): show the revocation date on revoked rows rather
+  // than the DA's original createdDate — that's what the user cares about
+  // once the agreement is terminal.
+  const dateStr = isRevoked
+    ? formatShortDate(da._revokedMeta?.revokedDate)
+    : formatShortDate(da.terms?.createdDate)
 
   // Action visibility gating. Internal + proof-of-eval DAs hide both actions.
   // Revoked DAs suppress all actions (historical, no operations remain).
+  // Phase 9D.1.1 (Fix 3): grantee may also revoke — either side can terminate
+  // the agreement. Amend remains grantor-only (scope changes are the
+  // grantor's prerogative).
   const actionsHidden = isInternal || isProofOfEval || isRevoked
   const showAmend = !actionsHidden && isGrantor && !isDeclined
-  const showRevoke = !actionsHidden && isGrantor && !isProvisional && !isDeclined
+  const showRevoke = !actionsHidden && (isGrantor || isGrantee) && !isProvisional && !isDeclined
   const amendLabel = isProvisional ? 'Respond' : 'Amend'
 
   const rowInner = (
@@ -1146,6 +1117,7 @@ function EvaluationAgreementRow({
   ea, activeParty, claimName, onRowClick, onRevokeEa,
 }) {
   const isGrantor = activeParty === ea.grantor.party
+  const isGrantee = activeParty === ea.grantee.party
   const isInternal = ea.grantor.party === ea.grantee.party
   // Phase 9D.1: revoked EAs surface dimmed in the Revoked subsection.
   const isRevoked = !!ea._revokedMeta
@@ -1156,12 +1128,17 @@ function EvaluationAgreementRow({
   else counterpartyLabel = `${ea.grantor.party} → ${ea.grantee.party}`
 
   const expiresIso = ea.terms?.resultExpiry || ea.terms?.expires || null
+  // Phase 9D.1.1 (Fix 2): revoked EAs show the revocation date beside the
+  // Revoked status so the grantee/grantor sees *when* it happened.
+  const revokedDate = ea._revokedMeta?.revokedDate
   const expiresStr = isRevoked
-    ? 'Revoked'
+    ? (revokedDate ? `Revoked · ${formatShortDate(revokedDate)}` : 'Revoked')
     : (expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'Never expires')
 
+  // Phase 9D.1.1 (Fix 3): grantee may also revoke EA; Amend stays grantor-
+  // only (placeholder pending #108).
   const showAmend = isGrantor && !isInternal && !isRevoked
-  const showRevoke = isGrantor && !isInternal && !isRevoked
+  const showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked
 
   const rowInner = (
     <AgreementRow onClick={isRevoked ? null : onRowClick}>
