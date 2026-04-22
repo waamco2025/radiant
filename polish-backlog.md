@@ -90,6 +90,31 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Context:** V2.1 had two persistent edge animations: a glow effect on Full Disclosure edges, and marching-ants (animated dashed line) on Selective, Proof-only, and Provisional edges. Both effects were lost during V2.2 migration cleanup. Both should persist through selection state (additive brightening on top, not replacing). Reference V2.1 backups for original implementation.
 - **Proposed fix:** Port the V2.1 edge-animation logic to V2Canvas.jsx. Glow likely a Three.js shader or post-processing effect; marching-ants is a stroke-dashoffset animation. Ensure both additively compose with selection brightening (+1.5px stroke, 65% white blend from 9A.1) and with Phase 9B's 30% hover brightening.
 
+### 124. Revoked node unravel animation sequence
+- **Source:** Andrew planning conversation during Phase 9D QA. Existed conceptually across prior discussions but never formally captured at this level of detail.
+- **Scope:** Medium–Large (multi-stage animation with edge choreography and node-level transforms across potentially multiple connected nodes).
+- **Priority:** Medium (demo polish; revocation is functional without it, but the animation meaningfully improves user comprehension of what's being removed from their network).
+- **Context — the problem the animation solves:** When a revoked node is dismissed from the user's canvas, it disappears instantly. The user loses mental-map continuity — they can't see what edges were connected, what the spatial relationship to nearby nodes was, or visually track "this is being removed." This is a regression from V2.1's perceived quality even when the underlying revocation logic is correct.
+- **Animation sequence (per revoked node + its connected edges):**
+  - The animation plays when the user clicks the Dismiss button in a revoked node's Detail Panel. It animates the revoked node itself AND all other connected node cards in sequence.
+  - **Phase 1 — Edge withdrawal (first ~400ms):** Every edge connected to the revoked node retracts from its endpoint into the card it's entering. Visually: the edge line "pulls back" into the card like a rope being reeled in, rather than fading out. Edges retract from both ends simultaneously if both endpoint cards are being dismissed together; otherwise from the revoked-node side only. Retraction eases out smoothly (not linear) — faster at the start, slowing as it disappears into the card edge.
+  - **Phase 2 — Dashed border unwinding (middle ~600ms):** The revoked node's solid border transitions to a dashed pattern. The dashed border then "unwinds" clockwise around the card — as if the border itself is a continuous dashed line being unraveled from a starting point. The starting point can be the top-right corner (arbitrary convention) or wherever implementation makes cleanest. As each dash segment unwinds, it disappears — leaving progressively less border around the card until there's none.
+  - **Phase 3 — Content erasure (middle ~400ms, overlapping with Phase 2 end):** The card's internal content (name, owner, badges, health minibar, etc.) fades out. Not all at once — stagger so type label fades first, name second, owner/badges third, minibar last. Fade timing: each element ~150ms, offsets of ~50ms between elements.
+  - **Phase 4 — Card fade (final ~300ms):** The now-empty card's background fades to transparent. Simultaneously, the card's position translates very slightly (maybe 4-8px) toward its original edge origin points, or just slightly "settles downward" — subtle motion cue that emphasizes "going away."
+  - **Total duration per node:** ~1.0-1.3 seconds depending on overlap. Tune per QA.
+- **Choreography for multiple connected nodes:** When the revoked primary node is dismissed, any other nodes that were cascade-revoked alongside it (Eval Results in the current model, paired EAs' anchor nodes if applicable) should animate in the same sequence, but staggered:
+  - Primary revoked node starts animation at t=0
+  - First cascade-revoked node starts at t=~300ms
+  - Second cascade-revoked node starts at t=~500ms
+  - Stagger prevents the canvas from feeling like everything "exploded" simultaneously; reads as a connected sequence of related dismissals. The connecting edges between cascade-revoked nodes should retract in Phase 1 of whichever node starts the animation, from both sides.
+- **Edge cases to surface during scoping:**
+  - What if the user dismisses a revoked node while other canvas animations are still playing? Answer: queue the unravel, or force-complete prior animations first.
+  - What if the user navigates away (role switch, different view) mid-animation? Answer: cleanup-complete the animation silently; state transitions aren't canvas-dependent.
+  - Performance at scale — if a user has many cascade-revoked nodes (e.g., 10+ Eval Results tied to a revoked Claim), staggered sequential animation could feel slow. Consider grouping batches and animating them in parallel, or capping the stagger.
+- **Not in scope for this item:** The visual treatment of the revoked node BEFORE Dismiss (that's backlog #112 / Phase 9D; REVOKED badge + border color + Detail Panel content are already shipped). The revocation notification behavior (works today: pan/zoom/select/open-panel).
+- **Depends on:** Current 9D revocation logic (already shipped — commit b29fdc9). Pairs with #110 (V2.1 animation restoration — glow + marching ants). Both are animation-restoration work; could ship in a combined animation-focused phase. Pairs with #80 (Accepted-transfer animation sequence) as part of the broader "V2.2 feels polished when things enter and leave the canvas" theme.
+- **Implementation notes (for later scoping):** Current V2Canvas uses Three.js for edge rendering and HTML overlays for cards. Edge retraction needs Three.js animation; card-level animation can be CSS transitions or framer-motion if added later. The clockwise border unwinding is the most visually distinctive element and also the most custom — likely requires a dedicated SVG or Three.js custom shader. Don't underestimate complexity of this one piece. Build a reusable "unravel" function that takes a node ID and optional cascade-ID list, so the same animation can be reused for other "node leaves the canvas" scenarios (future: expired agreements, explicit delete actions, etc.).
+
 ---
 
 ## Edge Interactions
@@ -199,6 +224,13 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Scope:** Medium
 - **Context:** Detail Panels for each artifact type (Asset, Claim, Parse Result, Eval Result, DA, EA) should offer Export actions. JSON export is trivial — serialise the `v22Artifact` (or the underlying artifact) and trigger a browser download; this is functional from day one. PDF export is placeholder-grade (stub button that opens a "coming soon" dialog or generates a minimal PDF via a lightweight library) — the intent is to surface the capability in the UI so client discussions around export formats have a visible hook.
 - **Proposed fix:** Add a shared `<ExportActions>` strip to each Detail Panel footer, above the primary action. Two buttons: "Export JSON" (functional) + "Export PDF" (placeholder). Consider a single dropdown if footers get crowded.
+
+### 116. Agreements section on Eval Result + Parse Result Detail Panels
+- **Source:** Phase 9C QA — Andrew's observation that Eval Result panels don't show related Agreements.
+- **Scope:** Small (pattern-match from 9C's Actor/Asset/Claim work)
+- **Priority:** Medium
+- **Context:** Phase 9C shipped the Agreements section on Actor, Asset, and Claim Detail Panels. Parse Result and Eval Result panels were explicitly out of scope. An Eval Result is the subject of at least one Proof-of-Evaluation DA (flowing from the evaluator back to the Claim owner), and may be subject to additional DAs if the owner chooses to disclose the Eval Result to a third party (e.g., Alice discloses Bob's Eval Result to Carol). Currently these aren't surfaced anywhere in the Eval Result's own panel. Same holds for Parse Results (if/when they become subject to their own DAs — today they're generally not, but §6 pull-in semantics may evolve).
+- **Proposed fix:** Extend the 9C Agreements section pattern to V22EvalResultPanel and V22ParseResultPanel. Filter DAs by `subject.kind === 'evalResult'` and `subject.id === node.id` (Eval Result case); parse result filtering TBD per data model. Reuse existing row components from 9C — no new primitives needed.
 
 ---
 
@@ -310,6 +342,43 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Source:** Phase 9A.3 preamble — handoff roster. **Medium priority.**
 - **Scope:** Small
 - **Context:** Factory functions (`makeAsset`, `makeClaim`, `makeParseResult`, `makeEvaluationResult`, `makeDisclosureAgreement`, `makeEvaluationAgreement`) should preserve runtime-only flags on passed-in data without dropping them. Known flags: `_isNew`, `_isEdgeEndpoint`, `_edgeEndpointSide`, `_aiOriginalValue`, `confidence`, `_isDeclined`, `_declineMeta`, `_showAsProvisional`. Future additions should similarly round-trip. Audit each factory's output object construction — spread-then-override is the safe pattern; explicitly listing known fields risks dropping new flags silently.
+
+### 114. Umbrella Disclosure concept + second seller role with pre-existing DA to Bob
+- **Source:** Andrew planning conversation post-9C — modeling realistic procurement relationships.
+- **Scope:** Medium
+- **Priority:** High (enables #113's two-flow contrast)
+- **Context:** Real procurement doesn't ad-hoc request disclosure on every transaction. Mature buyer-supplier relationships have framework agreements covering visibility broadly, with specific actions exercised under those frameworks. The platform supports this via "umbrella" Disclosure Agreements at the Radiant Network layer — a standing DA from a seller to a buyer covering the seller's entire published catalog. Set up administratively (out-of-app, like a master service agreement at onboarding); not a UX flow within Radiant. Adds a second seller role to demonstrate the contrast: Alice (cold relationship with Bob, must request both DA + EA) versus a new seller (warm relationship with Bob via umbrella, requests only EA).
+- **Proposed implementation:**
+  - **New seller actor** — likely "Helio Aerospace" / Dave@HelioCorp, or promote one of NovaFab/ElectroGrid/Precision Components from mock-cluster-of-dots to a real second supplier. Andrew to choose.
+  - **Seed data:** the new seller has 2-3 published Claims in the Public Directory, plus a pre-existing umbrella DA to Bob covering all of those Claims. The umbrella DA exists in `v22Provisionals.disclosureAgreements` (or seed data) at boot.
+  - **Visual treatment:** the umbrella renders at the Radiant Network layer rather than as a direct edge between actors. Decision needed during scoping: dedicated edge style? Implicit (just lets the cloud-layer Claims appear as visible to Bob)? Worth thinking through with #29 / #45 / #43 (Public Directory Cloud work).
+- **Open question:** Does the umbrella cascade through Asset hierarchy (#70)? If a new Asset is added to a parent Program covered by an umbrella, does the umbrella auto-extend? Worth resolving as part of #70's design conversation.
+- **Depends on:** Pairs with #113. Touches the Public Directory Cloud work (#29, #43, #45).
+
+### 115. Evaluation Agreement terms checkboxes + metadata schema
+- **Source:** Andrew planning conversation post-9C — making EA terms first-class.
+- **Scope:** Small to Medium
+- **Priority:** High (ships with #113)
+- **Context:** When Alice grants Bob's Evaluation request, she ticks a series of predefined boxes that codify the terms of the agreement. These persist into the EA's metadata (`ea.metadata.terms[]`) as structured JSON. The platform doesn't enforce them programmatically — they're contract-style commitments recorded for audit and future legal-document attachment. Makes explicit that Requirements Sets in the EA are *one term among many*, not platform-enforced gating.
+- **Proposed checkbox content (to ideate together when scoping):**
+  - "Permitted Requirements Sets" — multi-select from Bob's proposed list, plus Alice's option to add others
+  - "Evaluation results expire after [N days / never]"
+  - "Bob may re-disclose Eval Results to [no one / specific parties / public]"
+  - "Re-evaluation permitted [unlimited / N times / not permitted]"
+  - "Self-evaluation by Alice required before Bob's evaluation [yes / no]"
+  - Andrew to ideate the full list when picking up this work
+- **Display:** EA Detail Panel shows the granted terms in a readable list (not raw JSON for the user — though raw JSON view could be a debug surface). Amend EA modal (#108) lets Alice modify any term mid-flight.
+- **Future enhancement:** attach an actual legal document (PDF / structured agreement) to the EA, alongside the structured terms. Out of scope for first ship.
+- **Depends on:** Pairs with #113. Scope finalization waits on Andrew's ideation pass on the term list.
+
+### 119. "Evidence" → "Assets" terminology audit
+- **Source:** Phase 9C QA — Andrew's copy observation. Extension of #17 (terminology reconciliation with client canon).
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** "Evidence" became conversational shorthand during V2.1 for what are canonically Assets (referenced by Claims) + Parse Results (structured fields extracted from Assets). The shorthand persisted into V2.2 copy — Run Evaluation modal shows "Evidence in scope (N)", various body text references "evidence", internal variable names like `evidenceAssets`. None of this matches the client's canon terminology.
+- **Proposed fix:** Audit pass across all V2.2 user-facing copy. Replace "Evidence" with the appropriate canonical term — "Assets" when referring to Asset nodes, "Parse Results" when referring to parsed fields, or "Referenced Assets" when context needs disambiguation. Update modal titles, button labels, body copy, tooltips, and any status text. Variable names can stay (they're internal) unless a rename is cheap as part of the same PR.
+- **Specific instance flagged:** Run Evaluation modal title "Evidence in scope" → "Assets in scope". Audit at minimum all modal titles, labels, and FieldLabel copy across V22RunEvaluationModal, V22ParseEvidenceModal, AmendDisclosureModal, CombinedResponseModal, CombinedRequestModal.
+- **Depends on:** Can ship independently; when #17 (full client-canon reconciliation) runs, absorb this.
 
 ---
 
@@ -438,7 +507,7 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Context:** When an Asset transfers out, its Parse Results orphan on the sender's canvas (should transfer with the Asset — they're derivatives per canon). Claims referencing only the transferred Asset are broken (need user decision in the transfer review step — warn / auto-revise to drop reference / block). Related to #73 (transfer constraint on disclosed Claims) but distinct: #73 is about the counterparty's visibility of disclosed Claims post-transfer, #88 is about the sender's own orphaned derivatives and broken Claim references.
 
 ### 94. QS picker preview pane multi-select summary
-- **Status:** ✅ Complete (Phase 9E-parallel.2). Preview pane slot now renders a selection-summary panel when `previewFile === null && selected.size > 1`. Panel mirrors the single-file preview's container, header, and "Preview not available" block. Shows count, total size (summed from QS `file.size` + local `file.bytes`), modified date range (earliest – latest; collapses to a single date when all match), distinct types (deduped + uppercased). Icon block is a stacked multi-file illustration with the count badge on the front card. Resolution iterates both sources: current-folder QS `files` + all-navigation-state `localFiles`. Single-file preview (`previewFile !== null`) and empty-preview (`selected.size <= 1`) cases unchanged.
+- **Status:** ✅ Complete (Phase 9E-parallel.3). Initial implementation shipped in 9E-parallel.2 but didn't render in practice: the `!previewFile` guard meant selecting multiple files and then clicking any one (which naturally sets `previewFile` for inspection) immediately replaced the summary with that file's single-preview. Corrected in 9E-parallel.3 — precedence inverted to match macOS Finder column-view multi-select: when `selected.size > 1 && resolvedSelectedForSummary.length > 1`, the summary panel wins the right-pane slot regardless of `previewFile`. Single-file preview only renders when `selected.size <= 1 && previewFile` is set. `previewFile` still persists in state on row-click (for single-select fallback), just not rendered while multi-select summary dominates.
 
 ### 95. QS picker re-add files preserves custom labels
 - **Source:** Phase 9A.6.1 QA.
@@ -476,6 +545,38 @@ Item numbers are permanent IDs; they are never resequenced, so sections may read
 - **Scope:** Medium
 - **Priority:** Medium
 - **Context:** Evaluations are Claim-level, not Asset-level. Bob evaluates the Claim against requirements; all in-scope evidence is automatically included. When Alice amends the Claim (adds/removes Assets), Bob's evaluation is marked stale and re-runs against ALL evidence — no partial/selective combinations. Proposal: remove the evidence picker from V22RunEvaluationModal entirely; the modal becomes a review-rows-only surface. Pairs with #88 (transfer cascade) — both deal with Claim-vs-evidence boundary semantics and should be scoped together.
+
+### 113. Split Combined Request into distinct Disclosure + Evaluation steps
+- **Source:** Andrew planning conversation post-9C — clarification of the conceptual separation between visibility and capability.
+- **Scope:** Medium
+- **Priority:** High (conceptual clarity matters for client demos)
+- **Context:** Today's `CombinedRequestModal` and `CombinedResponseModal` bundle "I want to see this Claim" and "I want to evaluate this Claim" into a single request/response cycle. The platform's data model already separates Disclosure Agreements (visibility) from Evaluation Agreements (capability), but the UX collapses them. This obscures an important conceptual distinction: a Disclosure grants only the right to look; an Evaluation grants the right to take a specific kind of action on what was disclosed, under recorded terms. Splitting the flow makes the model explicit, clarifies why Requirements Sets are courtesy-not-binding (they're one EA term among many), and sets up the umbrella concept (#114).
+- **Proposed flow:**
+  - **Cold request (no umbrella, see #114):** Bob explicitly requests Disclosure first → Alice accepts/declines/scopes. If accepted, Bob then requests Evaluation → Alice accepts/declines + ticks terms checkboxes (#115).
+  - **Warm request (umbrella in place, #114):** Bob skips Disclosure step entirely (umbrella covers it) → goes directly to Evaluation request.
+- **UI shape:** Either two sequential modals or a two-step modal with explicit Step 1 (Disclosure) → Step 2 (Evaluation). Same shape for the Response side.
+- **Depends on:** #114 (umbrella demo data) for the warm-path showcase. Pairs with #115 (EA terms checkboxes).
+
+### 117. Re-Run Evaluation: permissive Asset selection with audit metadata
+- **Source:** Phase 9C QA observation, reversed mid-chat from the original locked-Assets framing to a permissive framing.
+- **Scope:** Medium
+- **Priority:** High
+- **Context:** When Bob clicks "Re-Run Evaluation" on a Claim that has been amended (new Assets added, or existing Assets removed), the Asset selection step should be fully permissive — Bob can freely include, exclude, or add to the set of Assets being evaluated, including previously-evaluated ones. No locking. No hard rules preventing particular selections. This respects Bob's autonomy as evaluator: the platform's job is to record what was evaluated, not to enforce what *must* be evaluated. The originally-evaluated Asset set is pre-populated as the default selection, but it's a default, not a constraint.
+- **Audit behavior:** Any deviation from the originally-evaluated Asset set is recorded in the new Eval Result's metadata — which Assets were added to this run, which were dropped, which carried over unchanged. Preserves evaluation traceability without constraining Bob's choices. Surfaced in the Eval Result Detail Panel under a "Changes from prior evaluation" section when applicable.
+- **NEW badges:** Freshly disclosed Assets (since last evaluation) still carry a NEW badge in the Asset selection step, purely as an informational cue so Bob notices "there are new Assets available since I last evaluated." The badge is non-enforcing — Bob can still skip those Assets if he chooses.
+- **Proposed fix:** V22RunEvaluationModal's evidence selection step — pre-populate with the previously-evaluated set as default selection. Render NEW badges on freshly-disclosed Assets. Allow full freedom to toggle any selection. On submit, diff the final selection against the previous evaluated set, store the diff in the new Eval Result's metadata. Surface the diff in the Eval Result Detail Panel.
+- **Note on prior framing:** An earlier backlog draft framed previously-evaluated Assets as locked (non-removable in re-run), mirroring the AmendClaimModal lock where Alice can't remove evaluated Assets from her own Claim. That framing was reversed. The asymmetry is intentional: Alice locking evaluated Assets on her side preserves the integrity of evaluations Bob has already made; Bob's own re-run is a fresh evaluation event — he decides its scope.
+- **Depends on:** Pairs with #106 (evidence picker removal). If #106 ships first and evaluation becomes Claim-level rather than Asset-picker-level, #117 reshapes around surfacing the diff in the review UI rather than via an explicit picker.
+
+### 118. Bob's Asset shouldn't get NEW badge on disclosure accept
+- **Source:** Phase 9C QA — Andrew's observation.
+- **Scope:** Small
+- **Priority:** Medium
+- **Context:** When Bob sends a Disclosure Request from one of his Assets to Alice's Claim, and Alice accepts, Alice's Claim correctly appears on Bob's canvas with a NEW badge (it's new to Bob's view). Additionally, Bob's own anchor Asset also gets a NEW badge — but Bob's Asset isn't new; it's been on his canvas since he created it. The NEW treatment is a false signal.
+- **Proposed fix:** In the disclosure-accept handler path, scope the `_isNew` flag to only the newly pulled-in artifacts (counterparty's Claim, their referenced Assets if scope includes them), not the requester's own anchor Asset. Likely a filter in the flag-stamping logic that checks `asset.owner === requesterParty` and skips the requester's own artifacts.
+
+### 125. QS picker cross-tab mutual exclusion
+- **Status:** ✅ Complete (Phase 9E-parallel.3). Selections in the Qualified Storage tab and Local Storage tab are now mutually exclusive. Tab-change handler clears `selected` and `previewFile` before flipping `source`, so the footer "Select N Files" count always reflects only the active tab. Silent reset — no warning modal. Edge case confirmed: 3 files selected in QS → switch to Local (selection clears) → upload 2 files (auto-select per #97, count = 2) → switch back to QS (selection count = 0; prior QS selection is NOT restored). Corrects 9E-parallel.2's #97 implementation which permitted accumulating selections across tabs.
 
 ### 55. Error states + edge-case review
 - **Source:** Phase 9A.3 preamble — handoff roster.
@@ -551,6 +652,49 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - **Scope:** Exploratory
 - **Context:** Current Agreements are two-party (grantor + grantee). Client model hints at support for additional participants. Keep `participants[]` array extensible in schemas.
 
+### 120. Reference published Requirements Sets on a Claim (non-binding)
+- **Source:** Client planning discussion post-9C.
+- **Scope:** Medium (exploratory)
+- **Priority:** Low (captured for later assessment)
+- **Context:** Today Claims have no formal relationship to Requirements Sets — the relationship is established only when someone evaluates the Claim against a Requirements Set. The client suggested that a Claim owner (or anyone) could reference owner-created or publicly published Requirements Sets *on the Claim itself*, as a non-binding signal of intent: "this Claim is built to satisfy these standards." This would surface in the Claim's Detail Panel as a list of referenced Requirements Sets.
+- **Implications:** Opens up a discoverability path — counterparties browsing the Public Directory could filter Claims by referenced standards. Pairs conceptually with #114 umbrella disclosures + #115 EA terms (if a Claim references a Requirements Set, an EA over that Claim is pre-suggested against that same set). Also pairs with #25 (Library Modal unification).
+- **Open questions:** Can the reference change over the Claim's lifecycle? Who's authoritative for the reference (the Claim owner always, or does the Claim inherit references from its Assets)?
+
+### 121. Evaluate a Claim against multiple Requirements Sets simultaneously
+- **Source:** Client planning discussion post-9C.
+- **Scope:** Medium
+- **Priority:** Low (captured for later assessment)
+- **Context:** Currently Run Evaluation is 1:1 — one Claim, one Requirements Set, one Eval Result. Real evaluations often cover multiple standards (e.g., "does this part meet both MIL-STD-810 AND RoHS AND ITAR export-control?"). Extending the modal to accept N Requirements Sets would produce either N distinct Eval Results (one per set) or a single Eval Result that rolls up multi-set satisfaction.
+- **Open design questions:**
+  - Single Eval Result (multi-set) vs. multiple Eval Results (one per set)? The former is cleaner in the netgraph; the latter preserves per-set separability for partial supersede/amend.
+  - If multi-set, how does the Eval Result Detail Panel present per-set breakdown?
+  - Interaction with #117 (permissive re-run) — what if Bob originally evaluated against Set A, and now wants to expand to Set A + Set B?
+- **Depends on:** Pairs with #106 (remove evidence picker — if evaluations are Claim-level, multi-Set-at-once is more tractable).
+
+### 122. Remove evidence from a Claim despite prior evaluation (e.g., expired license)
+- **Source:** Client planning discussion post-9C.
+- **Scope:** Medium
+- **Priority:** Low (captured for later assessment)
+- **Context:** Today the platform locks evaluated Assets — they can't be removed from a Claim's scope once referenced by an Eval Result, to preserve the integrity of historical evaluations. Client's scenario: an Asset like an expired operating license becomes invalid over time. The Claim owner should be able to remove the expired Asset, which would mark prior Eval Results as needing re-evaluation.
+- **Implications:**
+  - Breaks a current platform invariant (evaluation locks on the Claim-owner side). Needs to decide the new invariant — probably "removal triggers supersede-required state on prior Eval Results."
+  - Adds a new Eval Result status beyond ACTIVE / SUPERSEDED — perhaps STALE or REQUIRES_RE-EVAL.
+  - Counterparty-side effect: Bob's old Eval Result on Alice's Claim is now marked STALE. Notification to Bob. His canvas might badge it. If he cares, he re-runs.
+  - Interaction with transfer flows (#73): if an Asset backs a Claim that's been disclosed, removing it has amend-cascade implications.
+- **Open design questions:** Scope carefully before implementing — this is a model-level change, not a UX addition.
+
+### 123. "Reverse AI Shopper" — publish an Evaluation Agreement as an open RFP
+- **Source:** Client planning discussion post-9C.
+- **Scope:** Large (exploratory)
+- **Priority:** Low (captured for later assessment)
+- **Context:** Flips the current AI Shopper model. Today, Bob (buyer) asks the platform "who can provide X?" and discovers sellers' published Claims. Proposed: Bob publishes an Evaluation Agreement as an RFP referencing specific Requirements Sets — "I'm looking for suppliers whose Claims can satisfy these requirements." Sellers discover the RFP, create Claims targeted at satisfying it (or point existing Claims at it), and engage the EA as grantees.
+- **Implications:**
+  - EAs become first-class discoverable objects in the Public Directory, not just downstream of disclosures.
+  - Creates a new Claim-creation flow ("create a Claim targeting RFP X") — possibly auto-populates referenced Requirements Sets.
+  - Shifts the directionality of the whole procurement model — sellers respond to buyer demand rather than buyers discovering seller supply.
+  - Natural pair with #114 (umbrella disclosure) — a mature buyer with umbrella relationships could publish RFPs against their umbrella supplier pool without needing wide public visibility.
+- **Open design questions:** Big one — does this change Radiant from "transparency infrastructure" to "procurement marketplace"? That's a positioning shift worth discussing with the client before scoping implementation.
+
 ---
 
 ## Exploratory Ideas Not Yet Scoped
@@ -590,3 +734,4 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-21: Phase 9C — Agreements section added to Actor / Asset / Claim Detail Panels. Each row shows type + subject name, counterparty, status / expiration with Amend / Revoke text labels on the right (Amend wired for DAs — opens AmendDisclosureModal for active / CombinedResponseModal for provisionals; Amend for EAs + Revoke for both remain placeholder pending #108 + #112). Row click selects the edge (when one exists) and opens the agreement Detail Panel; agreementId fallback handles DAs without canvas edges (suppressed internal Actor→Claim ownership per 9A.5 #83). Internal DAs render "Internal" with no action labels; Proof-of-Evaluation DAs render with no action labels per design. Data sourced from `v22View.disclosureAgreements` / `v22View.evaluationAgreements` (already merged with provisionals via `getV22DataForRole`) — no #103-style regression. #111 ✅ Complete; #12 ✅ Superseded.
 - 2026-04-21: Phase 9D — Revocation flow restored and extended to EAs. DAs and EAs both revocable by either grantor or grantee. DA revocation cascades to paired EA + grantee's Eval Results under that EA with explicit warning surfaced in `V22RevocationConfirmModal` (new) before commit; chained notifications (`v22-da-revoked` + `v22-ea-revoked` with `cascadedFromDa`) fire to the counterparty. `V22RevocationNoticeModal` (new, pattern-matched from V2.1 `RevocationNoticeModal.jsx`) is the counterparty Dismiss surface — for grantor-initiated DA revocations, Dismiss also removes the revoked Claim + cascade-revoked EA + Eval Results from the grantee's canvas. `_revokedMeta` annotations on DAs/EAs/Eval Results drive view-layer filtering in `buildViewForActor`; `revocationRecords` ledger rides along via `mergeProvisionals` for audit. Revoke labels in the 9C Agreements Section are now functional (indigo hover); Proof-of-Evaluation DAs remain non-revocable by design with a defensive handler guard. REVOKED badge on Claim node + red border + "Disclosure revoked" message row pattern-match the DECLINED treatment. #112 ✅ Complete.
 - 2026-04-21: Phase 9E-parallel — #51 V2.1 prop pruning + #107 border shorthand→longhand + initial #60 approach (reverted). Co-shipped with Phase 9D in commit b29fdc9 (the two parallel sessions collapsed into one commit — post-mortem: future parallel work should explicitly constrain each session to its own commit scope). Phase 9E-parallel.1 corrected #60: restored uniform background grid opacity, brightened AssetNodeDot inner-circle ring. #60 ✅ Complete at commit 7d03982. Phase 9E-parallel.2 (this entry): QS picker cluster (#94 ✅ multi-select summary, #96 ✅ destination folder indicator, #97 ✅ default-checked + Select All toggle, #95 under investigation — flagged blocked on V22CreateAssetModal being in scope) + doc reconciliation for #51, #60, #107.
+- 2026-04-22: Phase 9E-parallel.3 — #94 correction + #97 cross-tab mutual exclusion + backlog file merge. #94 reopened and re-shipped: the 9E-parallel.2 implementation's `!previewFile` guard meant the summary panel never rendered in practice (clicking any row sets `previewFile`, flipping back to single-file preview immediately). Corrected by inverting precedence — multi-select summary wins the right-pane slot whenever `selected.size > 1 && resolvedSelectedForSummary.length > 1`, regardless of `previewFile`. Matches macOS Finder column-view behavior. #125 (new) filed and shipped: QS and Local Storage tab selections are now mutually exclusive — tab change clears `selected` + `previewFile` silently so the footer "Select N Files" count always reflects only the active tab. Merged #113–#124 from three reference files (`references/backlog-additions-disclosure-evaluation-split.md`, `references/backlog-additions-post-9c.md`, `references/backlog-addition-unravel-animation.md`) into categorical homes: #113 + #117 + #118 (Process Flows), #114 + #115 + #119 (Data Model & Content), #116 (Detail Panels), #120–#123 (Exploratory / Experimental), #124 (Visual & Rendering — revoked node unravel animation). Original #-IDs preserved; items filed as Open.

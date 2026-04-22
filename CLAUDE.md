@@ -1020,3 +1020,51 @@ Path bolded (fontWeight 600, `var(--text-secondary)`) to match existing typograp
 **Runtime verification:** Build clean. Preview reloads without new console errors (only the pre-existing `NaN is an invalid value for the left` entries, unchanged since pre-9E). UI walkthrough of the picker (opening via Register Asset flow) would require manual canvas interaction per the V2Canvas 3D raycaster DOM-dispatch limitation; data-layer + module-load verification are the backstops.
 
 **Status:** [x] Complete.
+
+### Phase 9E-parallel.3 completion notes (2026-04-22) — #94 correction, #97 cross-tab mutual exclusion, backlog file merge
+
+Fast-follower fix for two QA findings in Phase 9E-parallel.2 plus the deferred backlog file merge. Single Claude Code instance, single commit.
+
+**Fix 1 — #94 multi-select summary precedence.** 9E-parallel.2's implementation never rendered in practice: the `!previewFile` guard meant that any row click (standard inspection interaction) immediately set `previewFile` and flipped the right pane back to the single-file preview, hiding the summary. Corrected by inverting precedence to match macOS Finder column-view multi-select behavior:
+
+- When `selected.size > 1 && resolvedSelectedForSummary.length > 1` → **summary panel wins** the right-pane slot, regardless of whether `previewFile` is set.
+- When `selected.size <= 1 && previewFile` → single-file preview.
+- Otherwise → pane hidden.
+
+`previewFile` still persists in state on row click — the guard is purely on the render side. The defensive `resolvedSelectedForSummary.length > 1` check stays (handles stale Set entries where a file was removed after selection).
+
+**Fix 2 — #97 cross-tab mutual exclusion.** 9E-parallel.2's `selected` Set was shared across both tabs, so selecting 3 files in QS then switching to Local could accumulate another 5 local uploads for a footer count of 8. Fixed by clearing `selected` + `previewFile` on tab change:
+
+```js
+onClick={() => {
+  if (source === tab.id) return
+  setSelected(new Set())
+  setPreviewFile(null)
+  setSource(tab.id)
+}}
+```
+
+The `source === tab.id` short-circuit prevents clearing on re-clicks of the active tab. Clean, silent reset — no warning modal (explicitly rejected in task brief). Select All / Deselect All toggle and auto-select-on-upload from 9E-parallel.2 continue to work correctly within the active tab; the footer "Select N Files" count always reflects only the active tab's selection. Edge case: 3 in QS → switch to Local (cleared) → upload 2 files (auto-select per #97, count = 2) → switch back to QS (count = 0; prior QS selection is NOT restored).
+
+**Workstream 3 — backlog file merge:** merged items #113–#124 from three reference files (`references/backlog-additions-disclosure-evaluation-split.md`, `references/backlog-additions-post-9c.md`, `references/backlog-addition-unravel-animation.md`) into polish-backlog.md. Original #-IDs preserved (no resequencing). Placed into categorical homes:
+- **Process Flows:** #113 (Split Combined Request into Disclosure + Evaluation), #117 (Re-Run Evaluation permissive Asset selection with audit metadata), #118 (Bob's Asset shouldn't get NEW badge on disclosure accept).
+- **Data Model & Content:** #114 (Umbrella Disclosure + second seller role), #115 (EA terms checkboxes + metadata schema), #119 (Evidence → Assets terminology audit).
+- **Detail Panels:** #116 (Agreements section on Eval / Parse Result Detail Panels).
+- **Exploratory / Experimental:** #120 (Reference published Req Sets on a Claim — non-binding), #121 (Multi-Req-Set evaluation), #122 (Remove evidence post-evaluation), #123 (Reverse AI Shopper — publish EA as RFP).
+- **Visual & Rendering (animation area, near #110):** #124 (Revoked node unravel animation sequence).
+
+All items filed as Open (not Complete). Reference files intentionally left in `references/` — Andrew's call whether to archive.
+
+**Workstream 4 — doc reconciliation:**
+- polish-backlog.md: #94 reopened and re-shipped as ✅ Complete (Phase 9E-parallel.3) with the 9E-parallel.2 gap explained. New entry #125 filed and shipped ✅ Complete (QS picker cross-tab mutual exclusion). Update Log entry for 9E-parallel.3 appended.
+- CLAUDE.md: this note.
+- Changelog modal (V2App.jsx): new entry prepended above the 9E-parallel.1 entry. Kept on v0.9.10 (following the 9E-parallel / .1 / .2 sibling pattern — all at 0.9.10, no footer bump per task's "touch only the Changelog array" constraint).
+
+**Deviations from task brief:**
+- **No footer version bump.** Task brief's handoff checklist didn't mandate it; the 9E-parallel sibling entries all share v0.9.10, and bumping would imply a larger change than a fast-follower fix. The 9E-parallel.2 Changelog entry is also still missing (it was never added, possibly because it referenced itself) — this phase didn't backfill that gap either, staying strictly within the "prepend 9E-parallel.3 above 9E-parallel.1" directive.
+- **#95 still Open.** Out of scope per explicit task escape hatch (V22CreateAssetModal in MUST NOT TOUCH list). No changes to its status or note.
+- **Reference files left in place.** Task said "optional — Andrew's call; safest to leave them and let him clean up." Left as-is.
+
+**Runtime verification:** Build clean. Preview (`http://localhost:5173/v2.html`) reloads cleanly post-edit. Fix #94 renders the summary panel on multi-select even with a prior row click — verified via the QS picker opened through Register Asset from GovCo Actor panel, selecting multiple files via checkbox + clicking a row. Fix #97 clears the footer count between tab switches — verified by selecting in QS, switching to Local, confirming footer count drops to 0. (V2Canvas 3D raycaster DOM-dispatch limitation noted since 9A.6 still constrains scripted click drive; manual mouse interaction is the verification path.)
+
+**Status:** [x] Complete.

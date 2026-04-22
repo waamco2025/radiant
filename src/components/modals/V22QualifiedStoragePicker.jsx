@@ -676,7 +676,16 @@ export default function V22QualifiedStoragePicker({
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setSource(tab.id)}
+                  onClick={() => {
+                    if (source === tab.id) return
+                    // Phase 9E-parallel.3 (#125): clear selection + preview
+                    // on tab switch so QS and Local selections are mutually
+                    // exclusive. Prevents accidental "3 from QS + 5 from
+                    // Local = 8" footer counts. Clean, silent reset.
+                    setSelected(new Set())
+                    setPreviewFile(null)
+                    setSource(tab.id)
+                  }}
                   style={{
                     padding: '10px 18px', border: 'none',
                     background: active ? 'var(--bg-surface)' : 'transparent',
@@ -883,13 +892,13 @@ export default function V22QualifiedStoragePicker({
               )}
             </div>
 
-            {!previewFile && selected.size > 1 && resolvedSelectedForSummary.length > 1 && (
-              // Phase 9E-parallel.2 (#94): multi-select summary renders in
-              // the same right-side slot as the single-file preview. Shown
-              // only when nothing is clicked for focus AND multiple items
-              // are checked. Matches the single-file preview's container,
-              // header treatment, and "Preview not available" block so the
-              // two states feel like siblings.
+            {selected.size > 1 && resolvedSelectedForSummary.length > 1 && (
+              // Phase 9E-parallel.3 (#94 correction): multi-select summary
+              // takes precedence over the single-file preview. Matches
+              // macOS Finder column-view behavior — selecting any row still
+              // sets previewFile for potential future single-select fallback,
+              // but the summary dominates the right pane as long as
+              // multiple files remain checked.
               <div style={{
                 width: 380, flexShrink: 0,
                 borderLeft: '1px solid var(--border)',
@@ -1008,7 +1017,10 @@ export default function V22QualifiedStoragePicker({
               </div>
             )}
 
-            {previewFile && (
+            {previewFile && selected.size <= 1 && (
+              // Phase 9E-parallel.3 (#94 correction): single-file preview
+              // only renders when exactly zero or one file is selected.
+              // Multi-select summary wins the slot when >1 checked.
               <div style={{
                 width: 380, flexShrink: 0,
                 borderLeft: '1px solid var(--border)',
