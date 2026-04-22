@@ -4274,6 +4274,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-21', label: 'Phase 9E-parallel.1', items: [
+                  'Restored background dot matrix to full brightness at all zoom levels',
+                  'Brightened node dot ring so nodes clearly pop against the grid at dot zoom (#60)',
+                ]},
+                { version: '0.9.10', date: '2026-04-21', label: 'Phase 9E-parallel', items: [
+                  'Cleaned up unused V2.1 prop forwarding in V2Canvas (#51)',
+                  'Fixed a render warning about conflicting border styles on node cards (#107)',
+                  'Adjusted background grid opacity at dot zoom (reversed in 9E-parallel.1)',
+                ]},
                 { version: '0.9.10', date: '2026-04-21', label: 'Phase 9D', items: [
                   'New: Revoke Disclosure and Evaluation Agreements — from the Agreements section in any node Detail Panel',
                   'Revoked Disclosure Agreements propagate correctly: the paired Evaluation Agreement and any dependent Eval Results are also revoked',

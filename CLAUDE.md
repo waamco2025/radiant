@@ -942,3 +942,81 @@ The Notice modal's consequence copy branches on these cascade flags so the grant
 **Changelog v0.9.10 + footer bump v0.9.9 → v0.9.10.**
 
 **Status:** [x] Complete.
+
+### Phase 9E-parallel completion notes (2026-04-21) — co-shipped with 9D (commit b29fdc9)
+
+Three small fixes intended as a standalone sibling commit. Co-shipped into the 9D revocation commit due to a parallel-programming coordination artifact — the two parallel sessions' uncommitted changes collapsed into one commit. Post-mortem below.
+
+**Fix A (#51) — V2Canvas.jsx V2.1 prop pruning.** Removed seven V2.1-era handler props from `V2Canvas`'s signature and all three forward sites (full card + `AssetNodeMini` + `AssetNodeDot`): `onConnect`, `onDisclose`, `onAddEvidence`, `onParseEvidence`, `onRunEvaluation`, `onAmendEval`, `onCreateClaim`. V2.2 nodes route card actions through `onV22CardAction` exclusively; the old props had no backing code paths.
+
+**Scope bleed:** V2App.jsx still passes these seven handler props to V2Canvas (lines 3134-3223). V2Canvas now silently ignores them since they're no longer destructured — no runtime error, just dead prop-passing on the V2App side. Full V2App.jsx dead-prop cleanup deferred to backlog #50.
+
+**Fix B (#60 initial approach, later reversed in 9E-parallel.1) — Background grid opacity.** Lowered base-depth grid opacity (dark 0.20 → 0.12, light 0.25 → 0.15) to make node dots pop at dot-LOD. Wrong direction per Andrew's feedback — see 9E-parallel.1 notes below.
+
+**Fix C (#107) — Border shorthand → longhand conversion in AssetNode.jsx.** The task briefed this as "shorthand `border:` paired with a side-specific longhand like `borderTopColor`." Exhaustive code audit found no such pattern in AssetNode.jsx (no `borderTopColor`, `borderLeftColor`, etc. anywhere in the file). **Actual root cause identified during this phase:** React's style reconciler has trouble tracking `border-color` transitions when the border is set via shorthand `border: ...`. The warning fires because React updates the border across frames but can't consistently determine which color to apply.
+
+Fix: convert every `border:` shorthand paired with a `transition: border-color` to longhand (`borderWidth` + `borderStyle` + `borderColor`). Four call sites fixed: full-card selection border, full-card main div, mini selection border, mini main div. Dot-card borders and static non-transitioning borders left as shorthand.
+
+**Parallel-programming post-mortem.** The prompt-author's intent for this phase was an independent sibling commit to the parallel 9D revocation work. Coordination mechanic went wrong because uncommitted changes from both sessions existed in the working tree when 9D committed with `git add <file>` — the 9E-parallel changes got absorbed. Resolution: 9E-parallel fixes landed correctly in commit b29fdc9 with an acknowledgement in the commit message body. Future parallel work should explicitly constrain each session to its own commit scope (branch isolation or pre-staging / stash-and-pop).
+
+**Runtime verification:** Build clean. Preview reloads cleanly; no new console errors. DOM-level verification confirms longhand border properties applied to the main card (`border-width: 1px; border-style: solid; border-color: …`).
+
+**Status:** [x] Complete.
+
+### Phase 9E-parallel.1 completion notes (2026-04-21) — #60 correction (commit 7d03982)
+
+Reversed 9E-parallel's base-depth grid opacity change and relocated the contrast work to the node dot itself.
+
+**Fix 1 — Restore uniform background grid opacity.** Andrew's feedback: the background dot matrix is intentional visual infrastructure and should stay at full brightness. `getGridParams` now returns a single opacity across all depths (dark 0.28 / light 0.32) — the previous depth-1+ values became the single values. Phase 9E depth-specific comment block removed.
+
+**Fix 2 — Brighten AssetNodeDot inner-circle ring.** Dot at dot-LOD now has a clearly distinct indigo ring against the full-brightness matrix:
+- Stroke: **1px → 1.5px** (clear bump without reshaping the 8px dot — kept at `box-sizing: border-box` so the fill disc only reduces from 6px to 5px)
+- Color: **`color-mix(in srgb, var(--accent-indigo) 40%, var(--border))`** (`WARM_BORDER` constant) **→ `color-mix(in srgb, var(--accent-indigo) 70%, var(--border))`** (stronger saturated indigo, still blended with `var(--border)` so it stays architectural rather than chromatic glow)
+- Fill unchanged (`var(--text-tertiary)`) — the ring does the contrast work
+
+**Preserved:** WARM_BORDER constant untouched (still used by full + mini cards per Phase 9A.1.5 item 1). Red UNSAT path retained at the new 1.5px stroke. Selected amber ring (`isSelected` branch at the end of the dot) untouched. `_isEdgeEndpoint` hollow-ring treatment untouched.
+
+**Grid alignment note:** Original backlog #60 proposed grid-alignment as one candidate fix. Investigation confirms node positions already snap to the grid via the existing `snapToGrid` function in V2Canvas.jsx — alignment was never the issue. Contrast between nodes and background is now carried by the node dot's ring, not by dimming the background.
+
+**Closes #60.** Changelog v0.9.10 (same as 9D; footer already bumped in 9D).
+
+**Status:** [x] Complete.
+
+### Phase 9E-parallel.2 completion notes (2026-04-21) — QS picker cluster + doc reconciliation
+
+Two workstreams: QS picker cluster (#94, #95, #96, #97) and doc reconciliation for 9E-parallel and 9E-parallel.1.
+
+**#94 — Multi-select summary in preview pane.** The right-side preview slot now renders a selection-summary panel when `previewFile === null && selected.size > 1`. Panel structure mirrors the single-file preview container, header, and "Preview not available" block so the two states feel like siblings:
+- Header: SHIELD icon + "SELECTION SUMMARY" label + "{N} files selected"
+- Metadata rows: Total size (summed from `parseDisplaySizeToBytes(file.size)` for QS files + `file.bytes` for local uploads), Modified (earliest–latest date range, or single date if all equal), Types (distinct uppercase extensions, deduped)
+- Icon block: stacked multi-file illustration (3 offset dashed card shapes, front card shows the count)
+
+Resolution logic iterates both sources: `files` (current-folder QS) filtered by `selected.has(name)`, and `localFiles` (ready uploads across all navigation state) filtered by `selected.has(id)`. QS-side selection is cleared on navigation, so no stale cross-folder entries.
+
+**#95 — Re-add files preserves custom labels. FLAGGED AS OUT-OF-SCOPE.** Root cause confirmed in V22CreateAssetModal.jsx's `handlePickerSelect` at line 163: `setRows(newRows)` replaces the entire rows array on every picker return, losing any user-edited labels on re-selection. Fix requires editing V22CreateAssetModal to merge rather than replace rows (keyed by a stable file identity like `filename + size` or the V22 `file.path`). V22CreateAssetModal is in the MUST NOT TOUCH list for this phase. Considered a picker-only workaround (surface an `initialSelected` prop so re-opens pre-check the same files) — but even with that, V22CreateAssetModal still overwrites labels on every return. The fix has to happen there. Item stays open in backlog with the root-cause note.
+
+**#96 — Local Storage destination folder indicator.** Drop-zone copy now shows the real destination path. `LocalStoragePanel` accepts a `bucket` prop wired from `data.bucket` (e.g., `s3://govco-qualified-storage`). Copy reads:
+
+> Files will be uploaded to **{bucket}/uploads** in your Qualified Storage.
+
+Path bolded (fontWeight 600, `var(--text-secondary)`) to match existing typography conventions. Bucket uses the real `s3://…` URL rather than the display-friendly "GovCo QS Bucket" the task example suggested — that string doesn't exist anywhere in the picker; the `s3://…` URL is the canonical identifier used in the header bar at line 535 too.
+
+**#97 — Local Storage uploads default-checked + Select All / Deselect All.** Two sub-changes:
+
+*Auto-select newly-uploaded files.* The upload simulation tick in `handleFilesChosen` now flips each file's id into `selected` at the `status: 'uploading' → 'ready'` transition. A `markedReady` latch per-upload prevents re-adding if the tick fires multiple times at `p >= 1`. Guarded on `mode !== 'single'` since a batch upload in single-mode would otherwise fight over "which one is selected now" — single-mode users still click to pick.
+
+*Select All / Deselect All toggle.* Renders between the drop zone and the file list, right-aligned, text-style (11px mono, `var(--text-dim)` with hover brightening to `var(--accent-indigo)`). Visible only when `localFiles.length > 0 && mode !== 'single'` and at least one file is `status: 'ready'`. Toggle logic: if every ready local file is already selected → label reads "Deselect all" and click clears all ready-local IDs; otherwise reads "Select all" and click adds all ready-local IDs. QS-side selection (files keyed by name) is not touched — different ID space.
+
+**Doc reconciliation.** Changelog modal entries added for Phase 9E-parallel and 9E-parallel.1 (prepended before the 9D entry in V2App.jsx's Changelog array — touching only those entries, no other V2App changes). CLAUDE.md phase-completion notes for 9E-parallel and 9E-parallel.1 added directly above this note. polish-backlog.md updates for #51, #60, #107 (marked ✅ Complete with accurate root-cause notes per task brief), plus new entries for the four QS picker cluster items.
+
+**Deviations:**
+- Multi-select icon: stacked 3-card illustration with the count badge on the front card. Task briefed "generic multi-file icon" — chose stacked-cards as it composes with the existing single-file "2px dashed var(--border)" card icon used by the single-file preview, so the two states visually relate.
+- "Modified" row collapses to a single date when all selected files share it, rather than showing "Jan 12 – Jan 12, 2026".
+- Summary panel requires `resolvedSelectedForSummary.length > 1` (not just `selected.size > 1`) — defensive against Set entries that fail to resolve (e.g., user deleted a local file after selecting it; stale Set entry could persist briefly).
+- Select All toggle guards on `mode !== 'single'` — single-mode's semantics don't support a bulk select.
+- Auto-check on upload also guards on `mode !== 'single'` for the same reason.
+- #95 flagged out-of-scope per task's explicit escape hatch ("flag as blocked if fix requires V22CreateAssetModal").
+
+**Runtime verification:** Build clean. Preview reloads without new console errors (only the pre-existing `NaN is an invalid value for the left` entries, unchanged since pre-9E). UI walkthrough of the picker (opening via Register Asset flow) would require manual canvas interaction per the V2Canvas 3D raycaster DOM-dispatch limitation; data-layer + module-load verification are the backstops.
+
+**Status:** [x] Complete.

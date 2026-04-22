@@ -194,7 +194,7 @@ function selectedFileToV22Payload(file) {
 }
 
 /* ─── Local Storage panel (Phase 9A.6 Gate B / #67) ─── */
-function LocalStoragePanel({ localFiles, selected, mode, onChoose, onToggle, onRemove }) {
+function LocalStoragePanel({ localFiles, selected, mode, bucket, onChoose, onToggle, onRemove, onSelectAllLocal }) {
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useCallback((el) => { if (el) el.value = '' }, [])
 
@@ -229,8 +229,13 @@ function LocalStoragePanel({ localFiles, selected, mode, onChoose, onToggle, onR
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
             Drop files here or click to upload
           </div>
-          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-            Files will be uploaded to your Qualified Storage and then registered as Assets.
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', textAlign: 'center' }}>
+            {/* Phase 9E-parallel.2 (#96): show the real destination path. */}
+            Files will be uploaded to{' '}
+            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+              {bucket}/uploads
+            </span>
+            {' '}in your Qualified Storage.
           </div>
           <input
             ref={fileInputRef}
@@ -241,6 +246,34 @@ function LocalStoragePanel({ localFiles, selected, mode, onChoose, onToggle, onR
           />
         </label>
       </div>
+
+      {/* Phase 9E-parallel.2 (#97): Select All / Deselect All toggle for local files. */}
+      {localFiles.length > 0 && mode !== 'single' && (() => {
+        const readyLocalFiles = localFiles.filter(f => f.status === 'ready')
+        if (readyLocalFiles.length === 0) return null
+        const allSelected = readyLocalFiles.every(f => selected.has(f.id))
+        return (
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end',
+            padding: '6px 24px 0',
+            borderBottom: 'none',
+          }}>
+            <span
+              onClick={() => onSelectAllLocal(!allSelected)}
+              style={{
+                fontSize: 11, fontFamily: 'var(--font-mono)',
+                color: 'var(--text-dim)', cursor: 'pointer',
+                padding: '2px 4px',
+                transition: 'color 100ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-indigo)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+            >
+              {allSelected ? 'Deselect all' : 'Select all'}
+            </span>
+          </div>
+        )
+      })()}
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 24px' }}>
         {localFiles.length === 0 ? (
@@ -448,6 +481,7 @@ export default function V22QualifiedStoragePicker({
     newFiles.forEach((entry) => {
       const durationMs = 500 + Math.round(Math.random() * 300)
       const started = Date.now()
+      let markedReady = false
       const tick = () => {
         const elapsed = Date.now() - started
         const p = Math.min(1, elapsed / durationMs)
@@ -456,11 +490,26 @@ export default function V22QualifiedStoragePicker({
             ? (p >= 1 ? { ...f, status: 'ready', progress: 1 } : { ...f, progress: p })
             : f,
         ))
+        // Phase 9E-parallel.2 (#97): default newly-uploaded local files to
+        // selected. Add to the selection Set once at the ready transition.
+        // Skipped in single mode so a batch of uploads doesn't fight over
+        // "which one is selected now"; single-mode users still click to pick.
+        if (p >= 1 && !markedReady) {
+          markedReady = true
+          if (mode !== 'single') {
+            setSelected(prev => {
+              if (prev.has(entry.id)) return prev
+              const next = new Set(prev)
+              next.add(entry.id)
+              return next
+            })
+          }
+        }
         if (p < 1) requestAnimationFrame(tick)
       }
       requestAnimationFrame(tick)
     })
-  }, [])
+  }, [mode])
 
   const removeLocalFile = useCallback((id) => {
     setLocalFiles(prev => prev.filter(f => f.id !== id))
@@ -473,6 +522,41 @@ export default function V22QualifiedStoragePicker({
   }, [])
 
   const selectedCount = selected.size
+
+  // Phase 9E-parallel.2 (#94): helper for the multi-select summary panel.
+  // Formats a byte count as an approximate human size (e.g., "14.7 MB").
+  const formatBytesShort = (n) => {
+    if (!n || n <= 0) return '0 B'
+    if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`
+    return `${n} B`
+  }
+
+  // Resolve currently selected items (QS-side + Local-side) back to file
+  // records with a unified shape {name, bytes, type, date}. QS-side entries
+  // are keyed by `file.name` in the selected Set; local-side entries by
+  // `file.id` (the `local-…` prefix disambiguates). Navigation clears the
+  // QS selection, so only the current folder's files can resolve on the QS
+  // side — local files persist across navigation.
+  const resolvedSelectedForSummary = (() => {
+    const out = []
+    for (const f of files) {
+      if (selected.has(f.name)) {
+        out.push({ name: f.name, bytes: parseDisplaySizeToBytes(f.size), type: f.type, date: f.date })
+      }
+    }
+    for (const f of localFiles) {
+      if (f.status === 'ready' && selected.has(f.id)) {
+        out.push({ name: f.name, bytes: f.bytes || 0, type: (f.name.split('.').pop() || '').toLowerCase(), date: f.date })
+      }
+    }
+    return out
+  })()
+
+  const summaryTotalBytes = resolvedSelectedForSummary.reduce((a, r) => a + (r.bytes || 0), 0)
+  const summaryDates = resolvedSelectedForSummary.map(r => r.date).filter(Boolean).sort()
+  const summaryTypes = Array.from(new Set(resolvedSelectedForSummary.map(r => (r.type || '').toUpperCase()).filter(Boolean)))
 
   const handleSelect = useCallback(() => {
     if (selectedCount === 0) return
@@ -616,6 +700,7 @@ export default function V22QualifiedStoragePicker({
               localFiles={localFiles}
               selected={selected}
               mode={mode}
+              bucket={data.bucket}
               onChoose={handleFilesChosen}
               onToggle={(id) => {
                 setSelected(prev => {
@@ -624,6 +709,20 @@ export default function V22QualifiedStoragePicker({
                     if (next.has(id)) { next.delete(id) } else { next.clear(); next.add(id) }
                   } else {
                     if (next.has(id)) { next.delete(id) } else { next.add(id) }
+                  }
+                  return next
+                })
+              }}
+              onSelectAllLocal={(select) => {
+                // Phase 9E-parallel.2 (#97): flip all ready local files on/off.
+                // Leaves QS-side selection untouched.
+                const readyIds = localFiles.filter(f => f.status === 'ready').map(f => f.id)
+                setSelected(prev => {
+                  const next = new Set(prev)
+                  if (select) {
+                    for (const id of readyIds) next.add(id)
+                  } else {
+                    for (const id of readyIds) next.delete(id)
                   }
                   return next
                 })
@@ -783,6 +882,131 @@ export default function V22QualifiedStoragePicker({
                 </div>
               )}
             </div>
+
+            {!previewFile && selected.size > 1 && resolvedSelectedForSummary.length > 1 && (
+              // Phase 9E-parallel.2 (#94): multi-select summary renders in
+              // the same right-side slot as the single-file preview. Shown
+              // only when nothing is clicked for focus AND multiple items
+              // are checked. Matches the single-file preview's container,
+              // header treatment, and "Preview not available" block so the
+              // two states feel like siblings.
+              <div style={{
+                width: 380, flexShrink: 0,
+                borderLeft: '1px solid var(--border)',
+                display: 'flex', flexDirection: 'column',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  flexShrink: 0,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <ShieldIcon size={14} />
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: 'var(--accent-green)', letterSpacing: '0.06em',
+                    }}>SELECTION SUMMARY</span>
+                  </div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',
+                    lineHeight: 1.4,
+                  }}>
+                    {resolvedSelectedForSummary.length} files selected
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                  {[
+                    { label: 'Total size', value: formatBytesShort(summaryTotalBytes) },
+                    {
+                      label: 'Modified',
+                      value: summaryDates.length === 0
+                        ? '—'
+                        : summaryDates[0] === summaryDates[summaryDates.length - 1]
+                          ? summaryDates[0]
+                          : `${summaryDates[0]} – ${summaryDates[summaryDates.length - 1]}`,
+                    },
+                    { label: 'Types', value: summaryTypes.length > 0 ? summaryTypes.join(', ') : '—' },
+                  ].map(row => (
+                    <div key={row.label} style={{
+                      display: 'flex', alignItems: 'baseline', gap: 8,
+                      padding: '4px 0', fontSize: 11,
+                    }}>
+                      <span style={{
+                        width: 72, flexShrink: 0,
+                        color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                      }}>{row.label}</span>
+                      <span style={{
+                        flex: 1, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+                        wordBreak: 'break-all',
+                      }}>{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{
+                  flex: 1, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  padding: '24px 16px',
+                  color: 'var(--text-dim)',
+                }}>
+                  <div style={{
+                    position: 'relative',
+                    width: 80, height: 100,
+                    marginBottom: 16,
+                  }}>
+                    {/* Stacked-file multi-icon — three offset card shapes. */}
+                    {[0, 1, 2].map(i => (
+                      <div key={i} style={{
+                        position: 'absolute',
+                        top: 6 - i * 3,
+                        left: 6 - i * 3,
+                        width: 70,
+                        height: 90,
+                        borderRadius: 8,
+                        border: '2px dashed var(--border)',
+                        background: 'color-mix(in srgb, var(--border) 20%, transparent)',
+                        display: i === 0 ? 'flex' : 'none',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <span style={{
+                          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          color: 'var(--text-dim)',
+                          padding: '2px 6px', borderRadius: 3,
+                          background: 'var(--bg-raised)',
+                        }}>{resolvedSelectedForSummary.length}</span>
+                      </div>
+                    ))}
+                    {[2, 1].map(i => (
+                      <div key={`card-${i}`} style={{
+                        position: 'absolute',
+                        top: 6 - i * 3,
+                        left: 6 - i * 3,
+                        width: 70,
+                        height: 90,
+                        borderRadius: 8,
+                        border: '2px dashed var(--border)',
+                        background: 'color-mix(in srgb, var(--border) 20%, transparent)',
+                      }} />
+                    ))}
+                  </div>
+                  <div style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.6,
+                  }}>
+                    Preview not available
+                    <br />
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      Select to attach these files
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {previewFile && (
               <div style={{
