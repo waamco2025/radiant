@@ -1068,3 +1068,31 @@ All items filed as Open (not Complete). Reference files intentionally left in `r
 **Runtime verification:** Build clean. Preview (`http://localhost:5173/v2.html`) reloads cleanly post-edit. Fix #94 renders the summary panel on multi-select even with a prior row click — verified via the QS picker opened through Register Asset from GovCo Actor panel, selecting multiple files via checkbox + clicking a row. Fix #97 clears the footer count between tab switches — verified by selecting in QS, switching to Local, confirming footer count drops to 0. (V2Canvas 3D raycaster DOM-dispatch limitation noted since 9A.6 still constrains scripted click drive; manual mouse interaction is the verification path.)
 
 **Status:** [x] Complete.
+
+### Phase 9E-parallel.4 completion notes (2026-04-22) — two fast-followers from 9E-parallel.3 QA
+
+Narrow cleanup pass. Two small gaps surfaced during QA of 9E-parallel.3 (commit bc1a78a).
+
+**Fix 1 — single-preview render condition tightened.** 9E-parallel.3's condition was `previewFile && selected.size <= 1`. The `<=` included the zero-selected case, so `previewFile` persisting from a prior row click caused the single-file preview to linger after the user unchecked all files. Changed to `previewFile && selected.size === 1`:
+
+- `selected.size === 0` → right pane hidden, regardless of `previewFile` state.
+- `selected.size === 1 && previewFile` → single-file preview renders.
+- `selected.size > 1 && resolvedSelectedForSummary.length > 1` → summary panel renders (unchanged).
+
+Kept `previewFile` state as-is on uncheck — the gate is purely on the render side, so no new side effects / cleanup effects / state-coupling to worry about.
+
+**Fix 2 — seed data adjustment for summary-date collapse verification.** The #94 summary's Modified-date logic collapses to a single date when all selected files share one, otherwise renders as a range. 9E-parallel.3's seed data had no folder where 2+ files shared a date, so the collapse path wasn't runtime-verifiable. Targeted the `sentinel-program/manufacturing-reports` folder in MOCK_BUCKETS (in V22QualifiedStoragePicker.jsx — the QS picker's seed data lives in-file, not in `v2_2Data.js`):
+
+- `sentinel4-assembly-report.pdf` — `2026-03-15` (kept).
+- `propulsion-test-results.pdf` — `2026-03-12` → `2026-03-15` (changed to match).
+- `thermal-analysis-v2.pdf` — `2026-03-10` (kept).
+
+Both paths now testable:
+- Select the two `2026-03-15` files → summary shows `2026-03-15` (collapsed).
+- Select all three (or any mix that spans) → summary shows `2026-03-10 – 2026-03-15` (range).
+
+**Deviations:** none. Task was tight and prescriptive.
+
+**Runtime verification (preview):** Build clean. Preview reloads cleanly; no new console errors beyond the pre-existing `NaN is an invalid value for the left` entries (unchanged since pre-9E). End-to-end UI walkthrough of the picker (Register Asset → uncheck all → confirm pane hides; navigate to manufacturing-reports → select the 2 shared-date files → confirm single Modified date) still requires manual mouse input per the V2Canvas 3D raycaster DOM-dispatch limitation; code-level verification via source re-read + source-grep on the changed strings is the backstop.
+
+**Status:** [x] Complete.

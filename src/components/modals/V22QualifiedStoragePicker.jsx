@@ -28,8 +28,12 @@ const MOCK_BUCKETS = {
     },
     files: {
       '/sentinel-program/manufacturing-reports': [
+        // Phase 9E-parallel.4 (#94 follow-up): sentinel4-assembly-report
+        // and propulsion-test-results share 2026-03-15 so the summary's
+        // Modified-date collapse path is testable. thermal-analysis-v2
+        // retains a distinct date so the range path is also testable.
         { name: 'sentinel4-assembly-report.pdf', size: '2.4 MB', date: '2026-03-15', type: 'pdf' },
-        { name: 'propulsion-test-results.pdf', size: '1.8 MB', date: '2026-03-12', type: 'pdf' },
+        { name: 'propulsion-test-results.pdf', size: '1.8 MB', date: '2026-03-15', type: 'pdf' },
         { name: 'thermal-analysis-v2.pdf', size: '3.1 MB', date: '2026-03-10', type: 'pdf' },
       ],
       '/sentinel-program/test-data': [
@@ -1017,10 +1021,12 @@ export default function V22QualifiedStoragePicker({
               </div>
             )}
 
-            {previewFile && selected.size <= 1 && (
-              // Phase 9E-parallel.3 (#94 correction): single-file preview
-              // only renders when exactly zero or one file is selected.
-              // Multi-select summary wins the slot when >1 checked.
+            {previewFile && selected.size === 1 && (
+              // Phase 9E-parallel.4 (#94 follow-up): single-file preview
+              // only renders when exactly one file is selected. Zero
+              // selected → pane hidden (even if previewFile persists from
+              // a prior row click). Multi-select summary wins the slot
+              // when >1 checked.
               <div style={{
                 width: 380, flexShrink: 0,
                 borderLeft: '1px solid var(--border)',

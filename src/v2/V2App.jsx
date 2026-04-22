@@ -4274,6 +4274,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-22', label: 'Phase 9E-parallel.4', items: [
+                  'Fixed: Qualified Storage picker preview pane now hides when you uncheck all files (previously lingered on the last-clicked file)',
+                  'Adjusted seed data so the multi-select summary\'s Modified-date collapse is demo-visible',
+                ]},
                 { version: '0.9.10', date: '2026-04-22', label: 'Phase 9E-parallel.3', items: [
                   'Fixed: Qualified Storage picker multi-select summary now reliably shows when you select 2+ files — inspecting any file in the list no longer dismisses the summary (#94)',
                   'Selections in Qualified Storage and Local Storage tabs are now mutually exclusive — switching tabs clears the other tab\'s selection (#125)',
