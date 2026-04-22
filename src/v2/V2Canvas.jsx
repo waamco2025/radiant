@@ -100,9 +100,11 @@ function setViewTransitionBg() {
 function getGridParams(depthLevel) {
   const isDark = document.documentElement.dataset.theme !== 'light'
   const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
+  // Phase 9E item #60: base-depth grid lowered so node dots pop against the
+  // background matrix at dot-LOD. Higher depths unchanged.
   const opacity = isDark
-    ? (depthLevel === 0 ? 0.20 : 0.28)   // dark: 0.20 base, 0.28 for depth 1+
-    : (depthLevel === 0 ? 0.25 : 0.32)   // light: 0.25 base, 0.32 for depth 1+
+    ? (depthLevel === 0 ? 0.12 : 0.28)   // dark: 0.12 base, 0.28 for depth 1+
+    : (depthLevel === 0 ? 0.15 : 0.32)   // light: 0.15 base, 0.32 for depth 1+
   const radius = depthLevel === 0 ? 1.2 : 1.6
   return { spacing, opacity: Math.min(opacity, 0.4), radius }
 }
@@ -419,13 +421,6 @@ const V2Canvas = forwardRef(function V2Canvas({
   modalOpen,
   panelWidth = 0,
   onLayerChange,
-  onConnect,
-  onDisclose,
-  onAddEvidence,
-  onParseEvidence,
-  onRunEvaluation,
-  onAmendEval,
-  onCreateClaim,
   // Phase 9A item 9: single-dispatch card-action handler for V2.2 nodes.
   // Forwarded into `<AssetNode>`; V2App routes action names to the same
   // handlers its Detail Panel footer uses.
@@ -2885,12 +2880,6 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onSelect={onSelect}
                   onDive={isAnchor ? undefined : handleDive}
                   onOpenSubgraph={(node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
-                  onConnect={transitioning ? undefined : onConnect}
-                  onDisclose={transitioning ? undefined : onDisclose}
-                  onAddEvidence={transitioning ? undefined : onAddEvidence}
-                  onParseEvidence={transitioning ? undefined : onParseEvidence}
-                  onRunEvaluation={transitioning ? undefined : onRunEvaluation}
-                  onCreateClaim={transitioning ? undefined : onCreateClaim}
                   onV22CardAction={transitioning ? undefined : onV22CardAction}
                   activeParty={activeParty}
                 />
@@ -2956,12 +2945,6 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onSelect={onSelect}
                   onDive={isAnchor ? undefined : handleDive}
                   onOpenSubgraph={(node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
-                  onConnect={transitioning ? undefined : onConnect}
-                  onDisclose={transitioning ? undefined : onDisclose}
-                  onAddEvidence={transitioning ? undefined : onAddEvidence}
-                  onParseEvidence={transitioning ? undefined : onParseEvidence}
-                  onRunEvaluation={transitioning ? undefined : onRunEvaluation}
-                  onCreateClaim={transitioning ? undefined : onCreateClaim}
                   onV22CardAction={transitioning ? undefined : onV22CardAction}
                   activeParty={activeParty}
                 />
@@ -3005,13 +2988,6 @@ const V2Canvas = forwardRef(function V2Canvas({
                 isAnchor={isAnchor}
                 isChild={depth > 0 && !isAnchor}
                 zoom={zoom}
-                onConnect={transitioning ? undefined : onConnect}
-                onDisclose={transitioning ? undefined : onDisclose}
-                onAddEvidence={transitioning ? undefined : onAddEvidence}
-                onParseEvidence={transitioning ? undefined : onParseEvidence}
-                onRunEvaluation={transitioning ? undefined : onRunEvaluation}
-                onAmendEval={transitioning ? undefined : onAmendEval}
-                onCreateClaim={transitioning ? undefined : onCreateClaim}
                 onV22CardAction={transitioning ? undefined : onV22CardAction}
                 activeParty={activeParty}
                 revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}

@@ -349,6 +349,7 @@ export default function AssetNode({
   const isTerminalNode = node.isParse || node.category === 'parse' || node.isEvaluation || node.category === 'evaluation'
   const isProvisional = !!node.provisional || !!node._showAsProvisional
   const isDeclined = !!node._isDeclined
+  const isRevoked = !!node._isRevoked
   const isNew = !!node._isNew
 
   // Reveal animation: swap provisional appearance at flip midpoint
@@ -389,7 +390,7 @@ export default function AssetNode({
   // with edge indigo (edges render at full accent-indigo). Value is now a
   // module-level constant (WARM_BORDER) shared with the mini + dot cards
   // per Phase 9A.1.5 item 1.
-  const borderColor = isDeclined
+  const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
     ? 'var(--text-dim)'
@@ -478,7 +479,10 @@ export default function AssetNode({
         </div>
       )}
 
-      {/* Selection border — sibling so it's unaffected by card flip animation */}
+      {/* Selection border — sibling so it's unaffected by card flip animation.
+          Phase 9E (#107): longhand border props (not `border` shorthand) so
+          React's style reconciler doesn't flag a shorthand/longhand mix when
+          transitioning `border-color`. */}
       {isSelected && (
         <div style={{
           position: 'absolute',
@@ -486,7 +490,9 @@ export default function AssetNode({
           width: CARD_W * scale + 6,
           height: CARD_H * scale + 6,
           borderRadius: (8 * scale) + 3,
-          border: `2px solid ${showAsProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)'}`,
+          borderWidth: 2,
+          borderStyle: 'solid',
+          borderColor: showAsProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)',
           transition: 'border-color 600ms ease',
           pointerEvents: 'none',
           zIndex: 0,
@@ -537,7 +543,12 @@ export default function AssetNode({
                   // read as noticeably not-mine at a glance.
                   ? 'color-mix(in srgb, color-mix(in srgb, var(--bg-card) 55%, var(--bg-deep)) 92%, var(--accent-blue, #38bdf8))'
                   : 'var(--bg-card)',
-          border: `1px ${showAsProvisional ? 'dashed' : 'solid'} ${borderColor}`,
+          // Phase 9E (#107): longhand border props (not `border` shorthand)
+          // so React's style reconciler doesn't flag a shorthand/longhand mix
+          // while transitioning `border-color`.
+          borderWidth: 1,
+          borderStyle: showAsProvisional ? 'dashed' : 'solid',
+          borderColor: borderColor,
           opacity: showAsProvisional ? 0.6 : 1,
           borderRadius: 8 * scale,
           padding: `${9 * scale}px ${12 * scale}px`,
@@ -653,6 +664,15 @@ export default function AssetNode({
               flexShrink: 0,
             }}>DECLINED</span>
           )}
+          {isRevoked && (
+            <span style={{
+              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+              color: 'var(--accent-red)',
+              background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+              flexShrink: 0,
+            }}>REVOKED</span>
+          )}
           {!isAnchor && <StackBadge count={childCount} categoryColor={'var(--accent-amber)'} />}
         </div>
 
@@ -687,7 +707,7 @@ export default function AssetNode({
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 9,
-            color: isDeclined
+            color: (isDeclined || isRevoked)
               ? 'var(--accent-red)'
               : node._pendingTransfer
                 ? 'var(--accent-amber)'
@@ -695,11 +715,13 @@ export default function AssetNode({
             fontStyle: 'italic',
             marginBottom: 3,
           }}>
-            {isDeclined
-              ? 'Disclosure declined'
-              : node._pendingTransfer
-                ? `Awaiting acceptance from ${node._pendingTransfer.toParty}`
-                : 'Awaiting disclosure from owner'}
+            {isRevoked
+              ? 'Disclosure revoked'
+              : isDeclined
+                ? 'Disclosure declined'
+                : node._pendingTransfer
+                  ? `Awaiting acceptance from ${node._pendingTransfer.toParty}`
+                  : 'Awaiting disclosure from owner'}
           </div>
         ) : (() => {
           if (node.isEvidence || node.isParse || node.category === 'parse') return null
@@ -996,12 +1018,13 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
 
   const isProvisional = !!node.provisional || !!node._showAsProvisional
   const isDeclined = !!node._isDeclined
+  const isRevoked = !!node._isRevoked
   const h = node.displayHealth || node.health
   const hasBadHealth = h && h.bad > 0
   // Phase 9A.1.5 item 1: mini cards now use the same WARM_BORDER treatment
   // as full-size cards so node terminations don't fade into the canvas at
   // MID_LOD zoom.
-  const borderColor = isDeclined
+  const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
     ? 'var(--text-dim)'
@@ -1114,7 +1137,10 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
           width: MINI_CARD_W + 6,
           height: MINI_CARD_H + 6,
           borderRadius: 9,
-          border: `2px solid ${isProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)'}`,
+          // Phase 9E (#107): longhand border props to avoid shorthand/longhand mix.
+          borderWidth: 2,
+          borderStyle: 'solid',
+          borderColor: isProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)',
           pointerEvents: 'none',
           zIndex: 0,
         }} />
@@ -1125,7 +1151,10 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         background: hovered
           ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
           : 'var(--bg-card)',
-        border: `1px ${isProvisional ? 'dashed' : 'solid'} ${borderColor}`,
+        // Phase 9E (#107): longhand border props to avoid shorthand/longhand mix.
+        borderWidth: 1,
+        borderStyle: isProvisional ? 'dashed' : 'solid',
+        borderColor: borderColor,
         opacity: isProvisional ? 0.6 : 1,
         borderRadius: 6,
         padding: '4px 8px',

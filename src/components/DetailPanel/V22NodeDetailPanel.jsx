@@ -200,6 +200,8 @@ function V22ActorPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onRevokeDa,
+  onRevokeEa,
 }) {
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
@@ -228,6 +230,8 @@ function V22ActorPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onRevokeDa={onRevokeDa}
+            onRevokeEa={onRevokeEa}
           />
         </>
       }
@@ -252,6 +256,8 @@ function V22AssetPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onRevokeDa,
+  onRevokeEa,
 }) {
   const asset = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -310,6 +316,8 @@ function V22AssetPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onRevokeDa={onRevokeDa}
+            onRevokeEa={onRevokeEa}
           />
         </>
       }
@@ -334,7 +342,7 @@ function V22AssetPanel({
 /* ─── Claim Panel (covers active / provisional / declined sub-states) ─── */
 function V22ClaimPanel({
   node, activeParty, onClose,
-  onRespondToRequest, onCancelRequest, onDismissDeclined,
+  onRespondToRequest, onCancelRequest, onDismissDeclined, onDismissRevoked,
   onRunEvaluation,
   onAmendClaim,
   onSelfEvaluate,
@@ -347,12 +355,16 @@ function V22ClaimPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onRevokeDa,
+  onRevokeEa,
 }) {
   const claim = node.v22Artifact
   const isOwner = activeParty === node.owner
   const isProvisional = !!node.isProvisional
   const isDeclined = !!node.isDeclined
+  const isRevoked = !!node.isRevoked
   const declineRecord = node._declineRecord
+  const revokeRecord = node._revokeRecord
   const requestMeta = node._requestMeta
 
   // ── Awaiting Response state ─────────────────────────────────────────
@@ -447,6 +459,50 @@ function V22ClaimPanel({
     )
   }
 
+  // ── Disclosure Revoked state (Phase 9D / #112) ───────────────────────
+  // Grantor-initiated DA revocation path. The Claim stays pulled in on the
+  // grantee's canvas (with REVOKED badge) until they click Dismiss. Pattern-
+  // matches the DECLINED state above, with copy adapted to revocation
+  // semantics and a red-accented reason block that surfaces the revoker's
+  // reason inline.
+  if (isRevoked) {
+    const revokedBadge = (
+      <span style={{
+        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+        color: 'var(--bg-deep)', background: 'var(--accent-red)',
+      }}>REVOKED</span>
+    )
+    return (
+      <PanelLayout
+        header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={revokedBadge} />}
+        body={
+          <>
+            <Section title="Revocation">
+              <Row label="Revoked by" value={revokeRecord?.revokerParty || revokeRecord?.grantorParty || node.owner} />
+              <Row label="Revoked" value={formatDateTime(revokeRecord?.revokedDate)} />
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'color-mix(in srgb, var(--accent-red) 8%, transparent)', borderRadius: 6, border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Reason</div>
+                <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                  {revokeRecord?.reason
+                    ? `"${revokeRecord.reason}"`
+                    : <em style={{ color: 'var(--text-dim)' }}>No reason given.</em>}
+                </div>
+              </div>
+              <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                Dismissing will remove this Claim and any Eval Results you produced under the revoked agreement from your canvas. Historical records are preserved for audit.
+              </div>
+            </Section>
+            <Section title="Claim">
+              <Row label="Description" value={claim?.description || '—'} />
+            </Section>
+          </>
+        }
+        footer={<FooterButton label="Dismiss" onClick={onDismissRevoked} title="Remove the revoked Claim (and cascade-revoked EA + Eval Results) from your canvas." />}
+      />
+    )
+  }
+
   // ── Standard Claim panel ────────────────────────────────────────────
   return (
     <PanelLayout
@@ -509,6 +565,8 @@ function V22ClaimPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onRevokeDa={onRevokeDa}
+            onRevokeEa={onRevokeEa}
           />
         </>
       }
@@ -747,7 +805,7 @@ function AgreementRow({ children, onClick }) {
 }
 
 function DisclosureAgreementRow({
-  da, activeParty, subjectName, onRowClick, onAmendDa,
+  da, activeParty, subjectName, onRowClick, onAmendDa, onRevokeDa,
 }) {
   const isInternal = da.grantor.party === da.grantee.party
   const isProofOfEval = da.subject?.kind === 'evalResult'
@@ -813,11 +871,12 @@ function DisclosureAgreementRow({
             title={isProvisional ? 'Open the response flow for this pending request' : 'Amend this Disclosure Agreement'}
           />
         ) : <span style={{ height: 14 }} />}
+        {/* Phase 9D (#112): Revoke is live — opens V22RevocationConfirmModal. */}
         {showRevoke ? (
           <ActionLabel
             label="Revoke"
-            disabled
-            title="Revocation coming soon (Phase 9D)"
+            onClick={onRevokeDa ? () => onRevokeDa(da) : undefined}
+            title="Revoke this Disclosure Agreement — terminates the counterparty's visibility"
           />
         ) : <span style={{ height: 14 }} />}
       </div>
@@ -826,7 +885,7 @@ function DisclosureAgreementRow({
 }
 
 function EvaluationAgreementRow({
-  ea, activeParty, claimName, onRowClick,
+  ea, activeParty, claimName, onRowClick, onRevokeEa,
 }) {
   const isGrantor = activeParty === ea.grantor.party
   const isInternal = ea.grantor.party === ea.grantee.party
@@ -867,8 +926,13 @@ function EvaluationAgreementRow({
         {showAmend ? (
           <ActionLabel label="Amend" disabled title="Amend Evaluation Agreements coming soon" />
         ) : <span style={{ height: 14 }} />}
+        {/* Phase 9D (#112): Revoke is live for EAs too — opens the Confirm modal. */}
         {showRevoke ? (
-          <ActionLabel label="Revoke" disabled title="Revocation coming soon (Phase 9D)" />
+          <ActionLabel
+            label="Revoke"
+            onClick={onRevokeEa ? () => onRevokeEa(ea) : undefined}
+            title="Revoke this Evaluation Agreement — removes evaluation rights; historical results are preserved"
+          />
         ) : <span style={{ height: 14 }} />}
       </div>
     </AgreementRow>
@@ -883,6 +947,8 @@ function AgreementsSection({
   resolveClaimName,
   onRowClick,
   onAmendDa,
+  onRevokeDa,
+  onRevokeEa,
 }) {
   const das = disclosureAgreements
   const eas = evaluationAgreements
@@ -908,6 +974,7 @@ function AgreementsSection({
                 subjectName={resolveSubjectName ? resolveSubjectName(da.subject) : null}
                 onRowClick={onRowClick ? () => onRowClick('disclosure', da) : undefined}
                 onAmendDa={onAmendDa}
+                onRevokeDa={onRevokeDa}
               />
             ))}
           </div>
@@ -924,6 +991,7 @@ function AgreementsSection({
                 activeParty={activeParty}
                 claimName={resolveClaimName ? resolveClaimName(ea.claimId) : null}
                 onRowClick={onRowClick ? () => onRowClick('evaluation', ea) : undefined}
+                onRevokeEa={onRevokeEa}
               />
             ))}
           </div>

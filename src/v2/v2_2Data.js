@@ -1375,6 +1375,9 @@ function buildViewForActor(actor, shared) {
     if (da.grantee.party === RADIANT_NETWORK_PARTY) continue
     if (!da.granteeAssetId) continue
     if (da.type === 'provisional') continue
+    // Phase 9D: revoked DAs no longer pull the counterparty anchor onto the
+    // grantor's canvas — the disclosure relationship is terminated.
+    if (da._revokedMeta) continue
     pulledInAssetIds.add(da.granteeAssetId)
   }
   const pulledInAssets = shared.assets.filter(
@@ -1485,6 +1488,44 @@ function buildViewForActor(actor, shared) {
     }
   }
 
+  // ── Phase 9D: Revocation visibility ─────────────────────────────────
+  // `_revokedMeta` annotations on DAs/EAs mirror the Phase 6.5 #3 decline
+  // pattern. Keep revoked agreements in state (so the grantee can render
+  // REVOKED Claim + Dismiss CTA) but filter them out of the active list
+  // the canvas / Agreements Section consumes. On the grantee side, the
+  // Claim stays visible with a `_revokedMeta` flag so the AssetNode card
+  // shows a REVOKED badge and the Claim Detail Panel gates on the revoked
+  // state. On the grantor side (when the grantee revoked their own
+  // visibility), no Claim treatment is needed — the pulled-in anchor just
+  // disappears because the DA is filtered out of the active list.
+  const revokedClaimIds = new Map() // claimId → { record, reason, revokerParty, date, cascadeSummary }
+  for (const da of disclosureAgreements) {
+    if (!da._revokedMeta) continue
+    // Only surface REVOKED on the grantee's canvas (their visibility was
+    // terminated). The revoker-side canvas just loses the edge.
+    if (da.grantee.party !== party) continue
+    if (revokedClaimIds.has(da.subject.id)) continue
+    revokedClaimIds.set(da.subject.id, {
+      claimId: da.subject.id,
+      granteeParty: da.grantee.party,
+      grantorParty: da.grantor.party,
+      revokerParty: da._revokedMeta.revokerParty,
+      reason: da._revokedMeta.reason,
+      revokedDate: da._revokedMeta.revokedDate,
+      granteeAssetId: da.granteeAssetId,
+      daId: da.id,
+    })
+  }
+  // Filter the active list to drop revoked agreements. They stay in
+  // `shared.disclosureAgreements` (still accessible via v22View-level
+  // accessors) but the canvas / Agreements Section consumes the active
+  // view only.
+  const activeDisclosureAgreements = disclosureAgreements.filter((d) => !d._revokedMeta)
+  const activeEvaluationAgreements = evaluationAgreements.filter((e) => !e._revokedMeta)
+  // Revoked Eval Results also drop from the visible set. Metadata is
+  // preserved in shared.evaluationResults for audit.
+  const activeEvaluationResults = visibleEvaluationResults.filter((e) => !e._revokedMeta)
+
   return {
     actor,
     actors,
@@ -1493,9 +1534,15 @@ function buildViewForActor(actor, shared) {
     parseResults: visibleParseResults,
     claims: visibleClaims,
     ownedClaimIds: new Set(ownedClaims.map((c) => c.id)),
-    disclosureAgreements,
-    evaluationAgreements,
-    evaluationResults: visibleEvaluationResults,
+    disclosureAgreements: activeDisclosureAgreements,
+    evaluationAgreements: activeEvaluationAgreements,
+    evaluationResults: activeEvaluationResults,
+    // Phase 9D: surface the revoked-meta-annotated DAs so the grantee's
+    // REVOKED-claim Detail Panel can resolve reason + revoker on render
+    // without re-reading shared state. Empty set on revoker-side views.
+    revokedClaimIds,
+    revokedDisclosureAgreements: disclosureAgreements.filter((d) => d._revokedMeta),
+    revokedEvaluationAgreements: evaluationAgreements.filter((e) => e._revokedMeta),
     pairedDaIds,
     pulledInClaimIds,
     pulledInAssetIds,
@@ -1575,6 +1622,10 @@ export function mergeProvisionals(shared, provisionals) {
   // Asset as a TRANSFERRING badge. Canvas adapter reads these to stamp
   // `_pendingTransfer` onto the sender's Asset node.
   merged.transfers = [...(shared.transfers || []), ...(provisionals.transfers || [])]
+  // Phase 9D: revocation records ride along on the merged shared bundle so
+  // view builders can surface REVOKED claim state on the grantee's canvas
+  // (mirror of the declineRecords pattern).
+  merged.revocationRecords = [...(shared.revocationRecords || []), ...(provisionals.revocationRecords || [])]
   return merged
 }
 
@@ -2243,6 +2294,46 @@ export function makeDeclineRecord({ provisionalDa, reason = '' }) {
 }
 
 /**
+ * Phase 9D: Revocation record factory. Shipped alongside the agreement
+ * annotation (`_revokedMeta`) pattern mirroring `_declineMeta` from Phase 6.5
+ * #3. Revocation records ride along on the shared bundle via mergeProvisionals
+ * so view builders + notification payloads can resolve metadata without
+ * re-querying the primary agreement list.
+ *
+ * Cascade semantics:
+ *   • DA revocation produces one DA record plus (if a paired EA exists) an
+ *     EA record with `cascadedFromDaId` set, plus one record per Eval Result
+ *     the grantee produced on the grantor's Claim under that EA (also
+ *     cascaded).
+ *   • EA revocation produces only an EA record. No cascade.
+ *   • Proof-of-Evaluation DAs are non-revocable by design — handlers should
+ *     no-op on attempts.
+ */
+export function makeRevocationRecord({
+  agreementType,       // 'DA' | 'EA' | 'EvalResult'
+  agreementId,
+  revokerParty,
+  counterpartyParty,
+  claimId = null,
+  evalResultId = null,
+  reason = '',
+  cascadedFromDaId = null,
+}) {
+  return {
+    id: `revoke-${agreementType.toLowerCase()}-${agreementId}-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`,
+    agreementType,
+    agreementId,
+    revokerParty,
+    counterpartyParty,
+    claimId,
+    evalResultId,
+    reason: (reason || '').trim(),
+    cascadedFromDaId,
+    revokedDate: new Date().toISOString(),
+  }
+}
+
+/**
  * Build the artifact triple a completed evaluation run produces:
  *   - The Evaluation Result itself (spec §10.6)
  *   - A Proof-of-Evaluation Disclosure Agreement (evaluator → claim owner)
@@ -2614,6 +2705,20 @@ export function buildV22Canvas(view) {
       node._isDeclined = true
       node._declineReason = declineRecord.reason
       node._declineRecord = declineRecord
+      node._showAsProvisional = true
+      node._isNew = false
+      node.isProvisional = false
+    }
+    // Phase 9D: revoked Claims on the grantee's canvas. Pattern mirrors the
+    // declined treatment — REVOKED badge, persistent dashed border, cleared
+    // NEW state. Claim Detail Panel gates on `isRevoked` to render the
+    // REVOKED header + reason + Dismiss CTA.
+    const revokeRecord = view.revokedClaimIds?.get(claim.id)
+    if (revokeRecord) {
+      node.isRevoked = true
+      node._isRevoked = true
+      node._revokeReason = revokeRecord.reason
+      node._revokeRecord = revokeRecord
       node._showAsProvisional = true
       node._isNew = false
       node.isProvisional = false

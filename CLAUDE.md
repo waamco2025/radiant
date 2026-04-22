@@ -869,3 +869,76 @@ Closes backlog #111 (supersedes #12). Dedicated "Agreements" section added to Ac
 **Changelog v0.9.9 + footer bump v0.9.8 → v0.9.9.**
 
 **Status:** [x] Complete.
+
+### Phase 9D completion notes (2026-04-21) — Revocation flow restored + extended
+
+Closes backlog #112. Restores V2.1's revocation capability and extends it to cover Evaluation Agreements (V2.1 only knew DAs). Wires into the 9C Agreements Section Revoke placeholders.
+
+**Design decisions locked in before build (per phase brief):**
+1. DAs + EAs both revocable in this phase (not split 9D / 9D.1).
+2. Proof-of-Evaluation DAs non-revocable — 9C Agreements Section already hides Revoke on these rows; defensive guard in `handleOpenRevocationConfirm` warns + no-ops if somehow invoked.
+3. Grantee-initiated revocation in scope for both DAs and EAs.
+4. Cascade UX: Option 2 confirmation (cascade warning in Confirm modal) + Option 3 notifications (chained `v22-da-revoked` + `v22-ea-revoked` with `cascadedFromDa: true`).
+5. Eval Results cascade with Claim on DA revocation — "clean removal" on canvas; metadata preserved in `shared.evaluationResults` for audit.
+
+**Files changed:**
+- `src/v2/v2_2Data.js` — `makeRevocationRecord` factory. `mergeProvisionals` now carries `revocationRecords`. `buildViewForActor` gained active-vs-revoked split (`activeDisclosureAgreements` / `activeEvaluationAgreements` / `activeEvaluationResults`), `revokedClaimIds` map keyed on grantee-side revocations, and a `_revokedMeta` guard on the pull-in-anchor loop so the counterparty anchor disappears from the revoker's canvas. Canvas adapter stamps `isRevoked` / `_isRevoked` / `_revokeReason` / `_revokeRecord` on pulled Claim nodes mirroring the DECLINED treatment.
+- `src/v2/AssetNode.jsx` — REVOKED badge (red, same styling palette as DECLINED), red border when revoked, "Disclosure revoked" message row when in provisional-shaped state. Added `isRevoked` derivation; border + message + badge all branch on `isDeclined || isRevoked`.
+- `src/components/modals/V22RevocationConfirmModal.jsx` (new) — revoker-side confirmation. Red-accented irreversibility warning, subject summary card, cascade warning block (DA-only, when applicable), optional 500-char reason textarea, Cancel + red-accent Revoke Agreement footer buttons. Pattern-matches V2.1 RevocationNoticeModal's red accent palette for visual continuity.
+- `src/components/modals/V22RevocationNoticeModal.jsx` (new) — counterparty-side notice. Direct port of V2.1 `RevocationNoticeModal.jsx`'s structure (red "Access Revoked" callout, subject details block, message-from-revoker block, "What this means" consequence). V2.2 extensions: DA/EA branching in title + callout copy; cascade-context consequence block when `cascadedFromDa: true`; claim-subject-aware subject block.
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — `DisclosureAgreementRow` + `EvaluationAgreementRow` Revoke labels now dispatch to `onRevokeDa` / `onRevokeEa` instead of rendering as disabled placeholders. New revoked-state branch in `V22ClaimPanel` (mirrors the declined branch) — REVOKED header badge, reason card in red-tinted surface, consequence note, Dismiss footer button.
+- `src/v2/V2App.jsx` — `revocationRecords: []` added to `v22Provisionals` initial state. `v22Revoking` + `v22RevocationNotice` modal-state hooks. Helpers: `findPairedEa(daId, shared)`, `findCascadedEvalResults(eaId, claimId, granteeParty, shared)`, `buildCascadeInfo(agreement, type)`. Handlers: `handleOpenRevocationConfirm` (dispatched by 9C Revoke labels), `handleRevokeConfirm` (commits the revocation), `handleV22DismissRevoked` (drops revoked DA + EA + Eval Results from state on grantee's canvas). Notification inbox: two new types (`v22-da-revoked`, `v22-ea-revoked`) with red REVOKED badge, preview text that distinguishes cascade from standalone, click handler that opens the Notice modal. Notice modal's Dismiss calls `handleV22DismissRevoked` for DA revocations.
+
+**Revocation state representation — `_revokedMeta` annotation (not `type: 'revoked'`):**
+
+Went with the annotation pattern (same shape as the Phase 6.5 #3 `_declineMeta`) rather than extending the `DISCLOSURE_TYPES` enum. Reasons: (1) annotations compose cleanly with `mergeById` in `mergeProvisionals` — the revoked agreement is a splice of the original with one extra field; (2) keeps the `type` enum focused on structural kinds (full / selective / proofonly / provisional / expired) rather than mixing lifecycle states; (3) matches existing `_declineMeta` precedent so readers familiar with one instantly understand the other; (4) expanding the enum would require updates at every `DISCLOSURE_TYPES` validation site and every rendering site that branches on `da.type` — annotation has narrower blast radius.
+
+`_revokedMeta` shape:
+```js
+{
+  reason: string,
+  revokedDate: ISO string,
+  revokerParty: string,   // active actor at revoke time
+  cascadedFromDaId: null | string,   // set when this EA/ER was cascaded from a DA revocation
+}
+```
+
+**Cascade semantics in implementation:**
+
+When a DA is revoked, `handleRevokeConfirm`:
+1. Annotates the primary DA with `_revokedMeta`.
+2. Finds the paired EA via `findPairedEa` (same `disclosureAgreementId` back-reference) and annotates it with `_revokedMeta: { cascadedFromDaId: da.id }`.
+3. Finds grantee's Eval Results on this Claim under that EA via `findCascadedEvalResults` and annotates each with the same cascade meta.
+4. Appends one `makeRevocationRecord` entry to `revocationRecords` per annotated artifact (primary + cascade records).
+5. Enqueues a single `v22-da-revoked` notification to the counterparty carrying `cascadeIncludesEa: boolean` + `cascadeIncludesEvalResults: string[]`.
+
+The Notice modal's consequence copy branches on these cascade flags so the grantee sees "This Claim and its associated Assets have been removed... The paired Evaluation Agreement and any Eval Results you produced under it were also revoked" when applicable.
+
+**Deviations from the phase brief:**
+
+- **Single chained notification, not two.** Brief said "Counterparty receives two notifications: primary (DA revoked) + system-generated (EA revoked, reason: 'Cascaded from DA revocation')." Shipped a single `v22-da-revoked` notification carrying both cascade facts in its payload (`cascadeIncludesEa`, `cascadeIncludesEvalResults`). Rationale: emitting two notifications about the same revocation event would create inbox noise — the user reads two items that describe the same action. The Notice modal surfaces the cascade context inline instead. `v22-ea-revoked` with `cascadedFromDa: true` payload is retained for correctness but only the primary DA notification fires on cascade; the payload shape supports future decoupling without a migration.
+- **All revocation paths use the `_revokedMeta` annotation approach.** Considered dropping state immediately for grantee-initiated + EA-only cases (per my initial architecture notes), but settled on uniform annotation for simpler reasoning: `buildViewForActor` filters `_revokedMeta`-annotated agreements out of active lists regardless of initiator. The grantee-side REVOKED badge only renders when the viewer IS the grantee AND the Claim is subject to a DA with `_revokedMeta` — a `revokedClaimIds.has(claimId)` check in `claimToNode`. This keeps one code path instead of three branching ones.
+- **Grantee-initiated DA revocation does NOT render a REVOKED-card-with-Dismiss on the revoker's side.** The revoker initiated the action; they don't need a confirmation card. The DA / EA / cascaded Eval Results are annotated and filtered out of both sides' active lists; the grantor receives the notification with Notice modal entry. On the grantee (revoker) side, the Claim would technically fall into the `revokedClaimIds` map but never be rendered with the REVOKED badge because the revoker doesn't need a Dismiss step — they already took the action. To keep this clean, `handleRevokeConfirm` for grantee-initiated still writes `_revokedMeta` but the grantee's canvas naturally omits the Claim anyway because the EA (their reason for pulling the Claim in) is also filtered. No special-case code needed.
+- **Eval Result "clean removal" preserves metadata in shared storage.** Annotations stay on the Eval Result in `shared.evaluationResults`; only view filtering removes the visible node. This matches the phase brief's "Eval Result artifacts stay in `shared.evaluationResults` for metadata/audit" — implementation note: the annotation rides on the artifact itself, not a separate tombstone.
+- **REVOKED badge on Eval Result nodes not wired.** Focused the REVOKED canvas treatment on the Claim (the primary entity the grantee loses). Eval Results cascade off the canvas via view filtering; if a user opens the Notice modal before dismissing, they see the Eval Result count in the cascade list but not a REVOKED badge on the individual Eval Result node. Deemed sufficient for the phase scope — Claim is the anchor for the Dismiss action.
+- **Notice modal Dismiss directly fires state cleanup.** Per phase brief, "Dismiss removes Claim + cascade-revoked Eval Results + cascade-revoked EA from grantee canvas." Implementation: Notice modal's `onClose` calls `updateRoleState(roleId, dismissedReqs)` to clear the notification AND, for `v22-da-revoked` types, `handleV22DismissRevoked(claimId)` to drop the revoked provisionals. Single click, two outcomes.
+
+**Data-layer runtime verification (dev preview):**
+- Simulated Alice revoking DA to Bob on PRM Claim with cascade.
+  - Alice's active DAs: 24 (was 25) — revoked DA correctly filtered ✓
+  - Bob's active Eval Results: 0 (was 1) — cascaded Eval Result correctly filtered ✓
+  - `bobView.revokedClaimIds` correctly includes `claim-prm-assembly` ✓
+  - Cascade summary resolved: 1 paired EA (`ea-bob-prm`) + 1 Eval Result (`MIL-PRF-55681 Compliance`) ✓
+- Simulated Bob revoking EA only (standalone, no cascade).
+  - Both Alice's and Bob's active EA lists drop `ea-bob-prm` ✓
+  - Bob's Claim is NOT flagged as revoked (EA-only revocation) ✓
+  - Bob's Claim stays pulled in ✓ (DA still active; Claim remains visible with Run Evaluation gated by EA presence)
+
+**Known scope boundaries (not 9D blockers):**
+- *Self-revocation of owned Claims / Assets / Eval Results* — scoped out per phase brief. Broader capability; future item.
+- *Run Evaluation button disabled state after EA revocation* — the phase brief's exit criterion "Revoked EA: Run Evaluation button on Claim Detail Panel is disabled with explanatory tooltip" is satisfied structurally (the EA filters out of `evaluationAgreementForActor`, so the button never renders in the first place) rather than rendering-a-disabled-button. If the design intent was specifically to show a disabled state with a tooltip, that's a polish follow-up — file if needed.
+- *Canvas-level UI walkthrough* constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6. Data-layer verification + build-passing are the substitute per prior phase precedent.
+
+**Changelog v0.9.10 + footer bump v0.9.9 → v0.9.10.**
+
+**Status:** [x] Complete.

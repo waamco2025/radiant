@@ -14,6 +14,7 @@ import {
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   makeTransferRecord, makeAsset, makeDotObject,
   makeInternalDisclosureAgreement,
+  makeRevocationRecord,
   buildV22SharedArtifacts, mergeProvisionals,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
@@ -31,6 +32,8 @@ import V22CreateAssetModal from '../components/modals/V22CreateAssetModal.jsx'
 import V22CreateClaimModal from '../components/modals/V22CreateClaimModal.jsx'
 import V22TransferAssetModal from '../components/modals/V22TransferAssetModal.jsx'
 import V22TransferResponseModal from '../components/modals/V22TransferResponseModal.jsx'
+import V22RevocationConfirmModal from '../components/modals/V22RevocationConfirmModal.jsx'
+import V22RevocationNoticeModal from '../components/modals/V22RevocationNoticeModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
@@ -100,6 +103,12 @@ export default function V2App() {
     //   On cancel: removed from here, sender's Asset clears badge. No
     //     ledger record (cancelled transfers don't persist per §11.7).
     transfers: [],
+    // Phase 9D (#112): revocation ledger records. Shape per makeRevocationRecord.
+    // Appended on every DA / EA / Eval Result revocation (including cascaded).
+    // Agreements themselves are either annotated with `_revokedMeta` (grantor-
+    // initiated DA path, retained on canvas for grantee's REVOKED badge until
+    // Dismiss) or dropped from state outright (all other revocation paths).
+    revocationRecords: [],
   })
   // V2.2 modal state
   const [v22RequestOpen, setV22RequestOpen] = useState(false)
@@ -135,6 +144,13 @@ export default function V2App() {
   //   v22Provisionals.transfers — provisional transfer artifacts (pending on sender's canvas).
   //     Shape: [{ id, assetId, fromOwnerDid, fromParty, toOwnerDid, toParty, initiatedTimestamp, note }]
   const [v22TransferringAsset, setV22TransferringAsset] = useState(null)
+  // Phase 9D (#112): revocation modal state.
+  //   v22Revoking — shape: { agreementType: 'DA' | 'EA', agreementId, counterpartyParty, subjectName, cascadeInfo }
+  //     opened by Revoke label in Agreements section; closed by Cancel / Confirm.
+  //   v22RevocationNotice — notification object for the Notice modal. Opened when a
+  //     `v22-da-revoked` / `v22-ea-revoked` row is clicked in the inbox.
+  const [v22Revoking, setV22Revoking] = useState(null)
+  const [v22RevocationNotice, setV22RevocationNotice] = useState(null)
 
   const v22View = useMemo(
     () => getV22DataForRole(roleId, v22Provisionals),
@@ -527,6 +543,301 @@ export default function V2App() {
         evaluationAgreements: prev.evaluationAgreements.filter((e) => !matchingEaIds.has(e.id)),
         declineRecords: prev.declineRecords.filter(
           (r) => !(r.claimId === claimId && r.requesterParty === activeRole.party),
+        ),
+      }
+    })
+    setSel(null)
+  }, [activeRole.party])
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Phase 9D (#112) — Revocation handlers
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // Four revocation paths: {DA | EA} × {grantor-initiated | grantee-initiated}.
+  //
+  // Grantor-initiated DA revocation is the only path that retains `_revokedMeta`
+  // on the annotated artifacts so the grantee's canvas can render a REVOKED
+  // badge + Dismiss CTA. The other three paths drop state immediately — the
+  // counterparty gets an informational notification and a Notice-modal entry
+  // point; no canvas retention UI.
+  //
+  // DA cascade: grantor DA revocation annotates the paired EA and all of the
+  // grantee's Eval Results on the grantor's Claim. The Confirm modal surfaces
+  // the cascade list before commit; the Notice modal surfaces it again on the
+  // grantee side for context. Proof-of-Evaluation DAs are non-revocable by
+  // design — guard here no-ops with a console.warn if invoked.
+  //
+  // EA-only revocation is standalone — no DA change, no Eval Result cascade.
+
+  // Helper: find paired EA for a DA (same disclosureAgreementId back-reference).
+  const findPairedEa = useCallback((daId, shared) => {
+    return shared.evaluationAgreements.find((e) => e.disclosureAgreementId === daId) || null
+  }, [])
+
+  // Helper: find grantee's Eval Results on a grantor's Claim produced under
+  // a specific EA (cascade scope for DA revocation).
+  const findCascadedEvalResults = useCallback((eaId, claimId, granteePartyName, shared) => {
+    if (!eaId || !claimId || !granteePartyName) return []
+    return shared.evaluationResults.filter((er) =>
+      er.claimId === claimId
+      && er.owner === granteePartyName
+      && er.evaluationAgreementId === eaId
+      && !er._revokedMeta,
+    )
+  }, [])
+
+  // Build the cascade summary the Confirm modal displays before commit.
+  // Returns { willRevokeEa, evalResultCount, evalResultNames: [] } for DAs;
+  // null for EAs (EA revocation doesn't cascade).
+  const buildCascadeInfo = useCallback((agreement, agreementType) => {
+    if (agreementType !== 'DA') return { willRevokeEa: false, evalResultCount: 0, evalResultNames: [] }
+    const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const pairedEa = findPairedEa(agreement.id, shared)
+    if (!pairedEa) return { willRevokeEa: false, evalResultCount: 0, evalResultNames: [] }
+    const cascadedErs = findCascadedEvalResults(
+      pairedEa.id,
+      agreement.subject?.id,
+      pairedEa.grantee.party,
+      shared,
+    )
+    return {
+      willRevokeEa: true,
+      evalResultCount: cascadedErs.length,
+      evalResultNames: cascadedErs.map((er) => er.requirementsSet?.name || er.id),
+    }
+  }, [v22Provisionals, findPairedEa, findCascadedEvalResults])
+
+  // Open the Confirm modal for a given agreement + type. Wired by
+  // V22NodeDetailPanel's Agreements Section Revoke action.
+  const handleOpenRevocationConfirm = useCallback((agreement, agreementType) => {
+    if (agreementType === 'DA' && agreement.subject?.kind === 'evalResult') {
+      // Proof-of-Evaluation DAs are non-revocable by design. 9C hides the
+      // Revoke label on these rows; this guard is defensive against future
+      // dispatch drift.
+      console.warn('[Phase 9D] Proof-of-Evaluation DAs are non-revocable; ignoring revocation request.')
+      return
+    }
+    const counterpartyParty = agreement.grantor.party === activeRole.party
+      ? agreement.grantee.party
+      : agreement.grantor.party
+    const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    // Subject name for display. DAs subject out to claim / asset / parse /
+    // evalResult; EAs claimId always.
+    let subjectName = null
+    if (agreementType === 'DA') {
+      const { kind, id } = agreement.subject || {}
+      if (kind === 'claim') subjectName = shared.claims.find((c) => c.id === id)?.name
+      else if (kind === 'asset') subjectName = shared.assets.find((a) => a.id === id)?.name
+      else if (kind === 'parseResult') subjectName = shared.parseResults.find((p) => p.id === id)?.templateName
+    } else {
+      subjectName = shared.claims.find((c) => c.id === agreement.claimId)?.name
+    }
+    setV22Revoking({
+      agreement,
+      agreementType,
+      counterpartyParty,
+      subjectName,
+      cascadeInfo: buildCascadeInfo(agreement, agreementType),
+    })
+  }, [activeRole.party, v22Provisionals, buildCascadeInfo])
+
+  // Commit handler — fires when user confirms in V22RevocationConfirmModal.
+  // Branches on agreementType + grantor-vs-grantee to select the state path.
+  const handleRevokeConfirm = useCallback((reason) => {
+    if (!v22Revoking) return
+    const { agreement, agreementType } = v22Revoking
+    const timestamp = new Date().toISOString()
+    const isGrantor = agreement.grantor.party === activeRole.party
+    const counterpartyParty = isGrantor ? agreement.grantee.party : agreement.grantor.party
+    const counterpartyRole = ROLES.find((r) => r.party === counterpartyParty)
+
+    // Resolve data for notification payloads synchronously BEFORE the setState
+    // updater — React defers updaters and we'd miss cascade details if we read
+    // inside them (Phase 6.5 #2 / 9A.5 Fix 1 lesson).
+    const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const claimId = agreementType === 'DA' ? agreement.subject?.id : agreement.claimId
+    const claim = shared.claims.find((c) => c.id === claimId) || null
+    const pairedEa = agreementType === 'DA' ? findPairedEa(agreement.id, shared) : null
+    const cascadedErs = agreementType === 'DA' && pairedEa
+      ? findCascadedEvalResults(pairedEa.id, claimId, pairedEa.grantee.party, shared)
+      : []
+
+    setV22Provisionals((prev) => {
+      // Merge-by-id semantics: for annotations (grantor-initiated DA), we
+      // splice an annotated copy into the provisionals list so the mergeById
+      // in mergeProvisionals overwrites the seeded original. For drops
+      // (grantee-initiated, or EA-only), we push a "tombstone" annotated
+      // copy with _revokedMeta so buildViewForActor filters it out.
+      //
+      // Historical records always persist — appended to revocationRecords.
+      const nextRecords = [...(prev.revocationRecords || [])]
+      const nextDas = [...prev.disclosureAgreements]
+      const nextEas = [...prev.evaluationAgreements]
+      const nextErs = [...prev.evaluationResults]
+
+      const upsertDa = (daUpdated) => {
+        const idx = nextDas.findIndex((d) => d.id === daUpdated.id)
+        if (idx >= 0) nextDas[idx] = daUpdated
+        else nextDas.push(daUpdated)
+      }
+      const upsertEa = (eaUpdated) => {
+        const idx = nextEas.findIndex((e) => e.id === eaUpdated.id)
+        if (idx >= 0) nextEas[idx] = eaUpdated
+        else nextEas.push(eaUpdated)
+      }
+      const upsertEr = (erUpdated) => {
+        const idx = nextErs.findIndex((e) => e.id === erUpdated.id)
+        if (idx >= 0) nextErs[idx] = erUpdated
+        else nextErs.push(erUpdated)
+      }
+
+      if (agreementType === 'DA') {
+        // Annotate the primary DA.
+        const annotated = {
+          ...agreement,
+          _revokedMeta: {
+            reason: (reason || '').trim(),
+            revokedDate: timestamp,
+            revokerParty: activeRole.party,
+            cascadedFromDaId: null,
+          },
+        }
+        upsertDa(annotated)
+        nextRecords.push(makeRevocationRecord({
+          agreementType: 'DA',
+          agreementId: agreement.id,
+          revokerParty: activeRole.party,
+          counterpartyParty,
+          claimId,
+          reason,
+        }))
+        // Cascade the paired EA (if any).
+        if (pairedEa) {
+          upsertEa({
+            ...pairedEa,
+            _revokedMeta: {
+              reason: 'Cascaded from DA revocation',
+              revokedDate: timestamp,
+              revokerParty: activeRole.party,
+              cascadedFromDaId: agreement.id,
+            },
+          })
+          nextRecords.push(makeRevocationRecord({
+            agreementType: 'EA',
+            agreementId: pairedEa.id,
+            revokerParty: activeRole.party,
+            counterpartyParty,
+            claimId,
+            reason: 'Cascaded from DA revocation',
+            cascadedFromDaId: agreement.id,
+          }))
+        }
+        // Cascade Eval Results (grantee's results on this Claim under the EA).
+        for (const er of cascadedErs) {
+          upsertEr({
+            ...er,
+            _revokedMeta: {
+              reason: 'Cascaded from DA revocation',
+              revokedDate: timestamp,
+              revokerParty: activeRole.party,
+              cascadedFromDaId: agreement.id,
+            },
+          })
+          nextRecords.push(makeRevocationRecord({
+            agreementType: 'EvalResult',
+            agreementId: er.id,
+            evalResultId: er.id,
+            revokerParty: activeRole.party,
+            counterpartyParty,
+            claimId,
+            reason: 'Cascaded from DA revocation',
+            cascadedFromDaId: agreement.id,
+          }))
+        }
+      } else {
+        // EA revocation — no cascade. Annotate; buildViewForActor filters it
+        // out of both parties' active lists.
+        upsertEa({
+          ...agreement,
+          _revokedMeta: {
+            reason: (reason || '').trim(),
+            revokedDate: timestamp,
+            revokerParty: activeRole.party,
+            cascadedFromDaId: null,
+          },
+        })
+        nextRecords.push(makeRevocationRecord({
+          agreementType: 'EA',
+          agreementId: agreement.id,
+          revokerParty: activeRole.party,
+          counterpartyParty,
+          claimId,
+          reason,
+        }))
+      }
+
+      return {
+        ...prev,
+        disclosureAgreements: nextDas,
+        evaluationAgreements: nextEas,
+        evaluationResults: nextErs,
+        revocationRecords: nextRecords,
+      }
+    })
+
+    // Enqueue the counterparty notification. Type branches on agreementType.
+    if (counterpartyRole) {
+      const notifId = agreementType === 'DA'
+        ? `v22-da-revoked-${agreement.id}-${Date.now().toString(36)}`
+        : `v22-ea-revoked-${agreement.id}-${Date.now().toString(36)}`
+      enqueueV22NotificationForRequester(counterpartyRole.id, {
+        id: notifId,
+        type: agreementType === 'DA' ? 'v22-da-revoked' : 'v22-ea-revoked',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        claim: claim ? { name: claim.name, pin: claim.pin } : null,
+        claimOwnerParty: agreement.grantor.party === activeRole.party
+          ? activeRole.party
+          : agreement.grantor.party,
+        reason: (reason || '').trim(),
+        claimId,
+        agreementId: agreement.id,
+        pairedEaId: pairedEa?.id || null,
+        cascadeIncludesEa: agreementType === 'DA' && !!pairedEa,
+        cascadeIncludesEvalResults: cascadedErs.map((er) => er.id),
+        cascadedFromDa: false,
+        date: timestamp.slice(0, 10),
+      })
+    }
+
+    // Clean up edge / agreement UI state so the revoked agreement's Detail
+    // Panel + edge menu don't linger after commit.
+    setV22Revoking(null)
+    setOpenAgreement(null)
+    setSelectedEdgeId(null)
+    setEdgeMenu(null)
+  }, [v22Revoking, v22Provisionals, activeRole.party, activeRole.partyDot, findPairedEa, findCascadedEvalResults, enqueueV22NotificationForRequester])
+
+  // Dismiss handler for revoked claims (grantee side, grantor-initiated DA
+  // path). Drops the revoked DA, paired revoked EA, and cascade-revoked Eval
+  // Results from provisionals — removing the Claim from the grantee's canvas.
+  const handleV22DismissRevoked = useCallback((claimId) => {
+    setV22Provisionals((prev) => {
+      const revokedDaIds = new Set(
+        prev.disclosureAgreements
+          .filter((d) => d._revokedMeta && d.subject?.id === claimId && d.grantee.party === activeRole.party)
+          .map((d) => d.id),
+      )
+      const revokedEaIds = new Set(
+        prev.evaluationAgreements
+          .filter((e) => e._revokedMeta && revokedDaIds.has(e.disclosureAgreementId))
+          .map((e) => e.id),
+      )
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.filter((d) => !revokedDaIds.has(d.id)),
+        evaluationAgreements: prev.evaluationAgreements.filter((e) => !revokedEaIds.has(e.id)),
+        evaluationResults: prev.evaluationResults.filter((er) =>
+          !(er._revokedMeta && er.claimId === claimId && er.owner === activeRole.party),
         ),
       }
     })
@@ -2344,8 +2655,11 @@ export default function V2App() {
                     const isV22TransferAccepted = req.type === 'v22-transfer-accepted'
                     const isV22TransferDeclined = req.type === 'v22-transfer-declined'
                     const isV22TransferCancelled = req.type === 'v22-transfer-cancelled'
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : 'REQUEST'
+                    // Phase 9D (#112): revocation notifications.
+                    const isV22DaRevoked = req.type === 'v22-da-revoked'
+                    const isV22EaRevoked = req.type === 'v22-ea-revoked'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -2472,6 +2786,13 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
+                        } else if (req.type === 'v22-da-revoked' || req.type === 'v22-ea-revoked') {
+                          // Phase 9D (#112): revocation notifications open the
+                          // Notice modal. Dismiss in the modal both clears the
+                          // notification AND (for DA revocations on the grantee
+                          // side) removes the revoked Claim + cascade-revoked EA
+                          // + Eval Results from the canvas.
+                          setV22RevocationNotice(req)
                         } else {
                           ensureParentLayer(() => {
                             const reqNode = req.asset?.pin ? Object.values(nodeMap).find(n => n.pin === req.asset.pin) : null
@@ -2543,7 +2864,13 @@ export default function V2App() {
                                           ? (req.declineReason ? `Transfer declined by ${req.from.name} — "${req.declineReason}"` : `Transfer of ${req.asset?.name} declined by ${req.from.name}.`)
                                           : isV22TransferCancelled
                                             ? `${req.from.name} cancelled the transfer of ${req.asset?.name}.`
-                                            : req.asset?.name || ''
+                                            : isV22DaRevoked
+                                              ? `${req.from.name} revoked the Disclosure Agreement on ${req.claim?.name || 'a Claim'}.`
+                                              : isV22EaRevoked
+                                                ? (req.cascadedFromDa
+                                                  ? `Evaluation Agreement on ${req.claim?.name || 'a Claim'} was revoked (cascade from Disclosure revocation).`
+                                                  : `${req.from.name} revoked your Evaluation Agreement on ${req.claim?.name || 'a Claim'}.`)
+                                                : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -3587,6 +3914,50 @@ export default function V2App() {
           )
         })()}
 
+        {/* Phase 9D (#112): Revocation Confirm modal — revoker-side.
+            Opens from the Revoke action in the Agreements section of a
+            node Detail Panel. Confirmation commits the revocation (with
+            cascade handling for DA revocations) and enqueues the
+            counterparty notification. */}
+        {v22Revoking && (
+          <V22RevocationConfirmModal
+            agreement={v22Revoking.agreement}
+            agreementType={v22Revoking.agreementType}
+            counterpartyParty={v22Revoking.counterpartyParty}
+            subjectName={v22Revoking.subjectName}
+            cascadeInfo={v22Revoking.cascadeInfo}
+            onConfirm={handleRevokeConfirm}
+            onClose={() => setV22Revoking(null)}
+          />
+        )}
+
+        {/* Phase 9D (#112): Revocation Notice modal — counterparty-side.
+            Opens when a v22-da-revoked / v22-ea-revoked notification is
+            clicked. Dismiss clears the notification AND (for DA revocations
+            on the grantee side) removes the revoked Claim + cascade-revoked
+            EA + Eval Results from the canvas. */}
+        {v22RevocationNotice && (
+          <V22RevocationNoticeModal
+            notification={v22RevocationNotice}
+            onClose={() => {
+              const notif = v22RevocationNotice
+              // Dismiss the notification on the inbox.
+              updateRoleState(roleId, (prev) => ({
+                ...prev,
+                dismissedReqs: [...(prev.dismissedReqs || []), notif.id],
+              }))
+              // For DA revocations on the grantee side (non-cascaded), the
+              // Dismiss action also removes the Claim + cascade state from
+              // the canvas. Grantee is the active user if they received this
+              // v22-da-revoked notification.
+              if (notif.type === 'v22-da-revoked' && notif.claimId) {
+                handleV22DismissRevoked(notif.claimId)
+              }
+              setV22RevocationNotice(null)
+            }}
+          />
+        )}
+
         {/* Detail Panel overlay — route V2.2 nodes to V22NodeDetailPanel.
             Phase 9A.3: ACTOR nodes now render the panel too (V22ActorPanel)
             so the owner can surface Register Asset from the footer.
@@ -3808,6 +4179,10 @@ export default function V2App() {
                 resolveClaimName={resolveClaimName}
                 onAgreementRowClick={handleAgreementRowClick}
                 onAmendDa={handleAmendDaFromRow}
+                // Phase 9D — Revoke wiring (#112)
+                onRevokeDa={(da) => handleOpenRevocationConfirm(da, 'DA')}
+                onRevokeEa={(ea) => handleOpenRevocationConfirm(ea, 'EA')}
+                onDismissRevoked={() => handleV22DismissRevoked(node.id)}
               />
             </div>
           )
@@ -3852,7 +4227,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.9 &middot; Changelog
+          v0.9.10 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -3899,6 +4274,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-21', label: 'Phase 9D', items: [
+                  'New: Revoke Disclosure and Evaluation Agreements — from the Agreements section in any node Detail Panel',
+                  'Revoked Disclosure Agreements propagate correctly: the paired Evaluation Agreement and any dependent Eval Results are also revoked',
+                  'Revocation is bidirectional — either party can initiate',
+                  'Notifications show revocation reason and cascade context; Dismiss removes revoked artifacts from your canvas',
+                ]},
                 { version: '0.9.9', date: '2026-04-21', label: 'Phase 9C', items: [
                   'New: Agreements section in Actor, Asset, and Claim Detail Panels — lists all Disclosure and Evaluation Agreements for the selected node',
                   'Click any agreement row to jump to its edge on the canvas and open the agreement\'s details',
