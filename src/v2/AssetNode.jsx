@@ -938,20 +938,22 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
           pointerEvents: 'none',
         }} />
       )}
-      {/* Phase 9A.1.5 item 1: dots get the same WARM_BORDER ring as mini +
-          full cards. The 1px border at 40% indigo keeps dots from fading
-          into the dark canvas at low zoom. Red UNSAT borders applied if the
-          dot's node has bad health. */}
+      {/* Phase 9A.1.5 item 1: dots get a stronger indigo ring than mini +
+          full cards (which use WARM_BORDER at 40% indigo) so they remain
+          clearly distinct from the background dot matrix at dot-LOD. Red
+          UNSAT borders applied if the dot's node has bad health.
+          Phase 9E-parallel.1 (#60): ring stroke 1 → 1.5px and indigo blend
+          40 → 70% to make the dot pop against the full-brightness matrix. */}
       <div style={{
         width: 8,
         height: 8,
         borderRadius: '50%',
         background: 'var(--text-tertiary)',
         margin: 4,
-        border: `1px solid ${
+        border: `1.5px solid ${
           (node.displayHealth || node.health)?.bad > 0
             ? 'var(--accent-red)'
-            : WARM_BORDER
+            : 'color-mix(in srgb, var(--accent-indigo) 70%, var(--border))'
         }`,
         boxSizing: 'border-box',
         position: 'relative',

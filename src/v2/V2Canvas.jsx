@@ -100,11 +100,7 @@ function setViewTransitionBg() {
 function getGridParams(depthLevel) {
   const isDark = document.documentElement.dataset.theme !== 'light'
   const spacing = BASE_GRID_SPACING * Math.pow(GRID_SPACING_MULT, depthLevel)
-  // Phase 9E item #60: base-depth grid lowered so node dots pop against the
-  // background matrix at dot-LOD. Higher depths unchanged.
-  const opacity = isDark
-    ? (depthLevel === 0 ? 0.12 : 0.28)   // dark: 0.12 base, 0.28 for depth 1+
-    : (depthLevel === 0 ? 0.15 : 0.32)   // light: 0.15 base, 0.32 for depth 1+
+  const opacity = isDark ? 0.28 : 0.32
   const radius = depthLevel === 0 ? 1.2 : 1.6
   return { spacing, opacity: Math.min(opacity, 0.4), radius }
 }
