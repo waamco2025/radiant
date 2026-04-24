@@ -33,6 +33,13 @@ export default function Tooltip({
   const [visible, setVisible] = useState(false)
   const [anchorRect, setAnchorRect] = useState(null)
   const [resolvedPosition, setResolvedPosition] = useState('top')
+  // Phase 9D.1.3 Fix 2: measured tooltip width (null until first-paint ref
+  // measurement). Used to clamp the tooltip's left position + bound the
+  // arrow's offset with the actual rendered box rather than the hard-coded
+  // `halfEst = 200/2` estimate. Without this, a narrow tooltip near a
+  // viewport edge gets clamped as if it were 200px wide — the arrow offset
+  // then points beyond the tooltip body.
+  const [measuredWidth, setMeasuredWidth] = useState(null)
   const anchorRef = useRef(null)
   const tooltipRef = useRef(null)
 
@@ -78,6 +85,23 @@ export default function Tooltip({
     setResolvedPosition(wouldOverflowTop ? 'bottom' : 'top')
   }, [visible, anchorRect, position])
 
+  // Phase 9D.1.3 Fix 2: measure actual rendered tooltip width once mounted.
+  // Triggers a second render with the correct width flowing into both the
+  // horizontal clamp AND the arrow offset calc. Single pass after first
+  // paint — imperceptible to the user since the tooltip has no entry
+  // animation.
+  useEffect(() => {
+    if (!visible || !tooltipRef.current) return
+    const w = tooltipRef.current.offsetWidth
+    if (w && w !== measuredWidth) setMeasuredWidth(w)
+  }, [visible, anchorRect, resolvedPosition, content, measuredWidth])
+
+  // Reset measured width on hide so the next show recomputes — content can
+  // differ between invocations.
+  useEffect(() => {
+    if (!visible && measuredWidth !== null) setMeasuredWidth(null)
+  }, [visible, measuredWidth])
+
   if (!shouldRender) {
     return children
   }
@@ -117,6 +141,7 @@ export default function Tooltip({
           position={resolvedPosition}
           mono={mono}
           width={width}
+          measuredWidth={measuredWidth}
         />,
         document.body,
       )}
@@ -124,15 +149,20 @@ export default function Tooltip({
   )
 }
 
-const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, position, mono, width }, ref) {
+const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, position, mono, width, measuredWidth }, ref) {
   const anchorCenterX = anchorRect.left + anchorRect.width / 2
   const above = position === 'top'
   // Clamp horizontal position so the tooltip stays within the viewport.
+  // Phase 9D.1.3 Fix 2: use the measured width when available, falling back
+  // to the previous 200px estimate on first paint. Once measured, the clamp
+  // respects the tooltip's actual bounds — no over-clamping for short
+  // content, no under-clamping for long wrapped content.
   const maxW = width || 260
-  const halfEst = Math.min(maxW, 200) / 2
+  const effectiveWidth = measuredWidth || Math.min(maxW, 200)
+  const half = effectiveWidth / 2
   const margin = 8
   const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1280
-  const clampedX = Math.max(halfEst + margin, Math.min(viewportW - halfEst - margin, anchorCenterX))
+  const clampedX = Math.max(half + margin, Math.min(viewportW - half - margin, anchorCenterX))
 
   const baseStyle = {
     position: 'fixed',
@@ -176,7 +206,14 @@ const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, posit
   // and the `left` property positions the border-box's left edge. So:
   //   element-left = tooltipWidth/2 + offset - ARROW_SIZE
   //                = calc(50% - ARROW_SIZE + offset)
-  const anchorOffsetFromTooltipCenter = anchorCenterX - clampedX
+  // Phase 9D.1.3 Fix 2: bound the arrow offset to the tooltip's actual
+  // inner half-width (minus a small safe margin for the arrow base + the
+  // rounded corner radius). Without this, arrow could be pushed past the
+  // tooltip edge for anchors that clamp far off-center.
+  const rawOffset = anchorCenterX - clampedX
+  const ARROW_SAFE_MARGIN = ARROW_SIZE + 4 // arrow base + 4px from rounded corner
+  const maxOffset = Math.max(0, half - ARROW_SAFE_MARGIN)
+  const anchorOffsetFromTooltipCenter = Math.max(-maxOffset, Math.min(maxOffset, rawOffset))
   const arrowStyle = {
     position: 'absolute',
     left: `calc(50% - ${ARROW_SIZE}px + ${anchorOffsetFromTooltipCenter}px)`,

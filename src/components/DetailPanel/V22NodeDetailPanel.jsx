@@ -405,14 +405,18 @@ function RevocationNoticeSection({
   }
 
   // "What this means" explainer — same case routing.
-  // Phase 9D.1.2 W1: Cases C/D copy updated to reflect that Eval Results
-  // persist across EA revocation. Eval Results are independent artifacts
-  // once created and are not removed when their originating EA is revoked.
+  // Phase 9D.1.3 Fix 7: all four cases updated to reflect the new cascade
+  // semantics — Evaluation Results are independent artifacts owned by the
+  // grantee and persist across DA/EA revocation (Fix 6). Phrasing uses
+  // "Evaluation Results" (not "Eval Results") per Fix 3.
   let consequence
   if (isDa && !viewerIsGrantor) {
-    consequence = 'This Claim and its referenced Assets have been removed from your network. Any Evaluation Agreements and Evaluation Results tied to this disclosure have also been terminated. You may request disclosure again from the Claim owner if needed.'
+    // Case A — grantor revoked DA, grantee sees it.
+    consequence = 'This Claim and its referenced Assets have been removed from your network. The paired Evaluation Agreement has also been terminated. Evaluation Results you previously produced against this Claim remain in your Qualified Storage and on your canvas; you can dismiss them from your canvas individually from each Evaluation Result\'s Detail Panel if you wish.'
   } else if (isDa && viewerIsGrantor) {
-    consequence = 'They no longer have visibility into this Claim. Any Evaluation Agreements and Evaluation Results tied to their access have been terminated. Your Claim and its data remain on your network.'
+    // Case B — retained for completeness; in practice Case B no longer
+    // routes through this component (inline DA row pattern handles it).
+    consequence = 'They no longer have visibility into this Claim. The paired Evaluation Agreement has also been terminated. Evaluation Results they previously produced remain in their Qualified Storage and on their canvas. Your Claim and its data remain on your network.'
   } else if (!isDa && !viewerIsGrantor) {
     consequence = 'You can still view this Claim under your existing Disclosure Agreement, but you can no longer run evaluations against it. Any Evaluation Results you previously submitted remain visible on your canvas.'
   } else {
@@ -517,6 +521,13 @@ function V22ClaimPanel({
   expandedRevokedEaId = null,
   expandedRevokedEaInfo = null,
   onDismissExpandedRevokedEa,
+  // Phase 9D.1.3 Fix 1: inline DA revocation pattern (Case B — grantor view
+  // of grantee-initiated DA revocation). Same mechanic applied to DAs;
+  // Case A (grantee view) still uses the REVOKED Claim branch since the
+  // Claim itself is being removed.
+  expandedRevokedDaId = null,
+  expandedRevokedDaInfo = null,
+  onDismissExpandedRevokedDa,
   resolveSubjectName,
   resolveClaimName,
   onAgreementRowClick,
@@ -681,7 +692,7 @@ function V22ClaimPanel({
             )}
           </>
         }
-        footer={<FooterButton label="Dismiss" accent onClick={onDismissRevoked} title="Remove the revoked Claim (and cascade-revoked EA + Eval Results) from your canvas. Historical records are preserved for audit." />}
+        footer={<FooterButton label="Dismiss" accent onClick={onDismissRevoked} title="Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit." />}
       />
     )
   }
@@ -768,6 +779,9 @@ function V22ClaimPanel({
             expandedRevokedEaId={expandedRevokedEaId}
             expandedRevokedEaInfo={expandedRevokedEaInfo}
             onDismissExpandedRevokedEa={onDismissExpandedRevokedEa}
+            expandedRevokedDaId={expandedRevokedDaId}
+            expandedRevokedDaInfo={expandedRevokedDaInfo}
+            onDismissExpandedRevokedDa={onDismissExpandedRevokedDa}
             activeParty={activeParty}
             resolveSubjectName={resolveSubjectName}
             resolveClaimName={resolveClaimName}
@@ -853,7 +867,15 @@ function V22ParseResultPanel({ node, onClose, sourceAsset }) {
 }
 
 /* ─── Eval Result Panel ───────────────────────────────────────────────── */
-function V22EvalResultPanel({ node, activeParty, onClose, onReRunEvaluation }) {
+function V22EvalResultPanel({
+  node, activeParty, onClose, onReRunEvaluation,
+  // Phase 9D.1.3 Fix 6: orphaned Eval Result — backing DA or EA has been
+  // revoked. When true, the footer swaps from Re-Run Evaluation to Dismiss
+  // (with inline confirmation copy explaining that the artifact stays in QS
+  // but leaves the canvas view).
+  isOrphaned = false,
+  onDismissOrphanedEvalResult,
+}) {
   const er = node.v22Artifact
   const isOwner = activeParty === node.owner
   const isSuperseded = er?.status === 'superseded'
@@ -909,13 +931,53 @@ function V22EvalResultPanel({ node, activeParty, onClose, onReRunEvaluation }) {
               <Row label="Superseded by" value={er.supersededBy} mono />
             </Section>
           )}
+          {isOwner && isOrphaned && !isSuperseded && (
+            /* Phase 9D.1.3 Fix 6: orphan notice — the Evaluation Agreement
+               that underpinned this result has been revoked. The artifact
+               itself remains in the owner's QS but has no active access
+               agreement anymore. */
+            <Section title="Orphaned Evaluation Result">
+              <div style={{
+                padding: '10px 12px',
+                background: 'color-mix(in srgb, var(--accent-red) 8%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
+                borderRadius: 6,
+                fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.6,
+              }}>
+                The Evaluation Agreement that backed this result has been
+                revoked. The Evaluation Result itself remains in your
+                Qualified Storage and on your canvas — you can dismiss it
+                from the canvas view below, or leave it in place.
+              </div>
+            </Section>
+          )}
         </>
       }
-      footer={
-        isOwner && !isSuperseded && onReRunEvaluation ? (
-          <FooterButton label="Re-run Evaluation" accent onClick={onReRunEvaluation} title="Run a new evaluation; this result will be marked superseded." />
-        ) : null
-      }
+      footer={(() => {
+        if (!isOwner) return null
+        if (isSuperseded) return null
+        // Phase 9D.1.3 Fix 6: orphan state swaps Re-Run Evaluation for a
+        // Dismiss action. Mutually exclusive — no overlap.
+        if (isOrphaned) {
+          return (
+            <FooterButton
+              label="Dismiss"
+              accent
+              onClick={() => {
+                const ok = typeof window !== 'undefined' && window.confirm
+                  ? window.confirm('Dismissing this Evaluation Result removes it from your canvas view only. The Evaluation Result remains in your Qualified Storage and its data lineage is preserved in the ledger.')
+                  : true
+                if (ok && onDismissOrphanedEvalResult) onDismissOrphanedEvalResult(er?.id)
+              }}
+              title="Remove this orphaned Evaluation Result from your canvas. The artifact stays in your QS."
+            />
+          )
+        }
+        if (onReRunEvaluation) {
+          return <FooterButton label="Re-run Evaluation" accent onClick={onReRunEvaluation} title="Run a new evaluation; this result will be marked superseded." />
+        }
+        return null
+      })()}
     />
   )
 }
@@ -1029,6 +1091,12 @@ function AgreementRow({ children, onClick }) {
 
 function DisclosureAgreementRow({
   da, activeParty, subjectName, onRowClick, onAmendDa, onRevokeDa,
+  // Phase 9D.1.3 Fix 1: inline revocation block for Case B (grantor views
+  // their own revoked DA — grantee terminated access). Mirrors the 9D.1.2
+  // EA-row pattern. Populated when this DA is the one targeted by a
+  // v22-da-revoked notification click AND the viewer is the grantor.
+  expandedRevokedInfo = null,
+  onDismissExpandedRevokedDa,
 }) {
   const isInternal = da.grantor.party === da.grantee.party
   const isProofOfEval = da.subject?.kind === 'evalResult'
@@ -1122,11 +1190,94 @@ function DisclosureAgreementRow({
     </AgreementRow>
   )
 
-  // Phase 9D.1: revoked rows render dimmed via a wrapper.
-  if (isRevoked) {
-    return <div style={{ opacity: 0.5, pointerEvents: 'none' }}>{rowInner}</div>
-  }
-  return rowInner
+  // Phase 9D.1.3 Fix 1: scroll-to-row on notification click (Case B) AND
+  // render the expanded inline revocation block beneath the row.
+  const rowRef = useRef(null)
+  const isExpanded = !!expandedRevokedInfo
+  useEffect(() => {
+    if (isExpanded && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [isExpanded])
+
+  // Inline block: Case B — grantee-initiated DA revocation, grantor sees it.
+  // Only Case B reaches this code path; Case A (grantee view) uses the
+  // Claim-level Revocation Notice Section in the REVOKED Claim branch.
+  const inlineBlock = isExpanded ? (() => {
+    const info = expandedRevokedInfo
+    const daTypeLabel = {
+      full: 'full',
+      selective: 'selective',
+      proofonly: 'proof-only',
+    }[info.daType] || 'full'
+    const headerCopy = `${info.revokerParty} has revoked their ${daTypeLabel} disclosure access to this Claim.`
+    const consequence = `They no longer have visibility into this Claim. The paired Evaluation Agreement has also been terminated. Evaluation Results they previously produced remain in their Qualified Storage and on their canvas. Your Claim and its data remain on your network.`
+    const dateStr = formatShortDate(info.revokedDate) || ''
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: '10px 12px',
+        background: 'color-mix(in srgb, var(--accent-red) 8%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
+        borderRadius: 6,
+      }}>
+        <div style={{
+          fontSize: 10, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)',
+          fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+          marginBottom: 6,
+        }}>
+          Disclosure Agreement Revoked{dateStr ? ` · ${dateStr}` : ''}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+          {headerCopy}
+        </div>
+        <div style={{
+          fontSize: 11, marginTop: 6,
+          color: info.reason ? 'var(--text-secondary)' : 'var(--text-dim)',
+          fontStyle: 'italic', lineHeight: 1.5,
+        }}>
+          {info.reason ? `"${info.reason}"` : '(No reason given)'}
+        </div>
+        <div style={{
+          fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginTop: 8,
+        }}>
+          {consequence}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onDismissExpandedRevokedDa) onDismissExpandedRevokedDa(da.id)
+            }}
+            style={{
+              padding: '6px 14px',
+              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--bg-deep)', background: 'var(--accent-indigo)',
+              border: '1px solid var(--accent-indigo)', borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    )
+  })() : null
+
+  // Phase 9D.1.3 Fix 1: outer wrapper follows the same pattern as
+  // EvaluationAgreementRow — dim revoked rows by default; when expanded,
+  // lift the dim so the inline Dismiss is clickable.
+  const outerStyle = (isRevoked && !isExpanded)
+    ? { opacity: 0.5, pointerEvents: 'none' }
+    : null
+  return (
+    <div ref={rowRef} style={outerStyle}>
+      {rowInner}
+      {inlineBlock}
+    </div>
+  )
 }
 
 function EvaluationAgreementRow({
@@ -1314,6 +1465,11 @@ function AgreementsSection({
   expandedRevokedEaId = null,
   expandedRevokedEaInfo = null,
   onDismissExpandedRevokedEa,
+  // Phase 9D.1.3 Fix 1: inline DA revocation pattern (Case B — grantor view
+  // of grantee-initiated DA revocation). Same mechanic applied to DAs.
+  expandedRevokedDaId = null,
+  expandedRevokedDaInfo = null,
+  onDismissExpandedRevokedDa,
   activeParty,
   resolveSubjectName,
   resolveClaimName,
@@ -1349,6 +1505,8 @@ function AgreementsSection({
                 onRowClick={onRowClick ? () => onRowClick('disclosure', da) : undefined}
                 onAmendDa={onAmendDa}
                 onRevokeDa={onRevokeDa}
+                expandedRevokedInfo={expandedRevokedDaId === da.id ? expandedRevokedDaInfo : null}
+                onDismissExpandedRevokedDa={onDismissExpandedRevokedDa}
               />
             ))}
           </div>
@@ -1383,7 +1541,9 @@ function AgreementsSection({
                 da={da}
                 activeParty={activeParty}
                 subjectName={resolveSubjectName ? resolveSubjectName(da.subject) : null}
-                /* Revoked rows are informational — no row click, no actions. */
+                expandedRevokedInfo={expandedRevokedDaId === da.id ? expandedRevokedDaInfo : null}
+                onDismissExpandedRevokedDa={onDismissExpandedRevokedDa}
+                /* Revoked rows are informational — no row click, no actions (except the expanded inline block). */
               />
             ))}
             {revokedEas.map((ea) => (

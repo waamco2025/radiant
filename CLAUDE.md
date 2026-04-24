@@ -1212,3 +1212,57 @@ Fix: replace with direct pixel math `left: calc(50% - ARROW_SIZEpx + Xpx)` (no t
 **Runtime verification:** Build clean (same 86-module count as 9D.1.1; no new/removed modules). Preview reloads cleanly; no new console errors beyond the pre-existing `NaN is an invalid value for the left` warnings (unchanged since pre-9E). Scroll-into-view + inline block + inline Dismiss + Case C/D copy routing all verified structurally via source re-read. UI walkthrough still gated by V2Canvas 3D raycaster DOM-dispatch limitation — manual mouse interaction is the verification path for the four cases.
 
 **Status:** [x] Complete.
+
+### Phase 9D.1.3 completion notes (2026-04-24) — Case B inline pattern + Eval Result persistence + polish fixes
+
+Seven fixes in one commit. The cascade-semantics revision (Fix 6) is the biggest behavioural shift since 9D itself: Evaluation Results are now treated as independent artifacts owned by the grantee and persist across DA/EA revocation. Previously DA revocation cascade-annotated the grantee's ERs with `_revokedMeta` and dismissed them alongside the Claim.
+
+**Fix 6 — Evaluation Results no longer cascade on DA revocation.**
+- `handleRevokeConfirm` in V2App.jsx no longer annotates ERs with `_revokedMeta`. The `for (const er of cascadedErs) { upsertEr(...) }` block is removed; the `cascadedErs` local is hard-coded to `[]`; the `upsertEr` helper is removed; `nextErs` is no longer touched.
+- `buildCascadeInfo` now always returns `evalResultCount: 0` + `evalResultNames: []` for DA revocations (was computing `cascadedErs.length` via `findCascadedEvalResults`). Shape preserved so the revoker-side Confirm modal doesn't need a schema migration.
+- Notification payload: `cascadeIncludesEvalResults: []` (was `cascadedErs.map((er) => er.id)`). Shape preserved.
+- **Ownership rationale**: a DA gives the grantee visibility + action rights. An Evaluation Result is an artifact the grantee creates under an EA and stores in their own QS. Revoking visibility doesn't retroactively terminate an artifact the grantee created. The grantee gets to decide what happens to their orphaned ERs.
+- **Detail Panel surface**: new "Dismiss" footer on orphaned ER panels (see Fix 6 UI below).
+
+**Fix 6 (UI) — Orphaned Eval Result Dismiss.** `V22EvalResultPanel` accepts `isOrphaned` + `onDismissOrphanedEvalResult` props. Orphan detection (V2App): an ER is orphaned iff it has an `evaluationAgreementId` (self-evaluated ERs excluded), isn't superseded, AND its backing EA is absent from `v22View.evaluationAgreements` (either revoked or already-dismissed). When orphaned, a red-accented "Orphaned Evaluation Result" section surfaces in the body explaining the situation, and the footer swaps from "Re-Run Evaluation" to "Dismiss". Confirmation dialog ("Dismissing this Evaluation Result removes it from your canvas view only. The Evaluation Result remains in your Qualified Storage and its data lineage is preserved in the ledger.") fires on click; on confirm, `handleV22DismissOrphanedEvalResult` annotates `_dismissedRevoked: true` on the ER. `buildViewForActor`'s existing pre-filter (from 9D.1.1 Fix 6) excludes the flagged ER from all view outputs.
+
+**Fix 1 — Case B inline DA pattern.** Case B (grantee-initiated DA revocation, grantor view) now routes to the same inline-row pattern 9D.1.2 shipped for Cases C/D. `DisclosureAgreementRow` extended with `expandedRevokedInfo` + `onDismissExpandedRevokedDa` props, `useRef` + `scrollIntoView` effect, and a red inline block beneath the row with Case B copy. `AgreementsSection` threads the new `expandedRevokedDaId` / `expandedRevokedDaInfo` / `onDismissExpandedRevokedDa` props to both active + revoked DA subsections. `V22ClaimPanel` signature + AgreementsSection call updated. V2App routing in the panel-props derivation block now splits on `(kind, viewerIsGrantor)`:
+- Case A (DA + !grantor) → `revocationNoticeForPanel` populated (REVOKED Claim branch renders it)
+- Case B (DA + grantor) → `expandedRevokedDaId/Info` populated (inline DA row)
+- Cases C, D (EA) → `expandedRevokedEaId/Info` populated (inline EA row)
+
+New `handleV22DismissRevokedDaGrantorSide` in V2App: annotates the DA + its paired EA with `_dismissedRevoked: true`. The Claim is NOT dismissed (it's the grantor's — they keep it); no ER touches (Fix 6).
+
+**Fix 7 — Case A + Case B copy refreshed.** Updated in `RevocationNoticeSection` (Case A) and the new inline DA block (Case B) to reflect the persistence model:
+- Case A: "…Evaluation Results you previously produced against this Claim remain in your Qualified Storage and on your canvas; you can dismiss them from your canvas individually from each Evaluation Result's Detail Panel if you wish."
+- Case B: "…The paired Evaluation Agreement has also been terminated. Evaluation Results they previously produced remain in their Qualified Storage and on their canvas. Your Claim and its data remain on your network."
+
+Cases C/D copy already reflected this correctly from 9D.1.2.
+
+**Fix 3 — "Eval Results" → "Evaluation Results" audit.** In-scope user-facing strings in revocation UI:
+- `V22ClaimPanel` REVOKED branch footer Dismiss title: "Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit."
+- `V22RevocationConfirmModal` EA revocation callout: "Historical Evaluation Results are preserved."
+- All new inline-block copy uses "Evaluation Results."
+- Dead-code `V22RevocationNoticeModal.jsx` not touched (already flagged for #50 sweep).
+- Code comments left using "Eval Results" shorthand — not user-facing.
+- Broader app-wide "Evidence"/"Eval Results"/"Assets" terminology audit stays scoped to backlog #119 (Phase 11).
+
+**Fix 4 — Badge precedence.** `AssetNode.jsx` badge composition now suppresses PROVISIONAL when `isRevoked` (added to the existing `!isDeclined` guard) and suppresses DECLINED when `isRevoked`. REVOKED renders alone on a revoked Claim. Matches the declared precedence: REVOKED > DECLINED > PROVISIONAL.
+
+**Fix 5 — Revoked card opacity.** Revoked Claims reuse `_showAsProvisional: true` to get the dashed-border treatment; the existing `opacity: 0.6` branch (line 552 full card / 1162 mini card) was dropping the whole card to 60%, leaking underlying canvas content through. Fix: branch the opacity by `(showAsProvisional && !isRevoked) ? 0.6 : 1` and introduce an opaque red-tinted background for `isRevoked`:
+- Full card: `color-mix(in srgb, var(--bg-deep) 90%, var(--accent-red))`
+- Mini card: `color-mix(in srgb, var(--bg-card) 90%, var(--accent-red))`
+
+Red border + red badge retained. No color-mix-with-transparent; the tint is baked into a solid color against the canvas surface.
+
+**Fix 2 — Tooltip arrow measurement.** Root cause: `halfEst = Math.min(maxW, 200) / 2` in `TooltipBody` was a hard-coded estimate diverging from the tooltip's actual rendered width. When anchor is near a viewport edge, the clamp uses `halfEst` → `clampedX` can be far from `anchorCenterX`. Arrow offset = `anchorCenterX - clampedX` could exceed the tooltip's actual half-width, pushing the arrow past the tooltip body. Fix:
+1. New `measuredWidth` state in the `Tooltip` component; `useEffect` reads `tooltipRef.current.offsetWidth` after mount and updates state → triggers a second render with correct geometry.
+2. `TooltipBody` accepts `measuredWidth` prop; uses it for `half` in the clamp math when available (falls back to 200 on first paint).
+3. Arrow offset bounded to `half - ARROW_SIZE - 4` so the arrow never visually detaches from the tooltip.
+4. `measuredWidth` resets on hide so fresh content gets re-measured on next show.
+
+**Deviations:** none. All seven fixes landed as described.
+
+**Runtime verification:** Build clean (86 modules, same as 9D.1.2). Preview (`http://localhost:5173/v2.html`) reloads with only pre-existing `NaN is an invalid value for the left` warnings. Manual E2E walkthrough for all 4 revocation cases + orphaned-ER Dismiss constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. Data-layer invariants: `handleRevokeConfirm` no longer mutates `evaluationResults`; `buildCascadeInfo` returns `evalResultCount: 0`; orphan detection correctly skips self-evaluated + superseded ERs.
+
+**Status:** [x] Complete.

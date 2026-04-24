@@ -531,25 +531,35 @@ export default function AssetNode({
         style={{
           width: CARD_W * scale,
           height: CARD_H * scale,
-          background: showAsProvisional
-            ? 'var(--bg-deep)'
-            : isNew
-              ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
-              : hovered
-                ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
-                : isCounterpartyNode
-                  // Phase 9A.1 item 5: stronger mix (82% → 55% bg-card) plus a
-                  // subtle cooler shift via accent-blue so counterparty nodes
-                  // read as noticeably not-mine at a glance.
-                  ? 'color-mix(in srgb, color-mix(in srgb, var(--bg-card) 55%, var(--bg-deep)) 92%, var(--accent-blue, #38bdf8))'
-                  : 'var(--bg-card)',
+          // Phase 9D.1.3 Fix 5: revoked state gets an opaque red-tinted
+          // surface, not the 60% opacity treatment used for purely provisional
+          // cards. The revoked Claim is in a terminal state; fading it lets
+          // underlying canvas content show through, which the zoomed-out
+          // LODs make obvious. Red tint + full opacity reads as "frozen +
+          // revoked" rather than "provisional + in-flight."
+          background: isRevoked
+            ? 'color-mix(in srgb, var(--bg-deep) 90%, var(--accent-red))'
+            : showAsProvisional
+              ? 'var(--bg-deep)'
+              : isNew
+                ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
+                : hovered
+                  ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+                  : isCounterpartyNode
+                    // Phase 9A.1 item 5: stronger mix (82% → 55% bg-card) plus a
+                    // subtle cooler shift via accent-blue so counterparty nodes
+                    // read as noticeably not-mine at a glance.
+                    ? 'color-mix(in srgb, color-mix(in srgb, var(--bg-card) 55%, var(--bg-deep)) 92%, var(--accent-blue, #38bdf8))'
+                    : 'var(--bg-card)',
           // Phase 9E (#107): longhand border props (not `border` shorthand)
           // so React's style reconciler doesn't flag a shorthand/longhand mix
           // while transitioning `border-color`.
           borderWidth: 1,
           borderStyle: showAsProvisional ? 'dashed' : 'solid',
           borderColor: borderColor,
-          opacity: showAsProvisional ? 0.6 : 1,
+          // Phase 9D.1.3 Fix 5: opaque for revoked; 0.6 only for still-
+          // provisional (non-revoked, non-declined) cards.
+          opacity: (showAsProvisional && !isRevoked) ? 0.6 : 1,
           borderRadius: 8 * scale,
           padding: `${9 * scale}px ${12 * scale}px`,
           cursor: 'pointer',
@@ -625,7 +635,8 @@ export default function AssetNode({
           }}>
             {node.name}
           </div>
-          {showAsProvisional && !isDeclined && !node._pendingTransfer && (
+          {/* Phase 9D.1.3 Fix 4: REVOKED outranks PROVISIONAL + DECLINED. */}
+          {showAsProvisional && !isDeclined && !isRevoked && !node._pendingTransfer && (
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
               padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
@@ -655,7 +666,8 @@ export default function AssetNode({
               flexShrink: 0,
             }}>SUPERSEDED</span>
           )}
-          {isDeclined && (
+          {/* Phase 9D.1.3 Fix 4: REVOKED outranks DECLINED. */}
+          {isDeclined && !isRevoked && (
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
               padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
@@ -1150,14 +1162,21 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
       <div style={{
         width: MINI_CARD_W,
         height: MINI_CARD_H,
-        background: hovered
-          ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
-          : 'var(--bg-card)',
+        // Phase 9D.1.3 Fix 5: revoked cards at mini LOD get an opaque red-
+        // tinted background + full opacity so cards/edges behind don't show
+        // through at zoomed-out viewing. Keeps the dashed red border signal.
+        background: isRevoked
+          ? 'color-mix(in srgb, var(--bg-card) 90%, var(--accent-red))'
+          : hovered
+            ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+            : 'var(--bg-card)',
         // Phase 9E (#107): longhand border props to avoid shorthand/longhand mix.
         borderWidth: 1,
         borderStyle: isProvisional ? 'dashed' : 'solid',
         borderColor: borderColor,
-        opacity: isProvisional ? 0.6 : 1,
+        // Phase 9D.1.3 Fix 5: 0.6 opacity only for still-provisional (not
+        // revoked) cards.
+        opacity: (isProvisional && !isRevoked) ? 0.6 : 1,
         borderRadius: 6,
         padding: '4px 8px',
         display: 'flex',

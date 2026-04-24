@@ -598,22 +598,21 @@ export default function V2App() {
   // Returns { willRevokeEa, evalResultCount, evalResultNames: [] } for DAs;
   // null for EAs (EA revocation doesn't cascade).
   const buildCascadeInfo = useCallback((agreement, agreementType) => {
+    // Phase 9D.1.3 Fix 6: Eval Results no longer cascade on revocation.
+    // The Confirm modal's Cascade block only lists the paired EA (if any).
+    // evalResultCount always 0; evalResultNames always empty array —
+    // preserved in the return shape so the Confirm modal doesn't need to
+    // handle a schema change.
     if (agreementType !== 'DA') return { willRevokeEa: false, evalResultCount: 0, evalResultNames: [] }
     const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
     const pairedEa = findPairedEa(agreement.id, shared)
     if (!pairedEa) return { willRevokeEa: false, evalResultCount: 0, evalResultNames: [] }
-    const cascadedErs = findCascadedEvalResults(
-      pairedEa.id,
-      agreement.subject?.id,
-      pairedEa.grantee.party,
-      shared,
-    )
     return {
       willRevokeEa: true,
-      evalResultCount: cascadedErs.length,
-      evalResultNames: cascadedErs.map((er) => er.requirementsSet?.name || er.id),
+      evalResultCount: 0,
+      evalResultNames: [],
     }
-  }, [v22Provisionals, findPairedEa, findCascadedEvalResults])
+  }, [v22Provisionals, findPairedEa])
 
   // Open the Confirm modal for a given agreement + type. Wired by
   // V22NodeDetailPanel's Agreements Section Revoke action.
@@ -666,9 +665,13 @@ export default function V2App() {
     const claimId = agreementType === 'DA' ? agreement.subject?.id : agreement.claimId
     const claim = shared.claims.find((c) => c.id === claimId) || null
     const pairedEa = agreementType === 'DA' ? findPairedEa(agreement.id, shared) : null
-    const cascadedErs = agreementType === 'DA' && pairedEa
-      ? findCascadedEvalResults(pairedEa.id, claimId, pairedEa.grantee.party, shared)
-      : []
+    // Phase 9D.1.3 Fix 6: Eval Results are independent artifacts owned by the
+    // grantee. Revoking an access agreement (DA or EA) does NOT terminate the
+    // grantee's Eval Results — they persist in the grantee's QS and on their
+    // canvas. If the grantee wants to tidy up orphaned Eval Results after a
+    // revocation, they can Dismiss each one individually from its Detail
+    // Panel (handleV22DismissOrphanedEvalResult).
+    const cascadedErs = []
 
     setV22Provisionals((prev) => {
       // Merge-by-id semantics: for annotations (grantor-initiated DA), we
@@ -681,7 +684,6 @@ export default function V2App() {
       const nextRecords = [...(prev.revocationRecords || [])]
       const nextDas = [...prev.disclosureAgreements]
       const nextEas = [...prev.evaluationAgreements]
-      const nextErs = [...prev.evaluationResults]
 
       const upsertDa = (daUpdated) => {
         const idx = nextDas.findIndex((d) => d.id === daUpdated.id)
@@ -693,11 +695,8 @@ export default function V2App() {
         if (idx >= 0) nextEas[idx] = eaUpdated
         else nextEas.push(eaUpdated)
       }
-      const upsertEr = (erUpdated) => {
-        const idx = nextErs.findIndex((e) => e.id === erUpdated.id)
-        if (idx >= 0) nextErs[idx] = erUpdated
-        else nextErs.push(erUpdated)
-      }
+      // Phase 9D.1.3 Fix 6: upsertEr removed — Eval Results no longer cascade
+      // on revocation.
 
       if (agreementType === 'DA') {
         // Annotate the primary DA.
@@ -740,28 +739,11 @@ export default function V2App() {
             cascadedFromDaId: agreement.id,
           }))
         }
-        // Cascade Eval Results (grantee's results on this Claim under the EA).
-        for (const er of cascadedErs) {
-          upsertEr({
-            ...er,
-            _revokedMeta: {
-              reason: 'Cascaded from DA revocation',
-              revokedDate: timestamp,
-              revokerParty: activeRole.party,
-              cascadedFromDaId: agreement.id,
-            },
-          })
-          nextRecords.push(makeRevocationRecord({
-            agreementType: 'EvalResult',
-            agreementId: er.id,
-            evalResultId: er.id,
-            revokerParty: activeRole.party,
-            counterpartyParty,
-            claimId,
-            reason: 'Cascaded from DA revocation',
-            cascadedFromDaId: agreement.id,
-          }))
-        }
+        // Phase 9D.1.3 Fix 6: Eval Results do NOT cascade-revoke. They are
+        // independent artifacts the grantee owns in their QS; revoking an
+        // access agreement doesn't terminate them. The grantee can Dismiss
+        // orphaned Eval Results individually from each Eval Result Detail
+        // Panel (swapped footer action surfaces when orphan state detected).
       } else {
         // EA revocation — no cascade. Annotate; buildViewForActor filters it
         // out of both parties' active lists.
@@ -788,7 +770,7 @@ export default function V2App() {
         ...prev,
         disclosureAgreements: nextDas,
         evaluationAgreements: nextEas,
-        evaluationResults: nextErs,
+        // Phase 9D.1.3 Fix 6: evaluationResults not mutated by revocation.
         revocationRecords: nextRecords,
       }
     })
@@ -811,7 +793,10 @@ export default function V2App() {
         agreementId: agreement.id,
         pairedEaId: pairedEa?.id || null,
         cascadeIncludesEa: agreementType === 'DA' && !!pairedEa,
-        cascadeIncludesEvalResults: cascadedErs.map((er) => er.id),
+        // Phase 9D.1.3 Fix 6: Eval Results no longer cascade. Kept in the
+        // notification payload shape (always empty array) so downstream
+        // consumers don't need a schema migration.
+        cascadeIncludesEvalResults: [],
         cascadedFromDa: false,
         date: timestamp.slice(0, 10),
       })
@@ -835,6 +820,24 @@ export default function V2App() {
   // `buildViewForActor` pre-filters all `_dismissedRevoked` items out of
   // every view-layer output. Audit records in `revocationRecords` are
   // unaffected.
+  // Phase 9D.1.3 Fix 6: dismiss an orphaned Eval Result. An Eval Result is
+  // orphaned when its originating DA (or paired EA) has been revoked — the
+  // Eval Result itself persists in the owner's QS but its edge(s) to the
+  // Claim-side artifacts are gone. Dismiss removes the Eval Result from the
+  // owner's canvas view only; the underlying artifact stays in QS and the
+  // ledger. Annotation mechanic matches Phase 9D.1.1 Fix 6 so the provisional
+  // override shadows the seeded row.
+  const handleV22DismissOrphanedEvalResult = useCallback((evalResultId) => {
+    if (!evalResultId) return
+    setV22Provisionals((prev) => ({
+      ...prev,
+      evaluationResults: prev.evaluationResults.map((er) =>
+        er.id === evalResultId ? { ...er, _dismissedRevoked: true } : er,
+      ),
+    }))
+    setSel(null)
+  }, [])
+
   // Phase 9D.1.2 W1: EA-only revocation dismiss (Cases C/D). Unlike the
   // DA revocation path, this dismisses ONLY the one targeted EA — the
   // Claim and any DA remain untouched. Eval Results persist across EA
@@ -851,6 +854,37 @@ export default function V2App() {
           : e,
       ),
     }))
+    setV22ActiveRevocationNotice(null)
+  }, [])
+
+  // Phase 9D.1.3 Fix 1: Case B inline-DA dismiss. Grantor clicked a
+  // v22-da-revoked notification about a DA the grantee terminated.
+  // Dismisses the DA (and its paired EA, which was cascade-revoked per
+  // existing 9D logic). The Claim stays on the grantor's canvas — it's
+  // their Claim. Eval Results are independent and also persist (the
+  // grantee's orphaned ERs, if any, live on the grantee's side per
+  // Fix 6). Annotation mechanic matches the grantee-side DA dismiss.
+  const handleV22DismissRevokedDaGrantorSide = useCallback((daId) => {
+    if (!daId) return
+    setV22Provisionals((prev) => {
+      // Find the paired EA (if any) so we can dismiss it alongside.
+      const da = prev.disclosureAgreements.find((d) => d.id === daId)
+      const pairedEaId = da && prev.evaluationAgreements
+        .find((e) => e.disclosureAgreementId === daId && e._revokedMeta)?.id
+      return {
+        ...prev,
+        disclosureAgreements: prev.disclosureAgreements.map((d) =>
+          d.id === daId && d._revokedMeta
+            ? { ...d, _dismissedRevoked: true }
+            : d,
+        ),
+        evaluationAgreements: prev.evaluationAgreements.map((e) =>
+          pairedEaId && e.id === pairedEaId
+            ? { ...e, _dismissedRevoked: true }
+            : e,
+        ),
+      }
+    })
     setV22ActiveRevocationNotice(null)
   }, [])
 
@@ -4141,24 +4175,25 @@ export default function V2App() {
             )
             revokedEvaluationAgreementsForNode = allRevokedEas.filter((e) => e.claimId === node.id)
           }
-          // Phase 9D.1.2 W1: notification routing splits by kind.
-          //   • kind === 'DA' (Cases A/B) → `revocationNoticeForPanel` drives
-          //     the Claim-level notice at the top of the panel body (Case B)
-          //     or the REVOKED branch's embedded notice (Case A).
-          //   • kind === 'EA' (Cases C/D) → `expandedRevokedEaInfo` drives
-          //     an inline red block inside the targeted EA row within the
-          //     Agreements Section. The Claim itself isn't being dismissed —
-          //     only the one EA relationship — so the Claim-level notice is
-          //     suppressed.
-          // Routing via the notification `kind` is simpler than inspecting
-          // `_revokedMeta` on the Claim (Case B has no Claim-level meta
-          // anyway; it's always an EA or DA annotation).
+          // Phase 9D.1.3 Fix 1: notification routing refined to four cases.
+          //   • Case A (kind=DA, viewer=grantee) → Claim-level notice via
+          //     `revocationNoticeForPanel` (REVOKED Claim branch).
+          //   • Case B (kind=DA, viewer=grantor) → inline DA row expansion
+          //     via `expandedRevokedDaId/Info` (Claim persists).
+          //   • Case C (kind=EA, viewer=grantee) → inline EA row expansion.
+          //   • Case D (kind=EA, viewer=grantor) → inline EA row expansion.
+          // Cases B/C/D all keep the Claim on-canvas; only Case A removes
+          // the Claim from the viewer's network. Eval Result cascade removed
+          // in Fix 6 — Eval Results persist across all revocation paths.
           let revocationNoticeForPanel = null
           let expandedRevokedEaId = null
           let expandedRevokedEaInfo = null
+          let expandedRevokedDaId = null
+          let expandedRevokedDaInfo = null
           if (v22ActiveRevocationNotice && node.v22Type === 'CLAIM'
               && v22ActiveRevocationNotice.targetClaimId === node.id) {
             const notif = v22ActiveRevocationNotice.notification
+            const viewerIsGrantor = activeRole.party === node.owner
             if (v22ActiveRevocationNotice.kind === 'DA') {
               // daType derivation: look up the referenced DA in the shared pool.
               let daType = 'full'
@@ -4166,18 +4201,33 @@ export default function V2App() {
                 const da = sharedForPanel.disclosureAgreements.find((d) => d.id === notif.agreementId)
                 if (da?.type && da.type !== 'provisional') daType = da.type
               }
-              revocationNoticeForPanel = {
-                kind: 'DA',
-                daType,
-                revokerParty: notif?.from?.name,
-                revokedDate: notif?.date,
-                reason: notif?.reason,
-                cascadeEa: !!notif?.cascadeIncludesEa,
-                cascadeEvalResultCount: Array.isArray(notif?.cascadeIncludesEvalResults)
-                  ? notif.cascadeIncludesEvalResults.length
-                  : 0,
+              if (viewerIsGrantor) {
+                // Case B: inline DA row expansion on grantor's canvas.
+                expandedRevokedDaId = notif?.agreementId || null
+                expandedRevokedDaInfo = {
+                  daType,
+                  revokerParty: notif?.from?.name,
+                  revokedDate: notif?.date,
+                  reason: notif?.reason,
+                }
+              } else {
+                // Case A: Claim-level notice in the REVOKED branch.
+                revocationNoticeForPanel = {
+                  kind: 'DA',
+                  daType,
+                  revokerParty: notif?.from?.name,
+                  revokedDate: notif?.date,
+                  reason: notif?.reason,
+                  cascadeEa: !!notif?.cascadeIncludesEa,
+                  // Phase 9D.1.3 Fix 6: always 0 — Eval Results no longer
+                  // cascade on DA revocation.
+                  cascadeEvalResultCount: 0,
+                }
               }
             } else if (v22ActiveRevocationNotice.kind === 'EA') {
+              // Cases C + D: inline EA row expansion. Same mechanic on both
+              // sides; the case-C-vs-D copy branches inside the row based
+              // on viewerIsGrantor.
               expandedRevokedEaId = notif?.agreementId || null
               expandedRevokedEaInfo = {
                 revokerParty: notif?.from?.name,
@@ -4307,6 +4357,21 @@ export default function V2App() {
                     priorActiveResultId: er.id,
                   })
                 }}
+                // Phase 9D.1.3 Fix 6: orphan detection for Eval Result panel.
+                // An ER is orphaned when its backing EA is no longer in the
+                // active view — either revoked or already dismissed. Self-
+                // evaluated ERs (no evaluationAgreementId) are never orphaned.
+                // Superseded ERs aren't flagged orphaned either; the existing
+                // SUPERSEDED treatment handles that case.
+                isOrphaned={(() => {
+                  if (node.v22Type !== 'EVAL RESULT') return false
+                  const er = node.v22Artifact
+                  if (!er || !er.evaluationAgreementId) return false
+                  if (er.status === 'superseded') return false
+                  const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
+                  return !ea
+                })()}
+                onDismissOrphanedEvalResult={handleV22DismissOrphanedEvalResult}
                 // Phase 9C — Agreements Section (backlog #111)
                 disclosureAgreementsForNode={disclosureAgreementsForNode}
                 evaluationAgreementsForNode={evaluationAgreementsForNode}
@@ -4333,6 +4398,10 @@ export default function V2App() {
                 expandedRevokedEaId={expandedRevokedEaId}
                 expandedRevokedEaInfo={expandedRevokedEaInfo}
                 onDismissExpandedRevokedEa={handleV22DismissRevokedEa}
+                // Phase 9D.1.3 Fix 1 — inline DA revocation pattern (Case B)
+                expandedRevokedDaId={expandedRevokedDaId}
+                expandedRevokedDaInfo={expandedRevokedDaInfo}
+                onDismissExpandedRevokedDa={handleV22DismissRevokedDaGrantorSide}
               />
             </div>
           )
@@ -4424,6 +4493,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-24', label: 'Phase 9D.1.3', items: [
+                  'Disclosure-Agreement revocations by the grantee now show the dismiss ceremony inline on the affected DA row on the grantor\'s panel (matching the EA pattern shipped in 9D.1.2)',
+                  'Evaluation Results now persist across Disclosure Agreement revocation — they remain in your Qualified Storage and on your canvas',
+                  'Orphaned Evaluation Results (where the backing agreement has been revoked) can be dismissed individually from each Result\'s Detail Panel',
+                  'Revocation copy refreshed across all four cases to reflect Evaluation Result persistence',
+                  'Revoked Claim cards now render with an opaque red-tinted background at all zoom levels',
+                  'REVOKED badge now supersedes PROVISIONAL and DECLINED badges on the same Claim',
+                  'Tooltip arrow alignment now respects the tooltip\'s actual width — arrow stays attached on near-edge anchors',
+                ]},
                 { version: '0.9.10', date: '2026-04-24', label: 'Phase 9D.1.2', items: [
                   'Evaluation-Agreement-only revocations now show the dismiss ceremony inline on the affected EA row — the Claim-level notice is used only when the Claim itself is being removed',
                   'Detail Panel auto-scrolls to the revoked EA row when you click its notification',

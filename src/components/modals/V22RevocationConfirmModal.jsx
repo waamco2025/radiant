@@ -65,7 +65,7 @@ export default function V22RevocationConfirmModal({
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.55 }}>
                 {isDa
                   ? 'Revoking this Disclosure Agreement terminates the counterparty’s visibility into the underlying Claim.'
-                  : 'Revoking this Evaluation Agreement removes the counterparty’s right to run new evaluations. Historical Eval Results are preserved.'}
+                  : 'Revoking this Evaluation Agreement removes the counterparty’s right to run new evaluations. Historical Evaluation Results are preserved.'}
               </div>
             </div>
           </div>
