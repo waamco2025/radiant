@@ -16,7 +16,15 @@ The platform rests on two foundational rules established during the V2.1 → V2.
 
 These two rules scale cleanly to auditors (Carol), self-evaluation (Alice using OSHA's requirements on her own factory), and the Public Directory at scale (the AI Shopper browsing thousands of Claims). The Disclosure → Evaluation Agreement sequence is the platform's fundamental inter-party relationship.
 
-> **Document structure note.** Sections §1–§11, §15–§17 describe the current platform architecture. §12 (V2.1 → V2.2 Migration Map) and §13 (Phased Implementation Plan) are preserved verbatim as historical record of the 2026-04 migration — they're no longer operative guidance but remain useful for understanding *why* certain component decisions were made. §14 implementation guidelines have been collapsed into operating conventions; see `CLAUDE.md` for the authoritative working-conventions reference.
+> **Document structure note.** Sections §1–§11, §15–§18 describe the current platform architecture. §12 (V2.1 → V2.2 Migration Map) and §13 (Phased Implementation Plan) are preserved verbatim as historical record of the 2026-04 migration — they're no longer operative guidance but remain useful for understanding *why* certain component decisions were made. §14 implementation guidelines have been collapsed into operating conventions; see `CLAUDE.md` for the authoritative working-conventions reference.
+
+> **Prototype-vs-Production annotation convention.** This document is the architecture spec for a demo prototype. Any behavior this document describes that would be authoritative to a production system's platform layer (rather than to the App) is flagged inline using the following convention:
+>
+> > **Prototype note — {Topic}.** {What the prototype does — current implementation behavior.} **In production:** {What the production system must do — handoff requirement.} **Authority:** {Who is authoritative — specific protocol (DPP / SDP / REP / PEP / COP), Platform umbrella, External Service, App, or TBD.} {Optional: open design questions, related backlog items, or links to confirmed decisions.}
+>
+> The full catalog of production-handoff points is consolidated in §18 Production Handoff Map. Inline annotations support local reading; §18 supports migration planning.
+>
+> **Terminology alignment with client canon.** Where the prototype's terminology differs from the client's published glossary, the first use of the prototype term includes a parenthetical note. The prototype's own terminology is retained throughout the rest of the document; a systematic rename is tracked as backlog #17. Notable mappings: "Disclosure Agreement" (client canon: Selective Disclosure Agreement / SDA — the prototype's term is kept because our model admits Full, Selective, and Proof-Only variants, of which Selective is one); "Asset" (client canon: Data Object); the prototype's "endorsing on ledger" UI step corresponds to the client's Endorsement concept. Client-canon protocol names (DPP, SDP, REP, PEP, COP) are used in §18 and in inline flags when referring to production authority.
 
 ---
 
@@ -46,12 +54,14 @@ Six processes operate on the platform. A seventh — Transferring (ownership tra
 
 | Process | Input | Output | Who can initiate |
 |---------|-------|--------|------------------|
-| Registering | Evidence file from QS | Asset node | Evidence owner |
+| Registering | Evidence file from QS | Asset (client canon: Data Object) node | Evidence owner |
 | Parsing | An Asset + a Parse Template | Parse Result (parent-layer node) | Asset owner |
 | Claiming | One or more Assets | Claim node | Asset owner |
-| Disclosing | A Claim | Disclosure Agreement | Claim owner |
+| Disclosing | A Claim | Disclosure Agreement (client canon: Selective Disclosure Agreement / SDA — see terminology note in §1) | Claim owner |
 | Agreeing | A Disclosure Agreement | Evaluation Agreement | Both parties (grantor responds to grantee's request) |
 | Evaluating | An Evaluation Agreement + Requirements Set | Evaluation Result | Grantee (evaluator) |
+
+> **Prototype note — Process authority in production.** This table describes user-facing intent and initiation authority. In production, each process is executed by a specific named protocol on the Platform, not by the App. The App requests the operation and renders the resulting artifact. **In production:** Registering → DPP (Data Property Protocol) issues the DOT and records the artifact on-chain. Parsing → PEP (Parse and Extract Protocol) runs the template against the file and produces the Parse Result. Claiming → DPP registers the Claim as a new data object. Disclosing → SDP (Selective Disclosure Protocol) provisions the Disclosure Agreement and issues associated SDA Cryptographic Access Keys (sCAKs). Agreeing → SDP provisions the paired Evaluation Agreement. Evaluating → REP (RICE Evaluation Protocol) runs the Requirements Set against the in-scope evidence and produces the Evaluation Result, including the Proof-of-Evaluation (POE) artifact. **Authority:** DPP, PEP, SDP, REP respectively. Per-artifact authority details are enumerated in §18.
 
 Parsing is formally optional, but it is a prerequisite for **Selective Disclosure**: Selective Disclosure discloses specific parsed fields rather than raw files, so a Parse Result must exist on an Asset for Selective Disclosure of that Asset's fields to be possible. Full Disclosure and Proof-Only Disclosure do not require parsing.
 
@@ -78,7 +88,9 @@ Agreements are bilateral — both parties store identical copies as proof of mut
 
 All artifacts live in qualified storage (QS). QS is an actor-controlled storage layer (think S3, Dropbox, or on-prem file servers) that the platform indexes but does not host. The platform maintains an indexing layer that maps URIs and PINs to storage locations; the actual content remains on the actor's infrastructure.
 
-For the prototype, QS is mocked: a fake file picker shows pre-populated files per actor.
+> **Prototype note — Qualified Storage.** For the prototype, QS is mocked: a fake file picker shows pre-populated files per actor, and a Local Storage upload tab simulates file ingest with a progress animation. File bytes are not actually stored server-side; mock URIs synthesized client-side under `{bucket}/uploads/{filename}`. **In production:** QS is an actor-controlled real storage service (S3, Dropbox, on-prem); the Platform indexes URIs but does not host files. File hash computation happens at the QS adapter layer and is verified by DPP at registration. **Authority:** Actor (storage custody); DPP (indexing + hash verification).
+
+> **Prototype note — Endorsement on registration.** The prototype's Asset registration UI plays an "endorsing on ledger…" step in the hashing sequence animation (`V22CreateAssetModal`, introduced in Phase 9A.6). This is a simulation of the client's Endorsement concept: the cryptographically recorded attestation that a data object has been verified and approved, written onto the chain during the DPP flow. **In production:** Endorsement is an on-chain write executed by DPP during registration, producing a verifiable attestation of authenticity and provenance; cryptographic keys and artifact tokens (DOT, PIN) are issued as outputs of that write. **Authority:** DPP.
 
 ### 2.6 DOTs and Identity
 
@@ -89,6 +101,8 @@ Every registered data element — Asset, Claim, Evaluation Result — is anchore
 **PIN vs DOT in the UI.** PINs render as click-to-copy badges throughout the app — they're the identifier users read, copy, and paste when referring to a specific Asset or Claim. The surrounding DOT is plumbing: it's what the ledger verifies and what transfers manipulate, but it isn't typically exposed in UI except in Detail Panels, where the DOT's own PIN is surfaced alongside the file hash and URI (the Asset Detail Panel's "DOT" row shows `asset.dot.pin`, not the owner DID — owner identity surfaces via the "Owner" row).
 
 **Why DOTs matter for this build.** Without a structured DOT, ownership is denormalised: `asset.owner` is the current owner's party name, but there's no provenance chain to show who held it before, and no clean place to record "this transfer happened at this timestamp, from this DID to this DID." The DOT gives transfers a proper home in the data model and enables any auditor to verify the full chain independently — which is the whole point of the Trust Plane.
+
+> **Prototype note — DOT issuance and lineage.** The prototype mints DOTs client-side via the `makeDotObject(...)` factory on every Asset / Claim / Evaluation Result creation, and appends transfer records to `dot.lineage[]` directly in client state. Mock DID strings (`DOT-0x...`) per actor. **In production:** DOT issuance is a DPP operation performed during artifact registration; PIN, owner DID, content hash, registration timestamp, and the initial lineage entry are all Platform-issued and cryptographically signed. Subsequent lineage appends (transfers, ownership changes) are written by COP (Change of Ownership Protocol) as on-chain state transitions. DIDs are real W3C DIDs resolved against a DID registry. **Authority:** DPP (issuance, initial lineage); COP (ownership-change lineage); External DID registry (DID resolution).
 
 ---
 
@@ -233,6 +247,8 @@ This is an intentional trade-off: V2.2 prioritizes "everything visible on the ca
 
 Each actor sees a different slice of the graph. What appears on a canvas is determined by (a) what the actor owns, (b) what has been disclosed to them via Disclosure + Evaluation Agreements, and (c) what Evaluation Results they are a party to.
 
+> **Prototype note — View building and access control.** The prototype's view builder (`buildViewForActor` in `v2_2Data.js`) filters the shared dataset client-side based on the active actor's identity, their active agreements, and their ownership. The App has access to the full shared dataset and filters down to what the actor is allowed to see. **In production:** the App-side view builder *mirrors* Platform-side authorization. The Platform is the authoritative enforcement point for what each actor is permitted to see; SDP-issued authorization scopes (backed by SDA Cryptographic Access Keys / sCAKs) determine what data the App ever receives for a given actor. The App-side filter becomes a UX rendering layer on top of Platform-authorized data, not a gatekeeper. Permission Consumption — the act of a grantee exercising their granted access — is tracked by SDP in production; the prototype does not model it because access is binary (you have the agreement or you don't). **Authority:** SDP (authorization scope issuance + enforcement, key management, permission consumption); App (UX rendering within authorized scope).
+
 ### 6.1 Alice's View (seller/claim-maker)
 
 - Her MicroCo Actor node.
@@ -360,7 +376,7 @@ The Directory Layer is a separate canvas layer (not part of the parent or child 
 
 ### 8.5 Implementation note
 
-The Directory Layer is ambitious. It is explicitly a back-burner item until the core parent-layer restructure is complete. A minimal placeholder (empty canvas with title "Directory Layer") is acceptable for initial implementation; the full dots-and-clouds visualization can follow.
+> **Prototype note — Directory Layer.** The Directory Layer is ambitious. A minimal placeholder (empty canvas with title "Directory Layer") is acceptable for initial implementation; the full dots-and-clouds visualization can follow. The current shipped Phase 7 implementation renders 4 actor-party dot clusters behind a circular-wipe transition; full visualization (real force-directed layout, thousands of dots at scale, per-dot interactivity) is tracked as backlog items #29, #43, #45, #46. **In production:** the Directory Layer renders the Platform's public directory index — a real catalog of publicly disclosed Claims with discoverability metadata, indexed and searchable by the Platform. **Authority:** Platform (directory indexing); App (rendering).
 
 ---
 
@@ -381,13 +397,17 @@ The AI Shopper is a tool exposed via an icon in the canvas chrome, similar to th
 
 Like the Directory Layer, AI Shopper is a back-burner item. Its existence is specified for reference, but its implementation follows the core migration.
 
+> **Prototype note — AI Shopper.** The prototype runs a scripted progress animation (10–30s fake agent-at-work sequence) and returns mocked candidate results from a pre-seeded list of public-directory Claims. **In production:** a real LLM-backed agent runs queries against the Platform's public directory index, producing real discovery results. Search infrastructure, per-Claim discoverability metadata, and agent orchestration are all Platform concerns. **Authority:** Platform (directory index + search); External Service (LLM agent execution). Backlog #47.
+
 ---
 
 ## 10. JSON Schemas
 
-All schemas are mocked for the prototype. Real implementations would include cryptographic signatures, Merkle proofs, etc. — none of that is required here.
+> **Prototype note — Schema fidelity.** All schemas are mocked for the prototype. The JSON below captures the shape of each artifact as the App constructs and consumes it client-side. **In production:** each artifact is cryptographically signed by the issuing actor's DID; Platform-issued fields (PINs, DOTs, timestamps, status values) are populated by DPP/SDP/REP/COP at registration rather than by the App; Merkle proofs, on-chain anchoring, and agreement-lifecycle state fields ride along with each artifact. Per-field authority — which fields are Platform-issued vs App-derived — is called out in the subsections below where relevant and consolidated in §18. **Authority:** DPP (issuance of identity and registration fields); respective protocols (SDP/REP/COP) for lifecycle/state fields.
 
 ### 10.1 Asset artifact
+
+> **Prototype note — Asset field authority.** Platform-issued fields in production: `pin`, `ownerDot`, `file.hash` (verified at ingest), `registrationDate`. App-derived / actor-input fields: `name`, `description`, `file.uri`, `file.filename`, `file.size`, `file.mimeType`. The prototype populates the Platform-issued fields client-side via `makeDotObject` and mock hash computation. **Authority:** DPP (Platform-issued fields); Actor + App (actor-input fields).
 
 ```json
 {
@@ -430,6 +450,8 @@ All schemas are mocked for the prototype. Real implementations would include cry
 
 ### 10.3 Claim artifact
 
+> **Prototype note — Claim field authority.** Platform-issued: `pin`, `createdDate`, each `amendments[].date`. App-derived / actor-input: `name`, `description`, `referencedAssetIds[]`, `amendments[].added[]`, `amendments[].removed[]`. **Authority:** DPP (Platform-issued fields and amendment chain registration).
+
 ```json
 {
   "artifactType": "claim",
@@ -451,6 +473,8 @@ All schemas are mocked for the prototype. Real implementations would include cry
 ```
 
 ### 10.4 Disclosure Agreement artifact
+
+> **Prototype note — Disclosure Agreement field authority.** Platform-issued: agreement `id`, `terms.createdDate`, `terms.expires` (once set; validity enforced Platform-side), `status`, each `amendments[]` entry's metadata. App-derived / actor-input: `grantor`, `grantee`, `subject`, `granteeAssetId`, `type`, `scope`, `terms.autoRenew`. In production, the agreement itself is provisioned by SDP, signed by both parties, and stored bilaterally with Platform-verified cryptographic consent records. The `status` field transitions (`active` → `expired`, `active` → `revoked`, `pending` → `active`, etc.) are managed by SDP as lifecycle state changes. **Authority:** SDP (provisioning, lifecycle state, status transitions, bilateral consent recording); DPP (agreement artifact registration).
 
 The Disclosure Agreement's `subject` field identifies the artifact being disclosed. It replaces V2.1's `claimId` field, which was ambiguous for ownership (Actor → Asset), claim-internal (Claim → referenced Asset), proof-of-evaluation (Eval Result → Claim), and public-directory variants. `subject.kind` is one of `'asset' | 'claim' | 'evalResult' | 'parseResult'`.
 
@@ -494,6 +518,8 @@ Typical subject assignments across DA variants:
 
 ### 10.5 Evaluation Agreement artifact
 
+> **Prototype note — Evaluation Agreement field authority.** Platform-issued: agreement `id`, `terms.createdDate`, `status`, `disclosureAgreementId` linkage. App-derived / actor-input: `grantor`, `grantee`, `claimId`, `granteeAssetId`, `authorizedRequirementsSetIds`, `restrictions`, `terms.evaluationDeadline`, `terms.resultExpiry`, `terms.flowDownRequirements`, `incentives`. **Authority:** SDP (provisioning, lifecycle, status transitions) — the Evaluation Agreement is SDP-managed in the same way as the paired Disclosure Agreement.
+
 The `authorizedRequirementsSetIds` field is **advisory / informational**, not enforced. It records the Requirements Sets the requester suggested when sending the original combined request, so the grantor sees the requester's stated intent during the response flow. Once an Evaluation Agreement exists, the grantee may run **any** Requirements Set from their library against the Claim — the platform does not gate evaluation by this list. (Earlier Round 11 spec drafts implied enforcement; the product decision in Phase 6 was that gating evaluation by an authorized list adds friction without meaningfully improving trust.)
 
 ```json
@@ -525,6 +551,8 @@ The `authorizedRequirementsSetIds` field is **advisory / informational**, not en
 ```
 
 ### 10.6 Evaluation Result artifact
+
+> **Prototype note — Evaluation Result field authority.** Platform-issued: `pin`, `ownerDot`, `evaluationDate`, `status`, `supersededBy` links, the Proof-of-Evaluation (POE) attestation that this artifact represents. App-derived / actor-input: `evaluationAgreementId`, `claimId`, `granteeAssetId`, `requirementsSet` (embedded snapshot), `results[]` (per-row values and assessments), `evidenceUsed[]`. In production, the Evaluation Result is produced by REP executing the Requirements Set against the in-scope evidence; the result artifact is the POE itself, cryptographically signed and on-chain, providing verifiable credibility scoring for downstream trust decisions. **Authority:** REP (execution, result production, POE issuance); DPP (artifact registration); SDP (supersede chain lifecycle).
 
 ```json
 {
@@ -566,6 +594,8 @@ Alice amends her Claim by adding one or more Asset references. Preconditions: sh
 4. Claim's JSON is updated with a new `amendments[]` entry (added Asset IDs, timestamp).
 5. No Disclosure Agreements are automatically updated. Alice must explicitly amend each agreement to share the new evidence.
 
+> **Prototype note — Claim amendment.** The prototype writes the `amendments[]` entry directly to the Claim artifact in `v22Provisionals` on submit, and fires a `v22-amendment` notification to counterparties with active DAs on the Claim (convention documented in §7.4, though current implementation covers only the evaluation re-run path — notification dispatch to DA counterparties is tracked as backlog #102). **In production:** Claim amendments are DPP lifecycle events on the existing Claim artifact; each amendment is cryptographically recorded and the amendment chain is verifiable on-chain. Counterparty notifications are emitted by DPP as lifecycle events. **Authority:** DPP (amendment registration + event emission).
+
 ### 11.2 Disclosure Agreement amendment
 
 Alice amends a Disclosure Agreement to include (or exclude) evidence.
@@ -575,6 +605,10 @@ Alice amends a Disclosure Agreement to include (or exclude) evidence.
 3. Modal shows current scope; she adjusts which Assets/fields/eval results are included.
 4. **Evidence can only be added in an amendment, not removed** — if the Disclosure has been used for an evaluation. (Evidence can be removed if no evaluation has been run against it yet. Final rule TBD; default is no removal.)
 5. Counterparty receives a notification that the agreement was amended. Updated scope is immediately available.
+
+> **Prototype note — Disclosure Agreement amendment.** The prototype writes the amended scope directly to the agreement artifact in `v22Provisionals` and fires a `v22-amendment` notification to the counterparty. **In production:** DA amendment is an SDP lifecycle event that produces a new cryptographically signed amendment record linked to the existing agreement; both parties' bilateral copies are updated via Platform push. SDP also re-issues or updates SDA Cryptographic Access Keys (sCAKs) as needed to reflect the new scope. The "no removal after evaluation" rule is an enforcement concern for SDP in production, not a client-side convention. **Authority:** SDP (amendment lifecycle, scope enforcement, key re-issuance).
+
+> **Prototype note — Evaluation Agreement amendment.** Not yet implemented in V2.2 (backlog #108). **In production:** EA amendment follows the same SDP lifecycle pattern as DA amendment. **Authority:** SDP.
 
 ### 11.3 Evaluation amendment (re-evaluation)
 
@@ -588,6 +622,8 @@ Bob re-runs an evaluation after Alice amends her Disclosure to include more evid
 6. **New-result path:** a *different* Requirements Set always produces a separate active Evaluation Result (does not supersede).
 7. Both active and superseded results remain visible on both canvases; the superseded one has a `SUPERSEDED` label, dimmed styling, and does not contribute to health minibars.
 
+> **Prototype note — Evaluation execution and supersede.** The prototype runs evaluation client-side via `makeEvaluationRunArtifacts(...)` using pre-seeded AI values and assessments; it computes supersede locally by flipping the prior result's `status` and populating `supersededBy`. Duplicate detection is client-side. **In production:** evaluation execution is an REP operation — REP runs the Requirements Set against the Claim's in-scope evidence and produces the Evaluation Result (which is the Proof-of-Evaluation artifact per the client canon). Supersede is an SDP/REP-managed lifecycle state on the Eval Result. Duplicate detection is enforced at registration by DPP; the App may pre-check for UX but is not authoritative. **Authority:** REP (execution, result production, POE issuance); DPP (duplicate-detection enforcement, registration); SDP (supersede chain lifecycle).
+
 ### 11.4 Disclosure decline
 
 Alice declines Bob's Disclosure + Evaluation Agreement request.
@@ -599,6 +635,8 @@ Alice declines Bob's Disclosure + Evaluation Agreement request.
 5. Bob receives a `v22-declined` entry on his inbox; clicking it animated-pans to the DECLINED Claim.
 6. Bob's Detail Panel for the declined Claim surfaces the reason in a red-bordered panel and offers a **Dismiss** CTA. Dismissal (`handleV22DismissDeclined`) strips the annotations and removes both DA and EA as a pair, which collapses the edge and the Claim node together.
 
+> **Prototype note — Decline lifecycle.** The prototype annotates declined DA/EA pairs with `_declineMeta` on `v22Provisionals` and keeps them in client state until the requester explicitly dismisses, at which point the annotations and artifacts are removed from React state. **In production:** decline is an SDP lifecycle transition — the DA and paired EA move to a `declined` status managed by the Platform, with the decline reason and declining party recorded as part of the on-chain artifacts. Dismissal in production is a per-user UI preference (hide-from-view), not data deletion; the decline record persists on-chain for audit regardless of whether the requester chooses to continue rendering it. **Authority:** SDP (lifecycle state); App (UI-preference persistence in production).
+
 ### 11.5 Agreement expiry
 
 When an agreement's `expires` date passes, its `status` transitions to `expired`.
@@ -606,6 +644,19 @@ When an agreement's `expires` date passes, its `status` transitions to `expired`
 - Expired Disclosure Agreement: scope visibility is revoked for the counterparty. The Claim node disappears from Bob's canvas (or is visually marked as expired).
 - Expired Evaluation Agreement: Bob cannot run new evaluations against the Claim. Existing Evaluation Results remain valid.
 - Auto-renewal (if enabled in terms): agreements automatically extend by the original duration at expiry.
+
+> **Prototype note — Agreement expiry.** The prototype does not currently enforce expiry; the `expires` field is informational and no clock-driven transition runs client-side. **In production:** expiry is an SDP clock-driven lifecycle transition — when an agreement's `expires` timestamp passes, SDP automatically flips its `status` to `expired` and enforces the scope-visibility change. Auto-renewal, if enabled in the agreement's terms, is executed by SDP as an automatic state transition with a new `expires` timestamp. **Authority:** SDP (lifecycle clock + automatic transitions + auto-renewal execution).
+
+### 11.5a Agreement revocation (Phase 9D)
+
+Either party may revoke a Disclosure Agreement or Evaluation Agreement. Revocation by the grantor terminates the counterparty's access; revocation by the grantee terminates their own access. DA revocation cascades to the paired EA and to any Evaluation Results the grantee produced under that EA; EA-only revocation does not cascade. Proof-of-Evaluation DAs are non-revocable by design.
+
+1. The revoker opens the agreement's Revoke action (either from the Agreements Section row on a node Detail Panel, or from the agreement Detail Panel's footer).
+2. `V22RevocationConfirmModal` opens with a cascade warning if applicable (DA revocation lists the paired EA and any dependent Eval Results that will be revoked together).
+3. On confirm, the revoker's provisional state annotates the affected artifacts with `_revokedMeta` (revoker party, reason, date) and emits `v22-da-revoked` / `v22-ea-revoked` notifications to the counterparty.
+4. The counterparty clicks the notification; the canvas pans to the affected Claim and opens its Detail Panel with a Revocation Notice section at the top. A Dismiss footer button removes the revoked artifact from the counterparty's view on click; non-Dismiss exit preserves the revoked state until the counterparty explicitly dismisses.
+
+> **Prototype note — Revocation lifecycle.** The prototype annotates DA/EA/Eval Result artifacts with `_revokedMeta` in `v22Provisionals`, maintains a `revocationRecords` audit ledger client-side, and computes cascade (paired EA + dependent Eval Results) client-side in the revocation handler. Dismissal client-side annotates `_dismissedRevoked: true` so the view builder filters dismissed-revoked artifacts from rendering (Phase 9D.1.1). **In production:** revocation is an SDP lifecycle transition that moves the agreement to a `revoked` status; the revocation record is signed and written on-chain, including the revoker's identity and reason. Cascade rules (DA revocation revoking the paired EA and dependent Eval Results) are executed Platform-side by SDP. Dismissal remains a per-user UI preference in production, not data deletion — the revocation record is permanent for audit. Proof-of-Evaluation DA non-revocability is enforced by SDP as a lifecycle constraint. **Authority:** SDP (lifecycle state, cascade execution, POE DA non-revocability enforcement); App (UI-preference dismissal).
 
 ### 11.6 Self-evaluation
 
@@ -616,6 +667,8 @@ Alice evaluates her own Claim against a Requirements Set without a counterparty.
 3. On submit, `makeEvaluationRunArtifacts` produces an Evaluation Result plus two internal Disclosure Agreements: a proof-of-evaluation DA (grantor = Alice, grantee = Alice, subject = evalResult) and an ownership DA (grantor = Alice, grantee = Alice, subject = evalResult with `scope.assetIds`). Both are internal (grantor == grantee); `granteeAssetId` is absent on the proof DA since there's no external anchor.
 4. `deriveAgreementEdges` has a dedicated branch for internal proof-of-eval (`subject.kind === 'evalResult' && internal && !hasScopeAssets`) that renders the edge from the Eval Result to the Claim. Visually identical to a non-self proof-of-evaluation edge.
 5. Duplicate detection and supersede semantics (§11.3) apply identically to self-evaluation.
+
+> **Prototype note — Self-evaluation execution.** Same execution authority as inter-party evaluation (§11.3): REP runs the Requirements Set against the Claim's evidence and produces the result; the result is a Proof-of-Evaluation artifact. The internal proof-of-eval DA + ownership DA pattern in the prototype is a modeling convenience to keep edge derivation consistent; in production, these internal agreements may be implicit (not separate SDP-provisioned artifacts) since grantor == grantee means no cross-party consent is required. **Authority:** REP (execution); DPP (result registration); SDP (internal agreement modeling TBD — may simplify in production).
 
 ### 11.7 Ownership transfer (Transferring process)
 
@@ -638,7 +691,9 @@ Alice transfers an Asset she owns to another actor. Canon X.5: the transfer is r
 
 **No cascading state.** The transferred Asset arrives "clean" on the recipient's canvas — existing Parse Results, Evaluation Results, and Disclosure Agreements against the Asset stay with Alice. Production cascade semantics (do derived Parse Results transfer too? what happens to Claims referencing the Asset on Alice's side?) are deferred. Similarly, transferring an Asset that is the sole evidence backing an active disclosed Claim is permitted in the demo but has no guardrail UI — backlog #73.
 
-**File custody on transfer.** The DOT canon (X.1) specifies that the DOT contains the file's hash but not the file itself, leaving file custody as an implementation question. This prototype assumes a **replication model**: on transfer acceptance, the file is replicated from the sender's qualified storage to the recipient's qualified storage, both copies hashing identically. The DOT lineage records the transfer; the file content is independently held under each owner's custody. The alternative — a pointer model where the recipient's DOT references the sender's still-hosted file — is cryptographically valid but operationally fragile (sender deletion or modification breaks the recipient's reference). The prototype does not actually move file bytes; the mock URI travels with the DOT for demonstration purposes. Production semantics should be confirmed with the client; this section will be updated accordingly. (Andrew's call — surfaced for client review; tracked as backlog #93.)
+**File custody on transfer.** The DOT canon (X.1) specifies that the DOT contains the file's hash but not the file itself, leaving file custody as an implementation question. This prototype assumes a **replication model**: on transfer acceptance, the file is replicated from the sender's qualified storage to the recipient's qualified storage, both copies hashing identically. The DOT lineage records the transfer; the file content is independently held under each owner's custody. The alternative — a pointer model where the recipient's DOT references the sender's still-hosted file — is cryptographically valid but operationally fragile (sender deletion or modification breaks the recipient's reference). The prototype does not actually move file bytes; the mock URI travels with the DOT for demonstration purposes.
+
+> **Prototype note — Ownership transfer lifecycle.** The prototype creates provisional transfer records in `v22Provisionals.transfers`, flips `asset.dot.ownerDid` on accept, appends `makeTransferRecord` entries to `asset.dot.lineage[]` directly in client state, and manages pending/accepted/declined transitions entirely client-side. **In production:** ownership transfer is a COP (Change of Ownership Protocol) operation — COP orchestrates the transfer of the DOT, writes the lineage entry on-chain, and ensures both parties' records reflect the new ownership state atomically. File custody (replication vs pointer model) is an operational decision that sits alongside COP; the choice affects how QS adapters execute the transfer but not the on-chain lineage record. **Authority:** COP (transfer orchestration + lineage writes); Actor QS adapters (file custody execution); TBD (replication vs pointer — backlog #93).
 
 ### 11.8 Parse flow
 
@@ -649,6 +704,8 @@ Alice parses an Asset she owns to extract structured fields into a Parse Result 
 3. On submit, `makeParseRunArtifacts({ ownerParty, ownerDot, sourceAssetId, template, rows })` produces a Parse Result plus an internal Full Disclosure Agreement (`subject={kind:'parseResult', id}` with `scope.assetIds=[sourceAssetId]`) that wires the new Parse Result to its source Asset. The ref DA's shape matches the seeded `parseResultRefEdges` so edge derivation treats the new Parse Result identically.
 4. Both artifacts land on `v22Provisionals` and merge into the view; the new Parse Result node renders on Alice's canvas with an `_isNew` reveal.
 5. Structural parity with `V22RunEvaluationModal`: same split-panel layout, same `ConfidenceBadge` + row shape. Parse rows edit the extracted value + confidence only (no SAT/UNSAT/MISSING/N/A cycling), per the Parsing-vs-Evaluating distinction in §2.3.
+
+> **Prototype note — Parse execution.** The prototype runs parsing client-side via `makeParseRunArtifacts(...)`; AI extraction values and confidences are pre-populated from seeded `aiValue` + `aiConfidence` fields on template rows. **In production:** parsing is a PEP (Parse and Extract Protocol) operation — PEP runs the chosen Parse Template against the Asset's actual file contents, extracting structured key-value pairs with confidence scores. The resulting Parse Result is registered by DPP and enriches the source Asset to enable advanced search, Selective Disclosure, and analytics. **Authority:** PEP (execution, field extraction); DPP (artifact registration).
 
 ---
 
@@ -1001,6 +1058,108 @@ V2.2 leaves the child layer empty. If the parent layer becomes unreadable in dem
 
 ---
 
+## 18. Production Handoff Map
+
+This section consolidates every point in the prototype where App-side behavior simulates production-side responsibility. Inline `**Prototype note —**` callouts throughout §2–§11 mark these locations within their narrative context; this section is the master reference for production-build planning.
+
+The platform decomposes into named protocols per the client canon:
+
+- **DPP (Data Property Protocol)** — the prerequisite protocol ensuring registered ownership of data objects. Issues DOTs and PINs, registers artifacts, writes endorsements on-chain, and anchors initial lineage. Roughly: anything that creates verifiable identity or registers an artifact in the first place.
+- **SDP (Selective Disclosure Protocol)** — manages data access, protects IP, enables owners to control selective sharing. Provisions Disclosure Agreements (SDAs in client canon) and Evaluation Agreements bilaterally, manages their lifecycle (pending / active / declined / expired / revoked), issues SDA Cryptographic Access Keys (sCAKs), enforces scope, and tracks Permission Consumption.
+- **REP (RICE Evaluation Protocol)** — executes evaluations and produces Proof-of-Evaluation (POE) artifacts with credibility scoring. Integrates automated (AI) and human-reviewed evaluations. Produces the Evaluation Result artifact as an on-chain POE.
+- **PEP (Parse and Extract Protocol)** — enriches registered data objects by parsing them into structured key-value pairs, producing Parse Result artifacts. Enables advanced search, Selective Disclosure, and analytics.
+- **COP (Change of Ownership Protocol)** — facilitates transfers of DOT ownership between parties, writing lineage entries on-chain as a verifiable chain of ownership.
+- **Platform** — used as an umbrella term when a concern spans multiple protocols or when the specific protocol attribution is ambiguous.
+- **App** — the user-facing application. In production, the App's role narrows to surfacing artifacts retrieved from the Platform, requesting state transitions, and rendering authorization-scoped views derived from SDP-issued credentials. The App does not own the source of truth for any artifact.
+
+### 18.1 Registration and identity
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| DOT issuance | §2.6, §10.1 | App mints DOT client-side via `makeDotObject(...)` on Asset / Claim / Eval Result creation | DPP mints DOT during artifact registration; PIN, owner DID, registration timestamp are Platform-issued | DPP |
+| Asset registration | §2.3 (Registering) | App constructs Asset JSON and stashes in `v22Provisionals.assets` | DPP registers Asset on-chain, returns canonical artifact with PIN + DOT + registration metadata | DPP |
+| Claim registration | §2.3 (Claiming), §10.3 | App constructs Claim JSON in `v22Provisionals.claims` | DPP registers Claim, manages amendment chain | DPP |
+| Endorsement | §2.3, §2.5 | App plays an "endorsing on ledger…" animation step in the hashing sequence UI | DPP writes the cryptographically recorded attestation on-chain during registration; produces cryptographic keys and artifact tokens (DOT, PIN) as outputs | DPP |
+| File hash | §10.1 | App computes mock SHA-256 deterministically from `filename + size` | Hash computed at Platform ingestion or actor's QS adapter; verified by DPP at registration | DPP (verification); App or QS adapter (computation) |
+| File URI | §10.1 | App synthesizes mock URI; for Local Storage uploads, `{bucket}/uploads/{filename}` | URI managed by actor's QS system; DPP indexes the URI alongside the artifact | Actor's QS; DPP indexes |
+| DID resolution | §2.6 | Mock DIDs (`DOT-0x...` strings) per actor | Real W3C DIDs resolved against a DID registry; the Platform maintains the resolver | External (DID registry); Platform (resolution) |
+| DOT lineage writes (initial) | §2.6 | App writes initial lineage entry via `makeDotObject` factory | DPP writes initial lineage entry at registration | DPP |
+| DOT lineage writes (transfer) | §11.7 | App appends to `asset.dot.lineage[]` via `makeTransferRecord` on transfer accept/decline | COP writes transfer lineage entries on-chain | COP |
+
+### 18.2 Storage and file custody
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| Qualified Storage | §2.5 | Mocked: fake file picker shows pre-populated files per actor; Local Storage tab simulates upload | Actor-controlled storage layer (S3, Dropbox, on-prem); Platform indexes URIs but does not host files | Actor (storage); Platform (indexing) |
+| File custody on transfer | §11.7 | Mock URI travels with the DOT on transfer; no actual byte movement | **TBD with client.** Two candidate models: replication (sender's file copied to recipient's QS at accept time, both sides hash identically) vs. pointer (recipient's DOT references sender's still-hosted file). Tracked as backlog #93 | TBD |
+
+### 18.3 Disclosure and Evaluation Agreement lifecycle
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| Disclosure Agreement (SDA) provisioning | §2.3 (Disclosing), §10.4 | App creates DA JSON in `v22Provisionals.disclosureAgreements` on accept of a request | SDP provisions the DA bilaterally; both parties' QS receive identical signed copies; Platform records mutual consent; sCAKs issued for the grantee | SDP |
+| Evaluation Agreement provisioning | §2.3 (Agreeing), §10.5 | App creates EA JSON in `v22Provisionals.evaluationAgreements` paired with the DA | SDP provisions the EA bilaterally; consent records on-chain | SDP |
+| SDA Cryptographic Access Keys (sCAKs) | (not modeled) | Not present in the prototype | SDP issues, rotates, and revokes sCAKs as needed to enforce access rights granted via the DA. Key lifecycle is invisible to users — issued, rotated, and revoked under the inherent authorization of the user on the Platform | SDP |
+| Provisional → active transition | §11 (implicit), §7.4 | App flips `_showAsProvisional` flag in client state on accept | SDP transitions the DA/EA from `pending` to `active` lifecycle status; Platform notifies both parties | SDP |
+| DA amendment | §11.2 | App writes `amendments[]` entry on the DA artifact in `v22Provisionals`; fires `v22-amendment` notification client-side | SDP records amendment as a lifecycle event on the existing DA; both parties' copies update via Platform push; sCAKs re-issued as scope changes | SDP |
+| EA amendment | §11.2 (Amend EA modal #108 pending) | Not yet implemented in V2.2 | Same pattern as DA amendment | SDP |
+| Decline retention | §11.4 | App annotates the provisional DA/EA pair with `_declineMeta` and retains in `v22Provisionals` until user dismisses | SDP transitions the DA/EA to a `declined` lifecycle status; decline reason + declining party recorded on-chain. Dismissal becomes a per-user UI preference (hide-from-view), not data deletion | SDP (state); App (UI preference) |
+| Agreement expiry | §11.5 | App does not currently enforce expiry; `expires` field is informational | SDP runs lifecycle transitions on a clock; `expires` triggers automatic state change to `expired`; auto-renewal (if enabled) handled by SDP | SDP |
+| Agreement revocation | §11.5a (Phase 9D) | App annotates DA/EA with `_revokedMeta` and maintains `revocationRecords` audit ledger in `v22Provisionals`; cascade to paired EA + dependent Eval Results computed client-side; dismissal annotates `_dismissedRevoked` | SDP transitions the DA/EA to a `revoked` lifecycle status; cascade rules executed Platform-side; revocation record signed and on-chain; dismissal is per-user UI preference | SDP |
+| Proof-of-Evaluation DA non-revocability | §11.5a | App suppresses Revoke action labels on Proof-of-Eval DA rows; defensive guard in handler | SDP enforces non-revocability as a lifecycle constraint; App cannot construct a revocation request for these | SDP |
+| Permission Consumption | (not modeled) | Not present in the prototype | SDP tracks when a grantee actually exercises their granted access (e.g., fetching in-scope evidence, running an evaluation) for audit, compensation, and usage-limit enforcement | SDP |
+
+### 18.4 Evaluation and parsing execution
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| Parse execution | §2.3 (Parsing), §11.8 | App runs `makeParseRunArtifacts(...)` client-side; AI fields pre-populated from seeded `aiValue` + `aiConfidence` | PEP runs the parse against the Asset's actual contents using the chosen Parse Template; produces structured key-value pairs; DPP registers the resulting Parse Result | PEP (compute); DPP (record) |
+| Evaluation execution | §2.3 (Evaluating), §11.3 | App runs `makeEvaluationRunArtifacts(...)` client-side; AI assessments pre-populated | REP runs the evaluation against the Claim's referenced Assets using the chosen Requirements Set; produces SAT/UNSAT/MISSING/N/A per row; integrates automated + human-reviewed steps | REP (compute); DPP (record) |
+| Proof-of-Evaluation (POE) artifact | §11.3, §10.6 | The prototype's Evaluation Result is a plain JSON in `v22Provisionals.evaluationResults` | The Evaluation Result *is* the POE artifact — a cryptographically signed, on-chain proof of the evaluation having been conducted, establishing the credibility of claims | REP (POE production); DPP (POE registration) |
+| Human-edited indicators | §10.6 (per-row `_aiOriginalValue`) | App tracks per-row AI-original-value snapshot in client state and persists to the submitted artifact | REP returns AI-original values as part of the result payload; human-edited delta is recorded as part of the Eval Result artifact | REP / DPP |
+| Supersede chain | §11.3 | App computes supersede locally: previous result's `status` flipped to `superseded`, `supersededBy` populated | SDP/REP manage the supersede chain as part of the Eval Result lifecycle | SDP / REP |
+| Self-evaluation | §11.6 | App emits internal proof-of-eval DA + ownership DA via `makeEvaluationRunArtifacts`; both grantor==grantee | Same REP execution path as inter-party evaluation; internal agreements may be implicit (not separate SDP artifacts) since no cross-party consent is required — detail TBD | REP; SDP (internal agreement modeling TBD) |
+| Duplicate detection | §11.3 | App detects duplicate Req Set + evidence combo client-side and blocks submission | DPP enforces duplicate detection at registration; App may pre-check for UX but is not authoritative | DPP (authoritative); App (pre-check UX) |
+
+### 18.5 Access control and view derivation
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| View building | §6, §6.5 | App's `buildViewForActor` filters the shared dataset client-side based on actor identity, agreements, and ownership | App-side view builder *mirrors* SDP-side authorization. SDP is authoritative for what each actor is permitted to see; the App's filter is a UX layer producing views consistent with SDP-issued authorization scopes | SDP (authority); App (UX rendering) |
+| Cross-canvas pull-in rules | §6.5 | App computes pull-ins client-side from active DAs/EAs in the shared dataset | SDP issues per-actor view scopes; App renders within those scopes | SDP (scope issuance); App (rendering) |
+| Counterparty data visibility | §6.4 | App filters out non-disclosed Assets, EAs, Eval Results client-side | SDP enforces data segregation at the access layer; the App never receives data the actor isn't authorized to see | SDP |
+| Internal Actor → Claim suppression | §6.5, §11 (Phase 9A.5) | App-side `deriveAgreementEdges` suppresses redundant ownership edges for visual cleanliness | UX-only concern; no production equivalent. Ownership remains recorded in DPP regardless of edge rendering | App (UX only) |
+
+### 18.6 Notifications and inter-party signaling
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| Notification dispatch | §7.4 | App pushes notifications via React state on every reciprocal action | Platform emits events on lifecycle transitions (SDP, DPP, REP, COP); production notification system subscribes and routes per-actor | Platform (eventing); App (UI rendering) |
+| Notification types | §7.4, §11.5a | Multiple V2.2 types wired client-side (`v22-request`, `v22-accept`, `v22-decline`, `v22-amendment`, `v22-eval-completed`, `v22-da-revoked`, `v22-ea-revoked`, `v22-transfer-*`) | Each maps to a Platform lifecycle event emitted by the owning protocol; notification payload derived from the on-chain state transition | Platform (by protocol) |
+| Reciprocal notification convention | §11 (Phase 9A.5 convention in `CLAUDE.md`) | App must explicitly fire reciprocal notifications on every party-to-party action; audit tracked as backlog #81 | Platform eventing automatically reaches both parties on any bilateral state transition; the convention dissolves | Platform |
+
+### 18.7 Cryptographic primitives
+
+| Concern | Spec section | Prototype behavior | Production behavior | Authority |
+|---|---|---|---|---|
+| Signatures on artifacts | §10 (opening) | None — schemas are mocked, no signatures present | All artifacts cryptographically signed by the issuing actor's DID; signatures verified at registration | DPP |
+| Merkle proofs / on-chain anchoring | §10 (opening) | None | DPP anchors artifact hashes on-chain; Merkle proofs available for any artifact's lineage | DPP |
+| Cryptographic Asset Keys (CAKs) | (not modeled) | Not present in the prototype | CAKs govern the data asset; public CAKs are part of a raw registered data object's identity (alongside PIN and DOT) | DPP |
+
+### 18.8 Out-of-scope for the prototype
+
+The following systems exist in production but are not modeled in the prototype:
+
+- **Credit / billing system.** Prototype tracks credits in a single client-side counter (`activeRole.credits`) and charges synthetic amounts on Asset registration + Claim creation (§2.3). Production billing is a separate Platform service.
+- **Identity and onboarding.** Prototype starts every demo with three actors already in place. Production includes actor onboarding, DID issuance, KYC where applicable, QS provisioning.
+- **AI Shopper backend.** §9 — mock implementation only. Production requires a real LLM-backed agent, indexing of the Public Directory, and a search API.
+- **Public Directory at scale.** §8 — placeholder visualization with mocked supplier clusters. Production requires a real catalog indexing system, search infrastructure, and per-Claim discoverability metadata.
+- **Product Story Protocol (PSP).** Out of scope. PSP orchestrates the interpretation of a product's associations to PCN-registered authors and objects for product storytelling. The prototype's Claim construction is a simpler cousin of PSP-enabled functionality.
+- **Audit log / events log.** Backlog #30 contemplates this; not in V2.2.
+- **Network resilience and offline behavior.** Prototype assumes synchronous in-memory state. Production must handle partial failures, network partitions, and eventual consistency between actor App instances and Platform.
+
+---
+
 *End of spec. Claude Code: begin Phase 1 when Andrew approves. Work to `xhigh` effort, surface ambiguities, perform a structured review against the phase's acceptance criteria before declaring phase completion.*
 
 ---
@@ -1027,3 +1186,4 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 - **§7.4 Notification Types — Phase 8:** section title dropped the "V2.2" prefix.
 - **§11.6 Self-evaluation — Phase 8:** section title dropped the "(Phase 6)" suffix.
 - **§11.8 Parse flow — Phase 8 (new subsection):** documented the V2.2 Parse Evidence flow (`V22ParseEvidenceModal` + `makeParseRunArtifacts` factory + internal Full DA wiring the new Parse Result to its source Asset). Closes the one remaining gap in V2.2's process coverage — parsing was seeded in demo data but had no user-facing creation flow pre-Phase-8.
+- **§1 annotation convention + §18 Production Handoff Map — Spec annotation pass (2026-04-23):** introduced a systematic Prototype-vs-Production annotation convention at the top of the document (four-part callout: Topic / Prototype behavior / Production behavior / Authority); added a client-canon terminology-mapping note on first-use of "Disclosure Agreement" (SDA), "Asset" (Data Object), and the endorsement UI step. Inline flags added in §2.3 (process authority), §2.5 (QS + endorsement, reformatted from prior partial flag), §2.6 (DOT issuance + COP lineage), §6 (view-building + access control + Permission Consumption), §8.5 (Directory Layer, reformatted), §9 (AI Shopper, reformatted), §10 opening (schema fidelity, reformatted), §10.1 / §10.3 / §10.4 / §10.5 / §10.6 (per-schema field-authority flags), §11.1 through §11.8 (every state transition, including new §11.5a for Revocation Phase 9D). New §18 Production Handoff Map consolidates every flag into a master reference for production-build planning, organized by concern area (registration, storage, agreement lifecycle, evaluation execution, access control, notifications, cryptographic primitives, out-of-scope). Protocol names used: DPP (Data Property Protocol), SDP (Selective Disclosure Protocol), REP (RICE Evaluation Protocol), PEP (Parse and Extract Protocol), COP (Change of Ownership Protocol), with "Platform" as umbrella when attribution spans multiple protocols. Addresses client-report issue C1 (Prototype-vs-Production annotation applied inconsistently).
