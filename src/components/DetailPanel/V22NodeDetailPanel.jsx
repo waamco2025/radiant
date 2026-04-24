@@ -10,6 +10,7 @@
 //   • Disclosure Declined (spec §11.4 + Phase 5 add #5) — when node.isDeclined,
 //     show owner's decline reason + "Dismiss" CTA.
 
+import { useEffect, useRef } from 'react'
 import CopyBadge from './shared/CopyBadge'
 import Tooltip from '../Tooltip'
 
@@ -404,15 +405,18 @@ function RevocationNoticeSection({
   }
 
   // "What this means" explainer — same case routing.
+  // Phase 9D.1.2 W1: Cases C/D copy updated to reflect that Eval Results
+  // persist across EA revocation. Eval Results are independent artifacts
+  // once created and are not removed when their originating EA is revoked.
   let consequence
   if (isDa && !viewerIsGrantor) {
     consequence = 'This Claim and its referenced Assets have been removed from your network. Any Evaluation Agreements and Evaluation Results tied to this disclosure have also been terminated. You may request disclosure again from the Claim owner if needed.'
   } else if (isDa && viewerIsGrantor) {
     consequence = 'They no longer have visibility into this Claim. Any Evaluation Agreements and Evaluation Results tied to their access have been terminated. Your Claim and its data remain on your network.'
   } else if (!isDa && !viewerIsGrantor) {
-    consequence = 'You can still view this Claim under your existing Disclosure Agreement, but you can no longer run evaluations against it. Any Evaluation Results you previously submitted have been terminated.'
+    consequence = 'You can still view this Claim under your existing Disclosure Agreement, but you can no longer run evaluations against it. Any Evaluation Results you previously submitted remain visible on your canvas.'
   } else {
-    consequence = 'They no longer have the ability to run evaluations against this Claim. Their prior Evaluation Results have been terminated. Your Claim and its disclosure to them remain active.'
+    consequence = 'They no longer have the ability to run evaluations against this Claim. Prior Evaluation Results remain visible on both canvases. Your Claim and its disclosure to them remain active.'
   }
 
   // Cascade summary line — lists only non-zero categories.
@@ -504,6 +508,15 @@ function V22ClaimPanel({
   // for this Claim on the grantor's canvas.
   revocationNotice = null,
   onDismissRevocationNotice,
+  // Phase 9D.1.2 W1: inline EA revocation pattern (Cases C/D). When
+  // populated, V22ClaimPanel renders the standard panel (Claim persists)
+  // and the targeted EA row expands with a red inline block + Dismiss.
+  // Mutually exclusive with `revocationNotice` — Case routing in V2App
+  // suppresses the Claim-level notice for kind='EA' and populates these
+  // instead.
+  expandedRevokedEaId = null,
+  expandedRevokedEaInfo = null,
+  onDismissExpandedRevokedEa,
   resolveSubjectName,
   resolveClaimName,
   onAgreementRowClick,
@@ -752,6 +765,9 @@ function V22ClaimPanel({
             evaluationAgreements={evaluationAgreementsForNode}
             revokedDisclosureAgreements={revokedDisclosureAgreementsForNode}
             revokedEvaluationAgreements={revokedEvaluationAgreementsForNode}
+            expandedRevokedEaId={expandedRevokedEaId}
+            expandedRevokedEaInfo={expandedRevokedEaInfo}
+            onDismissExpandedRevokedEa={onDismissExpandedRevokedEa}
             activeParty={activeParty}
             resolveSubjectName={resolveSubjectName}
             resolveClaimName={resolveClaimName}
@@ -1115,6 +1131,13 @@ function DisclosureAgreementRow({
 
 function EvaluationAgreementRow({
   ea, activeParty, claimName, onRowClick, onRevokeEa,
+  // Phase 9D.1.2 W1: inline revocation block for Cases C/D. Populated when
+  // this EA is the one targeted by a v22-ea-revoked notification click.
+  // Shape: { revokerParty, revokedDate, reason, cascadedFromDa }. When non-
+  // null, the row renders an expanded red-tinted block beneath its content
+  // with case-routed copy + inline Dismiss.
+  expandedRevokedInfo,
+  onDismissExpandedRevokedEa,
 }) {
   const isGrantor = activeParty === ea.grantor.party
   const isGrantee = activeParty === ea.grantee.party
@@ -1139,6 +1162,18 @@ function EvaluationAgreementRow({
   // only (placeholder pending #108).
   const showAmend = isGrantor && !isInternal && !isRevoked
   const showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked
+
+  // Phase 9D.1.2 W1: scroll the row into view when it becomes the expanded-
+  // revocation target. Fires once on mount (and again if the targeted id
+  // changes to this row). `block: 'center'` centers vertically inside the
+  // Detail Panel's scroll container.
+  const rowRef = useRef(null)
+  const isExpanded = !!expandedRevokedInfo
+  useEffect(() => {
+    if (isExpanded && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [isExpanded])
 
   const rowInner = (
     <AgreementRow onClick={isRevoked ? null : onRowClick}>
@@ -1177,11 +1212,91 @@ function EvaluationAgreementRow({
     </AgreementRow>
   )
 
-  // Phase 9D.1: revoked EA rows render dimmed via a wrapper.
-  if (isRevoked) {
-    return <div style={{ opacity: 0.5, pointerEvents: 'none' }}>{rowInner}</div>
-  }
-  return rowInner
+  // Phase 9D.1.2 W1: inline revocation block — Cases C/D. Renders underneath
+  // the standard row. Case routing is the same viewer-side + kind logic used
+  // by `RevocationNoticeSection`, specialized to kind='EA' so only the C/D
+  // copy variants apply.
+  const inlineBlock = isExpanded ? (() => {
+    const viewerIsGrantor = activeParty === ea.grantor.party
+    const info = expandedRevokedInfo
+    let headerCopy, consequence
+    if (!viewerIsGrantor) {
+      // Case C: grantor revoked your EA, you're the grantee.
+      headerCopy = `${info.revokerParty} has revoked your Evaluation Agreement for this Claim.`
+      consequence = 'You can still view this Claim under your existing Disclosure Agreement, but you can no longer run evaluations against it. Any Evaluation Results you previously submitted remain visible on your canvas.'
+    } else {
+      // Case D: grantee revoked their EA, you're the grantor.
+      headerCopy = `${info.revokerParty} has revoked their Evaluation Agreement for this Claim.`
+      consequence = 'They no longer have the ability to run evaluations against this Claim. Prior Evaluation Results remain visible on both canvases. Your Claim and its disclosure to them remain active.'
+    }
+    const dateStr = formatShortDate(info.revokedDate) || ''
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: '10px 12px',
+        background: 'color-mix(in srgb, var(--accent-red) 8%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
+        borderRadius: 6,
+      }}>
+        <div style={{
+          fontSize: 10, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)',
+          fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+          marginBottom: 6,
+        }}>
+          Evaluation Agreement Revoked{dateStr ? ` · ${dateStr}` : ''}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+          {headerCopy}
+        </div>
+        <div style={{
+          fontSize: 11, marginTop: 6,
+          color: info.reason ? 'var(--text-secondary)' : 'var(--text-dim)',
+          fontStyle: 'italic', lineHeight: 1.5,
+        }}>
+          {info.reason ? `"${info.reason}"` : '(No reason given)'}
+        </div>
+        <div style={{
+          fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginTop: 8,
+        }}>
+          {consequence}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onDismissExpandedRevokedEa) onDismissExpandedRevokedEa(ea.id)
+            }}
+            style={{
+              padding: '6px 14px',
+              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--bg-deep)', background: 'var(--accent-indigo)',
+              border: '1px solid var(--accent-indigo)', borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    )
+  })() : null
+
+  // Wrap in rowRef container so scrollIntoView can target the full row
+  // (including any inline block beneath it). Revoked rows dim by default,
+  // but when expanded (Cases C/D), the row lifts back to full opacity and
+  // pointer-events so the inline Dismiss is clickable. Dimming the row
+  // above the revocation block would read as "this isn't actionable."
+  const outerStyle = (isRevoked && !isExpanded)
+    ? { opacity: 0.5, pointerEvents: 'none' }
+    : null
+  return (
+    <div ref={rowRef} style={outerStyle}>
+      {rowInner}
+      {inlineBlock}
+    </div>
+  )
 }
 
 function AgreementsSection({
@@ -1192,6 +1307,13 @@ function AgreementsSection({
   // Dismiss context only — grantor side (no revoked artifact) skips this.
   revokedDisclosureAgreements = [],
   revokedEvaluationAgreements = [],
+  // Phase 9D.1.2 W1: inline EA revocation pattern (Cases C/D). When
+  // `expandedRevokedEaId` matches a revoked EA row, that row renders its
+  // inline red block with the payload from `expandedRevokedEaInfo` and a
+  // Dismiss button wired to `onDismissExpandedRevokedEa`.
+  expandedRevokedEaId = null,
+  expandedRevokedEaInfo = null,
+  onDismissExpandedRevokedEa,
   activeParty,
   resolveSubjectName,
   resolveClaimName,
@@ -1244,6 +1366,8 @@ function AgreementsSection({
                 claimName={resolveClaimName ? resolveClaimName(ea.claimId) : null}
                 onRowClick={onRowClick ? () => onRowClick('evaluation', ea) : undefined}
                 onRevokeEa={onRevokeEa}
+                expandedRevokedInfo={expandedRevokedEaId === ea.id ? expandedRevokedEaInfo : null}
+                onDismissExpandedRevokedEa={onDismissExpandedRevokedEa}
               />
             ))}
           </div>
@@ -1268,6 +1392,8 @@ function AgreementsSection({
                 ea={ea}
                 activeParty={activeParty}
                 claimName={resolveClaimName ? resolveClaimName(ea.claimId) : null}
+                expandedRevokedInfo={expandedRevokedEaId === ea.id ? expandedRevokedEaInfo : null}
+                onDismissExpandedRevokedEa={onDismissExpandedRevokedEa}
               />
             ))}
           </div>

@@ -1170,3 +1170,45 @@ Feels like a structured panel section rather than a floated modal. Pattern-match
 **Runtime verification:** Build clean. Preview (`http://localhost:5173/v2.html`) reloads cleanly post-edit. Manual end-to-end UI walkthrough (Cases A/B/C/D + Dismiss persistence test + DA-panel-Revoke + EA-panel-Revoke) constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. Data-layer invariants: `_dismissedRevoked` filter applied in three places in `buildViewForActor` (`partyDisclosureAgreements`, `evaluationAgreements`, `ownedEvaluationResults` + `visibleEvaluationResults`); dismissed items excluded from both `active*` and `revoked*` output arrays automatically.
 
 **Status:** [x] Complete.
+
+### Phase 9D.1.2 completion notes (2026-04-24) — per-EA inline revocation + loose ends
+
+Four workstreams. The big one is the per-EA inline revocation pattern; the tooltip arrow fix is surgical; the backlog filing and docs round it out. Single commit.
+
+**Workstream 1 — per-EA inline revocation pattern (Cases C/D).** EA-only revocation (DA stays active, only EA is revoked) no longer surfaces a Claim-level Revocation Notice Section. The Claim isn't being removed — only the one EA relationship — so anchoring the dismiss ceremony at the Claim level was structurally wrong. New pattern:
+
+1. Counterparty clicks the `v22-ea-revoked` notification.
+2. V2App's notification handler sets `v22ActiveRevocationNotice` with `kind: 'EA'` (routing key). Canvas pans + selects Claim.
+3. V22ClaimPanel renders its **standard** branch (Claim is not revoked; `isRevoked = false`).
+4. V2App derivation computes two new values and passes them to the panel: `expandedRevokedEaId` (the targeted EA's id — comes from `notif.agreementId`) and `expandedRevokedEaInfo` (`{ revokerParty, revokedDate, reason }`).
+5. V22ClaimPanel threads these through `AgreementsSection` → `EvaluationAgreementRow`. Each row compares its own `ea.id` against `expandedRevokedEaId`; the matching row gets a non-null `expandedRevokedInfo` prop.
+6. In the matching row: a `useEffect` keyed on `isExpanded` calls `rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })` — the panel body's `overflowY: auto` container scrolls to center the row. Then the row renders its inline red block beneath its standard content: "Evaluation Agreement Revoked · YYYY-MM-DD" header, case-C-or-D copy summary, italic reason blockquote, consequence paragraph, right-aligned inline Dismiss button.
+7. Dismiss calls `handleV22DismissRevokedEa(eaId)` in V2App, which annotates the one EA with `_dismissedRevoked: true` and clears `v22ActiveRevocationNotice`. `buildViewForActor`'s existing 9D.1.1 pre-filter picks up the flag and removes the EA from all view outputs (active + revoked subsections). The Claim and any Eval Results remain untouched.
+
+**Routing via `v22ActiveRevocationNotice.kind`:**
+- `kind === 'DA'` → `revocationNoticeForPanel` populated; `expandedRevokedEaId/Info` null. Case A (REVOKED branch) or Case B (standard + top-level notice).
+- `kind === 'EA'` → `revocationNoticeForPanel` null; `expandedRevokedEaId/Info` populated. Cases C/D (standard + inline row expansion).
+
+Task brief's suggested routing was "whether the Claim has `_revokedMeta` (A/B) vs whether only its EA has `_revokedMeta` (C/D)". I used the notification kind directly since it's unambiguous and doesn't require traversing shared state to distinguish. Same outcome, cleaner code.
+
+**Copy update for Cases C/D.** Both the new inline block copy and the existing `RevocationNoticeSection` Case C/D strings now reflect that Eval Results persist across EA revocation (they're independent artifacts, not cascaded). Specifically:
+- Case C: "…you can no longer run evaluations against it. Any Evaluation Results you previously submitted **remain visible on your canvas**." (was: "…have been terminated.")
+- Case D: "…Prior Evaluation Results **remain visible on both canvases**. Your Claim and its disclosure to them remain active." (was: "…have been terminated.")
+
+The shared `RevocationNoticeSection` component's C/D strings are updated too even though those cases no longer render the section — for consistency if the component is ever reused or the routing contract changes. The actual view path for Cases C/D now goes through the inline `EvaluationAgreementRow` expansion.
+
+**New `handleV22DismissRevokedEa` (V2App.jsx).** Pattern-matched against 9D.1.1 Fix 6's `handleV22DismissRevoked` for DAs. Annotates only the single targeted EA with `_dismissedRevoked: true`; does NOT touch Eval Results or the DA. `buildViewForActor`'s pre-filter handles the rest. Clears `v22ActiveRevocationNotice` on dismiss so the inline block collapses on next render.
+
+**Workstream 2 — Tooltip arrow alignment.** `Tooltip.jsx` arrow positioning used `left: '50%'; transform: translateX(calc(-50% + Xpx))` on a `width: 0` triangle with `border-left/right: ARROW_SIZE` each. The CSS Transforms spec resolves percentage translates against the **border-box**, so `-50%` on a 0-width-with-borders element resolved to `-ARROW_SIZE` in strict engines (not 0 as it would if content-box were referenced). Result: arrow border-box center sat at `tooltip 50% - ARROW_SIZE`, not at tooltip center. The visual misalignment reported in QA.
+
+Fix: replace with direct pixel math `left: calc(50% - ARROW_SIZEpx + Xpx)` (no transform). Border-box left edge lands at `tooltip 50% - ARROW_SIZE + X`, border-box center at `tooltip 50% + X` — exactly where the anchor sits (when X = anchorCenterX - clampedX = 0 for unclamped cases). Applied to both the border arrow and the 1px-inset fill triangle. Behavior is now independent of browser reference-box interpretation.
+
+**Workstream 3 — Backlog #126 filed.** EA reinstate flow on a Claim with existing DA. Sits in Process Flows near #113 (DA/EA separation); noted as likely shipping with #113's "warm path" in Phase 11 rather than standalone.
+
+**Workstream 4 — Docs.** polish-backlog.md: #112 status note extended with 9D.1.2 entry; new #127 ✅ for the tooltip arrow fix; #126 filed; Update Log entry prepended. CLAUDE.md: this note. Changelog modal: new v0.9.10 / 9D.1.2 entry prepended above 9D.1.1. Touched only the Changelog array.
+
+**Deviations from task brief:** none material. Task suggested routing key could be `_revokedMeta` location (Claim vs EA); implementation uses `v22ActiveRevocationNotice.kind` (set from notification type) — equivalent routing, simpler code. No dedicated `v22ScrollToRevokedEa` state as the task brief sketched; the targeting ID is just `expandedRevokedEaId` derived from `v22ActiveRevocationNotice.notification.agreementId`. `scrollIntoView` lives on the EA row itself, triggered by its own `useEffect` on the `isExpanded` flag — cleaner than a panel-level scroll coordinator.
+
+**Runtime verification:** Build clean (same 86-module count as 9D.1.1; no new/removed modules). Preview reloads cleanly; no new console errors beyond the pre-existing `NaN is an invalid value for the left` warnings (unchanged since pre-9E). Scroll-into-view + inline block + inline Dismiss + Case C/D copy routing all verified structurally via source re-read. UI walkthrough still gated by V2Canvas 3D raycaster DOM-dispatch limitation — manual mouse interaction is the verification path for the four cases.
+
+**Status:** [x] Complete.

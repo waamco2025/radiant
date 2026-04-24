@@ -835,6 +835,25 @@ export default function V2App() {
   // `buildViewForActor` pre-filters all `_dismissedRevoked` items out of
   // every view-layer output. Audit records in `revocationRecords` are
   // unaffected.
+  // Phase 9D.1.2 W1: EA-only revocation dismiss (Cases C/D). Unlike the
+  // DA revocation path, this dismisses ONLY the one targeted EA — the
+  // Claim and any DA remain untouched. Eval Results persist across EA
+  // revocation by design (they're independent artifacts once created).
+  // Annotation pattern matches the DA path (Phase 9D.1.1 Fix 6) so the
+  // provisional override keeps shadowing the seeded row via mergeById.
+  const handleV22DismissRevokedEa = useCallback((eaId) => {
+    if (!eaId) return
+    setV22Provisionals((prev) => ({
+      ...prev,
+      evaluationAgreements: prev.evaluationAgreements.map((e) =>
+        e.id === eaId && e._revokedMeta
+          ? { ...e, _dismissedRevoked: true }
+          : e,
+      ),
+    }))
+    setV22ActiveRevocationNotice(null)
+  }, [])
+
   const handleV22DismissRevoked = useCallback((claimId) => {
     setV22Provisionals((prev) => {
       const revokedDaIds = new Set(
@@ -4122,35 +4141,49 @@ export default function V2App() {
             )
             revokedEvaluationAgreementsForNode = allRevokedEas.filter((e) => e.claimId === node.id)
           }
-          // Phase 9D.1.1 (Fix 5): revocation notice payload renders on the
-          // standard panel for both grantor and grantee viewers — the gate
-          // on `activeRole.party === node.owner` was dropped. Case A still
-          // uses the REVOKED branch (driven by `_revokedMeta`); Cases B /
-          // C / D all route through this payload. Case routing inside the
-          // section uses `viewerIsGrantor` derived per-panel from the
-          // active party vs claim owner.
+          // Phase 9D.1.2 W1: notification routing splits by kind.
+          //   • kind === 'DA' (Cases A/B) → `revocationNoticeForPanel` drives
+          //     the Claim-level notice at the top of the panel body (Case B)
+          //     or the REVOKED branch's embedded notice (Case A).
+          //   • kind === 'EA' (Cases C/D) → `expandedRevokedEaInfo` drives
+          //     an inline red block inside the targeted EA row within the
+          //     Agreements Section. The Claim itself isn't being dismissed —
+          //     only the one EA relationship — so the Claim-level notice is
+          //     suppressed.
+          // Routing via the notification `kind` is simpler than inspecting
+          // `_revokedMeta` on the Claim (Case B has no Claim-level meta
+          // anyway; it's always an EA or DA annotation).
           let revocationNoticeForPanel = null
+          let expandedRevokedEaId = null
+          let expandedRevokedEaInfo = null
           if (v22ActiveRevocationNotice && node.v22Type === 'CLAIM'
               && v22ActiveRevocationNotice.targetClaimId === node.id) {
             const notif = v22ActiveRevocationNotice.notification
-            // daType derivation: look up the referenced DA in the shared pool.
-            // For EA notifications, daType is the type of the paired DA (used
-            // only by DA copy variants — the EA copy branch ignores it).
-            let daType = 'full'
-            if (notif?.agreementId) {
-              const da = sharedForPanel.disclosureAgreements.find((d) => d.id === notif.agreementId)
-              if (da?.type && da.type !== 'provisional') daType = da.type
-            }
-            revocationNoticeForPanel = {
-              kind: v22ActiveRevocationNotice.kind,
-              daType,
-              revokerParty: notif?.from?.name,
-              revokedDate: notif?.date,
-              reason: notif?.reason,
-              cascadeEa: !!notif?.cascadeIncludesEa,
-              cascadeEvalResultCount: Array.isArray(notif?.cascadeIncludesEvalResults)
-                ? notif.cascadeIncludesEvalResults.length
-                : 0,
+            if (v22ActiveRevocationNotice.kind === 'DA') {
+              // daType derivation: look up the referenced DA in the shared pool.
+              let daType = 'full'
+              if (notif?.agreementId) {
+                const da = sharedForPanel.disclosureAgreements.find((d) => d.id === notif.agreementId)
+                if (da?.type && da.type !== 'provisional') daType = da.type
+              }
+              revocationNoticeForPanel = {
+                kind: 'DA',
+                daType,
+                revokerParty: notif?.from?.name,
+                revokedDate: notif?.date,
+                reason: notif?.reason,
+                cascadeEa: !!notif?.cascadeIncludesEa,
+                cascadeEvalResultCount: Array.isArray(notif?.cascadeIncludesEvalResults)
+                  ? notif.cascadeIncludesEvalResults.length
+                  : 0,
+              }
+            } else if (v22ActiveRevocationNotice.kind === 'EA') {
+              expandedRevokedEaId = notif?.agreementId || null
+              expandedRevokedEaInfo = {
+                revokerParty: notif?.from?.name,
+                revokedDate: notif?.date,
+                reason: notif?.reason,
+              }
             }
           }
           const resolveSubjectName = (subject) => {
@@ -4296,6 +4329,10 @@ export default function V2App() {
                 revokedEvaluationAgreementsForNode={revokedEvaluationAgreementsForNode}
                 revocationNotice={revocationNoticeForPanel}
                 onDismissRevocationNotice={() => setV22ActiveRevocationNotice(null)}
+                // Phase 9D.1.2 W1 — inline EA revocation pattern (Cases C/D)
+                expandedRevokedEaId={expandedRevokedEaId}
+                expandedRevokedEaInfo={expandedRevokedEaInfo}
+                onDismissExpandedRevokedEa={handleV22DismissRevokedEa}
               />
             </div>
           )
@@ -4387,6 +4424,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-24', label: 'Phase 9D.1.2', items: [
+                  'Evaluation-Agreement-only revocations now show the dismiss ceremony inline on the affected EA row — the Claim-level notice is used only when the Claim itself is being removed',
+                  'Detail Panel auto-scrolls to the revoked EA row when you click its notification',
+                  'Evaluation Results now correctly persist when an Evaluation Agreement is revoked (they are independent artifacts)',
+                  'Tooltip arrow alignment fixed — small visual offset on Amend / Revoke row tooltips',
+                ]},
                 { version: '0.9.10', date: '2026-04-22', label: 'Phase 9D.1.1', items: [
                   'Fixed: Dismissing a revoked Claim now actually dismisses it — previously the seeded agreement would reappear after dismiss',
                   'Revoked agreements now show the revocation date (not the original created date)',

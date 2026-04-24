@@ -161,15 +161,25 @@ const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, posit
   }
 
   // Arrow: small triangle pointing toward the anchor.
-  // `left` positioned in pixel space relative to the tooltip's own bounds
-  // AFTER the translate(-50%,…) — so the arrow origin is at the tooltip's
-  // horizontal midpoint unless the anchor centre was clamped off-screen,
-  // in which case we nudge the arrow toward the anchor edge.
+  // Phase 9D.1.2 W2: arrow positioned via direct pixel math, not a
+  // `translateX(-50%)` on a 0-width element. The prior approach relied on
+  // the CSS-transforms spec's percentage rule that `-50%` refers to the
+  // element's *border-box* width (= ARROW_SIZE * 2 for a 0-width triangle);
+  // in practice this resolved to -ARROW_SIZE in some browsers and 0 in
+  // others, producing a small horizontal misalignment. Explicit `left: calc`
+  // makes the intent unambiguous regardless of engine.
+  //
+  // We want the triangle's visual center at `tooltipWidth/2 + offset` so it
+  // points at the anchor. For an element with width: 0 and
+  // border-left: ARROW_SIZE / border-right: ARROW_SIZE, the border-box
+  // center sits ARROW_SIZE px right of the element's border-box left edge,
+  // and the `left` property positions the border-box's left edge. So:
+  //   element-left = tooltipWidth/2 + offset - ARROW_SIZE
+  //                = calc(50% - ARROW_SIZE + offset)
   const anchorOffsetFromTooltipCenter = anchorCenterX - clampedX
   const arrowStyle = {
     position: 'absolute',
-    left: '50%',
-    transform: `translateX(calc(-50% + ${anchorOffsetFromTooltipCenter}px))`,
+    left: `calc(50% - ${ARROW_SIZE}px + ${anchorOffsetFromTooltipCenter}px)`,
     width: 0,
     height: 0,
     borderLeft: `${ARROW_SIZE}px solid transparent`,
@@ -185,22 +195,22 @@ const TooltipBody = forwardRef(function TooltipBody({ content, anchorRect, posit
         }),
   }
   // Inner arrow fill (1px inset) to match the border-on-card look.
+  const FILL = ARROW_SIZE - 1
   const arrowFillStyle = {
     position: 'absolute',
-    left: '50%',
-    transform: `translateX(calc(-50% + ${anchorOffsetFromTooltipCenter}px))`,
+    left: `calc(50% - ${FILL}px + ${anchorOffsetFromTooltipCenter}px)`,
     width: 0,
     height: 0,
-    borderLeft: `${ARROW_SIZE - 1}px solid transparent`,
-    borderRight: `${ARROW_SIZE - 1}px solid transparent`,
+    borderLeft: `${FILL}px solid transparent`,
+    borderRight: `${FILL}px solid transparent`,
     ...(above
       ? {
           top: 'calc(100% - 1px)',
-          borderTop: `${ARROW_SIZE - 1}px solid var(--bg-card)`,
+          borderTop: `${FILL}px solid var(--bg-card)`,
         }
       : {
           bottom: 'calc(100% - 1px)',
-          borderBottom: `${ARROW_SIZE - 1}px solid var(--bg-card)`,
+          borderBottom: `${FILL}px solid var(--bg-card)`,
         }),
   }
 
