@@ -763,9 +763,20 @@ export default function V2App() {
             .filter((er) => er.evaluationAgreementId === pairedEa.id)
             .map((er) => er.id)
           if (erIdsUnderEa.length > 0) {
+            // Phase 9D.1.6: discriminate external POE DAs (grantor !==
+            // grantee, e.g. Bob → Alice) from internal ownership DAs
+            // (grantor === grantee, e.g. Bob → Bob). Both share the same
+            // (subject.kind === 'evalResult', subject.id === er.id) shape
+            // so the prior filter caught both. Only the external POE DA
+            // confers cross-party visibility and should cascade-revoke;
+            // the internal ownership DA wires the ER to the evaluator's
+            // own Asset on their own canvas (e.g. Bob's Avionics Module
+            // ownership edge to his MIL-PRF-55681 Compliance ER) and
+            // would orphan that edge if cascaded.
             const poeDas = (shared.disclosureAgreements || []).filter((d) =>
               d.subject?.kind === 'evalResult'
               && erIdsUnderEa.includes(d.subject.id)
+              && d.grantor.party !== d.grantee.party
               && !d._revokedMeta,
             )
             for (const poe of poeDas) {
@@ -4580,6 +4591,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.1.6', items: [
+                  'Fixed: when a counterparty revokes your Disclosure Agreement, your Evaluation Result on your own canvas no longer loses its ownership edge to your Asset',
+                ]},
                 { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.1.5', items: [
                   'Fixed: when you revoke a Disclosure Agreement, the counterparty\'s Evaluation Result now disappears from your canvas immediately instead of waiting for them to dismiss it on their side',
                 ]},

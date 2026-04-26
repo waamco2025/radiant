@@ -1310,3 +1310,30 @@ Surgical one-line fix to v2_2Data.js. Closes the loop on the 9D.1.4 POE cascade 
 **Runtime verification:** Build clean. Preview reloads cleanly post-edit, no new console errors beyond pre-existing `NaN` warnings. Code-level verification via source re-read confirms the diff is exactly the one-line addition described in the task brief, in the location described. End-to-end UI walkthrough (Alice revokes → Bob's ER disappears immediately from Alice's canvas → switch to Bob → ER persists with Avionics Module ownership edge → Bob clicks Dismiss → modal opens → Confirm → ER removed) constrained by V2Canvas 3D raycaster DOM-dispatch limitation; data-layer invariants are sufficient for confidence in the fix.
 
 **Status:** [x] Complete.
+
+### Phase 9D.1.6 completion notes (2026-04-26) — preserve internal ownership DA in POE cascade
+
+Surgical one-line fix to V2App.jsx's POE cascade filter. Closes a follow-on issue from 9D.1.5 QA on the grantee's side.
+
+**Root cause.** Phase 9D.1.4's POE cascade located candidate DAs by `subject.kind === 'evalResult' && subject.id === er.id`. Two distinct DA types match this shape:
+1. **External POE DA** (e.g., Bob → Alice for Bob's MIL-PRF-55681 Compliance ER) — gives Alice cross-party visibility on Bob's ER. Should cascade-revoke when Alice revokes Bob's primary DA.
+2. **Internal ownership DA** (e.g., Bob → Bob for the same ER) — wires the ER to Bob's Avionics Module on his own canvas via the v2_2Data edge derivation. This is platform plumbing for ownership rendering, not a cross-party access agreement, and should NOT cascade with Alice's revocation.
+
+Cascading both annotated Bob's internal ownership DA with `_revokedMeta`. The 9D.1.5 view-layer filter then excluded that internal DA from `proofDaEvalResultIds` — but more importantly, edge derivation in v2_2Data treats `_revokedMeta` DAs as out-of-view, so the ownership edge between Bob's Avionics Module and his ER vanished. Visual symptom: Bob's ER appeared as an orphaned floating node post-revocation.
+
+**Fix.** Added `&& d.grantor.party !== d.grantee.party` to the candidate filter in `handleRevokeConfirm`'s POE cascade block. Internal ownership DAs (grantor === grantee) are excluded from the cascade. External POE DAs continue to cascade as 9D.1.4 + 9D.1.5 designed.
+
+**Why the fix is safe.**
+- Alice's view-side cascade unaffected — the external POE DA she relies on for visibility still gets `_revokedMeta`, the 9D.1.5 view filter still excludes it from her `visibleEvaluationResults`, and edge derivation drops her POE edge.
+- Bob's internal ownership DA stays unannotated — his ownership edge to the ER persists, the ER renders normally on his canvas with full edges intact.
+- Eval Result artifact still unannotated (Fix 6 invariant preserved across both 9D.1.5 and 9D.1.6).
+- Cases B/C/D unchanged — they don't trigger the POE cascade.
+- Bob's orphaned-ER Dismiss flow unchanged — it operates on the ER artifact (`_dismissedRevoked`) independently of any DA annotation.
+
+**Implementation note.** The discriminator was added to the candidate `.filter` rather than as a `continue` inside the loop body. Same outcome but keeps the candidate list itself accurate — easier to reason about + extends cleanly if a future phase adds another cascade arm.
+
+**Deviations:** none.
+
+**Runtime verification:** Build clean. Preview reloads cleanly. Code-level verification via source re-read confirms the diff is exactly `&& d.grantor.party !== d.grantee.party` added to the POE candidate filter. End-to-end UI walkthrough (revoke → verify Bob's ownership edge persists → Bob dismisses → ER + edges removed) constrained by V2Canvas 3D raycaster DOM-dispatch limitation; data-layer invariants are sufficient for confidence in the fix.
+
+**Status:** [x] Complete.
