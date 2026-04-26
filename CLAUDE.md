@@ -1337,3 +1337,80 @@ Cascading both annotated Bob's internal ownership DA with `_revokedMeta`. The 9D
 **Runtime verification:** Build clean. Preview reloads cleanly. Code-level verification via source re-read confirms the diff is exactly `&& d.grantor.party !== d.grantee.party` added to the POE candidate filter. End-to-end UI walkthrough (revoke → verify Bob's ownership edge persists → Bob dismisses → ER + edges removed) constrained by V2Canvas 3D raycaster DOM-dispatch limitation; data-layer invariants are sufficient for confidence in the fix.
 
 **Status:** [x] Complete.
+
+### Phase 9D.2 completion notes (2026-04-26) — unravel animation primitive (#124)
+
+Closes backlog #124. Builds the animation primitive that plays when a revoked node is dismissed from the canvas, restoring the visual continuity that was lost when V2.2's instant-removal pattern shipped. Wired into the two revocation-dismiss callers in scope; designed reusably for future "leaves the canvas" scenarios.
+
+**Scoping decision (upfront).** The brief's most expensive piece — the Stage 2 clockwise dashed-border unwind — would have required either an SVG overlay tracking each card's pos+size through pan/zoom OR a custom canvas2D layer. Both add a meaningful chunk of new infrastructure for one animation. The brief explicitly allowed a fallback ("dashed border fades to transparent over 600ms"). Shipped the fallback approach: a single coordinated CSS keyframe (`node-unravel`) that handles Stages 2-4 together — border erodes (border-color → transparent) + content fades (opacity → 0) + card settles (translateY → 6px). Lost: the choreographed unwind direction. Kept: the perceptual sense of "card erodes and goes away."
+
+**Architecture overview.**
+
+The primitive lives in `src/v2/animations/unravel.js` and exposes a single async function:
+
+```js
+playUnravelAnimation({
+  nodeId,
+  canvasRef,            // V2Canvas imperative handle
+  setUnravelingNodeId,  // React state setter on V2App
+  ensureFocused = true,
+  onComplete,
+})
+```
+
+It runs four stages sequentially-with-overlap, returns a Promise that resolves after the last stage settles plus a 60ms paint buffer. Callers `await` the Promise before mutating state to remove the artifact — critical, because mutating first would let the view-builder filter drop the artifact mid-animation.
+
+**Stage 0 — Pan/zoom (`~400ms`, optional).** Uses V2Canvas's existing `animatedPanToWithZoom` via the imperative handle. Skipped when `isFocusedOnPoint(x, y, 60px)` returns true at `zoom >= 0.6`. Two new V2Canvas methods support this:
+- `getNodeWorldPos(nodeId)` — looks up node in the current layer, returns `{ x, y }` or null.
+- `isFocusedOnPoint(x, y, tolPx)` — compares cam center to world point at current zoom; pixel-distance threshold + zoom sanity check.
+
+**Stage 1 — Edge retract (`~400ms`).** New V2Canvas imperative method `playEdgeRetract(nodeId, durationMs)`. Implementation:
+1. Walks `edgeGroupRef.current.children` filtering for Line2 instances where `userData.from === nodeId || userData.to === nodeId`.
+2. For each candidate, captures the original curve points by reconstructing the flattened `[x,y,z,...]` array from the Line2's `instanceStart` + `instanceEnd` buffer attributes (the buildEdges path uses `geometry.setPositions(positions)` to populate these).
+3. Per-RAF-frame, interpolates each curve point toward the OPPOSITE endpoint (anchor end). Per-point lerp factor = `clamp01(eased / distFromTarget)`, so points closer to the target end retract first — visually the line "pulls back" rather than collapsing uniformly. Ease-out cubic.
+4. `line.geometry.setPositions(newPositions)` per frame; `line.computeLineDistances()` for dashed lines.
+5. Material opacity tail-fade in the last 30% of the duration so the line doesn't end as a single bright pixel at the anchor.
+6. `dirtyRef.current = true` per frame to trigger render.
+7. Returns a Promise that resolves at `t === 1`.
+
+Try/catch around `setPositions` swallows the rare case where the geometry has been disposed mid-animation (layer change). 
+
+**Stages 2-4 — Card unravel (`~900ms`).** Single coordinated CSS keyframe in `index.css`:
+
+```css
+@keyframes node-unravel {
+  0%   { opacity: 1;   transform: translateY(0); border-color: var(--accent-red); }
+  33%  { opacity: 0.95; border-color: color-mix(in srgb, var(--accent-red) 40%, transparent); }
+  70%  { opacity: 0.4;  border-color: transparent; transform: translateY(2px); }
+  100% { opacity: 0;    border-color: transparent; transform: translateY(6px); }
+}
+```
+
+Triggered via the `_unraveling` flag on the node, which AssetNode reads to apply `animation: 'node-unravel 900ms ease-in-out forwards'` to both full-card and mini-card render paths. `forwards` keeps the final transparent state until the node unmounts (the primitive holds the flag for the full duration + 60ms buffer).
+
+**Sequencing.** Stage 1 starts at t=0 (after Stage 0's pan settles). Stage 2-4 starts at `t=300ms` so it overlaps Stage 1's tail — the user sees the edge halfway-retracted as the card begins to erode. Total ~1.2s after pan, within the 1.0–1.3s budget the original spec set.
+
+**State plumbing.** New React state: `v22UnravelingNodeId` in V2App. The `v22DataWithReveal` memo grew a stamping branch: when the unraveling id matches a node, that node gets `_unraveling: true` overlaid (alongside the existing `_isNew` / `_isEdgeEndpoint` decoration). The memo deps gained `v22UnravelingNodeId`. AssetNode (full card + mini card) reads `node._unraveling` and conditionally applies the animation style.
+
+**Caller wiring.** Both targeted dismiss handlers (`handleV22DismissRevoked` and `handleV22DismissOrphanedEvalResult`) became `async`. The pattern:
+
+```js
+await playUnravelAnimation({ nodeId, canvasRef, setUnravelingNodeId: setV22UnravelingNodeId })
+setV22Provisionals(prev => ({ ... annotate _dismissedRevoked ... }))
+setSel(null)  // panel close moved past the await so it doesn't snap shut mid-anim
+```
+
+Other dismiss handlers (`handleV22DismissRevokedEa`, `handleV22DismissRevokedDaGrantorSide`, `handleV22DismissDeclined`) operate on agreement rows or pure state without removing canvas nodes — they were not touched.
+
+**Edge-case behavior.**
+- **Mid-animation navigation** (role switch, panel close): the primitive doesn't observe React state. The Promise resolves on its own timeline; the caller's mutation runs unconditionally. AssetNode unmount during the CSS animation just stops the animation — no crash.
+- **Concurrent dismisses**: in practice, modal-driven dismiss flows are serial. No queueing implemented; if two primitives ran simultaneously they'd animate independently and not conflict (each targets a different nodeId, each sets/clears its own flag — though `setV22UnravelingNodeId` would race; ok per the brief's "implementation choice; document the chosen approach" allowance).
+- **Geometry disposed mid-animation**: try/catch around `setPositions` swallows the error; the animation abandons that target silently.
+
+**Deviations.**
+- **Stage 2 clockwise unwind shipped as the fallback** (CSS coordinated keyframe). Per brief allowance.
+- **No queueing for concurrent invocations.** Per brief allowance — modal-driven dismisses are serial in practice. Documented in the primitive's header comment.
+
+**Runtime verification.** Build clean (no new module-graph errors). Preview (`http://localhost:5173/v2.html`) loads cleanly post-edit, no new console errors beyond pre-existing `NaN` warnings. End-to-end UI walkthrough of the four stages constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. The primitive is testable in isolation (it's a pure async function); browser walkthrough is the canonical verification path for the visual sequencing.
+
+**Status:** [x] Complete.

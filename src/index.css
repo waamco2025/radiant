@@ -424,6 +424,23 @@ body {
   to   { opacity: 0.9; transform: translateX(-50%) translateY(0); }
 }
 
+/* Phase 9D.2 (#124) — node-unravel: card erodes + settles when a node leaves
+   the canvas. Driven by `_unraveling: true` flag on the node, applied via
+   AssetNode.jsx. Compresses Stages 2-4 of the original spec into a single
+   coordinated keyframe (per the brief's CSS-fallback allowance — full
+   clockwise dashed-border unwind would require an SVG overlay tracking card
+   pos+size through pan/zoom, disproportionately expensive vs. visual gain).
+   Stage 2 (border erodes): 0% → 33% — border-color fades to transparent.
+   Stage 3 (content fade):  20% → 70% — opacity ramps down.
+   Stage 4 (card fade):     60% → 100% — transparent + slight settle.
+*/
+@keyframes node-unravel {
+  0%   { opacity: 1; transform: translateY(0); border-color: var(--accent-red); }
+  33%  { opacity: 0.95; border-color: color-mix(in srgb, var(--accent-red) 40%, transparent); }
+  70%  { opacity: 0.4; border-color: transparent; transform: translateY(2px); }
+  100% { opacity: 0; transform: translateY(6px); border-color: transparent; }
+}
+
 /* Dark mode date input styling */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);

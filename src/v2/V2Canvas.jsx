@@ -1987,6 +1987,158 @@ const V2Canvas = forwardRef(function V2Canvas({
       dirtyRef.current = true
     },
     animatedPanToWithZoom: (x, y, z, duration) => animatedPanToWithZoom(x, y, z, duration),
+    // Phase 9D.2: lookups + edge-retract animation for the unravel primitive.
+    // getNodeWorldPos resolves a nodeId to its world-space (x,y) on the
+    // current layer; null if not found or coords are non-finite (e.g.
+    // pseudo Radiant Network actor).
+    getNodeWorldPos: (nodeId) => {
+      const layer = layerStackRef.current[layerStackRef.current.length - 1]
+      const n = layer?.nodes?.find((nn) => nn.id === nodeId)
+      if (!n) return null
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) return null
+      return { x: n.x, y: n.y }
+    },
+    // Compare current camera focus to a world point. Returns true when
+    // the camera is centered on (x, y) within `tolPx` screen pixels at
+    // the current zoom AND the zoom is in a "reasonable" range so the
+    // user can actually see the target node. Used by playUnravelAnimation
+    // to skip the pan step when already focused.
+    isFocusedOnPoint: (x, y, tolPx = 60) => {
+      const cam = camPosRef.current
+      if (!cam) return false
+      const z = zoomRef.current || 1
+      const dxPx = (x - cam.x) * z
+      const dyPx = (y - cam.y) * z
+      // "Reasonable zoom": don't skip the pan if we're zoomed way out (the
+      // target would be a tiny dot the user can't see).
+      const zoomOk = z >= 0.6
+      return zoomOk && Math.hypot(dxPx, dyPx) <= tolPx
+    },
+    // Edge retract animation. For each Line2 in the edge group whose
+    // userData.from === nodeId or userData.to === nodeId, interpolate the
+    // curve points so the END at the target node collapses toward the
+    // OTHER endpoint. ease-out cubic. Returns a Promise that resolves
+    // when the animation is complete (after `durationMs`). Resolves
+    // immediately when no edges connect to the target node.
+    playEdgeRetract: (nodeId, durationMs = 400) => {
+      const group = edgeGroupRef.current
+      if (!group || !nodeId) return Promise.resolve()
+      const targets = []
+      for (const line of group.children) {
+        if (!line?.userData) continue
+        const isFrom = line.userData.from === nodeId
+        const isTo = line.userData.to === nodeId
+        if (!isFrom && !isTo) continue
+        // Capture the current geometry so per-frame interpolation has a
+        // stable starting point.
+        const arr = line.geometry?.attributes?.instanceStart?.array
+            || line.geometry?.attributes?.position?.array
+        // LineGeometry stores positions on instanceStart/End buffers.
+        // Easiest path: pull the original positions array from setPositions
+        // — V2Canvas's buildEdges uses geometry.setPositions(positions),
+        // so we can replay a flattened copy. Read from the line's
+        // computed start positions when available.
+        // Safer: walk the points via the attribute we know exists.
+        // For LineSegments2 / Line2, the curve points were flattened to
+        // [x0,y0,z0,x1,y1,z1,…]. We capture them from instanceStart pairs.
+        if (!arr) continue
+        // Reconstruct flat positions [x,y,z,...] from the buffered pairs.
+        // Each instanceStart entry is one segment start; the last segment's
+        // end isn't in instanceStart, but we can reconstruct by using
+        // (start, end) pairs from instanceStart + instanceEnd.
+        const startArr = line.geometry?.attributes?.instanceStart?.array
+        const endArr = line.geometry?.attributes?.instanceEnd?.array
+        if (!startArr || !endArr) continue
+        const segCount = startArr.length / 3
+        const flat = new Array((segCount + 1) * 3)
+        for (let i = 0; i < segCount; i++) {
+          flat[i * 3] = startArr[i * 3]
+          flat[i * 3 + 1] = startArr[i * 3 + 1]
+          flat[i * 3 + 2] = startArr[i * 3 + 2]
+        }
+        // Append the last segment's end to close out the curve.
+        flat[segCount * 3] = endArr[(segCount - 1) * 3]
+        flat[segCount * 3 + 1] = endArr[(segCount - 1) * 3 + 1]
+        flat[segCount * 3 + 2] = endArr[(segCount - 1) * 3 + 2]
+        targets.push({
+          line,
+          original: flat,
+          // retractFromStart === true means the FROM end is the target node;
+          // we collapse curve points toward the END (last position).
+          retractFromStart: isFrom,
+        })
+      }
+      if (targets.length === 0) return Promise.resolve()
+      return new Promise((resolve) => {
+        let startTime = null
+        const tick = (time) => {
+          if (!startTime) startTime = time
+          const elapsed = time - startTime
+          const t = Math.min(1, elapsed / durationMs)
+          const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
+          for (const tgt of targets) {
+            const { line, original, retractFromStart } = tgt
+            const ptCount = original.length / 3
+            // Anchor index: the END that stays in place. Target index: the
+            // END that collapses toward the anchor.
+            const anchorIdx = retractFromStart ? ptCount - 1 : 0
+            const ax = original[anchorIdx * 3]
+            const ay = original[anchorIdx * 3 + 1]
+            const az = original[anchorIdx * 3 + 2]
+            // Each point i interpolates toward the anchor with a fraction
+            // proportional to its distance from the target end. Points
+            // closer to the target end retract first.
+            const newPositions = new Array(original.length)
+            for (let i = 0; i < ptCount; i++) {
+              const distFromTarget = retractFromStart
+                ? i / (ptCount - 1)            // 0 at start (target), 1 at end (anchor)
+                : (ptCount - 1 - i) / (ptCount - 1) // 1 at start (anchor), 0 at end (target)
+              // Retract: point's lerp factor = clamp01(eased / distFromTarget),
+              // so points closer to the target collapse first. Anchor stays.
+              const lerp = distFromTarget === 0
+                ? eased
+                : Math.min(1, eased / distFromTarget)
+              const ox = original[i * 3]
+              const oy = original[i * 3 + 1]
+              const oz = original[i * 3 + 2]
+              newPositions[i * 3] = ox + (ax - ox) * lerp
+              newPositions[i * 3 + 1] = oy + (ay - oy) * lerp
+              newPositions[i * 3 + 2] = oz + (az - oz) * lerp
+            }
+            try {
+              line.geometry.setPositions(newPositions)
+              if (line.material?.dashed) {
+                line.computeLineDistances()
+              }
+            } catch {
+              // setPositions can throw if geometry was disposed mid-anim
+              // (e.g., layer change). Swallow and bail this target.
+            }
+            // Also fade material opacity at the tail of the animation so
+            // the line doesn't end as a single bright pixel at the anchor.
+            if (line.material) {
+              const opacityFactor = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3
+              const baseOpacity = line.material.userData?.baseOpacity
+                ?? (line.material.transparent ? line.material.opacity : 1)
+              if (line.material.userData) {
+                if (line.material.userData.baseOpacity == null) {
+                  line.material.userData.baseOpacity = baseOpacity
+                }
+              }
+              line.material.opacity = baseOpacity * opacityFactor
+              line.material.transparent = true
+            }
+          }
+          dirtyRef.current = true
+          if (t < 1) {
+            requestAnimationFrame(tick)
+          } else {
+            resolve()
+          }
+        }
+        requestAnimationFrame(tick)
+      })
+    },
     // Phase 9B.1 §4: project world coords to VIEWPORT (fixed) coords so the
     // pinned edge tooltip can track its world-space anchor through pan/zoom.
     // `worldToScreen` alone returns canvas-local coords; add the container's

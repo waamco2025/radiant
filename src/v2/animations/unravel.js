@@ -1,0 +1,118 @@
+// Phase 9D.2 — Unravel animation primitive (#124).
+//
+// Plays when a node leaves the canvas (today: revoked-Claim Dismiss + orphaned-
+// Eval-Result Dismiss). Designed reusably so future "leaves the canvas"
+// scenarios — expired agreements, transfer-accept on sender side, explicit
+// delete actions — can call the same primitive.
+//
+// Sequence:
+//   Stage 0 (~400ms, optional): pan/zoom to the target node.
+//   Stage 1 (~400ms):           edge retract (Three.js, via canvasRef).
+//   Stage 2-4 (~900ms):         CSS card unravel (border + content + bg fade
+//                               + slight translate). Driven by an `_unraveling`
+//                               flag on the node, picked up by AssetNode's
+//                               `node-unravel` keyframe animation.
+//
+// Stage 1 starts at t=0 (after Stage 0). Stage 2-4 starts at t=300 so it
+// overlaps Stage 1's tail — the user sees the edge halfway-retracted as the
+// card begins to erode. Total ~1.2s after Stage 0 (within the 1.0–1.3s
+// budget in the original spec).
+//
+// Stage 2 fallback note: the original spec called for a clockwise dashed-
+// border unwind. Per the task brief's explicit allowance, this phase ships
+// the simpler "border + card fade + slight translate" via CSS keyframe
+// instead, deferring the clockwise unwind. The deferred work would require
+// either an SVG overlay tracking card position+size through pan/zoom or a
+// custom canvas2D layer — disproportionately expensive for marginal visual
+// gain over a coordinated fade.
+//
+// Edge cases:
+//   - Caller navigates away mid-animation (role switch / panel close): the
+//     primitive doesn't observe React state directly. The Promise resolves
+//     on its own timeline; the caller's state mutation runs unconditionally
+//     after the await. AssetNode unmount during the CSS animation just
+//     stops the animation — no crash.
+//   - Concurrent dismisses: in practice the modal-driven dismiss flow is
+//     serial (one modal at a time). No queuing implemented; if two
+//     primitives run simultaneously they animate independently and don't
+//     conflict (each targets a different nodeId).
+
+const STAGE_PAN_MS = 400
+const STAGE_PAN_PAD = 60        // small breath after the pan settles
+const STAGE_EDGE_MS = 400
+const STAGE_CARD_OFFSET_MS = 300 // card unravel starts overlapping edge retract
+const STAGE_CARD_MS = 900
+const PAN_TARGET_ZOOM = 1.1
+const PAN_FOCUS_TOL_PX = 60
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Play the unravel animation for a node leaving the canvas.
+ *
+ * @param {Object}   opts
+ * @param {string}   opts.nodeId            The node id to unravel.
+ * @param {Object}   opts.canvasRef         React ref to V2Canvas (must expose
+ *                                          getNodeWorldPos, isFocusedOnPoint,
+ *                                          animatedPanToWithZoom, playEdgeRetract).
+ * @param {Function} opts.setUnravelingNodeId  React state setter:
+ *                                          (id | null) → void. The setter
+ *                                          drives an `_unraveling` flag on
+ *                                          the node via v22DataWithReveal,
+ *                                          which AssetNode reads to apply
+ *                                          the `node-unravel` CSS keyframes.
+ * @param {boolean}  [opts.ensureFocused=true]  If true, pan/zoom to the node
+ *                                          first (skipped when already focused).
+ * @param {Function} [opts.onComplete]      Optional callback after all stages
+ *                                          settle. Called after the Promise
+ *                                          resolves.
+ * @returns {Promise<void>}
+ */
+export async function playUnravelAnimation({
+  nodeId,
+  canvasRef,
+  setUnravelingNodeId,
+  ensureFocused = true,
+  onComplete,
+}) {
+  if (!nodeId) {
+    onComplete?.()
+    return
+  }
+  const canvas = canvasRef?.current
+  // Stage 0 — pan/zoom to node (skipped when already focused).
+  if (ensureFocused && canvas?.getNodeWorldPos && canvas.animatedPanToWithZoom) {
+    const pos = canvas.getNodeWorldPos(nodeId)
+    if (pos) {
+      const focused = canvas.isFocusedOnPoint?.(pos.x, pos.y, PAN_FOCUS_TOL_PX)
+      if (!focused) {
+        canvas.animatedPanToWithZoom(pos.x, pos.y, PAN_TARGET_ZOOM, STAGE_PAN_MS)
+        await sleep(STAGE_PAN_MS + STAGE_PAN_PAD)
+      }
+    }
+  }
+
+  // Stage 1 — edge retract (Three.js). Don't await yet — we want Stage 2-4
+  // to start overlapping in CSS while the edges are still retracting.
+  const edgeRetractPromise = canvas?.playEdgeRetract
+    ? canvas.playEdgeRetract(nodeId, STAGE_EDGE_MS)
+    : Promise.resolve()
+
+  // Stage 2-4 — start the CSS card unravel after a short overlap delay.
+  await sleep(STAGE_CARD_OFFSET_MS)
+  setUnravelingNodeId?.(nodeId)
+
+  // Wait for both to fully complete. A small +60ms buffer past the CSS
+  // duration ensures the keyframe's final state is painted before the
+  // node unmounts (otherwise the unmount can clip the last frame).
+  await Promise.all([
+    edgeRetractPromise,
+    sleep(STAGE_CARD_MS + 60),
+  ])
+
+  // Clear the flag — at this point the caller will mutate state to remove
+  // the artifact. The brief moment between flag-clear and view-builder
+  // re-render is imperceptible.
+  setUnravelingNodeId?.(null)
+  onComplete?.()
+}

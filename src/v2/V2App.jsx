@@ -36,6 +36,8 @@ import V22RevocationConfirmModal from '../components/modals/V22RevocationConfirm
 // Phase 9D.1.4 Fix 2: confirmation modal for orphaned-Eval-Result Dismiss.
 // Replaces the prior window.confirm dialog.
 import V22DismissEvalResultModal from '../components/modals/V22DismissEvalResultModal.jsx'
+// Phase 9D.2 (#124): unravel animation primitive for nodes leaving the canvas.
+import { playUnravelAnimation } from './animations/unravel.js'
 // Phase 9D.1: V22RevocationNoticeModal is no longer mounted — notification
 // click now routes into the Detail Panel. File kept as dead code pending the
 // #50 dead-handler sweep. Import removed to keep the V2App surface clean.
@@ -167,6 +169,11 @@ export default function V2App() {
   // renders. Confirm calls handleV22DismissOrphanedEvalResult; Cancel just
   // clears the state.
   const [v22DismissingEvalResult, setV22DismissingEvalResult] = useState(null)
+  // Phase 9D.2 (#124): node id currently running the unravel keyframe.
+  // Set by playUnravelAnimation right before its CSS stage; cleared when
+  // the primitive resolves. AssetNode reads `_unraveling` (stamped via
+  // v22DataWithReveal) to apply the `node-unravel` keyframe.
+  const [v22UnravelingNodeId, setV22UnravelingNodeId] = useState(null)
 
   const v22View = useMemo(
     () => getV22DataForRole(roleId, v22Provisionals),
@@ -253,13 +260,20 @@ export default function V2App() {
         }
       }
     }
-    const anyDecoration = flagged.size > 0 || endpointSet.size > 0 || Object.keys(eaByClaimForActor).length > 0
+    // Phase 9D.2 (#124): unravel-flag stamping. Only one node animates at a
+    // time (the dismiss flow is serial via modal). The id flows through
+    // node._unraveling, which AssetNode reads to apply the CSS keyframe.
+    const unravelingId = v22UnravelingNodeId
+    const anyDecoration = flagged.size > 0 || endpointSet.size > 0
+      || Object.keys(eaByClaimForActor).length > 0
+      || unravelingId != null
     if (!anyDecoration) return v22Data
     const nodes = v22Data.nodes.map(n => {
       const needsReveal = flagged.has(n.id)
       const isEndpoint = endpointSet.has(n.id)
       const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
-      if (!needsReveal && !isEndpoint && !eaForClaim) return n
+      const isUnraveling = unravelingId === n.id
+      if (!needsReveal && !isEndpoint && !eaForClaim && !isUnraveling) return n
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
@@ -268,12 +282,13 @@ export default function V2App() {
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
         } : {}),
         ...(eaForClaim ? { _evaluationAgreementForActor: eaForClaim } : {}),
+        ...(isUnraveling ? { _unraveling: true } : {}),
       }
     })
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
     return { ...v22Data, nodes, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -896,9 +911,18 @@ export default function V2App() {
   // change in 9D.1.3, ERs no longer get an upstream `_revokedMeta` write
   // — the orphaned-dismiss path is now the only path that pushes them
   // into provisionals, so it must handle the append case.
-  const handleV22DismissOrphanedEvalResult = useCallback((evalResultArtifact) => {
+  const handleV22DismissOrphanedEvalResult = useCallback(async (evalResultArtifact) => {
     if (!evalResultArtifact?.id) return
     const id = evalResultArtifact.id
+    // Phase 9D.2 (#124): play unravel animation BEFORE the state mutation
+    // so the view-builder filter doesn't drop the artifact mid-animation.
+    // The Detail Panel close (setSel(null)) also moves to AFTER the
+    // animation so the panel doesn't snap shut while the card unravels.
+    await playUnravelAnimation({
+      nodeId: id,
+      canvasRef,
+      setUnravelingNodeId: setV22UnravelingNodeId,
+    })
     setV22Provisionals((prev) => {
       const existingIdx = prev.evaluationResults.findIndex((er) => er.id === id)
       if (existingIdx >= 0) {
@@ -973,7 +997,18 @@ export default function V2App() {
     setV22ActiveRevocationNotice(null)
   }, [])
 
-  const handleV22DismissRevoked = useCallback((claimId) => {
+  const handleV22DismissRevoked = useCallback(async (claimId) => {
+    if (!claimId) return
+    // Phase 9D.2 (#124): play unravel animation on the Claim card BEFORE
+    // the state mutation. The Claim is what visibly leaves the canvas
+    // (Eval Results persist per 9D.1.3 Fix 6; the paired EA is just a
+    // metadata annotation). Detail Panel close moves to AFTER the
+    // animation so the panel doesn't snap shut while the card unravels.
+    await playUnravelAnimation({
+      nodeId: claimId,
+      canvasRef,
+      setUnravelingNodeId: setV22UnravelingNodeId,
+    })
     setV22Provisionals((prev) => {
       const revokedDaIds = new Set(
         prev.disclosureAgreements
@@ -4591,6 +4626,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.2', items: [
+                  'New: dismissed revoked nodes now play an unravel animation — pan/zoom to the node, edges retract back into their counterpart cards, then the card erodes and settles before disappearing',
+                  'Animation fires on Case A (revoked Claim Dismiss) and on the orphaned-Evaluation-Result Dismiss flow',
+                  'Other "leaves the canvas" scenarios can call the same primitive when they ship',
+                ]},
                 { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.1.6', items: [
                   'Fixed: when a counterparty revokes your Disclosure Agreement, your Evaluation Result on your own canvas no longer loses its ownership edge to your Asset',
                 ]},

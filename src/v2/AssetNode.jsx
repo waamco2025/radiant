@@ -350,6 +350,10 @@ export default function AssetNode({
   const isProvisional = !!node.provisional || !!node._showAsProvisional
   const isDeclined = !!node._isDeclined
   const isRevoked = !!node._isRevoked
+  // Phase 9D.2 (#124): unravel animation flag. When set, the card runs the
+  // node-unravel keyframe (border + content fade + slight settle). Driven
+  // by V2App's v22UnravelingNodeId state via v22DataWithReveal.
+  const isUnraveling = !!node._unraveling
   const isNew = !!node._isNew
 
   // Reveal animation: swap provisional appearance at flip midpoint
@@ -580,6 +584,14 @@ export default function AssetNode({
           willChange: 'transform',
           transform: scale !== 1 ? `scale(${scale})` : undefined,
           transformOrigin: 'top left',
+          // Phase 9D.2 (#124): unravel animation. Coordinated keyframe handles
+          // border erosion + content fade + slight settle. forwards keeps the
+          // final transparent state in place until the node unmounts (the
+          // primitive holds the flag for the full duration + 60ms buffer).
+          ...(isUnraveling ? {
+            animation: 'node-unravel 900ms ease-in-out forwards',
+            pointerEvents: 'none',
+          } : {}),
           ...(isFlipping ? {
             animation: 'revealFlip 700ms ease-in-out forwards',
             transformOrigin: 'center center',
@@ -1033,6 +1045,7 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
   const isProvisional = !!node.provisional || !!node._showAsProvisional
   const isDeclined = !!node._isDeclined
   const isRevoked = !!node._isRevoked
+  const isUnraveling = !!node._unraveling // Phase 9D.2 (#124)
   const h = node.displayHealth || node.health
   const hasBadHealth = h && h.bad > 0
   // Phase 9A.1.5 item 1: mini cards now use the same WARM_BORDER treatment
@@ -1186,6 +1199,11 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
         transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
         ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
+        // Phase 9D.2 (#124): unravel keyframe at mini LOD too.
+        ...(isUnraveling ? {
+          animation: 'node-unravel 900ms ease-in-out forwards',
+          pointerEvents: 'none',
+        } : {}),
         userSelect: 'none',
         WebkitUserSelect: 'none',
         position: 'relative',
