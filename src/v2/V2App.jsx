@@ -33,6 +33,9 @@ import V22CreateClaimModal from '../components/modals/V22CreateClaimModal.jsx'
 import V22TransferAssetModal from '../components/modals/V22TransferAssetModal.jsx'
 import V22TransferResponseModal from '../components/modals/V22TransferResponseModal.jsx'
 import V22RevocationConfirmModal from '../components/modals/V22RevocationConfirmModal.jsx'
+// Phase 9D.1.4 Fix 2: confirmation modal for orphaned-Eval-Result Dismiss.
+// Replaces the prior window.confirm dialog.
+import V22DismissEvalResultModal from '../components/modals/V22DismissEvalResultModal.jsx'
 // Phase 9D.1: V22RevocationNoticeModal is no longer mounted — notification
 // click now routes into the Detail Panel. File kept as dead code pending the
 // #50 dead-handler sweep. Import removed to keep the V2App surface clean.
@@ -159,6 +162,11 @@ export default function V2App() {
   //     cleared on Dismiss (inside the notice section) or on role switch.
   const [v22Revoking, setV22Revoking] = useState(null)
   const [v22ActiveRevocationNotice, setV22ActiveRevocationNotice] = useState(null)
+  // Phase 9D.1.4 Fix 2: orphaned Eval Result Dismiss confirmation modal.
+  // Holds the ER artifact (or null) — when set, V22DismissEvalResultModal
+  // renders. Confirm calls handleV22DismissOrphanedEvalResult; Cancel just
+  // clears the state.
+  const [v22DismissingEvalResult, setV22DismissingEvalResult] = useState(null)
 
   const v22View = useMemo(
     () => getV22DataForRole(roleId, v22Provisionals),
@@ -738,6 +746,49 @@ export default function V2App() {
             reason: 'Cascaded from DA revocation',
             cascadedFromDaId: agreement.id,
           }))
+          // Phase 9D.1.4 Fix 1B: cascade-revoke any Proof-of-Evaluation DAs
+          // whose subject is an Eval Result tied to this paired EA.
+          //
+          // The POE DA grants the Claim owner (Alice) visibility on the
+          // grantee's (Bob's) Eval Result via `proofDaEvalResultIds` in
+          // buildViewForActor. Without this cascade, Alice keeps POE
+          // visibility into Bob's ER even though she's revoked his DA —
+          // his orphaned ER lingers on her canvas.
+          //
+          // The Eval Results themselves still don't get _revokedMeta — they
+          // remain Bob's artifacts in his QS (Fix 6 invariant). This step
+          // only touches the access agreement (POE DA) so Alice's view
+          // stops resolving them as visible.
+          const erIdsUnderEa = (shared.evaluationResults || [])
+            .filter((er) => er.evaluationAgreementId === pairedEa.id)
+            .map((er) => er.id)
+          if (erIdsUnderEa.length > 0) {
+            const poeDas = (shared.disclosureAgreements || []).filter((d) =>
+              d.subject?.kind === 'evalResult'
+              && erIdsUnderEa.includes(d.subject.id)
+              && !d._revokedMeta,
+            )
+            for (const poe of poeDas) {
+              upsertDa({
+                ...poe,
+                _revokedMeta: {
+                  reason: 'Cascaded from DA revocation (POE)',
+                  revokedDate: timestamp,
+                  revokerParty: activeRole.party,
+                  cascadedFromDaId: agreement.id,
+                },
+              })
+              nextRecords.push(makeRevocationRecord({
+                agreementType: 'DA',
+                agreementId: poe.id,
+                revokerParty: activeRole.party,
+                counterpartyParty,
+                claimId,
+                reason: 'Cascaded from DA revocation (POE)',
+                cascadedFromDaId: agreement.id,
+              }))
+            }
+          }
         }
         // Phase 9D.1.3 Fix 6: Eval Results do NOT cascade-revoke. They are
         // independent artifacts the grantee owns in their QS; revoking an
@@ -820,21 +871,44 @@ export default function V2App() {
   // `buildViewForActor` pre-filters all `_dismissedRevoked` items out of
   // every view-layer output. Audit records in `revocationRecords` are
   // unaffected.
-  // Phase 9D.1.3 Fix 6: dismiss an orphaned Eval Result. An Eval Result is
-  // orphaned when its originating DA (or paired EA) has been revoked — the
-  // Eval Result itself persists in the owner's QS but its edge(s) to the
-  // Claim-side artifacts are gone. Dismiss removes the Eval Result from the
-  // owner's canvas view only; the underlying artifact stays in QS and the
-  // ledger. Annotation mechanic matches Phase 9D.1.1 Fix 6 so the provisional
-  // override shadows the seeded row.
-  const handleV22DismissOrphanedEvalResult = useCallback((evalResultId) => {
-    if (!evalResultId) return
-    setV22Provisionals((prev) => ({
-      ...prev,
-      evaluationResults: prev.evaluationResults.map((er) =>
-        er.id === evalResultId ? { ...er, _dismissedRevoked: true } : er,
-      ),
-    }))
+  // Phase 9D.1.3 Fix 6 / 9D.1.4 Fix 1A: dismiss an orphaned Eval Result.
+  // An Eval Result is orphaned when its originating EA has been revoked —
+  // the artifact itself persists in the owner's QS but its edges to the
+  // Claim are gone. Dismiss removes it from the owner's canvas view only.
+  //
+  // 9D.1.4 Fix 1A: accept the full ER artifact (not just the id) so we can
+  // ANNOTATE the row even when it lives only in the seeded dataset and not
+  // yet in `v22Provisionals.evaluationResults`. Previous version only
+  // mapped over `prev.evaluationResults`; for seeded ERs (e.g., the demo
+  // MIL-PRF-55681 result) the array contained no matching entry, the map
+  // was a no-op, and the dismiss silently failed. With the cascade-removal
+  // change in 9D.1.3, ERs no longer get an upstream `_revokedMeta` write
+  // — the orphaned-dismiss path is now the only path that pushes them
+  // into provisionals, so it must handle the append case.
+  const handleV22DismissOrphanedEvalResult = useCallback((evalResultArtifact) => {
+    if (!evalResultArtifact?.id) return
+    const id = evalResultArtifact.id
+    setV22Provisionals((prev) => {
+      const existingIdx = prev.evaluationResults.findIndex((er) => er.id === id)
+      if (existingIdx >= 0) {
+        return {
+          ...prev,
+          evaluationResults: prev.evaluationResults.map((er, i) =>
+            i === existingIdx ? { ...er, _dismissedRevoked: true } : er,
+          ),
+        }
+      }
+      // Seeded-only ER — append a tombstone-annotated copy. mergeProvisionals
+      // shadows the seeded row via mergeById; buildViewForActor's pre-filter
+      // (9D.1.1 Fix 6) drops the dismissed row from every view output.
+      return {
+        ...prev,
+        evaluationResults: [
+          ...prev.evaluationResults,
+          { ...evalResultArtifact, _dismissedRevoked: true },
+        ],
+      }
+    })
     setSel(null)
   }, [])
 
@@ -4060,6 +4134,19 @@ export default function V2App() {
           />
         )}
 
+        {/* Phase 9D.1.4 Fix 2: orphaned Eval Result Dismiss confirmation. */}
+        {v22DismissingEvalResult && (
+          <V22DismissEvalResultModal
+            evalResultArtifact={v22DismissingEvalResult}
+            onConfirm={() => {
+              const er = v22DismissingEvalResult
+              setV22DismissingEvalResult(null)
+              handleV22DismissOrphanedEvalResult(er)
+            }}
+            onClose={() => setV22DismissingEvalResult(null)}
+          />
+        )}
+
         {/* Phase 9D.1 (#112 UX redo): V22RevocationNoticeModal mount removed.
             Notification-click now pans/selects the Claim and opens the Detail
             Panel, which renders the revocation notice inline — grantee-side
@@ -4371,7 +4458,7 @@ export default function V2App() {
                   const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
                   return !ea
                 })()}
-                onDismissOrphanedEvalResult={handleV22DismissOrphanedEvalResult}
+                onDismissOrphanedEvalResult={() => setV22DismissingEvalResult(node.v22Artifact || null)}
                 // Phase 9C — Agreements Section (backlog #111)
                 disclosureAgreementsForNode={disclosureAgreementsForNode}
                 evaluationAgreementsForNode={evaluationAgreementsForNode}
@@ -4493,6 +4580,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.1.4', items: [
+                  'Fixed: dismissing an orphaned Evaluation Result now actually removes it from the canvas (the dismiss button was silently no-opping for seeded results)',
+                  'When you revoke a Disclosure Agreement, the counterparty\'s Evaluation Results now also disappear from your canvas — you no longer see their orphaned results lingering',
+                  'Replaced the browser confirmation dialog for orphaned-Evaluation-Result Dismiss with a styled modal',
+                  'Tightened the inline copy on the grantor\'s view of a grantee-initiated Disclosure Agreement revocation',
+                ]},
                 { version: '0.9.10', date: '2026-04-24', label: 'Phase 9D.1.3', items: [
                   'Disclosure-Agreement revocations by the grantee now show the dismiss ceremony inline on the affected DA row on the grantor\'s panel (matching the EA pattern shipped in 9D.1.2)',
                   'Evaluation Results now persist across Disclosure Agreement revocation — they remain in your Qualified Storage and on your canvas',

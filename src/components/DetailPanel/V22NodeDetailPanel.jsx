@@ -416,7 +416,8 @@ function RevocationNoticeSection({
   } else if (isDa && viewerIsGrantor) {
     // Case B — retained for completeness; in practice Case B no longer
     // routes through this component (inline DA row pattern handles it).
-    consequence = 'They no longer have visibility into this Claim. The paired Evaluation Agreement has also been terminated. Evaluation Results they previously produced remain in their Qualified Storage and on their canvas. Your Claim and its data remain on your network.'
+    // Phase 9D.1.4 Fix 3: party-name substitution if/when re-enabled.
+    consequence = `${revokerParty} no longer has visibility into this Claim. The Evaluation Agreement with this Claim has also been terminated. Evaluation Results that ${revokerParty} previously produced remain in their Qualified Storage and on their network. Your Claim and its data remains on your network.`
   } else if (!isDa && !viewerIsGrantor) {
     consequence = 'You can still view this Claim under your existing Disclosure Agreement, but you can no longer run evaluations against it. Any Evaluation Results you previously submitted remain visible on your canvas.'
   } else {
@@ -959,16 +960,14 @@ function V22EvalResultPanel({
         // Phase 9D.1.3 Fix 6: orphan state swaps Re-Run Evaluation for a
         // Dismiss action. Mutually exclusive — no overlap.
         if (isOrphaned) {
+          // Phase 9D.1.4 Fix 2: V2App owns the dismiss-confirmation modal
+          // (V22DismissEvalResultModal). The footer click just hands the
+          // ER up; parent state-routes the Confirm/Cancel choice.
           return (
             <FooterButton
               label="Dismiss"
               accent
-              onClick={() => {
-                const ok = typeof window !== 'undefined' && window.confirm
-                  ? window.confirm('Dismissing this Evaluation Result removes it from your canvas view only. The Evaluation Result remains in your Qualified Storage and its data lineage is preserved in the ledger.')
-                  : true
-                if (ok && onDismissOrphanedEvalResult) onDismissOrphanedEvalResult(er?.id)
-              }}
+              onClick={() => onDismissOrphanedEvalResult && onDismissOrphanedEvalResult(er)}
               title="Remove this orphaned Evaluation Result from your canvas. The artifact stays in your QS."
             />
           )
@@ -1210,8 +1209,12 @@ function DisclosureAgreementRow({
       selective: 'selective',
       proofonly: 'proof-only',
     }[info.daType] || 'full'
-    const headerCopy = `${info.revokerParty} has revoked their ${daTypeLabel} disclosure access to this Claim.`
-    const consequence = `They no longer have visibility into this Claim. The paired Evaluation Agreement has also been terminated. Evaluation Results they previously produced remain in their Qualified Storage and on their canvas. Your Claim and its data remain on your network.`
+    // Phase 9D.1.4 Fix 3: substitute the grantee party name throughout the
+    // copy instead of using "they/their" pronouns — reads more directly and
+    // removes ambiguity about who's being discussed.
+    const grantee = info.revokerParty
+    const headerCopy = `${grantee} has revoked their ${daTypeLabel} disclosure access to this Claim.`
+    const consequence = `${grantee} no longer has visibility into this Claim. The Evaluation Agreement with this Claim has also been terminated. Evaluation Results that ${grantee} previously produced remain in their Qualified Storage and on their network. Your Claim and its data remains on your network.`
     const dateStr = formatShortDate(info.revokedDate) || ''
     return (
       <div style={{
