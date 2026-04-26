@@ -1349,6 +1349,12 @@ function buildViewForActor(actor, shared) {
   const proofDaEvalResultIds = new Set()
   for (const da of disclosureAgreements) {
     if (da.subject.kind !== 'evalResult') continue
+    // Phase 9D.1.5: revoked POE DAs (cascade-annotated by 9D.1.4 when their
+    // backing EA is revoked) no longer confer ER visibility to the Claim
+    // owner. Without this filter, the grantor's `visibleEvaluationResults`
+    // kept the grantee's ER even though the access agreement was revoked,
+    // so the orphaned ER lingered on the grantor's canvas.
+    if (da._revokedMeta) continue
     // Proof-of-eval: grantee is the claim owner receiving the result.
     if (da.grantee.party === party && da.grantor.party !== party) {
       proofDaEvalResultIds.add(da.subject.id)

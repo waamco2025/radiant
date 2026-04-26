@@ -1288,3 +1288,25 @@ Four fixes addressing 9D.1.3 QA findings. Two are bug fixes in the orphaned-Eval
 - New modal mounts conditionally on `v22DismissingEvalResult`; renders nothing when null.
 
 **Status:** [x] Complete.
+
+### Phase 9D.1.5 completion notes (2026-04-26) — POE DA cascade view-layer filter
+
+Surgical one-line fix to v2_2Data.js. Closes the loop on the 9D.1.4 POE cascade work.
+
+**Root cause.** Phase 9D.1.4 Fix 1B added a cascade step in `handleRevokeConfirm` that annotates POE DAs with `_revokedMeta` when their backing EA is revoked. The intent: when Alice revokes Bob's DA, Bob's Eval Result (visible to Alice via the POE DA flowing back to her as Claim owner) drops from her canvas immediately. The handler chain was correct — annotation landed, `revocationRecord` entries pushed.
+
+**Where the fix didn't take.** `buildViewForActor` builds `proofDaEvalResultIds` by iterating `disclosureAgreements` (already pre-filtered for `_dismissedRevoked` per 9D.1.1 Fix 6) and adding any ER subject of a POE DA where the actor is grantee. The loop did NOT check `_revokedMeta`. So a POE DA in the "revoked but not yet dismissed" state — exactly the state 9D.1.4's cascade puts it in — kept conferring visibility. Alice's `visibleEvaluationResults` then included Bob's orphaned ER even though the access agreement was structurally terminated. She only stopped seeing it once Bob clicked Dismiss (which doesn't actually annotate the POE DA at all — it dismisses the ER artifact, which independently filters out via the `_dismissedRevoked` check on `evaluationResults`).
+
+**Fix.** One line in `v2_2Data.js` (line ~1352): `if (da._revokedMeta) continue` added after the `subject.kind !== 'evalResult'` check. Now revoked POE DAs no longer add their subject to `proofDaEvalResultIds`. Alice's view stops resolving Bob's ER as visible the instant the cascade fires.
+
+**Why the fix is safe.**
+- `disclosureAgreements` is already pre-filtered for `_dismissedRevoked` (9D.1.1), so this filter doesn't double-up. The two flags are orthogonal: `_revokedMeta` = "the agreement is revoked"; `_dismissedRevoked` = "the user has dismissed this revoked agreement from their view." A revoked-not-yet-dismissed POE DA was the gap.
+- The Eval Result artifact itself remains unannotated (9D.1.3 Fix 6 invariant preserved). Bob still owns the ER in his QS; only Alice's view-layer access is severed.
+- No edge derivation regressions: the canvas's POE edge derivation runs against the same `proofDaEvalResultIds`, so the visual edge between Bob's ER and Alice's Claim disappears at the same instant the visibility does.
+- The Phase 9C Agreements Section's "Revoked" subsection still surfaces the cascaded POE DA (it consumes `revokedDisclosureAgreements`, populated separately at v2_2Data.js line 1544 by filtering `disclosureAgreements` for `_revokedMeta`) — so Alice still has audit context for the cascade.
+
+**Deviations:** none.
+
+**Runtime verification:** Build clean. Preview reloads cleanly post-edit, no new console errors beyond pre-existing `NaN` warnings. Code-level verification via source re-read confirms the diff is exactly the one-line addition described in the task brief, in the location described. End-to-end UI walkthrough (Alice revokes → Bob's ER disappears immediately from Alice's canvas → switch to Bob → ER persists with Avionics Module ownership edge → Bob clicks Dismiss → modal opens → Confirm → ER removed) constrained by V2Canvas 3D raycaster DOM-dispatch limitation; data-layer invariants are sufficient for confidence in the fix.
+
+**Status:** [x] Complete.
