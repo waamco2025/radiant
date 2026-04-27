@@ -4585,7 +4585,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.9.10 &middot; Changelog
+          v0.10.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -4632,6 +4632,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-27', label: 'Phase 10.1', items: [
+                  'Register Asset modal copy rewritten to use plain language — no more "V2.2 Asset", "internal (Full) Disclosure Agreement", or "filename stem" leaking into the user-facing surface',
+                ]},
                 { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.4', items: [
                   'Fixed: edges no longer reappear at full length mid-unravel — they stay retracted from Stage 1 through to artifact removal',
                 ]},

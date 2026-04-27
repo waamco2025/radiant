@@ -1634,3 +1634,24 @@ So the rebuild-effect guard is sufficient. No other paths needed touching.
 **Runtime verification:** Build clean. Preview reloads cleanly with the canvas mounted. Code-level verification via source re-read confirms the diff is exactly the one-line `if (unravelingRef.current) return` added immediately after the `transitioningRef.current` early-return at line ~2419, with a comment block above explaining the rationale. Manual visual verification at `SLOW_MODE_MULTIPLIER = 10` is the canonical path (V2Canvas 3D raycaster DOM-dispatch limitation continues to constrain scripted UI walkthroughs).
 
 **Status:** [x] Complete.
+
+### Phase 10.1 completion notes (2026-04-27) — Register Asset modal copy rewrite
+
+Surgical copy-only pass on `src/components/modals/V22CreateAssetModal.jsx`. Four user-facing strings rewritten to use plain language instead of leaking V2.2 data-model vocabulary ("V2.2 Asset", "evidence file", "internal (Full) Disclosure Agreement", "filename stem"). No structural, layout, animation, or behavior changes.
+
+**Strings updated:**
+1. Step 0 intro callout (~line 241): "Every V2.2 Asset references exactly one evidence file…" → "Register evidence from your Qualified Storage to your network. Select one file or many — you'll be able to name each one and watch them hash before confirming."
+2. Step 1 helper text (~line 277): "Each file's display name defaults to its filename stem — edit to taste. The hash is computed as each file registers." → "Names default to the filename — edit as needed. Each file is being hashed and endorsed for your records."
+3. Step 1 hashing-in-progress message (~line 354): "Continue enables when every file is ready." → "Continue will enable when every file is ready."
+4. Step 2 footer (~line 422): "Each Asset / The Asset will render on your canvas with a NEW badge and connect to you via an internal (Full) Disclosure Agreement. No counterparty acceptance is required — Asset registration is unilateral." → "These / This will appear on your canvas with NEW badges / a NEW badge, connected to you as their owner. Registration is immediate — no other parties need to approve."
+
+Singular/plural conditionals (`rows.length === 1` / `> 1`) preserved on Step 1 + Step 2 — "this/these", "a NEW badge / NEW badges" branch correctly.
+
+**Out of scope (deferred):**
+- Workstream B (Library Modal unification) — separate phase.
+- Workstream C (Asset hierarchy) — Phase 10.2.
+- Backlog #95 (row-merge on re-add) — V22CreateAssetModal was in scope for the copy edit only; row-construction restructure pairs naturally with Phase 10.2 hierarchy work where that path will be revisited anyway.
+
+**Runtime verification:** Build clean. End-to-end UI walkthrough of the four step states (intro callout, helper text, hashing-in-progress amber footer message, Step 2 confirmation footer) constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read of the four edits is the backstop. Singular/plural branching verified via the unchanged conditionals (`{rows.length === 1 ? '' : 's'}`, `{rows.length > 1 ? 'These' : 'This'}`, `{rows.length > 1 ? 'NEW badges' : 'a NEW badge'}`).
+
+**Status:** [x] Complete.

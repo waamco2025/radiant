@@ -238,9 +238,9 @@ export default function V22CreateAssetModal({
               border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
               fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
             }}>
-              Every V2.2 Asset references exactly one evidence file. Select one or many
-              — each file becomes its own Asset. You'll be able to edit display names
-              and watch each file get hashed before final confirmation.
+              Register evidence from your Qualified Storage to your network. Select one
+              file or many — you'll be able to name each one and watch them hash before
+              confirming.
             </div>
             <FieldLabel label="Evidence files" required />
             <button
@@ -275,9 +275,8 @@ export default function V22CreateAssetModal({
         {step === 1 && (
           <>
             <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-              {rows.length} file{rows.length === 1 ? '' : 's'} selected. Each file's display name
-              defaults to its filename stem — edit to taste. The hash is computed as each file
-              registers.
+              {rows.length} file{rows.length === 1 ? '' : 's'} selected. Names default to the
+              filename — edit as needed. Each file is being hashed and endorsed for your records.
             </div>
             <div style={{
               maxHeight: 380, overflowY: 'auto',
@@ -351,7 +350,7 @@ export default function V22CreateAssetModal({
                 marginTop: 10, fontSize: 11, color: 'var(--accent-amber)',
                 fontStyle: 'italic', lineHeight: 1.5,
               }}>
-                Hashing and endorsing in progress — Continue enables when every file is ready.
+                Hashing and endorsing in progress — Continue will enable when every file is ready.
               </div>
             )}
             <button
@@ -419,9 +418,9 @@ export default function V22CreateAssetModal({
               <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
             )}
             <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-              {rows.length > 1 ? 'Each Asset' : 'The Asset'} will render on your canvas with a NEW badge
-              and connect to you via an internal (Full) Disclosure Agreement. No counterparty
-              acceptance is required — Asset registration is unilateral.
+              {rows.length > 1 ? 'These' : 'This'} will appear on your canvas with {rows.length > 1 ? 'NEW badges' : 'a NEW badge'},
+              connected to you as their owner. Registration is immediate — no other parties
+              need to approve.
             </div>
           </div>
         )}
