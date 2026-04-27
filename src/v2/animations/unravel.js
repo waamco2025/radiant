@@ -46,12 +46,20 @@
 // The constant is exported so AssetNode can pull the same value — single
 // source of truth so JS-side timings and CSS-side animation-durations
 // stay in sync at any multiplier.
-export const SLOW_MODE_MULTIPLIER = 1
+export const SLOW_MODE_MULTIPLIER = 10
 
 const _PAN_MS = 400
 const _PAN_PAD = 60
 const _EDGE_MS = 400
 const _CARD_OFFSET_MS = 300
+// Phase 9D.2.3 Fix 2: Stage -1 — wait for the Detail Panel slide-out
+// transition to complete before starting the unravel. The Detail Panel
+// uses `detail-panel-slide-in 200ms ease` (in V2App.jsx); the slide-OUT
+// runs the same duration in reverse. 280ms = 200 + 80ms paint buffer.
+// Caller passes panelCloseDelay (in ms; this is the default value when
+// the option is set to true OR the literal default) — primitive multiplies
+// by SLOW_MODE_MULTIPLIER so the wait scales in slow mode.
+const _PANEL_CLOSE_MS = 280
 // Phase 9D.2.1 Fix 3: split the 900ms-coordinated keyframe into staged
 // timings. Held-flag duration = max stage end. Border erasure starts at
 // flag-set, runs 600ms; content fade starts at +300ms relative to the
@@ -64,6 +72,7 @@ const STAGE_PAN_PAD = Math.round(_PAN_PAD * SLOW_MODE_MULTIPLIER)
 const STAGE_EDGE_MS = Math.round(_EDGE_MS * SLOW_MODE_MULTIPLIER)
 const STAGE_CARD_OFFSET_MS = Math.round(_CARD_OFFSET_MS * SLOW_MODE_MULTIPLIER)
 const STAGE_HOLD_MS = Math.round(_HOLD_MS * SLOW_MODE_MULTIPLIER)
+const STAGE_PANEL_CLOSE_MS = Math.round(_PANEL_CLOSE_MS * SLOW_MODE_MULTIPLIER)
 
 const PAN_TARGET_ZOOM = 1.1
 // Phase 9D.2.1 Fix 2: when the Detail Panel is open, the visible canvas
@@ -107,6 +116,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  *                                          the `node-unravel` CSS keyframes.
  * @param {boolean}  [opts.ensureFocused=true]  If true, pan/zoom to the node
  *                                          first (skipped when already focused).
+ * @param {boolean}  [opts.waitForPanelClose=false]  Phase 9D.2.3 Fix 2:
+ *                                          when true, sleep ~280ms (scaled
+ *                                          by SLOW_MODE_MULTIPLIER) before
+ *                                          Stage 0 to let a closing Detail
+ *                                          Panel slide out — caller is
+ *                                          expected to set selection/panel
+ *                                          state to null BEFORE invoking the
+ *                                          primitive with this option. The
+ *                                          delay matches detail-panel-slide-in's
+ *                                          200ms reversed + 80ms paint buffer.
  * @param {Function} [opts.onComplete]      Optional callback after all stages
  *                                          settle. Called after the Promise
  *                                          resolves.
@@ -117,6 +136,7 @@ export async function playUnravelAnimation({
   canvasRef,
   setUnravelingNodeId,
   ensureFocused = true,
+  waitForPanelClose = false,
   onComplete,
 }) {
   if (!nodeId) {
@@ -130,6 +150,16 @@ export async function playUnravelAnimation({
   // an unexpected error tears down mid-animation.
   canvas?.setUnraveling?.(true)
   try {
+  // Phase 9D.2.3 Fix 2: Stage -1 — wait for the Detail Panel slide-out
+  // transition. Caller is expected to setSel(null) BEFORE invoking the
+  // primitive (so the panel starts closing); this sleep just lets the
+  // close animation paint to completion before edges + border begin to
+  // animate, eliminating the visual conflict between selection state
+  // and the unravel choreography. Scaled by SLOW_MODE_MULTIPLIER like
+  // every other timing in this primitive.
+  if (waitForPanelClose) {
+    await sleep(STAGE_PANEL_CLOSE_MS)
+  }
   // Stage 0 — pan/zoom to node (skipped when already on screen).
   // Phase 9D.2.1 Fix 2: visibility-based skip instead of focus-on-point.
   // The Detail Panel offsets the camera so the node sits to the LEFT of

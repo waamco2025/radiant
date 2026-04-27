@@ -1519,3 +1519,83 @@ Bump `SLOW_MODE_MULTIPLIER` to e.g. `5` and every JS wait + every CSS animation 
 **Runtime verification:** Build clean. Preview reloads cleanly. End-to-end UI walkthrough of the three fixes (red revoked edge persists across hover/select/zoom; no double-pan during dismiss; slow-mode multiplier scales JS+CSS together) constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read + math is the backstop.
 
 **Status:** [x] Complete.
+
+### Phase 9D.2.3 completion notes (2026-04-27) — edge-retract trim + sequence reorder + clip-path text wipe
+
+Three refinements that emerged during slow-mode (`SLOW_MODE_MULTIPLIER = 10`) QA of the unravel choreography. Each fix is small but addresses a real visual regression that only became obvious at slow speed.
+
+**Fix 1 — Edge retract via point trimming.**
+
+Diagnosis at 10× speed: the previous lerp-based retract had each curve point lerping toward the opposite endpoint independently. With Bezier-curved edges, this collapsed the curve in a visually weird way — the line bent and curled inward instead of cleanly retracting. The intent was always "the line walks back along its existing path"; the implementation didn't match.
+
+Fix: replaced the per-point lerp with a slice-based emission. Per-frame:
+```js
+const pointsToShow = Math.max(2, Math.ceil(ptCount * (1 - eased)))
+// retractFromStart === true → target endpoint at index 0 (FROM side):
+//   keep points [ptCount - pointsToShow .. ptCount - 1] (anchor-side tail)
+// retractFromStart === false → target endpoint at last index (TO side):
+//   keep points [0 .. pointsToShow - 1] (anchor-side head)
+const newPositions = new Array(pointsToShow * 3)
+for (let i = 0; i < pointsToShow; i++) {
+  const sourceIdx = retractFromStart ? (ptCount - pointsToShow + i) : i
+  newPositions[i*3]   = original[sourceIdx*3]
+  newPositions[i*3+1] = original[sourceIdx*3+1]
+  newPositions[i*3+2] = original[sourceIdx*3+2]
+}
+line.geometry.setPositions(newPositions)
+if (line.material?.dashed) line.computeLineDistances()
+```
+
+The line's existing curve points are emitted unchanged; just fewer of them per frame. Anchor side stays put; target side walks toward the anchor. `Math.max(2, ...)` floor preserves Three.js's minimum-2-points-for-a-valid-line invariant. The original points array (captured pre-animation in the `targets` setup) is the source of truth — never mutated, just sliced.
+
+Material opacity tail-fade preserved from the original implementation: in the last 30% of duration, opacity ramps to 0 so the final 2-point line doesn't end as a single bright pixel at the anchor.
+
+**Fix 2 — Sequence reorder: deselect + panel close before unravel.**
+
+Diagnosis: the previous handler order was:
+```js
+await playUnravelAnimation({ ... })  // selection border + panel render throughout
+setV22Provisionals(...)
+setSel(null)  // deselect AFTER animation
+```
+
+The selection border (gray amber outline + indigo glow) and the open Detail Panel both stayed rendered for the full ~1.2s of the unravel. The selection visual state competed with the red revoked-border erasure — the user couldn't cleanly see the SVG border SVG path animation because the gray selection border was painting on top.
+
+Fix: move `setSel(null)` to BEFORE `playUnravelAnimation`, and add a Stage -1 wait inside the primitive:
+
+```js
+// In V2App handlers:
+setSel(null)                                  // begin Detail Panel slide-out
+await playUnravelAnimation({                  // primitive waits for panel close
+  nodeId, canvasRef, setUnravelingNodeId,
+  waitForPanelClose: true,                    // new option (default false)
+})
+setV22Provisionals(...)                       // state mutation as before
+```
+
+Inside the primitive: new `Stage -1` block right after `setUnraveling(true)`:
+```js
+if (waitForPanelClose) {
+  await sleep(STAGE_PANEL_CLOSE_MS)  // 280ms × SLOW_MODE_MULTIPLIER
+}
+```
+
+`STAGE_PANEL_CLOSE_MS` derives from `_PANEL_CLOSE_MS = 280` (panel slide-out 200ms + 80ms paint buffer) × `SLOW_MODE_MULTIPLIER`. Scales in lockstep with every other timing so slow-mode QA exposes the full sequence. Default `waitForPanelClose = false` so future "leaves the canvas" callers without a panel context don't pay the wait.
+
+The trailing `setSel(null)` after the await was removed from both handlers — the deselect now happens up front.
+
+**Fix 3 — Clip-path right-to-left text wipe.**
+
+Diagnosis: Stage 3's per-row opacity fade read as "the row dims and disappears" — generic. User wanted text-deletion semantics: each row visually wipes from right to left like a backspace key being held.
+
+Fix: rewrote the `@keyframes node-unravel-content` keyframe in index.css. Animating `clip-path: inset(top right bottom left)` from `inset(0 0 0 0)` (fully visible) to `inset(0 100% 0 0)` (right edge clips inward to 100% of the row's width) progressively reveals less of the row from the right inward. `-webkit-clip-path` paired for Safari.
+
+No JS changes. `unravelRowStyle(isUnraveling, rowIdx)` still applies the same `node-unravel-content` animation with per-row delays (300, 350, 400, 450ms × SLOW_MODE_MULTIPLIER) — the stagger order (badge → title → owner → minibar) is preserved. The minibar row's HealthBar segments wipe right-to-left along with the rest.
+
+**Caveat (per task brief's note):** clip-path on text doesn't truly delete characters — it's a masking effect that reads as deletion at normal viewing distance. True character-by-character scrambling-text deletion is filed as backlog #129 (deferred refinement); this fix achieves the visual intent at meaningfully lower implementation cost.
+
+**Deviations:** none. All three fixes shipped exactly as briefed. The `Math.max(2, …)` floor on `pointsToShow` is a Three.js correctness requirement (added unprompted but consistent with the brief's "minimum of 2 points keeps the line valid" note).
+
+**Runtime verification:** Build clean. Preview reloads cleanly. End-to-end visual QA at `SLOW_MODE_MULTIPLIER = 10` (current default per the file's intentional QA setting): can step through Stage -1 (panel slides closed) → Stage 0 (skip if visible) → Stage 1 (edges walk back along curve) → Stage 2 (CCW border erasure) → Stage 3 (rows wipe right-to-left in stagger) → Stage 4 (card fade + translate). Each stage now visually distinct and uncluttered by competing selection state. Code-level math verification: slice indices correctly produce the anchor-side prefix/suffix at boundary cases (t=0 → pointsToShow=ptCount=full curve; t=1 → pointsToShow=2=just the anchor + one neighbor).
+
+**Status:** [x] Complete.

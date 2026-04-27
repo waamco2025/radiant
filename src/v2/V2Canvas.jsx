@@ -2092,11 +2092,17 @@ const V2Canvas = forwardRef(function V2Canvas({
       return sp.x >= minX && sp.x <= maxX && sp.y >= minY && sp.y <= maxY
     },
     // Edge retract animation. For each Line2 in the edge group whose
-    // userData.from === nodeId or userData.to === nodeId, interpolate the
-    // curve points so the END at the target node collapses toward the
-    // OTHER endpoint. ease-out cubic. Returns a Promise that resolves
-    // when the animation is complete (after `durationMs`). Resolves
-    // immediately when no edges connect to the target node.
+    // userData.from === nodeId or userData.to === nodeId, walk the line's
+    // terminus back along its existing curve toward the OPPOSITE endpoint.
+    // Implementation: per-frame, slice the original curve points and
+    // re-emit a shorter prefix/suffix via setPositions — the curve shape
+    // stays put; only its length progressively shortens from one end.
+    // Phase 9D.2.3 Fix 1: switched from per-point lerp (which curled the
+    // line) to point trimming (which preserves curvature, walks the
+    // terminus along the path).
+    // ease-out cubic. Returns a Promise that resolves when the animation
+    // is complete (after `durationMs`). Resolves immediately when no
+    // edges connect to the target node.
     playEdgeRetract: (nodeId, durationMs = 400) => {
       const group = edgeGroupRef.current
       if (!group || !nodeId) return Promise.resolve()
@@ -2156,31 +2162,22 @@ const V2Canvas = forwardRef(function V2Canvas({
           for (const tgt of targets) {
             const { line, original, retractFromStart } = tgt
             const ptCount = original.length / 3
-            // Anchor index: the END that stays in place. Target index: the
-            // END that collapses toward the anchor.
-            const anchorIdx = retractFromStart ? ptCount - 1 : 0
-            const ax = original[anchorIdx * 3]
-            const ay = original[anchorIdx * 3 + 1]
-            const az = original[anchorIdx * 3 + 2]
-            // Each point i interpolates toward the anchor with a fraction
-            // proportional to its distance from the target end. Points
-            // closer to the target end retract first.
-            const newPositions = new Array(original.length)
-            for (let i = 0; i < ptCount; i++) {
-              const distFromTarget = retractFromStart
-                ? i / (ptCount - 1)            // 0 at start (target), 1 at end (anchor)
-                : (ptCount - 1 - i) / (ptCount - 1) // 1 at start (anchor), 0 at end (target)
-              // Retract: point's lerp factor = clamp01(eased / distFromTarget),
-              // so points closer to the target collapse first. Anchor stays.
-              const lerp = distFromTarget === 0
-                ? eased
-                : Math.min(1, eased / distFromTarget)
-              const ox = original[i * 3]
-              const oy = original[i * 3 + 1]
-              const oz = original[i * 3 + 2]
-              newPositions[i * 3] = ox + (ax - ox) * lerp
-              newPositions[i * 3 + 1] = oy + (ay - oy) * lerp
-              newPositions[i * 3 + 2] = oz + (az - oz) * lerp
+            // Phase 9D.2.3 Fix 1: point-trim retract. Compute how many
+            // points to keep from the anchor side; the rest are dropped.
+            // Three.js needs at least 2 points for a valid line segment.
+            const pointsToShow = Math.max(2, Math.ceil(ptCount * (1 - eased)))
+            // retractFromStart === true → target endpoint is at index 0
+            // (the FROM side). We keep points [ptCount - pointsToShow ..
+            // ptCount - 1] (the anchor-side tail). Otherwise we keep
+            // points [0 .. pointsToShow - 1] (the anchor-side head).
+            const newPositions = new Array(pointsToShow * 3)
+            for (let i = 0; i < pointsToShow; i++) {
+              const sourceIdx = retractFromStart
+                ? (ptCount - pointsToShow + i)
+                : i
+              newPositions[i * 3] = original[sourceIdx * 3]
+              newPositions[i * 3 + 1] = original[sourceIdx * 3 + 1]
+              newPositions[i * 3 + 2] = original[sourceIdx * 3 + 2]
             }
             try {
               line.geometry.setPositions(newPositions)

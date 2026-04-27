@@ -444,12 +444,17 @@ body {
   to   { stroke-dashoffset: 1000; }
 }
 
-/* Stage 3: per-row content fade. Applied to elements tagged with
-   data-unravel-row. Each row's animation-delay is set inline in
-   AssetNode.jsx so the stagger order can match the row order. */
+/* Stage 3: per-row content "deletion" right-to-left.
+   Phase 9D.2.3 Fix 3: switched from opacity fade to clip-path wipe.
+   inset(top right bottom left) — animating the RIGHT inset from 0 to
+   100% reveals less and less of the row from the right edge inward,
+   visually reading as a backspace-key text deletion. The wipe acts on
+   each row independently; AssetNode's unravelRowStyle helper applies
+   per-row delays so the rows delete in stagger order (badge first,
+   title, owner, minibar last). */
 @keyframes node-unravel-content {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+  from { clip-path: inset(0 0 0 0); -webkit-clip-path: inset(0 0 0 0); }
+  to   { clip-path: inset(0 100% 0 0); -webkit-clip-path: inset(0 100% 0 0); }
 }
 
 /* Stage 4: card background fade + slight translateY settle. Applied to

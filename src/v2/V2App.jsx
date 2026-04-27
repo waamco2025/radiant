@@ -914,14 +914,21 @@ export default function V2App() {
   const handleV22DismissOrphanedEvalResult = useCallback(async (evalResultArtifact) => {
     if (!evalResultArtifact?.id) return
     const id = evalResultArtifact.id
-    // Phase 9D.2 (#124): play unravel animation BEFORE the state mutation
-    // so the view-builder filter doesn't drop the artifact mid-animation.
-    // The Detail Panel close (setSel(null)) also moves to AFTER the
-    // animation so the panel doesn't snap shut while the card unravels.
+    // Phase 9D.2.3 Fix 2: deselect + close Detail Panel BEFORE running the
+    // unravel. The previous order (await unravel; then setSel(null)) left
+    // the selection border + panel rendering throughout the unravel,
+    // creating a visual conflict between the gray selection treatment and
+    // the red revoked-border erasure. Now: deselect → primitive waits for
+    // the panel slide-out via waitForPanelClose → unravel runs without
+    // competing visual state. State mutation still moves to AFTER the
+    // unravel so the view-builder filter doesn't drop the artifact while
+    // it's still animating.
+    setSel(null)
     await playUnravelAnimation({
       nodeId: id,
       canvasRef,
       setUnravelingNodeId: setV22UnravelingNodeId,
+      waitForPanelClose: true,
     })
     setV22Provisionals((prev) => {
       const existingIdx = prev.evaluationResults.findIndex((er) => er.id === id)
@@ -944,7 +951,6 @@ export default function V2App() {
         ],
       }
     })
-    setSel(null)
   }, [])
 
   // Phase 9D.1.2 W1: EA-only revocation dismiss (Cases C/D). Unlike the
@@ -999,15 +1005,15 @@ export default function V2App() {
 
   const handleV22DismissRevoked = useCallback(async (claimId) => {
     if (!claimId) return
-    // Phase 9D.2 (#124): play unravel animation on the Claim card BEFORE
-    // the state mutation. The Claim is what visibly leaves the canvas
-    // (Eval Results persist per 9D.1.3 Fix 6; the paired EA is just a
-    // metadata annotation). Detail Panel close moves to AFTER the
-    // animation so the panel doesn't snap shut while the card unravels.
+    // Phase 9D.2.3 Fix 2: deselect + close Detail Panel BEFORE running the
+    // unravel. See handleV22DismissOrphanedEvalResult above for rationale —
+    // selection state and red border erasure conflict visually.
+    setSel(null)
     await playUnravelAnimation({
       nodeId: claimId,
       canvasRef,
       setUnravelingNodeId: setV22UnravelingNodeId,
+      waitForPanelClose: true,
     })
     setV22Provisionals((prev) => {
       const revokedDaIds = new Set(
@@ -1035,7 +1041,7 @@ export default function V2App() {
         ),
       }
     })
-    setSel(null)
+    // Phase 9D.2.3 Fix 2: setSel(null) moved to BEFORE playUnravelAnimation.
   }, [activeRole.party])
 
   const handleV22OpenRunEvaluation = useCallback((evaluationAgreement) => {
@@ -4626,6 +4632,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.3', items: [
+                  'Edge retract animation now walks the line\'s terminus along its existing curve instead of curling the line inward',
+                  'Dismissing a revoked node now closes the Detail Panel first so selection state doesn\'t compete with the unravel choreography',
+                  'Stage 3 content rows now delete right-to-left like a backspace-key wipe instead of a generic opacity fade',
+                ]},
                 { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.2', items: [
                   'Fixed: revoked agreement edges now actually render in red (the styling was being overwritten on hover/select/zoom)',
                   'Fixed: dismissing a revoked node no longer double-pans the camera during the unravel animation',
