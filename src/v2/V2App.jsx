@@ -4632,6 +4632,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.4', items: [
+                  'Fixed: edges no longer reappear at full length mid-unravel — they stay retracted from Stage 1 through to artifact removal',
+                ]},
                 { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.3', items: [
                   'Edge retract animation now walks the line\'s terminus along its existing curve instead of curling the line inward',
                   'Dismissing a revoked node now closes the Detail Panel first so selection state doesn\'t compete with the unravel choreography',

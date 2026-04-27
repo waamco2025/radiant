@@ -2417,6 +2417,23 @@ const V2Canvas = forwardRef(function V2Canvas({
   useEffect(() => {
     if (!edgeGroupRef.current) return
     if (transitioningRef.current) return
+    // Phase 9D.2.4: skip the rebuild while playUnravelAnimation is running.
+    // The unravel primitive trims edge geometry per-frame via setPositions
+    // (see playEdgeRetract in this file's imperative handle). React state
+    // changes during the unravel — `setSel(null)` on entry, then the
+    // `_unraveling` flag flip on the target node — produce new
+    // `currentNodeMap` references, retriggering this effect mid-animation
+    // and rebuilding full-length edges that overwrite the trimmed state.
+    // The `unravelingRef` guard added in 9D.2.2 already protects the
+    // selection-pan effect; same suppression applies here.
+    //
+    // Cleanup is automatic: when the unravel completes and
+    // `setUnraveling(false)` fires, V2App's subsequent state mutation
+    // updates `currentLayer.edges` to drop the dismissed artifact's edges.
+    // The next render after the ref clears triggers exactly one rebuild
+    // run, which uses the post-mutation edge list — so the now-removed
+    // edges naturally don't reappear.
+    if (unravelingRef.current) return
     const lodMode = zoomRef.current < LOD_THRESHOLD
 
     buildEdges(edgeGroupRef.current, currentLayer.edges, currentNodeMap, 0.5, 1.0, lodMode)

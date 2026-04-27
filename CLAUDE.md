@@ -1599,3 +1599,38 @@ No JS changes. `unravelRowStyle(isUnraveling, rowIdx)` still applies the same `n
 **Runtime verification:** Build clean. Preview reloads cleanly. End-to-end visual QA at `SLOW_MODE_MULTIPLIER = 10` (current default per the file's intentional QA setting): can step through Stage -1 (panel slides closed) → Stage 0 (skip if visible) → Stage 1 (edges walk back along curve) → Stage 2 (CCW border erasure) → Stage 3 (rows wipe right-to-left in stagger) → Stage 4 (card fade + translate). Each stage now visually distinct and uncluttered by competing selection state. Code-level math verification: slice indices correctly produce the anchor-side prefix/suffix at boundary cases (t=0 → pointsToShow=ptCount=full curve; t=1 → pointsToShow=2=just the anchor + one neighbor).
 
 **Status:** [x] Complete.
+
+### Phase 9D.2.4 completion notes (2026-04-27) — suppress edge rebuild during unravel
+
+Single-line guard. The 9D.2.3 QA-pass uncovered one residual visual bug: edges were reappearing at full length mid-unravel and only disappearing all-at-once when the artifact was finally mutated out of state. Worse with `SLOW_MODE_MULTIPLIER = 10` because the rebuild flicker was protracted across the slow choreography.
+
+**Diagnosis.** V2Canvas.jsx's main edge-rebuild `useEffect` (line ~2417) watches `[currentLayer, currentNodeMap, buildEdges, zoom, chainNodeIds, threeReady]`. During the unravel:
+1. `setSel(null)` fires before unravel starts → `chainNodeIds` recomputes → effect runs → edges rebuilt at full length (overwriting any pre-unravel state).
+2. `playEdgeRetract` trims edge geometry per-frame via `setPositions`.
+3. `setUnravelingNodeId(nodeId)` flips the `_unraveling` flag in V2App → `v22DataWithReveal` re-stamps the target node → new `currentNodeMap` reference → **rebuild effect fires again** → `buildEdges` re-runs → trimmed geometries discarded, replaced with full-length edges.
+4. Stages 2-4 play with the now-restored full-length edges visible behind the unraveling card.
+5. Final state mutation drops the artifact → next rebuild → edges disappear all at once.
+
+**Fix.** One line added to the rebuild effect, alongside the existing `transitioningRef.current` early-return:
+
+```js
+if (unravelingRef.current) return
+```
+
+`unravelingRef` was introduced in 9D.2.2 to suppress the selection-pan effect during the unravel. Same ref applies here. The primitive sets it `true` on entry (in the `try { canvas.setUnraveling(true); ... }` block) and clears it `false` in the `finally`, so the guard is exact.
+
+**Cleanup is automatic.** When `setUnraveling(false)` fires at the end of the primitive, V2App's subsequent `setV22Provisionals(...)` mutation runs, dropping the dismissed artifact's edges from `view.disclosureAgreements` (or `evaluationResults`, etc.). The next render after `unravelingRef.current` clears triggers exactly one rebuild run, against the post-mutation edge list. The dismissed edges aren't in that list — they don't reappear. No extra wiring needed.
+
+**Other geometry-rebuild sites verified clean.**
+- Lines 1743/1773/1786/1871/1880/1922/2261/2360 are inside dive/surface/network-build flows guarded by the existing `transitioningRef.current = true`. None fire during a dismiss flow.
+- Line 2702 is the theme-change `MutationObserver`. Fires only on `data-theme` attribute change, which doesn't happen during unravel.
+- Line 2507 is the chain-dim/animate effect — modifies `mat.opacity` in place, doesn't call `buildEdges` or `setPositions`. Trim survives.
+- `applyEdgeStylingRef` modifies materials in place — same.
+
+So the rebuild-effect guard is sufficient. No other paths needed touching.
+
+**Deviations:** none.
+
+**Runtime verification:** Build clean. Preview reloads cleanly with the canvas mounted. Code-level verification via source re-read confirms the diff is exactly the one-line `if (unravelingRef.current) return` added immediately after the `transitioningRef.current` early-return at line ~2419, with a comment block above explaining the rationale. Manual visual verification at `SLOW_MODE_MULTIPLIER = 10` is the canonical path (V2Canvas 3D raycaster DOM-dispatch limitation continues to constrain scripted UI walkthroughs).
+
+**Status:** [x] Complete.
