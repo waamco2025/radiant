@@ -1414,3 +1414,48 @@ Other dismiss handlers (`handleV22DismissRevokedEa`, `handleV22DismissRevokedDaG
 **Runtime verification.** Build clean (no new module-graph errors). Preview (`http://localhost:5173/v2.html`) loads cleanly post-edit, no new console errors beyond pre-existing `NaN` warnings. End-to-end UI walkthrough of the four stages constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. The primitive is testable in isolation (it's a pure async function); browser walkthrough is the canonical verification path for the visual sequencing.
 
 **Status:** [x] Complete.
+
+### Phase 9D.2.1 completion notes (2026-04-27) — revoked-edge persistence + unravel choreography overhaul
+
+Three fixes from 9D.2 QA. The cumulative effect: when Alice revokes Bob's DA, Bob now sees a revoked-state edge to the Claim (red, dimmed) before he clicks Dismiss; clicking Dismiss in an already-visible-Claim panel doesn't jitter-pan the canvas; and the unravel itself is a properly-staged sequence — edges retract, border erodes counter-clockwise, content fades row-by-row, card settles into nothing.
+
+**Fix 1 — Revoked DAs/EAs persist as styled edges through Dismiss.**
+
+Diagnosis: v2_2Data.js line 1538 filtered `_revokedMeta`-annotated DAs out of `view.disclosureAgreements` BEFORE `deriveAgreementEdges` ran. Bob's view never saw a DA edge to the revoked Claim — the edge vanished the instant Alice revoked. Stage 1 of the unravel (edge retract) had nothing to retract.
+
+Fix:
+- `deriveAgreementEdges` now walks `[...view.disclosureAgreements, ...(view.revokedDisclosureAgreements || [])]`. Revoked DAs produce edges marked `isRevoked: true` on the edge object.
+- `daByEvalAgreementId` extended to also map `view.revokedEvaluationAgreements` so the paired-EA lookup still resolves when both the DA and EA are revoked together.
+- V2Canvas's `buildEdges` reads `edge.isRevoked` → sets `edgeColor` to `THREE.Color('#ef4444')` (resolved `--accent-red`) and `revokedOpacityFactor = 0.5`. The opacity factor multiplies into the existing `targetOpacity` chain at material creation. Revoked edges are forced through the transparent-material path (regardless of whether the underlying SDA type is solid) so the dim reads — solid revoked edges lose the `premixColor` optimization, acceptable tradeoff for the small number of revoked edges that exist at any time.
+- The dash pattern is preserved: a revoked Selective edge still renders dashed, just red+dimmed. Conveys "this kind of relationship is being terminated."
+
+The revoked edge persists from revocation through Dismiss. On Dismiss, the unravel primitive's Stage 1 (`playEdgeRetract`) finds the revoked edge by `userData.from`/`userData.to` and animates its retraction. After the unravel completes, the artifact is annotated `_dismissedRevoked: true`, the view-builder pre-filter (9D.1.1 Fix 6) drops it, and the edge naturally disappears.
+
+**Fix 2 — Visibility-based pan skip (panel-aware).**
+
+Diagnosis: `isFocusedOnPoint(x, y)` measured "is the camera centered on the node's world position?" When the Detail Panel is open, V2Canvas offsets the camera so the node sits to the LEFT of the 480px-wide panel. The node is visible to the user, but not centered — `isFocusedOnPoint` always returned false → `animatedPanToWithZoom` always fired, jittering the canvas by ~50px and forcing the zoom to 1.1.
+
+Fix: new V2Canvas method `isNodeVisibleInViewport(nodeId, { panelWidthPx, padding })`:
+- Resolves the node's world position via the same `layerStackRef` lookup as `getNodeWorldPos`.
+- Projects via the existing `worldToScreen`.
+- Compares the screen position against `[padding, containerWidth - panelWidthPx - padding] × [padding, containerHeight - padding]`.
+- Sanity check: if zoom < 0.6 (user is far out), treat as not-visible-enough so the unravel does pan + zoom in.
+- Returns true when the node sits inside the visible area accounting for the panel.
+
+`playUnravelAnimation` now calls `isNodeVisibleInViewport(nodeId, { panelWidthPx: 480 })` (480 hardcoded as the canonical Detail Panel width — primitive could accept this as an option for future non-panel callers, but no caller needs that today). When visible: skip Stage 0. When not visible: fall back to `animatedPanToWithZoom`. Most dismiss flows skip Stage 0 entirely now — the user just sees Stage 1+ from where they already are.
+
+**Fix 3 — Staged unravel choreography.**
+
+Replaced the single coordinated `node-unravel` keyframe with three layered animations:
+
+- **Stage 2 — `@keyframes node-unravel-border`**: 600ms `stroke-dashoffset` from 0 → 1000. Implemented as an SVG `<path>` overlay rendered inside the card body when `isUnraveling`. The path traces the card perimeter counter-clockwise from the top-right corner: M (W-R, 0) → L (R, 0) → arc top-left → L (0, H-R) → arc bottom-left → L (W-R, H) → arc bottom-right → L (W, R) → arc top-right → Z. Animating `stroke-dashoffset` from 0 toward positive values eats the dash from the path's *start* (top-right) along its drawing direction (CCW), producing the requested counter-clockwise erasure. `stroke-dasharray="1000"` (oversized vs. actual perimeter ~600) ensures the dash covers the full path; `stroke="var(--accent-red)"`. The card's own `borderColor` is set to `transparent` while `isUnraveling` so only the overlay reads.
+- **Stage 3 — `@keyframes node-unravel-content`**: 200ms opacity fade per row. Wired by a new helper `unravelRowStyle(isUnraveling, rowIdx)` in AssetNode.jsx that returns `{ animation: 'node-unravel-content 200ms <delay>ms ease forwards' }` with delay = 300 + rowIdx*50. Applied to four row containers in the full-card render: Row 0 (type label), Row 1 (name + badges), Row 2 (owner), Row 3 (minibar — both the provisional-message branch and the standard HealthBar branch). Stagger order follows the row order top-to-bottom.
+- **Stage 4 — `@keyframes node-unravel-card`**: 300ms opacity 1→0 + translateY 0→6px, applied to the card root with a 600ms delay so it kicks in after the border has mostly eroded. The mini-card LOD also uses Stage 4 (with a slightly different delay) but skips the SVG overlay and per-row stagger — the staged choreography doesn't read at the smaller card scale, and a card-level fade is sufficient.
+
+Primitive timing: `STAGE_HOLD_MS = 980` (was 900 + 60 buffer). Covers Stage 4's 600 + 300 + 80ms paint buffer. With `STAGE_CARD_OFFSET_MS = 300` (CSS animations start 300ms after Stage 1 begins), total post-Stage-0 = 300 + 980 = 1280ms. Within the original 1.0–1.3s budget.
+
+**Deviations:** none. All three fixes landed exactly as briefed. The clockwise/counter-clockwise direction was specifically requested as counter-clockwise; the SVG path was constructed CCW from top-right and animated with positive dashoffset to match.
+
+**Runtime verification:** Build clean. Preview reloads cleanly with no new console errors beyond pre-existing `NaN` warnings. End-to-end UI walkthrough of the staged sequence (revoke DA → switch role → see persistent dimmed-red edge → click notification → click Dismiss → no jitter pan → border erodes counter-clockwise → rows fade in stagger → card settles + fades) is constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. SVG path drawing direction verified via the path's start/end point math.
+
+**Status:** [x] Complete.

@@ -858,6 +858,12 @@ const V2Canvas = forwardRef(function V2Canvas({
       const sdaCfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const isNewEdge = !!edge._isNew
       const isSelectedEdge = !!edge._isSelected
+      // Phase 9D.2.1 Fix 1: revoked-state edge styling. Red + dimmed; keeps
+      // the dash pattern (so a Selective revoked edge still reads as
+      // selective). Wins over isNewEdge / isSelectedEdge color treatment
+      // since a revoked agreement is terminal — no point lerping toward
+      // white. Width preserved at the SDA's base.
+      const isRevokedEdge = !!edge.isRevoked
       // Selected edge treatment per spec §4.4 (tuned from spec's 40%/+0.5px to
       // 65%/+1.5px after visual testing showed the spec's values were invisible
       // on dashed/dotted edges).
@@ -869,14 +875,24 @@ const V2Canvas = forwardRef(function V2Canvas({
       const isInternalEdge = edge.grantorParty && edge.granteeParty
         && edge.grantorParty === edge.granteeParty
       const internalFactor = (isInternalEdge && !isSelectedEdge && !isNewEdge) ? 0.5 : 1.0
-      const edgeColor = isNewEdge
-        ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
-        : isSelectedEdge
-          ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.65)
-          : new THREE.Color(sdaCfg.color)
+      const edgeColor = isRevokedEdge
+        // Phase 9D.2.1 Fix 1: revoked → resolved CSS var --accent-red.
+        // Read once at module scope would require theme-change handling;
+        // hardcode the dark-theme value matching var(--accent-red) so we
+        // don't tangle with theme.
+        ? new THREE.Color('#ef4444')
+        : isNewEdge
+          ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.4)
+          : isSelectedEdge
+            ? new THREE.Color(sdaCfg.color).lerp(new THREE.Color('#ffffff'), 0.65)
+            : new THREE.Color(sdaCfg.color)
       const lineWidth = isNewEdge
         ? 3.0
         : (isSelectedEdge ? baseWidth + 1.5 : baseWidth * internalFactor)
+      // Phase 9D.2.1 Fix 1: target opacity for revoked edges. Multiplies
+      // into the existing chain-opacity logic at the material-creation
+      // site below.
+      const revokedOpacityFactor = isRevokedEdge ? 0.5 : 1.0
 
       // Flatten curve points for LineGeometry
       const positions = []
@@ -889,16 +905,21 @@ const V2Canvas = forwardRef(function V2Canvas({
       let dashSize = sdaCfg.dash
       let gapSize = sdaCfg.gap
       let material
-      if (isDashed) {
-        // Dashed lines: need transparent for gaps
+      // Phase 9D.2.1 Fix 1: revoked edges always go through the transparent-
+      // material path (regardless of dashed-ness) so the 0.5 opacity
+      // multiplier reads. Solid revoked edges get re-flagged transparent
+      // and lose the premixColor optimization — acceptable tradeoff for the
+      // small number of revoked edges that may exist at any time.
+      if (isDashed || isRevokedEdge) {
+        // Dashed lines: need transparent for gaps. Revoked: ditto for dim.
         material = new LineMaterial({
           color: edgeColor,
           linewidth: lineWidth,
-          opacity: targetOpacity,
+          opacity: targetOpacity * revokedOpacityFactor,
           transparent: true,
           depthWrite: false,
           resolution: new THREE.Vector2(resX, resY),
-          dashed: true,
+          dashed: isDashed,
           dashSize,
           gapSize,
           dashScale: 1,
@@ -2013,6 +2034,36 @@ const V2Canvas = forwardRef(function V2Canvas({
       // target would be a tiny dot the user can't see).
       const zoomOk = z >= 0.6
       return zoomOk && Math.hypot(dxPx, dyPx) <= tolPx
+    },
+    // Phase 9D.2.1 Fix 2: panel-aware visibility check. Returns true when
+    // the node's current screen position falls within the visible canvas
+    // area, accounting for an open Detail Panel reducing the usable width.
+    // Used by playUnravelAnimation to skip Stage 0 when the user already
+    // has the node in view — avoids jittery pan/zoom when the panel-click
+    // already centered the canvas. `padding` reserves a margin near each
+    // edge so we don't claim "visible" when the node is half-clipped.
+    isNodeVisibleInViewport: (nodeId, opts = {}) => {
+      const { panelWidthPx = 0, padding = 40 } = opts
+      const layer = layerStackRef.current[layerStackRef.current.length - 1]
+      const n = layer?.nodes?.find((nn) => nn.id === nodeId)
+      if (!n || !Number.isFinite(n.x) || !Number.isFinite(n.y)) return false
+      const container = containerRef.current
+      if (!container) return false
+      const sp = worldToScreen(n.x, n.y)
+      const w = container.clientWidth
+      const h = container.clientHeight
+      // Detail Panel sits on the right (zIndex 200, width 480 by V2App).
+      // Visible area is x ∈ [padding, w - panelWidthPx - padding].
+      const minX = padding
+      const maxX = w - panelWidthPx - padding
+      const minY = padding
+      const maxY = h - padding
+      // Sanity: the camera also needs to be at a "reasonable" zoom — if
+      // the user has zoomed way out so the node is a tiny dot, treat it
+      // as "not visible enough" so the unravel pans + zooms in.
+      const z = zoomRef.current || 1
+      if (z < 0.6) return false
+      return sp.x >= minX && sp.x <= maxX && sp.y >= minY && sp.y <= maxY
     },
     // Edge retract animation. For each Line2 in the edge group whose
     // userData.from === nodeId or userData.to === nodeId, interpolate the

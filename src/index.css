@@ -424,21 +424,40 @@ body {
   to   { opacity: 0.9; transform: translateX(-50%) translateY(0); }
 }
 
-/* Phase 9D.2 (#124) — node-unravel: card erodes + settles when a node leaves
-   the canvas. Driven by `_unraveling: true` flag on the node, applied via
-   AssetNode.jsx. Compresses Stages 2-4 of the original spec into a single
-   coordinated keyframe (per the brief's CSS-fallback allowance — full
-   clockwise dashed-border unwind would require an SVG overlay tracking card
-   pos+size through pan/zoom, disproportionately expensive vs. visual gain).
-   Stage 2 (border erodes): 0% → 33% — border-color fades to transparent.
-   Stage 3 (content fade):  20% → 70% — opacity ramps down.
-   Stage 4 (card fade):     60% → 100% — transparent + slight settle.
+/* Phase 9D.2.1 Fix 3 (#124) — staged unravel choreography. Replaces 9D.2's
+   single coordinated keyframe with three layered animations on the card,
+   plus an SVG border-erasure overlay rendered in AssetNode.jsx.
+
+   Timing (relative to `_unraveling` flag flipping true on the node):
+     Stage 2 (border erasure):     0ms  → 600ms  (SVG stroke-dashoffset)
+     Stage 3 (content stagger):    300ms → 700ms (opacity per row)
+     Stage 4 (card fade + settle): 600ms → 900ms (bg + translateY)
 */
-@keyframes node-unravel {
-  0%   { opacity: 1; transform: translateY(0); border-color: var(--accent-red); }
-  33%  { opacity: 0.95; border-color: color-mix(in srgb, var(--accent-red) 40%, transparent); }
-  70%  { opacity: 0.4; border-color: transparent; transform: translateY(2px); }
-  100% { opacity: 0; transform: translateY(6px); border-color: transparent; }
+
+/* Stage 2: counter-clockwise border erasure. Implemented as
+   stroke-dashoffset animation on an SVG <path> overlay drawn in
+   AssetNode.jsx (the path itself is built CCW from top-right, so a
+   positive dashoffset eats the dash from the start of the path,
+   producing the requested counter-clockwise erasure). */
+@keyframes node-unravel-border {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: 1000; }
+}
+
+/* Stage 3: per-row content fade. Applied to elements tagged with
+   data-unravel-row. Each row's animation-delay is set inline in
+   AssetNode.jsx so the stagger order can match the row order. */
+@keyframes node-unravel-content {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Stage 4: card background fade + slight translateY settle. Applied to
+   the card root with a 600ms delay so it kicks in after the border has
+   mostly eroded. */
+@keyframes node-unravel-card {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(6px); }
 }
 
 /* Dark mode date input styling */

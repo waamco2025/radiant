@@ -1704,6 +1704,15 @@ export function deriveAgreementEdges(view) {
   for (const ea of view.evaluationAgreements) {
     daByEvalAgreementId.set(ea.disclosureAgreementId, ea)
   }
+  // Phase 9D.2.1 Fix 1: also map revoked EAs so paired-EA lookup still
+  // resolves when the parent DA is itself revoked. Edges for revoked
+  // agreements render in a dimmed red state; the unravel animation
+  // retracts them on Dismiss.
+  for (const ea of (view.revokedEvaluationAgreements || [])) {
+    if (!daByEvalAgreementId.has(ea.disclosureAgreementId)) {
+      daByEvalAgreementId.set(ea.disclosureAgreementId, ea)
+    }
+  }
 
   const isRenderable = (nodeId) =>
     nodeId === RADIANT_NETWORK_ACTOR.id ||
@@ -1734,10 +1743,25 @@ export function deriveAgreementEdges(view) {
       // a thinner stroke.
       grantorParty: da.grantor.party,
       granteeParty: da.grantee.party,
+      // Phase 9D.2.1 Fix 1: revoked-state flag drives red+dimmed styling in
+      // V2Canvas's buildEdges. Revoked edges persist on the canvas through
+      // the user's Dismiss action; the unravel primitive's Stage 1 then
+      // visually retracts them as the artifact is removed from view.
+      isRevoked: !!da._revokedMeta,
     })
   }
 
-  for (const da of view.disclosureAgreements) {
+  // Phase 9D.2.1 Fix 1: walk both active and revoked DAs. Revoked DAs
+  // produce edges marked `isRevoked: true` for the dimmed-red styling +
+  // unravel-retract treatment. Order matters: actives first, then revokeds —
+  // the dedupe key in pushEdge includes da.id so the two passes don't
+  // collide, but the active version always wins if both exist for some
+  // reason (defensive against any future code path that pushes both).
+  const allDasForEdges = [
+    ...view.disclosureAgreements,
+    ...(view.revokedDisclosureAgreements || []),
+  ]
+  for (const da of allDasForEdges) {
     const grantorActorId = actorNodeIdForParty(da.grantor.party)
     const granteeActorId =
       da.grantee.party === RADIANT_NETWORK_PARTY

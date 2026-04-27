@@ -41,9 +41,17 @@ const STAGE_PAN_MS = 400
 const STAGE_PAN_PAD = 60        // small breath after the pan settles
 const STAGE_EDGE_MS = 400
 const STAGE_CARD_OFFSET_MS = 300 // card unravel starts overlapping edge retract
-const STAGE_CARD_MS = 900
+// Phase 9D.2.1 Fix 3: split the 900ms-coordinated keyframe into staged
+// timings. Held-flag duration = max stage end. Border erasure starts at
+// flag-set, runs 600ms; content fade starts at +300ms relative to the
+// flag, runs 400ms (so 700ms end); card fade + translate starts at
+// +600ms, runs 300ms (900ms end). Plus 80ms paint buffer.
+const STAGE_HOLD_MS = 980
 const PAN_TARGET_ZOOM = 1.1
-const PAN_FOCUS_TOL_PX = 60
+// Phase 9D.2.1 Fix 2: when the Detail Panel is open, the visible canvas
+// area is reduced by 480px on the right. The primitive passes this as
+// the panelWidthPx hint to V2Canvas's isNodeVisibleInViewport.
+const PANEL_WIDTH_PX = 480
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -80,12 +88,22 @@ export async function playUnravelAnimation({
     return
   }
   const canvas = canvasRef?.current
-  // Stage 0 — pan/zoom to node (skipped when already focused).
+  // Stage 0 — pan/zoom to node (skipped when already on screen).
+  // Phase 9D.2.1 Fix 2: visibility-based skip instead of focus-on-point.
+  // The Detail Panel offsets the camera so the node sits to the LEFT of
+  // the panel — it's clearly visible to the user but not centered on the
+  // camera's literal world position. The previous isFocusedOnPoint check
+  // measured "is the camera centered on the node?" and always answered
+  // false in this scenario, firing a jittery pan that only shifted the
+  // node by ~50px. Asking "is the node visible?" instead skips the pan
+  // when the user already has the node on screen.
   if (ensureFocused && canvas?.getNodeWorldPos && canvas.animatedPanToWithZoom) {
     const pos = canvas.getNodeWorldPos(nodeId)
     if (pos) {
-      const focused = canvas.isFocusedOnPoint?.(pos.x, pos.y, PAN_FOCUS_TOL_PX)
-      if (!focused) {
+      const visible = canvas.isNodeVisibleInViewport?.(nodeId, {
+        panelWidthPx: PANEL_WIDTH_PX,
+      })
+      if (!visible) {
         canvas.animatedPanToWithZoom(pos.x, pos.y, PAN_TARGET_ZOOM, STAGE_PAN_MS)
         await sleep(STAGE_PAN_MS + STAGE_PAN_PAD)
       }
@@ -98,16 +116,22 @@ export async function playUnravelAnimation({
     ? canvas.playEdgeRetract(nodeId, STAGE_EDGE_MS)
     : Promise.resolve()
 
-  // Stage 2-4 — start the CSS card unravel after a short overlap delay.
+  // Stages 2-4 — flip the unraveling flag after a short overlap delay.
+  // The flag drives three layered CSS animations on the card:
+  //   • Stage 2 (border erasure, SVG overlay, ~600ms from flag-set)
+  //   • Stage 3 (content stagger fade, ~700ms total from flag-set)
+  //   • Stage 4 (card bg + translate, ~300ms starting at +600ms from flag-set)
+  // See AssetNode.jsx + index.css for the keyframe definitions.
   await sleep(STAGE_CARD_OFFSET_MS)
   setUnravelingNodeId?.(nodeId)
 
-  // Wait for both to fully complete. A small +60ms buffer past the CSS
-  // duration ensures the keyframe's final state is painted before the
-  // node unmounts (otherwise the unmount can clip the last frame).
+  // Wait for both to fully complete. STAGE_HOLD_MS already includes the
+  // ~80ms paint buffer past the longest sub-stage (card fade ends at
+  // +900ms; +80ms ensures the keyframe's final state paints before the
+  // node unmounts).
   await Promise.all([
     edgeRetractPromise,
-    sleep(STAGE_CARD_MS + 60),
+    sleep(STAGE_HOLD_MS),
   ])
 
   // Clear the flag — at this point the caller will mutate state to remove

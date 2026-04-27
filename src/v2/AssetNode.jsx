@@ -51,6 +51,16 @@ const ACTION_BAR_W = 34 // 6px gap + 24px button + 4px breathing
 // mini and dot LOD renderings (was full-size only in Phase 9A.1).
 const WARM_BORDER = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
 
+// Phase 9D.2.1 Fix 3 (#124): per-row unravel-fade animation styles.
+// rowIdx 0 (type label) starts first; subsequent rows stagger by 50ms each.
+// Each row runs a 200ms opacity fade ending at offset+200ms relative to the
+// `_unraveling` flag flipping true. forwards keeps the final hidden state.
+function unravelRowStyle(isUnraveling, rowIdx) {
+  if (!isUnraveling) return null
+  const delay = 300 + rowIdx * 50  // 300, 350, 400, 450
+  return { animation: `node-unravel-content 200ms ${delay}ms ease forwards` }
+}
+
 // Phase 9A.2: PortalTooltip removed in favour of the shared Tooltip primitive
 // (src/components/Tooltip.jsx). StackBadge / GlobeBadge / EvidenceClip /
 // ActionButton each wrap themselves in <Tooltip content=…> now.
@@ -560,7 +570,9 @@ export default function AssetNode({
           // while transitioning `border-color`.
           borderWidth: 1,
           borderStyle: showAsProvisional ? 'dashed' : 'solid',
-          borderColor: borderColor,
+          // Phase 9D.2.1 Fix 3: while unraveling, hide the card's own border
+          // so only the SVG overlay (Stage 2 erasure) reads.
+          borderColor: isUnraveling ? 'transparent' : borderColor,
           // Phase 9D.1.3 Fix 5: opaque for revoked; 0.6 only for still-
           // provisional (non-revoked, non-declined) cards.
           opacity: (showAsProvisional && !isRevoked) ? 0.6 : 1,
@@ -584,12 +596,13 @@ export default function AssetNode({
           willChange: 'transform',
           transform: scale !== 1 ? `scale(${scale})` : undefined,
           transformOrigin: 'top left',
-          // Phase 9D.2 (#124): unravel animation. Coordinated keyframe handles
-          // border erosion + content fade + slight settle. forwards keeps the
-          // final transparent state in place until the node unmounts (the
-          // primitive holds the flag for the full duration + 60ms buffer).
+          // Phase 9D.2.1 Fix 3 (#124): staged unravel — Stage 4 (card bg +
+          // translate) starts at 600ms relative to flag-set, after the
+          // border erasure (SVG overlay) has mostly run. Stages 2 and 3
+          // run as separate animations on the SVG and per-row spans
+          // respectively. forwards keeps the final transparent state.
           ...(isUnraveling ? {
-            animation: 'node-unravel 900ms ease-in-out forwards',
+            animation: 'node-unravel-card 300ms 600ms ease-in-out forwards',
             pointerEvents: 'none',
           } : {}),
           ...(isFlipping ? {
@@ -598,6 +611,54 @@ export default function AssetNode({
           } : {}),
         }}
       >
+        {/* Phase 9D.2.1 Fix 3 (#124): SVG border-erasure overlay — Stage 2.
+            Path traverses the card perimeter counter-clockwise from the
+            top-right corner: top edge → top-left → left → bottom-left →
+            bottom → bottom-right → right → close. Animating
+            stroke-dashoffset 0 → +1000 (oversized vs. actual perimeter
+            ~600) eats the dash from the path's start (top-right), going
+            CCW. Card's own border is suppressed during the unravel via
+            borderColor 'transparent' so the overlay reads cleanly. */}
+        {isUnraveling && (() => {
+          const W = CARD_W * scale
+          const H = CARD_H * scale
+          const R = 8 * scale
+          // Path: M start, then CCW around the rect. Q = quadratic bezier
+          // for rounded corners (close enough to a true arc at this radius).
+          const d = `M ${W - R} 0
+            L ${R} 0 Q 0 0 0 ${R}
+            L 0 ${H - R} Q 0 ${H} ${R} ${H}
+            L ${W - R} ${H} Q ${W} ${H} ${W} ${H - R}
+            L ${W} ${R} Q ${W} 0 ${W - R} 0 Z`
+          return (
+            <svg
+              width={W}
+              height={H}
+              viewBox={`0 0 ${W} ${H}`}
+              style={{
+                position: 'absolute',
+                top: -1, left: -1,
+                width: W + 2, height: H + 2,
+                pointerEvents: 'none',
+                zIndex: 2,
+                overflow: 'visible',
+              }}
+              aria-hidden
+            >
+              <path
+                d={d}
+                fill="none"
+                stroke="var(--accent-red)"
+                strokeWidth="1.5"
+                strokeDasharray="1000"
+                strokeDashoffset="0"
+                style={{
+                  animation: 'node-unravel-border 600ms ease-out forwards',
+                }}
+              />
+            </svg>
+          )
+        })()}
         {/* Phase 9A item 4: wrapper is now flex column + space-between so
             the health minibar pins toward the bottom of the card and the
             whitespace equalises between the owner row and the card edge. */}
@@ -613,7 +674,7 @@ export default function AssetNode({
             Phase 9A.1 item 3: horizontal padding tightened to 4px; bottom
             margin bumped to 8px so name has clear breathing room. */}
         {node.v22Type && (
-          <div style={{ marginBottom: 8, lineHeight: 1 }}>
+          <div style={{ marginBottom: 8, lineHeight: 1, ...unravelRowStyle(isUnraveling, 0) }}>
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
               padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
@@ -631,6 +692,7 @@ export default function AssetNode({
           alignItems: 'center',
           gap: 4,
           marginBottom: 4,
+          ...unravelRowStyle(isUnraveling, 1),
         }}>
           <div style={{
             flex: 1,
@@ -704,6 +766,7 @@ export default function AssetNode({
         {(node.isEvaluation ? node.evaluatorParty : node.owner) && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 4,
+            ...unravelRowStyle(isUnraveling, 2),
           }}>
             <span style={{
               fontFamily: 'var(--font-display)',
@@ -738,6 +801,7 @@ export default function AssetNode({
                 : 'var(--text-dim)',
             fontStyle: 'italic',
             marginBottom: 3,
+            ...unravelRowStyle(isUnraveling, 3),
           }}>
             {isRevoked
               ? 'Disclosure revoked'
@@ -753,7 +817,7 @@ export default function AssetNode({
           const total = dh.ok + (dh.warn || 0) + dh.bad
           if (total === 0) return null
           return (
-            <div style={{ display: 'flex', marginBottom: 3 }}>
+            <div style={{ display: 'flex', marginBottom: 3, ...unravelRowStyle(isUnraveling, 3) }}>
               <HealthBar health={dh} />
             </div>
           )
@@ -1199,9 +1263,12 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
         transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
         ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
-        // Phase 9D.2 (#124): unravel keyframe at mini LOD too.
+        // Phase 9D.2 / 9D.2.1 (#124): unravel at mini LOD. Skips the
+        // SVG border erasure + per-row stagger (those don't read at
+        // zoomed-out scale); just runs the Stage-4 card fade so the
+        // mini card disappears with the same timing as the full card.
         ...(isUnraveling ? {
-          animation: 'node-unravel 900ms ease-in-out forwards',
+          animation: 'node-unravel-card 600ms 300ms ease-in-out forwards',
           pointerEvents: 'none',
         } : {}),
         userSelect: 'none',

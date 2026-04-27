@@ -4626,6 +4626,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.1', items: [
+                  'Revoked agreement edges now persist on the canvas in a red, dimmed visual state — visible from revocation through Dismiss',
+                  'Dismiss no longer jitter-pans when the node is already visible alongside an open Detail Panel',
+                  'Unravel animation now plays as four distinct stages with a counter-clockwise border-erasure overlay, staggered content fade, and card settle-fade — instead of the single-keyframe collapse that shipped with 9D.2',
+                ]},
                 { version: '0.9.10', date: '2026-04-26', label: 'Phase 9D.2', items: [
                   'New: dismissed revoked nodes now play an unravel animation — pan/zoom to the node, edges retract back into their counterpart cards, then the card erodes and settles before disappearing',
                   'Animation fires on Case A (revoked Claim Dismiss) and on the orphaned-Evaluation-Result Dismiss flow',
