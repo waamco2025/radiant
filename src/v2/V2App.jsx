@@ -4626,6 +4626,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.2', items: [
+                  'Fixed: revoked agreement edges now actually render in red (the styling was being overwritten on hover/select/zoom)',
+                  'Fixed: dismissing a revoked node no longer double-pans the camera during the unravel animation',
+                  'Added a slow-mode multiplier in the unravel module — bump the constant to slow the entire choreography for QA without redoing every timing',
+                ]},
                 { version: '0.9.10', date: '2026-04-27', label: 'Phase 9D.2.1', items: [
                   'Revoked agreement edges now persist on the canvas in a red, dimmed visual state — visible from revocation through Dismiss',
                   'Dismiss no longer jitter-pans when the node is already visible alongside an open Detail Panel',

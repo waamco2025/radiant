@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import Tooltip from '../components/Tooltip.jsx'
+// Phase 9D.2.2 Fix 3: shared timing constants for the unravel animation.
+// Single source of truth for JS-side waits + CSS-side animation-durations.
+// SLOW_MODE_MULTIPLIER lives in unravel.js; bump it to slow the whole
+// choreography for QA.
+import { UNRAVEL_DURATIONS } from './animations/unravel.js'
 
 // Inject reveal animation keyframes once
 if (typeof document !== 'undefined' && !document.getElementById('reveal-keyframes')) {
@@ -55,10 +60,15 @@ const WARM_BORDER = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))
 // rowIdx 0 (type label) starts first; subsequent rows stagger by 50ms each.
 // Each row runs a 200ms opacity fade ending at offset+200ms relative to the
 // `_unraveling` flag flipping true. forwards keeps the final hidden state.
+//
+// Phase 9D.2.2 Fix 3: durations + delays now driven by UNRAVEL_DURATIONS
+// from animations/unravel.js so SLOW_MODE_MULTIPLIER scales JS waits and
+// CSS animation lengths in lockstep.
 function unravelRowStyle(isUnraveling, rowIdx) {
   if (!isUnraveling) return null
-  const delay = 300 + rowIdx * 50  // 300, 350, 400, 450
-  return { animation: `node-unravel-content 200ms ${delay}ms ease forwards` }
+  const { contentFadeMs, contentBaseDelayMs, contentStaggerMs } = UNRAVEL_DURATIONS
+  const delay = contentBaseDelayMs + rowIdx * contentStaggerMs
+  return { animation: `node-unravel-content ${contentFadeMs}ms ${delay}ms ease forwards` }
 }
 
 // Phase 9A.2: PortalTooltip removed in favour of the shared Tooltip primitive
@@ -601,8 +611,9 @@ export default function AssetNode({
           // border erasure (SVG overlay) has mostly run. Stages 2 and 3
           // run as separate animations on the SVG and per-row spans
           // respectively. forwards keeps the final transparent state.
+          // Phase 9D.2.2 Fix 3: durations from UNRAVEL_DURATIONS.
           ...(isUnraveling ? {
-            animation: 'node-unravel-card 300ms 600ms ease-in-out forwards',
+            animation: `node-unravel-card ${UNRAVEL_DURATIONS.cardFadeMs}ms ${UNRAVEL_DURATIONS.cardFadeDelayMs}ms ease-in-out forwards`,
             pointerEvents: 'none',
           } : {}),
           ...(isFlipping ? {
@@ -653,7 +664,8 @@ export default function AssetNode({
                 strokeDasharray="1000"
                 strokeDashoffset="0"
                 style={{
-                  animation: 'node-unravel-border 600ms ease-out forwards',
+                  // Phase 9D.2.2 Fix 3: duration from UNRAVEL_DURATIONS.
+                  animation: `node-unravel-border ${UNRAVEL_DURATIONS.borderMs}ms ease-out forwards`,
                 }}
               />
             </svg>
@@ -1267,8 +1279,9 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         // SVG border erasure + per-row stagger (those don't read at
         // zoomed-out scale); just runs the Stage-4 card fade so the
         // mini card disappears with the same timing as the full card.
+        // Phase 9D.2.2 Fix 3: durations from UNRAVEL_DURATIONS.
         ...(isUnraveling ? {
-          animation: 'node-unravel-card 600ms 300ms ease-in-out forwards',
+          animation: `node-unravel-card ${UNRAVEL_DURATIONS.miniCardFadeMs}ms ${UNRAVEL_DURATIONS.miniCardFadeDelayMs}ms ease-in-out forwards`,
           pointerEvents: 'none',
         } : {}),
         userSelect: 'none',

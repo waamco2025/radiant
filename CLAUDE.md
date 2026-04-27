@@ -1459,3 +1459,63 @@ Primitive timing: `STAGE_HOLD_MS = 980` (was 900 + 60 buffer). Covers Stage 4's 
 **Runtime verification:** Build clean. Preview reloads cleanly with no new console errors beyond pre-existing `NaN` warnings. End-to-end UI walkthrough of the staged sequence (revoke DA → switch role → see persistent dimmed-red edge → click notification → click Dismiss → no jitter pan → border erodes counter-clockwise → rows fade in stagger → card settles + fades) is constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read is the backstop. SVG path drawing direction verified via the path's start/end point math.
 
 **Status:** [x] Complete.
+
+### Phase 9D.2.2 completion notes (2026-04-27) — revoked-edge styling persistence + double-pan suppression + slow-mode toggle
+
+Three surgical follow-ups to 9D.2.1. Each fix is small but addresses a real observed bug from QA.
+
+**Fix 1 — Revoked edge red color persists through restyles.**
+
+Diagnosis: `buildEdges` set the red color correctly via `edgeColor` and `revokedOpacityFactor` at material-creation time. But V2Canvas's restyle pass (`applyEdgeStylingRef`, fires on every `selectedEdgeId`, `hoveredEdge`, `currentLayer.edges`, or `zoom` change) re-reads `cfg.color` from `SDA_EDGE_CONFIG[effectiveSdaType]` and overwrites the red — the restyle had no awareness that the edge was revoked. The flag `isRevoked` lived on the input `edge` object but was never propagated to `line.userData`, so the restyle had nowhere to look it up.
+
+Fix:
+- `buildEdges` line ~959 now writes `isRevoked: !!edge.isRevoked` onto `line.userData` alongside the existing `_isNew` / `isInternal` / etc. flags.
+- `applyEdgeStylingRef` checks `line.userData?.isRevoked` first; when true: `mat.color.set('#ef4444')` + `mat.linewidth = baseWidth` + `mat.needsUpdate = true` + `return` to skip the SDA-config color + hover/select blend + width adjustments below. Width stays at `baseWidth` regardless of selection — even a selected revoked edge keeps the red treatment so the visual cue doesn't get lost.
+
+The 0.5 opacity multiplier set at material-creation time persists (this restyle pass doesn't touch `mat.opacity`), so the dim treatment continues across selection / hover / zoom.
+
+**Fix 2 — Suppress selection-pan effect during unravel.**
+
+Diagnosis: V2Canvas's selection-pan effect at line ~1591 watches `[selectedId, currentNodeMap, panToNode, panelWidth]`. When the unravel primitive flips `v22UnravelingNodeId`, V2App re-derives `v22DataWithReveal` (which stamps `_unraveling: true` onto the target node) → new `currentNodeMap` reference → effect re-fires while the edge retract is mid-flight, double-panning the camera ~50px. The effect already had guards for `transitioningRef` (dive/surface) and `externalPanRef` (animatedPanToWithZoom in flight), but no guard for the new unravel state.
+
+Fix:
+- `unravelingRef = useRef(false)` added alongside the existing `transitioningRef`.
+- New `setUnraveling(flag)` method on the imperative handle wrapping the ref.
+- Selection effect adds `if (unravelingRef.current) return` after the existing transitioning + externalPan guards.
+- Primitive wraps its body in `try { canvas.setUnraveling(true); ... existing flow ... } finally { canvas.setUnraveling(false) }` so the ref re-arms even if an upstream Promise rejects (defensive against tearing down mid-animation).
+
+This is the cleanest of the three "skip selection effect" patterns because the ownership stays with the primitive — V2Canvas just exposes the ref toggle, primitive controls when it's set.
+
+**Fix 3 — Slow-mode toggle for QA.**
+
+Implementation: single source of truth in `src/v2/animations/unravel.js`. New exported constants:
+
+```js
+export const SLOW_MODE_MULTIPLIER = 1
+export const UNRAVEL_DURATIONS = {
+  borderMs:               Math.round(600 * SLOW_MODE_MULTIPLIER),
+  contentFadeMs:          Math.round(200 * SLOW_MODE_MULTIPLIER),
+  contentBaseDelayMs:     Math.round(300 * SLOW_MODE_MULTIPLIER),
+  contentStaggerMs:       Math.round(50  * SLOW_MODE_MULTIPLIER),
+  cardFadeMs:             Math.round(300 * SLOW_MODE_MULTIPLIER),
+  cardFadeDelayMs:        Math.round(600 * SLOW_MODE_MULTIPLIER),
+  miniCardFadeMs:         Math.round(600 * SLOW_MODE_MULTIPLIER),
+  miniCardFadeDelayMs:    Math.round(300 * SLOW_MODE_MULTIPLIER),
+}
+```
+
+The internal `_PAN_MS` / `_EDGE_MS` / `_CARD_OFFSET_MS` / `_HOLD_MS` constants also multiply by `SLOW_MODE_MULTIPLIER`, so the JS-side waits track CSS animation lengths.
+
+AssetNode imports `UNRAVEL_DURATIONS` and uses it everywhere it previously hardcoded ms values:
+- `unravelRowStyle(isUnraveling, rowIdx)` — duration + base delay + stagger from the object.
+- Full-card Stage 4 animation — `node-unravel-card ${cardFadeMs}ms ${cardFadeDelayMs}ms ease-in-out forwards`.
+- SVG border overlay — `node-unravel-border ${borderMs}ms ease-out forwards`.
+- Mini-card Stage 4 — `node-unravel-card ${miniCardFadeMs}ms ${miniCardFadeDelayMs}ms ease-in-out forwards`.
+
+Bump `SLOW_MODE_MULTIPLIER` to e.g. `5` and every JS wait + every CSS animation length scales together. Runtime QA path: edit the constant, hot-reload, dismiss a node, observe each stage at 5× duration. Set back to `1` once verified.
+
+**Deviations:** none. All three fixes shipped as briefed. Chose the imperative-handle `setUnraveling` method over a direct ref export for the V2Canvas/primitive boundary — keeps the ref private to V2Canvas (matches the existing `transitioningRef` / `externalPanRef` pattern).
+
+**Runtime verification:** Build clean. Preview reloads cleanly. End-to-end UI walkthrough of the three fixes (red revoked edge persists across hover/select/zoom; no double-pan during dismiss; slow-mode multiplier scales JS+CSS together) constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read + math is the backstop.
+
+**Status:** [x] Complete.

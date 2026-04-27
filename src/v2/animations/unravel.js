@@ -37,21 +37,57 @@
 //     primitives run simultaneously they animate independently and don't
 //     conflict (each targets a different nodeId).
 
-const STAGE_PAN_MS = 400
-const STAGE_PAN_PAD = 60        // small breath after the pan settles
-const STAGE_EDGE_MS = 400
-const STAGE_CARD_OFFSET_MS = 300 // card unravel starts overlapping edge retract
+// Phase 9D.2.2 Fix 3: testing-time toggle. Multiplies every JS-side
+// timing constant AND drives the inline animation-duration overrides on
+// the SVG border overlay + per-row content fades + card fade in
+// AssetNode.jsx. Default `1` for production speed (~1.0–1.3s total).
+// Bump to e.g. 5 to slow the entire choreography for visual QA.
+//
+// The constant is exported so AssetNode can pull the same value — single
+// source of truth so JS-side timings and CSS-side animation-durations
+// stay in sync at any multiplier.
+export const SLOW_MODE_MULTIPLIER = 1
+
+const _PAN_MS = 400
+const _PAN_PAD = 60
+const _EDGE_MS = 400
+const _CARD_OFFSET_MS = 300
 // Phase 9D.2.1 Fix 3: split the 900ms-coordinated keyframe into staged
 // timings. Held-flag duration = max stage end. Border erasure starts at
 // flag-set, runs 600ms; content fade starts at +300ms relative to the
 // flag, runs 400ms (so 700ms end); card fade + translate starts at
 // +600ms, runs 300ms (900ms end). Plus 80ms paint buffer.
-const STAGE_HOLD_MS = 980
+const _HOLD_MS = 980
+
+const STAGE_PAN_MS = Math.round(_PAN_MS * SLOW_MODE_MULTIPLIER)
+const STAGE_PAN_PAD = Math.round(_PAN_PAD * SLOW_MODE_MULTIPLIER)
+const STAGE_EDGE_MS = Math.round(_EDGE_MS * SLOW_MODE_MULTIPLIER)
+const STAGE_CARD_OFFSET_MS = Math.round(_CARD_OFFSET_MS * SLOW_MODE_MULTIPLIER)
+const STAGE_HOLD_MS = Math.round(_HOLD_MS * SLOW_MODE_MULTIPLIER)
+
 const PAN_TARGET_ZOOM = 1.1
 // Phase 9D.2.1 Fix 2: when the Detail Panel is open, the visible canvas
 // area is reduced by 480px on the right. The primitive passes this as
 // the panelWidthPx hint to V2Canvas's isNodeVisibleInViewport.
 const PANEL_WIDTH_PX = 480
+
+/**
+ * CSS-side stage durations (used by AssetNode.jsx). Multiply by the same
+ * SLOW_MODE_MULTIPLIER so JS waits and CSS animation lengths stay locked.
+ * Numeric, in milliseconds.
+ */
+export const UNRAVEL_DURATIONS = {
+  borderMs: Math.round(600 * SLOW_MODE_MULTIPLIER),
+  contentFadeMs: Math.round(200 * SLOW_MODE_MULTIPLIER),
+  contentBaseDelayMs: Math.round(300 * SLOW_MODE_MULTIPLIER),
+  contentStaggerMs: Math.round(50 * SLOW_MODE_MULTIPLIER),
+  cardFadeMs: Math.round(300 * SLOW_MODE_MULTIPLIER),
+  cardFadeDelayMs: Math.round(600 * SLOW_MODE_MULTIPLIER),
+  // Mini-card LOD uses a longer single-stage fade matching the staged
+  // total so the disappearance timing is consistent.
+  miniCardFadeMs: Math.round(600 * SLOW_MODE_MULTIPLIER),
+  miniCardFadeDelayMs: Math.round(300 * SLOW_MODE_MULTIPLIER),
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -88,6 +124,12 @@ export async function playUnravelAnimation({
     return
   }
   const canvas = canvasRef?.current
+  // Phase 9D.2.2 Fix 2: tell V2Canvas's selection-pan effect to suspend
+  // for the duration of the unravel. The flag is cleared in the finally
+  // block at the bottom of this function so the effect re-arms even if
+  // an unexpected error tears down mid-animation.
+  canvas?.setUnraveling?.(true)
+  try {
   // Stage 0 — pan/zoom to node (skipped when already on screen).
   // Phase 9D.2.1 Fix 2: visibility-based skip instead of focus-on-point.
   // The Detail Panel offsets the camera so the node sits to the LEFT of
@@ -139,4 +181,10 @@ export async function playUnravelAnimation({
   // re-render is imperceptible.
   setUnravelingNodeId?.(null)
   onComplete?.()
+  } finally {
+    // Phase 9D.2.2 Fix 2: re-arm the selection-pan effect. Runs even if
+    // an upstream Promise rejects so the canvas doesn't get permanently
+    // locked out of selection panning.
+    canvas?.setUnraveling?.(false)
+  }
 }

@@ -460,6 +460,12 @@ const V2Canvas = forwardRef(function V2Canvas({
 
   // Transition state
   const transitioningRef = useRef(false)
+  // Phase 9D.2.2 Fix 2: while the unravel primitive is running, the
+  // selection-pan effect at line ~1586 must NOT fire — flipping the
+  // _unraveling flag in V2App produces a new currentNodeMap reference,
+  // which retriggers the selection effect mid-animation and double-pans
+  // the camera. Set/cleared via setUnraveling on the imperative handle.
+  const unravelingRef = useRef(false)
   const [transitioning, setTransitioning] = useState(false)
   const [diveTargetId, setDiveTargetId] = useState(null)
   const [unfurlSettle, setUnfurlSettle] = useState(false) // true = cards settling into place after dive
@@ -956,6 +962,12 @@ const V2Canvas = forwardRef(function V2Canvas({
         // effect at the bottom of this component can restore the 0.5× factor
         // on deselection.
         isInternal: !!isInternalEdge,
+        // Phase 9D.2.2 Fix 1: revoked-state flag carried onto userData so
+        // applyEdgeStylingRef can preserve the red+dimmed treatment when
+        // restyling on selection / hover / zoom changes. Without this the
+        // restyle re-reads color from SDA_EDGE_CONFIG and overwrites the
+        // red set in this same buildEdges call.
+        isRevoked: !!edge.isRevoked,
       }
       group.add(line)
     })
@@ -1579,6 +1591,11 @@ const V2Canvas = forwardRef(function V2Canvas({
   useEffect(() => {
     if (!selectedId || transitioningRef.current) return
     if (externalPanRef.current) return
+    // Phase 9D.2.2 Fix 2: skip during unravel. The primitive sets the
+    // _unraveling flag on the target node, which propagates a new
+    // currentNodeMap → retriggers this effect mid-animation. Without
+    // this guard the camera double-pans during the edge retract.
+    if (unravelingRef.current) return
     const node = currentNodeMap[selectedId]
     if (!node || node.x === undefined) return
     const container = containerRef.current
@@ -2008,6 +2025,15 @@ const V2Canvas = forwardRef(function V2Canvas({
       dirtyRef.current = true
     },
     animatedPanToWithZoom: (x, y, z, duration) => animatedPanToWithZoom(x, y, z, duration),
+    // Phase 9D.2.2 Fix 2: tells V2Canvas's selection-pan effect to suspend
+    // during the unravel sequence. The primitive sets `true` before any
+    // pan/zoom or edge-retract work, sets `false` in a finally block when
+    // the entire chain settles. Without this, flipping the _unraveling
+    // flag (which propagates a new currentNodeMap) causes the selection
+    // effect to fire mid-animation and double-pan the camera.
+    setUnraveling: (flag) => {
+      unravelingRef.current = !!flag
+    },
     // Phase 9D.2: lookups + edge-retract animation for the unravel primitive.
     // getNodeWorldPos resolves a nodeId to its world-space (x,y) on the
     // current layer; null if not found or coords are non-finite (e.g.
@@ -2908,6 +2934,19 @@ const V2Canvas = forwardRef(function V2Canvas({
       // gaps; solid edges stay at 30%.
       const isHovered = !isSelected && !!hovId && line.userData?.edgeId === hovId
       const baseWidth = SDA_EDGE_WIDTH[effectiveSdaType] || 2.0
+      // Phase 9D.2.2 Fix 1: revoked edges keep their red+dimmed treatment
+      // through every restyle (selection / hover / zoom / layer change).
+      // Width stays at base; selection lerp toward white skipped so the
+      // user doesn't lose the revoked visual cue when they click the edge
+      // to inspect it. Selection state still drives Detail Panel, just not
+      // the edge color.
+      const isRevokedEdge = !!line.userData?.isRevoked
+      if (isRevokedEdge) {
+        mat.linewidth = baseWidth
+        if (mat.color) mat.color.set('#ef4444')
+        mat.needsUpdate = true
+        return
+      }
       const baseColor = new THREE.Color(cfg.color)
       const hoverBlend = (cfg.dash || 0) > 0 ? 0.5 : 0.3
       const color = isSelected
