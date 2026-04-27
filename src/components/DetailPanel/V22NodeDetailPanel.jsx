@@ -96,6 +96,45 @@ function Row({ label, value, mono }) {
   )
 }
 
+// Phase 10.2: small clickable row for Parent / Children sections in the Asset
+// Detail Panel. Renders as `[ASSET]  {name}` — clicking pans/zooms and opens
+// the target Asset's panel via `onSelectAsset(id)`.
+function AssetHierarchyRow({ asset, onSelect }) {
+  const handleClick = () => {
+    if (onSelect && asset?.id) onSelect(asset.id)
+  }
+  return (
+    <div
+      onClick={handleClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 10px', marginTop: 6,
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        cursor: onSelect ? 'pointer' : 'default',
+        transition: 'background 120ms, border-color 120ms',
+      }}
+      onMouseEnter={(e) => {
+        if (!onSelect) return
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-raised))'
+        e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--accent-indigo) 35%, var(--border))'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'var(--bg-raised)'
+        e.currentTarget.style.borderColor = 'var(--border)'
+      }}
+    >
+      <span style={{
+        fontSize: 9, fontFamily: 'var(--font-mono)', letterSpacing: '0.08em',
+        color: 'var(--text-tertiary)', padding: '2px 6px',
+        borderRadius: 4, background: 'var(--bg-deep)',
+      }}>ASSET</span>
+      <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1 }}>{asset?.name || '—'}</span>
+    </div>
+  )
+}
+
 function FooterButton({ label, onClick, accent, danger, amber, disabled, title }) {
   const bg = disabled
     ? 'var(--bg-raised)'
@@ -250,7 +289,11 @@ function V22AssetPanel({
   node, activeParty, onClose,
   onRequestAgreement, onCreateClaim, onParseEvidence,
   onTransferAsset, onCancelTransfer,
+  onRegisterChildAsset,
   parseResultsForAsset = [],
+  childAssets = [],
+  parentAsset = null,
+  onSelectAsset,
   disclosureAgreementsForNode = [],
   evaluationAgreementsForNode = [],
   resolveSubjectName,
@@ -297,6 +340,20 @@ function V22AssetPanel({
             <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />
             <Row label="Parse Results" value={parseResultsForAsset.length} />
           </Section>
+          {/* Phase 10.2: Asset hierarchy. Parent shown above Children so the
+              tree reads top-down; sections only render when non-empty. */}
+          {parentAsset && (
+            <Section title="Parent">
+              <AssetHierarchyRow asset={parentAsset} onSelect={onSelectAsset} />
+            </Section>
+          )}
+          {childAssets.length > 0 && (
+            <Section title={`Children (${childAssets.length})`}>
+              {childAssets.map((child) => (
+                <AssetHierarchyRow key={child.id} asset={child} onSelect={onSelectAsset} />
+              ))}
+            </Section>
+          )}
           {isPendingTransfer && (
             <Section title="Pending Transfer">
               <Row label="Recipient" value={node._pendingTransfer.toParty} />
@@ -328,6 +385,10 @@ function V22AssetPanel({
             <FooterButton label="Cancel Transfer" danger onClick={onCancelTransfer} title="Withdraw the pending transfer — no ledger record, recipient notification dismisses." />
           ) : (
             <>
+              {/* Phase 10.2: Register child Asset under this Asset. Five-button
+                  footer is intentionally crowded for now — auto-collapsing
+                  affordance is a future polish phase. */}
+              <FooterButton label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
               <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
               <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a PEP template" />
               <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />

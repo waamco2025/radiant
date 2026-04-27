@@ -143,6 +143,7 @@ export default function V22CreateAssetModal({
   nested = false,
   onClose,
   onComplete,              // ({ files }) => void — files: [{ file, displayName, hash }]
+  parentAssetName = null,  // Phase 10.2: when set, modal copy adapts for child registration
 }) {
   const [step, setStep] = useState(0)
   // Each row: { id, file, label, hashPhase: 'pending'|'hashing'|'endorsing'|'done', hash }
@@ -223,7 +224,9 @@ export default function V22CreateAssetModal({
       <ModalHeader
         title={rows.length > 1 ? `Register ${rows.length} Assets` : 'Register Asset'}
         subtitle={
-          <>Register {rows.length > 1 ? `${rows.length} new Assets` : 'a new Asset'} under <strong style={{ color: 'var(--text-primary)' }}>{activeParty}</strong> from files in Qualified Storage.</>
+          parentAssetName
+            ? <>Register {rows.length > 1 ? `${rows.length} new Assets` : 'a new Asset'} under <strong style={{ color: 'var(--text-primary)' }}>{parentAssetName}</strong> from files in Qualified Storage.</>
+            : <>Register {rows.length > 1 ? `${rows.length} new Assets` : 'a new Asset'} under <strong style={{ color: 'var(--text-primary)' }}>{activeParty}</strong> from files in Qualified Storage.</>
         }
         step={step + 1}
         totalSteps={3}

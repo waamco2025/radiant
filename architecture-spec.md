@@ -127,11 +127,12 @@ A registered evidence file. Contains the file's URI, hash, size, MIME type, and 
 - Visual label: `ASSET` (small mono tag in card header).
 - Identity: anchored by a DOT object (see §2.6). The Detail Panel's "DOT" row surfaces `asset.dot.pin` (the Asset's own DOT identifier). The "Hash" row surfaces `asset.file.hash` (identical to `asset.dot.hash` for Assets). The "URI" row surfaces `asset.file.uri`. `asset.dot.ownerDid` is also accessible on the artifact but not rendered in the panel UI yet — provenance lineage is a future phase.
 - Display name: `asset.name` — the user-facing display name rendered on the card and panel header. Default is the filename stem (e.g., `power-supply-spec.pdf` → `power supply spec`); the registration modal exposes an editable per-file input so the user can refine the default before committing.
-- Key JSON fields: `name`, `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`, `dot`.
+- Key JSON fields: `name`, `fileUri`, `filename`, `size`, `mimeType`, `hash`, `registrationDate`, `parseResultIds[]`, `parentAssetId`, `dot`.
 - Child layer: intentionally empty in V2.2 (child layer code retained but unused — see §5).
 - Can be referenced by: one or more Claims owned by the same actor.
 - Cannot be disclosed directly — only Claims can be disclosed.
 - **Transferable** — Asset ownership can be transferred between parties; see §11.7.
+- **Hierarchy (Phase 10.2):** Assets can carry an optional `parentAssetId` to form a single-party tree (see §10.1 for constraints). Layout rule: each owned Asset is positioned in column `COL_OWN_ASSET + (depth × ASSET_COL_GAP)`. Downstream columns (Parse / Claim / Eval / Pulled / Public) shift right by `maxDepth × ASSET_COL_GAP` so they don't collide with deep trees. When no hierarchy exists (`maxDepth === 0`), the layout is byte-identical to the pre-hierarchy column rhythm. The Asset Detail Panel surfaces a "Parent" section (when `parentAssetId` is set) and a "Children" section (when other Assets reference this one as parent); both rows are clickable and pan/zoom to the target.
 
 ### 3.3 Parse Result Node
 
@@ -276,6 +277,7 @@ Carol's view is mechanically identical to Bob's. The "auditor" designation is in
 - Alice does not see Bob's internal Assets (the ones not involved in an Agreement with her).
 - Bob does not see Alice's individual Assets — he only sees her Claim. He may see referenced Asset metadata inside the Claim's Detail Panel depending on the disclosure type, filtered to the in-scope subset when the viewer is a grantee rather than the owner. (Phase 6.5.)
 - Neither party sees the other's Evaluation Agreements with third parties.
+- **Asset hierarchy is owner-only (Phase 10.2).** Counterparties never see parent-child Asset relationships — they continue to see only the Claim per the rules above. The `parentAssetId` field on an Asset doesn't affect what counterparties see; it only affects how the owner's own canvas lays out their own Assets.
 
 ### 6.5 Cross-canvas pull-in rules
 
@@ -407,7 +409,7 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
 
 ### 10.1 Asset artifact
 
-> **Prototype note — Asset field authority.** Platform-issued fields in production: `pin`, `ownerDot`, `file.hash` (verified at ingest), `registrationDate`. App-derived / actor-input fields: `name`, `description`, `file.uri`, `file.filename`, `file.size`, `file.mimeType`. The prototype populates the Platform-issued fields client-side via `makeDotObject` and mock hash computation. **Authority:** DPP (Platform-issued fields); Actor + App (actor-input fields).
+> **Prototype note — Asset field authority.** Platform-issued fields in production: `pin`, `ownerDot`, `file.hash` (verified at ingest), `registrationDate`. App-derived / actor-input fields: `name`, `description`, `file.uri`, `file.filename`, `file.size`, `file.mimeType`, `parentAssetId`. The prototype populates the Platform-issued fields client-side via `makeDotObject` and mock hash computation. **Authority:** DPP (Platform-issued fields); Actor + App (actor-input fields).
 
 ```json
 {
@@ -418,6 +420,7 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
   "ownerDot": "DOT-0x...",
   "name": "Power Regulation Module Datasheet",
   "description": "Official datasheet for PRM-3A rev. 4",
+  "parentAssetId": null,
   "file": {
     "uri": "provenance://evidence/prm-datasheet-v4",
     "filename": "prm-datasheet-v4.pdf",
@@ -429,6 +432,14 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
   "parseResultIds": ["parse-001", "parse-002"]
 }
 ```
+
+**Asset hierarchy (Phase 10.2).** `parentAssetId` (nullable) enables single-party Asset trees. Constraints:
+
+- A child Asset MUST share its parent's owner — cross-party hierarchy is forbidden. Validation runs at registration time (`makeAssetRegistrationArtifacts`).
+- The parent must already exist; cycles are forbidden (`A → B → A` rejected).
+- The ownership Disclosure Agreement is unchanged — the Actor still owns the child via the standard internal Full DA. Only the *rendered edge* anchors at the parent Asset instead of the Actor, so the canvas reads as a tree (parent on the left, children to the right).
+- Claims referencing a parent Asset do NOT implicitly include child Assets. Each Claim's `referencedAssetIds` lists exactly the Assets it references.
+- Counterparties NEVER see parent/child relationships — hierarchy is owner-only (see §6).
 
 ### 10.2 Parse Result artifact
 

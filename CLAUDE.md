@@ -1655,3 +1655,48 @@ Singular/plural conditionals (`rows.length === 1` / `> 1`) preserved on Step 1 +
 **Runtime verification:** Build clean. End-to-end UI walkthrough of the four step states (intro callout, helper text, hashing-in-progress amber footer message, Step 2 confirmation footer) constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read of the four edits is the backstop. Singular/plural branching verified via the unchanged conditionals (`{rows.length === 1 ? '' : 's'}`, `{rows.length > 1 ? 'These' : 'This'}`, `{rows.length > 1 ? 'NEW badges' : 'a NEW badge'}`).
 
 **Status:** [x] Complete.
+
+### Phase 10.2 completion notes (2026-04-27) — Asset hierarchy
+
+Closes backlog #70. Restores V1/V2/V2.1/V3 Asset hierarchy that was lost in the V2.2 model retreat. Adds an optional `parentAssetId` field to the Asset schema enabling single-party tree structures (e.g., "Sentinel-4 Program" as a parent with module/subsystem children). Counterparties never see hierarchy — it's owner-only.
+
+**Workstreams:**
+
+- **Schema (v2_2Data.js).** `makeAsset` accepts optional `parentAssetId = null` and includes it in the returned artifact. `makeAssetRegistrationArtifacts` accepts and passes through. Validation lives in V2App's submit handler (factory stays pure-stateless): when a `parentAssetId` is set, the handler resolves it against `mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)`, throws on missing parent, throws on cross-party hierarchy (`parent.owner !== activeRole.party`), and walks the proposed parent's ancestor chain to detect cycles (defensive — should only fire under corrupted state).
+
+- **Edge derivation (`deriveAgreementEdges`).** The internal-Asset DA branch at v2_2Data.js line ~1777 now walks `view.assets` to find the subject Asset and, when `parentAssetId` is set AND the parent is on the canvas (`visibleAssetIds.has(...)`), redirects the edge `from` endpoint from the owning Actor to the parent Asset. The DA itself is unchanged — only the rendered edge anchor differs. Fallback to the Actor when the parent isn't visible (defensive). Edge styling matches the existing internal Full DA — no new edge type.
+
+- **Layout (`buildV22Canvas`).** New constant `ASSET_COL_GAP = 380` (matches the natural spacing between adjacent V2.2 columns). Per-Asset depth is computed via `computeDepth(assetId)` — a memoized recursive walk of `parentAssetId` with cycle-safety. `maxOwnedAssetDepth = max(...depths)` drives `assetColShift = maxOwnedAssetDepth * ASSET_COL_GAP`. All downstream columns (`COL_OWN_PARSE_eff`, `COL_OWN_CLAIM_eff`, `COL_OWN_EVAL_eff`, `COL_PULLED_CLAIM_eff`, `COL_PULLED_ASSET_eff`, `COL_PUBLIC_eff`) and the Radiant Network anchor shift right by `assetColShift`. Owned Assets are placed at `COL_OWN_ASSET + (depth × ASSET_COL_GAP)`; within a depth group, vertical position uses the asset's index inside that group (deferred polish: row alignment with parent — backlog #130). Without hierarchy (`maxOwnedAssetDepth === 0`), `assetColShift === 0` and the layout is byte-identical to pre-10.2.
+
+- **Card action bar (AssetNode.jsx V22ActionBar).** ASSET branch grew a "+" Register Asset button as the first action when `isOwner && !node._pendingTransfer`. Same icon + dispatch verb (`registerAsset`) as the ACTOR branch — V2App's `handleV22CardAction` switches on `node.v22Type` to choose root vs. child registration semantics.
+
+- **Detail Panel footer (V22NodeDetailPanel.jsx V22AssetPanel).** New `Register Asset` button as the first of five owner-only footer buttons (Register Asset / Request Agreement / Parse Evidence / Create Claim / Transfer). Five-button footer is intentionally crowded; auto-collapsing affordance is a future polish phase.
+
+- **Detail Panel body — Parent + Children sections.** New `AssetHierarchyRow` helper component (similar visual rhythm as the existing AgreementRow). Parent section renders when `currentAsset.parentAssetId` is set AND the parent is in `view.assets`. Children section renders when any other Asset has `parentAssetId === currentAsset.id`. Both sections skipped when empty. Click on either fires `onSelectAsset(id)` which V2App wires to `setSel(...)` + `setV22PanToClaimId(...)` for pan/zoom navigation.
+
+- **V2App routing.**
+  - Modal state shape extended: `v22RegisteringAsset = { source: 'actor' } | { source: 'asset', parentAsset: <asset> }`.
+  - `handleV22CardAction` 'registerAsset' case branches: ACTOR (own party + non-network) → root; ASSET (owner equals active party) → child with `parentAsset = node.v22Artifact || node`.
+  - V22NodeDetailPanel mount passes `onRegisterChildAsset`, `childAssets`, `parentAsset`, `onSelectAsset` props for ASSET nodes.
+  - `handleV22CreateAssetSubmit` reads `parentAssetId` off `v22RegisteringAsset` state and runs the existence + ownership + cycle validation block before invoking the factory.
+  - V22CreateAssetModal mount passes `parentAssetName={v22RegisteringAsset?.parentAsset?.name || null}`.
+
+- **Modal copy (V22CreateAssetModal).** New optional `parentAssetName` prop. ModalHeader subtitle branches: when set, "Register {N} new Asset(s) under **{parentAssetName}** from files in Qualified Storage"; otherwise the existing "under **{activeParty}**" copy. No other strings touched.
+
+**Out of scope (deferred):**
+- Asset dismissal flow + re-parenting children + Claim-reference protection — backlog #131. Substantial future workstream; depends on dismissal UX decisions.
+- Vertical "squeeze children into rows aligned with parent" UX optimization — backlog #130. Current depth-based packing is functional; alignment is polish.
+- Cascading disclosures (parent Asset disclosure auto-includes children) — explicitly out of scope per the phase brief; future Phase 10.x scope.
+- Cross-party hierarchy — forbidden by design (validation throws).
+- Auto-collapsing footer button affordance — five buttons crowded, future polish.
+
+**Spec updates folded in:**
+- §3.2 — Asset Node grew a "Hierarchy (Phase 10.2)" bullet documenting the layout rule + Detail Panel sections.
+- §10.1 — Asset artifact JSON gained `parentAssetId` field; schema authority note expanded; new "Asset hierarchy" subsection codifies the constraints (cross-party forbidden, cycles forbidden, ownership DA unchanged, Claims don't implicit-include children, owner-only).
+- §6.4 — "What does NOT appear on each view" gained an explicit note that hierarchy is owner-only.
+
+**Runtime verification:** Build clean (88 modules, +5kB main bundle). Preview reloads cleanly post-edit; canvas mounts; existing seed data renders unchanged (no Assets carry `parentAssetId` in the seeded dataset, so `maxOwnedAssetDepth === 0` and the layout is byte-identical to pre-10.2). Browser-observable verification of the new "+" button on Asset cards + the Register Asset footer + the Parent/Children sections + the depth-based layout shift constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-level verification via source re-read of the eight workstreams + module-load + footer/Changelog visibility is the backstop.
+
+**Pre-existing warnings noted but not fixed:** the Changelog modal's `key={release.version}` collision (many entries share `'0.9.10'`) generates duplicate-key React warnings. Pre-dates Phase 10.2 — out of scope for this commit.
+
+**Status:** [x] Complete.

@@ -192,7 +192,11 @@ export function makeActor({ id, user, party, role, credits = 0, vertical = '' })
   }
 }
 
-/** Asset artifact — spec §10.1. Identity anchored by a DOT object (spec §2.4). */
+/** Asset artifact — spec §10.1. Identity anchored by a DOT object (spec §2.4).
+ * Phase 10.2: optional `parentAssetId` enables single-party Asset hierarchy.
+ * Children must share their parent's owner; cycles forbidden. Counterparties
+ * never see parent/child relationships — hierarchy is owner-only (spec §6).
+ */
 export function makeAsset({
   id,
   owner,
@@ -202,6 +206,7 @@ export function makeAsset({
   file,
   registrationDate,
   parseResultIds = [],
+  parentAssetId = null,
   dot,   // optional structured DOT; derived below if absent
 }) {
   if (!id) throw new Error('makeAsset: id is required')
@@ -230,6 +235,7 @@ export function makeAsset({
     ownerDot: ownerDid,
     name,
     description,
+    parentAssetId: parentAssetId || null,
     file: {
       uri: file.uri,
       filename: file.filename,
@@ -1775,8 +1781,17 @@ export function deriveAgreementEdges(view) {
     const hasScopeAssets = Array.isArray(da.scope?.assetIds) && da.scope.assetIds.length > 0
 
     if (kind === 'asset' && internal) {
-      // Actor → Asset ownership.
-      pushEdge(grantorActorId, id, da)
+      // Actor → Asset ownership. Phase 10.2: when this Asset has a
+      // `parentAssetId` and that parent is on the canvas, redirect the edge
+      // FROM the parent Asset instead of the owning Actor — the ownership DA
+      // itself is unchanged (the Actor still owns the child via the DA), only
+      // the rendered edge anchors to the parent so the hierarchy reads as a
+      // tree. Fallback to the Actor when the parent isn't visible (defensive).
+      const subjectAsset = view.assets.find((a) => a.id === id)
+      const fromNode = (subjectAsset?.parentAssetId && visibleAssetIds.has(subjectAsset.parentAssetId))
+        ? subjectAsset.parentAssetId
+        : grantorActorId
+      pushEdge(fromNode, id, da)
       continue
     }
     if (kind === 'claim' && internal && !hasScopeAssets) {
@@ -1860,6 +1875,10 @@ const COL_PULLED_CLAIM = 2100
 const COL_PULLED_ASSET = 2500
 const COL_PUBLIC = 2900
 const ROW_STEP = 260
+// Phase 10.2: per-depth horizontal spacing for the Asset hierarchy column.
+// Matches the natural gap between adjacent V2.2 columns (380px) so child
+// Assets read as siblings of the existing column rhythm rather than crowding.
+const ASSET_COL_GAP = 380
 
 /**
  * Compute evaluation-result health rollup for a Claim: counts satisfactory,
@@ -2479,6 +2498,7 @@ export function makeAssetRegistrationArtifacts({
   file,             // { uri, filename, size, mimeType, hash }
   name,             // optional display name — falls back to stripped filename
   description = '',
+  parentAssetId = null,  // Phase 10.2: optional parent for hierarchy
 }) {
   if (!ownerParty) throw new Error('makeAssetRegistrationArtifacts: ownerParty is required')
   if (!file || !file.uri || !file.filename) {
@@ -2502,6 +2522,7 @@ export function makeAssetRegistrationArtifacts({
     file,
     registrationDate,
     parseResultIds: [],
+    parentAssetId,
   })
 
   const ownershipDa = makeInternalDisclosureAgreement({
@@ -2674,15 +2695,63 @@ export function buildV22Canvas(view) {
 
   // ── Actor + optional Radiant Network ─────────────────────────────────
   nodes.push(actorToNode(actor, COL_ACTOR, 0))
-  if (view.actors.some((a) => a.id === RADIANT_NETWORK_ACTOR.id)) {
-    nodes.push(actorToNode(RADIANT_NETWORK_ACTOR, COL_PUBLIC, 0))
-  }
+  // Note: Radiant Network anchor uses the shifted public column when
+  // hierarchy is present. Computed below after `assetColShift`.
+  const hasNetworkAnchor = view.actors.some((a) => a.id === RADIANT_NETWORK_ACTOR.id)
 
-  // ── Owned Assets (column 1) ──────────────────────────────────────────
+  // ── Owned Assets (column 1, expands right by depth) ──────────────────
+  // Phase 10.2: Asset hierarchy. Owned Assets carrying a `parentAssetId`
+  // sit one column to the right of their parent. The downstream columns
+  // (Parse / Claim / Eval / Pulled / Public) shift right by `maxDepth *
+  // ASSET_COL_GAP` so they don't collide with deep Asset trees. When no
+  // hierarchy exists, maxDepth === 0 and the layout is identical to today.
   const ownedAssets = view.assets.filter((a) => view.ownedAssetIds.has(a.id))
   const pulledAssets = view.assets.filter((a) => !view.ownedAssetIds.has(a.id))
-  ownedAssets.forEach((asset, i) => {
-    const node = assetToNode(asset, COL_OWN_ASSET, i * ROW_STEP)
+
+  const ownedAssetMap = new Map(ownedAssets.map((a) => [a.id, a]))
+  const computeDepth = (assetId, visited = new Set()) => {
+    if (visited.has(assetId)) return 0  // cycle safety
+    visited.add(assetId)
+    const asset = ownedAssetMap.get(assetId)
+    if (!asset || !asset.parentAssetId) return 0
+    return 1 + computeDepth(asset.parentAssetId, visited)
+  }
+  const ownedAssetDepth = new Map(
+    ownedAssets.map((a) => [a.id, computeDepth(a.id)])
+  )
+  const maxOwnedAssetDepth = ownedAssets.length
+    ? Math.max(0, ...ownedAssetDepth.values())
+    : 0
+  const assetColShift = maxOwnedAssetDepth * ASSET_COL_GAP
+
+  // Effective column positions — shifted right when hierarchy depth > 0.
+  const COL_OWN_PARSE_eff = COL_OWN_PARSE + assetColShift
+  const COL_OWN_CLAIM_eff = COL_OWN_CLAIM + assetColShift
+  const COL_OWN_EVAL_eff = COL_OWN_EVAL + assetColShift
+  const COL_PULLED_CLAIM_eff = COL_PULLED_CLAIM + assetColShift
+  const COL_PULLED_ASSET_eff = COL_PULLED_ASSET + assetColShift
+  const COL_PUBLIC_eff = COL_PUBLIC + assetColShift
+
+  // Group owned Assets by depth and place each at its depth's column.
+  // Within a depth group, vertical position uses the asset's index inside
+  // that group (so depth-0 roots stack at i*ROW_STEP, depth-1 children also
+  // stack at i*ROW_STEP within the depth-1 column, etc.). The "squeeze
+  // children into rows aligned with their parent" UX optimization is
+  // deferred — see polish backlog.
+  const assetsByDepth = new Map()
+  ownedAssets.forEach((a) => {
+    const d = ownedAssetDepth.get(a.id)
+    if (!assetsByDepth.has(d)) assetsByDepth.set(d, [])
+    assetsByDepth.get(d).push(a)
+  })
+
+  ownedAssets.forEach((asset) => {
+    const depth = ownedAssetDepth.get(asset.id) || 0
+    const peers = assetsByDepth.get(depth) || []
+    const i = peers.indexOf(asset)
+    const x = COL_OWN_ASSET + (depth * ASSET_COL_GAP)
+    const y = i * ROW_STEP
+    const node = assetToNode(asset, x, y)
     // Phase 9A.4 Gate B: stamp _pendingTransfer so AssetNode can render the
     // TRANSFERRING badge. Canvas adapter also sets _showAsProvisional so the
     // dashed-border treatment fires (same visual language as Phase 4 PROVISIONAL).
@@ -2693,6 +2762,12 @@ export function buildV22Canvas(view) {
     }
     nodes.push(node)
   })
+
+  // Now that assetColShift is known, push the Radiant Network anchor at
+  // the shifted public column.
+  if (hasNetworkAnchor) {
+    nodes.push(actorToNode(RADIANT_NETWORK_ACTOR, COL_PUBLIC_eff, 0))
+  }
 
   // Phase 6 carry-over #4: do NOT append "· PROVISIONAL" / "· DECLINED" to v22Type.
   // The node card already renders separate PROVISIONAL/DECLINED badges via
@@ -2717,7 +2792,7 @@ export function buildV22Canvas(view) {
     const slot = parseSlotByAsset.get(pr.sourceAssetId) || 0
     parseSlotByAsset.set(pr.sourceAssetId, slot + 1)
     const y = (baseIdx != null ? baseIdx * ROW_STEP : 0) + slot * 80
-    nodes.push(parseResultToNode(pr, COL_OWN_PARSE, y))
+    nodes.push(parseResultToNode(pr, COL_OWN_PARSE_eff, y))
   })
 
   // ── Claims (owned column 3; pulled-in column 5) ──────────────────────
@@ -2725,11 +2800,11 @@ export function buildV22Canvas(view) {
   const pulledClaims = view.claims.filter((c) => !view.ownedClaimIds.has(c.id))
   ownedClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
-    nodes.push(claimToNode(claim, rollup, COL_OWN_CLAIM, i * ROW_STEP))
+    nodes.push(claimToNode(claim, rollup, COL_OWN_CLAIM_eff, i * ROW_STEP))
   })
   pulledClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
-    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM, i * ROW_STEP)
+    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM_eff, i * ROW_STEP)
     markProvisional(node, view.provisionalClaimIds)
     // Declined claims (Phase 5 / spec §11.4 + Phase 6.5 #3). AssetNode renders
     // its own DECLINED badge from `isDeclined`; we keep `_showAsProvisional`
@@ -2767,7 +2842,7 @@ export function buildV22Canvas(view) {
 
   // ── Pulled-in counterparty Assets (column 6) ────────────────────────
   pulledAssets.forEach((asset, i) => {
-    const node = assetToNode(asset, COL_PULLED_ASSET, i * ROW_STEP)
+    const node = assetToNode(asset, COL_PULLED_ASSET_eff, i * ROW_STEP)
     markProvisional(node, view.provisionalAssetIds)
     nodes.push(node)
   })
@@ -2782,10 +2857,10 @@ export function buildV22Canvas(view) {
   // his sole Eval Result was sharing a row with the pulled-in Claim).
   const EVAL_ROW_OFFSET = ROW_STEP / 2
   erOwn.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL, i * ROW_STEP + EVAL_ROW_OFFSET))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, i * ROW_STEP + EVAL_ROW_OFFSET))
   })
   erExternal.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL, (erOwn.length + i) * ROW_STEP + EVAL_ROW_OFFSET + 80))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, (erOwn.length + i) * ROW_STEP + EVAL_ROW_OFFSET + 80))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────

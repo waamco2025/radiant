@@ -1224,6 +1224,33 @@ export default function V2App() {
         : []
     if (files.length === 0) return null
     const _nested = !!payload._nested
+    // Phase 10.2: when registering a child Asset, the parent comes through on
+    // the v22RegisteringAsset state. Validate before invoking the factory:
+    // (1) parent must exist on the active actor's view, (2) parent must be
+    // owned by the active party, (3) cycles forbidden (defensive — at
+    // registration time the new id doesn't exist yet, so the chain from the
+    // proposed parent back through ancestors must not loop). If any check
+    // fails, throw — this should only fire under corrupted state since the UI
+    // already gates the action on owner equality.
+    const parentAssetId = v22RegisteringAsset?.parentAsset?.id || null
+    if (parentAssetId) {
+      const sharedAndProvisional = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+      const parent = sharedAndProvisional.assets.find(a => a.id === parentAssetId)
+      if (!parent) throw new Error(`Parent Asset ${parentAssetId} not found`)
+      if (parent.owner !== activeRole.party) {
+        throw new Error('Cannot register child Asset under another party\'s Asset')
+      }
+      // Cycle prevention: walk the proposed parent's chain. If we revisit an
+      // id we've already seen, the existing data is corrupted.
+      const visited = new Set([parentAssetId])
+      let cursor = parent.parentAssetId
+      while (cursor) {
+        if (visited.has(cursor)) throw new Error('Cycle detected in Asset hierarchy')
+        visited.add(cursor)
+        const next = sharedAndProvisional.assets.find(a => a.id === cursor)
+        cursor = next?.parentAssetId || null
+      }
+    }
     const newAssets = []
     const newOwnershipDAs = []
     for (const row of files) {
@@ -1233,6 +1260,7 @@ export default function V2App() {
         ownerDot: activeRole.partyDot,
         file: fileWithHash,
         name: row.displayName,
+        parentAssetId,
       })
       newAssets.push(artifacts.asset)
       newOwnershipDAs.push(artifacts.ownershipDa)
@@ -1264,7 +1292,7 @@ export default function V2App() {
       setV22RecentlyAcceptedAssetId(newIds.length > 1 ? newIds : firstId)
     }
     return newAssets.length > 1 ? newAssets.map(a => a.id) : firstId
-  }, [activeRole.party, activeRole.partyDot])
+  }, [activeRole.party, activeRole.partyDot, v22RegisteringAsset, v22Provisionals])
 
   // Phase 9A.3: V2.2 Claim creation. Produces a new Claim + Actor→Claim
   // ownership DA + one Claim→Asset internal DA per reference. Unilateral.
@@ -3482,9 +3510,13 @@ export default function V2App() {
                 setV22ParsingAsset(node)
                 return
               case 'registerAsset':
-                // Phase 9A.3: owner-only; Actor card action fires this.
+                // Phase 9A.3: owner-only; Actor card action fires this for
+                // root-level Assets. Phase 10.2: Asset card action fires this
+                // for child registration under the clicked Asset.
                 if (node.v22Type === 'ACTOR' && node.name === activeRole.party && !node.isNetworkNode) {
                   setV22RegisteringAsset({ source: 'actor' })
+                } else if (node.v22Type === 'ASSET' && node.owner === activeRole.party) {
+                  setV22RegisteringAsset({ source: 'asset', parentAsset: node.v22Artifact || node })
                 }
                 return
               case 'createClaim':
@@ -4108,6 +4140,7 @@ export default function V2App() {
             creditsPerAsset={CREDITS_PER_ASSET}
             onClose={() => setV22RegisteringAsset(null)}
             onComplete={handleV22CreateAssetSubmit}
+            parentAssetName={v22RegisteringAsset?.parentAsset?.name || null}
           />
         )}
 
@@ -4457,6 +4490,23 @@ export default function V2App() {
                 onCancelTransfer={node.v22Type === 'ASSET' && node.owner === activeRole.party && node._pendingTransfer
                   ? () => handleV22CancelTransfer(node.id)
                   : undefined}
+                // Phase 10.2: Asset hierarchy
+                onRegisterChildAsset={node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer
+                  ? () => setV22RegisteringAsset({ source: 'asset', parentAsset: node.v22Artifact || node })
+                  : undefined}
+                childAssets={node.v22Type === 'ASSET'
+                  ? (v22View?.assets || []).filter(a => a.parentAssetId === node.id)
+                  : []}
+                parentAsset={node.v22Type === 'ASSET' && node.v22Artifact?.parentAssetId
+                  ? (v22View?.assets || []).find(a => a.id === node.v22Artifact.parentAssetId) || null
+                  : null}
+                onSelectAsset={(assetId) => {
+                  // Pan/zoom + select the target Asset's canvas node.
+                  setSel(assetId)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22PanToClaimId(assetId)
+                }}
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
@@ -4632,6 +4682,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-27', label: 'Phase 10.2', items: [
+                  'New: Assets can now be registered under other Assets, restoring single-party hierarchy. Open an Asset and click "+" or "Register Asset" — the new child appears one column to the right with an edge from its parent',
+                  'Detail Panel surfaces "Parent" and "Children" sections on Asset panels — clickable rows pan/zoom to the target',
+                  'Layout: when hierarchy is present, downstream columns (Parse / Claims / Eval / Pulled / Public) shift right to accommodate the deepest tree; without hierarchy the layout is byte-identical to before',
+                  'Counterparties never see hierarchy — it remains owner-only',
+                ]},
                 { version: '0.10.0', date: '2026-04-27', label: 'Phase 10.1', items: [
                   'Register Asset modal copy rewritten to use plain language — no more "V2.2 Asset", "internal (Full) Disclosure Agreement", or "filename stem" leaking into the user-facing surface',
                 ]},

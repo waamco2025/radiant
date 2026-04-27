@@ -908,6 +908,9 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
         if (node._pendingTransfer) {
           buttons.push({ icon: '✕', tooltip: 'Cancel Transfer', onClick: fire('cancelTransfer') })
         } else {
+          // Phase 10.2: register child Asset under this Asset (matches the
+          // ACTOR branch's "+" pattern — same icon, same dispatch verb).
+          buttons.push({ icon: '＋', tooltip: 'Register Asset', onClick: fire('registerAsset') })
           buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
           buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
           buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
