@@ -429,6 +429,10 @@ The Directory Layer is a separate canvas layer (not part of the parent or child 
 
 > **Prototype note — Directory Layer.** The Directory Layer is ambitious. A minimal placeholder (empty canvas with title "Directory Layer") is acceptable for initial implementation; the full dots-and-clouds visualization can follow. The current shipped Phase 7 implementation renders 4 actor-party dot clusters behind a circular-wipe transition; full visualization (real force-directed layout, thousands of dots at scale, per-dot interactivity) is tracked as backlog items #29, #43, #45, #46. **In production:** the Directory Layer renders the Platform's public directory index — a real catalog of publicly disclosed Claims with discoverability metadata, indexed and searchable by the Platform. **Authority:** Platform (directory indexing); App (rendering).
 
+**Per-role cluster visibility (Phase 11A).** The Directory shows a curated subset of supplier clusters per actor — not every cluster is visible to every party. In V2.2, ChipCo's cluster appears only for actors with at least one active (non-revoked) Disclosure Agreement from ChipCo to the active party. Other clusters in the seeded dataset (NovaFab, Precision Components, MicroCo's own publication cluster) remain visible to all roles as inert visual dots. The filter runs at render time so role switches refresh the cluster set immediately.
+
+> **Prototype note — Per-role cluster visibility.** The prototype keys cluster visibility off the seeded inter-party DAs as a stand-in for production discoverability rules. **In production:** which clusters appear in a user's Directory view is platform-managed via subscription, discoverability settings on the publishing party's profile, and direct DA presence — the App renders whatever the Platform's Directory-index query returns for the active party. **Authority:** Platform (per-actor directory subscription + discoverability index); App (rendering the filtered set).
+
 ### 8.6 Library
 
 The Library is a chrome-accessible modal that unifies template-style artifacts in three tabs:

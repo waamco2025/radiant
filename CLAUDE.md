@@ -1854,3 +1854,48 @@ Default export identifiers renamed: `PEPLibraryModal` → `ParsingTemplatesPanel
 - Spec readable end-to-end: §8.6 Library section sits cleanly between §8.5 Implementation note and §9 AI Shopper; §17.1 references the Library in past tense; Changelog reflects Phases 9D + 10.x.
 
 **Status:** [x] Complete.
+
+### Phase 11A completion notes (2026-04-28) — DA/EA flow foundations: seed data + directory rebrand + actor corner refresh
+
+Phase 11 covers DA/EA flow separation work (#113, #115, #114, #126) + related items (#108, #102, #117, #118, #119). Aggregate too large for one phase, so split: 11A foundations only (this phase), 11B directory cluster interactivity + Detail Panel expand viewer, 11C the actual flow separation, 11D amendment + cleanup. Phase 11A is pure setup — no flow changes; existing behavior preserved end-to-end.
+
+**Workstream 1 — ChipCo as a fourth actor + warm-path seed.**
+
+- New actor `dave-chipco` (Dave @ ChipCo, role: 'supplier') added to both the actor pool (`actorPool()`) and the demo seed (`buildV22SharedArtifacts`). Not yet exposed in the role switcher — UI still shows the original three personas. Added to the pool so any 11C/11D flow that addresses Dave by PIN resolves correctly.
+- Three ChipCo Assets: PRM-3A IC Datasheet, PRM-3A IC Qualification Report, Voltage Reference IC Datasheet. Standard `makeAsset` factory, no schema changes.
+- One Parse Result on the IC Datasheet using the same Electronics Component Profile template Alice uses for her PRM datasheet (gives the demo structural symmetry across suppliers).
+- Two ChipCo Claims: "PRM-3A IC Compliance" (refs the IC datasheet + qualification report) and "Voltage Reference IC Spec" (refs the VRef datasheet).
+- One inter-party DA from ChipCo to GovCo (`da-chipco-bob-prm-ic`) — type `full`, subject = `claim-chipco-prm-ic`, no paired EA. This is the warm-path setup for Phase 11C: Bob has visibility into ChipCo's catalog (the directory cluster gates on this DA's existence) but no Claim pulls onto his canvas because no EA is paired yet. 11C will let Bob send an EA request which, when accepted, pulls the Claim onto his canvas.
+- Internal ownership DAs for ChipCo's Assets, Claims, Claim→Asset reference edges, and the Parse Result→source-Asset edge — all standard internal DAs matching the existing pattern for Alice/Bob/Carol so edge derivation works without changes.
+
+**Umbrella DA interpretation.** The brief calls this an "umbrella" DA, but the V2.2 schema doesn't have a dedicated umbrella type. Pragmatic interpretation: the warm-path anchor is one inter-party DA (subject = ChipCo's first Claim) that satisfies the directory cluster's visibility filter and serves as the seed Bob's Phase 11C flow will build on. If Phase 11C needs a true catalog-level umbrella concept, the schema can extend then.
+
+**Workstream 2 — Public Directory rebrand.**
+
+- The previous `ElectroGrid Ltd` mock cluster (line ~158 of DirectoryLayer.jsx) replaced with a real `ChipCo` cluster. Label rewritten from `mock supplier · 41 public` to `supplier · ${chipcoClaimCount} public` (resolves to "supplier · 2 public" today — the seeded ChipCo Claim count).
+- Per-role visibility filter: ChipCo's cluster only renders when the active party has at least one active (non-revoked) DA from ChipCo. Today only Bob (GovCo) qualifies via the seeded `da-chipco-bob-prm-ic`. Alice and Carol see the other 3 clusters but not ChipCo. Implementation: `chipcoVisible = useMemo(() => sharedForDirectory.disclosureAgreements.some(d => d.grantor?.party === 'ChipCo' && d.grantee?.party === activeParty && !d._revokedMeta), [sharedForDirectory, activeParty])`. Filter applied as a `.filter(c => c.partyName !== 'ChipCo' || chipcoVisible)` over the cluster array.
+- Other 3 clusters (MicroCo's own, NovaFab, Precision Components) preserved unchanged.
+
+**Workstream 3 — Actor corner refresh.**
+
+- Replaced the 88×88 amber-glowing circle anchor with a parent-layer-style ACTOR card (CARD_W = 210px, ACTOR badge on its own row above the party name, warm-indigo border matching the parent-layer Actor cards' Phase 9A.1 WARM_BORDER convention).
+- Tooltip wrapper updated: `Exit Directory` → `Return to your network`.
+- Hover treatment: border tightens from `40% indigo + var(--border)` blend → solid `var(--accent-indigo)`, background gets a 6% indigo wash, box-shadow deepens. Matches the parent-layer hover treatment without copying its specific glow value (which is selection-state).
+- Click handler unchanged — calls `onClose` to exit the Directory Layer.
+
+**Spec updates:** §8.5 grew a paragraph + Prototype note callout codifying per-role cluster visibility (Platform-side discoverability index in production; the prototype keys off seeded DAs).
+
+**Out of scope (deferred to later 11.x):** any flow changes (DA / EA / Parse / Evaluate / Revoke / Transfer), cluster-click interactivity, modal flow changes, expand-evidence Detail Panel work, DA/EA terms work, amendment work.
+
+**Runtime verification:**
+
+- Build clean (88 modules; +4 kB main bundle for ChipCo seed data).
+- ChipCo seed integrity (data-layer probe via dynamic module import):
+  - Bob's view sees ChipCo via the warm-path DA (`da-chipco-bob-prm-ic` resolves; `da.grantor === 'ChipCo'` && `da.grantee === 'GovCo'` && `!_revokedMeta`).
+  - ChipCo has 3 Assets, 2 Claims, 1 Parse Result. All ownership + reference DAs derive correctly.
+  - ChipCo's PRM-3A IC Compliance Claim does NOT pull onto Bob's parent-layer canvas (no paired EA — the pull-in rule requires `evaluationAgreements`).
+- DirectoryLayer per-role behavior verified by code path: `chipcoVisible` returns `true` for `activeParty === 'GovCo'`, `false` for `'MicroCo'` and `'AuditCo'`.
+- Corner anchor visual: full UI walkthrough constrained by V2Canvas raycaster DOM-dispatch limitation; code-level verification confirms the JSX swap landed at the documented coordinates.
+- No new console errors; pre-existing Changelog `key={release.version}` collision warnings persist (out of scope).
+
+**Status:** [x] Complete.

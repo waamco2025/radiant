@@ -134,6 +134,10 @@ function actorPool() {
     { id: 'bob-govco',     user: 'Bob',   party: 'GovCo',   role: 'buyer'    },
     { id: 'alice-microco', user: 'Alice', party: 'MicroCo', role: 'seller'   },
     { id: 'carol-auditco', user: 'Carol', party: 'AuditCo', role: 'auditor'  },
+    // Phase 11A: ChipCo as a fourth actor. Not yet in the role switcher
+    // (UI only exposes the original three demo personas); included here so
+    // PIN resolution works for any 11C/11D flow that addresses Dave directly.
+    { id: 'dave-chipco',   user: 'Dave',  party: 'ChipCo',  role: 'supplier' },
     RADIANT_NETWORK_ACTOR,
   ]
   _actorPoolCache = actors.map((a) => ({
@@ -665,6 +669,19 @@ export function buildV22SharedArtifacts() {
     credits: 2400,
     vertical: 'Audit Services',
   })
+  // Phase 11A: ChipCo (Dave) — IC supplier whose published catalog
+  // intersects MicroCo's PRM-3A. Pre-existing DA to GovCo seeds Bob's
+  // "warm path" for Phase 11C's DA/EA flow separation work: Bob already
+  // has visibility into ChipCo's catalog via the directory cluster, but
+  // no Claims pull onto his canvas because no EA is paired yet.
+  const dave = makeActor({
+    id: 'dave-chipco',
+    user: 'Dave',
+    party: 'ChipCo',
+    role: 'supplier',
+    credits: 2400,
+    vertical: 'Electronics',
+  })
 
   // ── Alice's Assets ────────────────────────────────────────────────────
   const aPrmDatasheet = makeAsset({
@@ -838,6 +855,60 @@ export function buildV22SharedArtifacts() {
     parseResultIds: [],
   })
 
+  // ── ChipCo's Assets (Phase 11A) ───────────────────────────────────────
+  // ChipCo supplies the IC components that go into MicroCo's PRM-3A
+  // assembly. Three Assets seed enough material for a Claim with
+  // referenced datasheet + test report + a separate Voltage Reference IC
+  // Claim, plus a Parse Result against the IC datasheet.
+  const dPrmIcDatasheet = makeAsset({
+    id: 'asset-chipco-prm-ic-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'PRM-3A IC Datasheet',
+    description: 'Datasheet for the buck-converter IC used in MicroCo PRM-3A.',
+    file: {
+      uri: 'provenance://evidence/chipco-prm-ic-datasheet-v3',
+      filename: 'chipco-prm-ic-datasheet.pdf',
+      size: 1738112,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-prm-ic-datasheet-v3',
+    },
+    registrationDate: '2026-02-04T11:00:00Z',
+    parseResultIds: ['parse-chipco-prm-ic-datasheet'],
+  })
+  const dPrmIcTestReport = makeAsset({
+    id: 'asset-chipco-prm-ic-testreport',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'PRM-3A IC Qualification Report',
+    description: 'Bench + radiation qualification report for the PRM-3A IC.',
+    file: {
+      uri: 'provenance://evidence/chipco-prm-ic-testreport-v3',
+      filename: 'chipco-prm-ic-qualification.pdf',
+      size: 2197504,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-prm-ic-testreport-v3',
+    },
+    registrationDate: '2026-02-09T15:30:00Z',
+    parseResultIds: [],
+  })
+  const dVrefDatasheet = makeAsset({
+    id: 'asset-chipco-vref-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Voltage Reference IC Datasheet',
+    description: 'Datasheet for ChipCo VREF-IC-220 ±0.05% precision reference.',
+    file: {
+      uri: 'provenance://evidence/chipco-vref-datasheet-v1',
+      filename: 'chipco-vref-datasheet.pdf',
+      size: 1428736,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-vref-datasheet-v1',
+    },
+    registrationDate: '2026-02-12T09:18:00Z',
+    parseResultIds: [],
+  })
+
   const assets = [
     aPrmDatasheet,
     aPrmTestReport,
@@ -849,6 +920,9 @@ export function buildV22SharedArtifacts() {
     bThermal,
     cAuditWorkspace,
     cComplianceQueue,
+    dPrmIcDatasheet,
+    dPrmIcTestReport,
+    dVrefDatasheet,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -900,7 +974,25 @@ export function buildV22SharedArtifacts() {
       { id: 'f-mounting', name: 'Mounting method', value: 'Soldered perimeter with snap-fit lid', confidence: 0.89 },
     ],
   })
-  const parseResults = [prPrmDatasheet, prVregDatasheet, prEmiDatasheet]
+  // Phase 11A: ChipCo's IC datasheet parse — same template Alice uses for
+  // her PRM datasheet so the demo has structural symmetry across suppliers.
+  const prChipcoPrmIcDatasheet = makeParseResult({
+    id: 'parse-chipco-prm-ic-datasheet',
+    owner: dave.party,
+    sourceAssetId: dPrmIcDatasheet.id,
+    templateId: 'tmpl-electronics-component',
+    templateName: 'Electronics Component Profile',
+    templateVersion: 2,
+    parseDate: '2026-02-22T11:08:00Z',
+    fields: [
+      { id: 'f-vin', name: 'Input voltage range', value: '6V – 36V', confidence: 0.95 },
+      { id: 'f-vout', name: 'Output voltage', value: '3.3V ±2%', confidence: 0.93 },
+      { id: 'f-iout', name: 'Output current', value: '3A continuous', confidence: 0.92 },
+      { id: 'f-eff', name: 'Conversion efficiency', value: '≥ 92% at full load', confidence: 0.86 },
+      { id: 'f-radiation', name: 'Radiation tolerance', value: 'TID > 75 krad(Si)', confidence: 0.74 },
+    ],
+  })
+  const parseResults = [prPrmDatasheet, prVregDatasheet, prEmiDatasheet, prChipcoPrmIcDatasheet]
 
   // ── Alice's Claims ────────────────────────────────────────────────────
   const cPrm = makeClaim({
@@ -933,7 +1025,28 @@ export function buildV22SharedArtifacts() {
     createdDate: '2026-02-15T11:45:00Z',
     amendments: [],
   })
-  const claims = [cPrm, cVreg, cEmi]
+  // ── ChipCo's Claims (Phase 11A) ───────────────────────────────────────
+  const cChipcoPrmIc = makeClaim({
+    id: 'claim-chipco-prm-ic',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'PRM-3A IC Compliance',
+    description: 'Buck-converter IC qualified for PRM-3A — datasheet + radiation qual report.',
+    referencedAssetIds: [dPrmIcDatasheet.id, dPrmIcTestReport.id],
+    createdDate: '2026-02-26T10:00:00Z',
+    amendments: [],
+  })
+  const cChipcoVref = makeClaim({
+    id: 'claim-chipco-vref',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Voltage Reference IC Spec',
+    description: 'VREF-IC-220 precision voltage reference component spec.',
+    referencedAssetIds: [dVrefDatasheet.id],
+    createdDate: '2026-02-28T09:30:00Z',
+    amendments: [],
+  })
+  const claims = [cPrm, cVreg, cEmi, cChipcoPrmIc, cChipcoVref]
 
   // ── Disclosure Agreements ─────────────────────────────────────────────
   // Ownership/internal: Actor → each of their Assets (Full, implicit).
@@ -971,6 +1084,46 @@ export function buildV22SharedArtifacts() {
       terms: { createdDate: a.registrationDate },
     }),
   )
+  // Phase 11A: ChipCo's ownership DAs (Assets + Claims + Parse Result).
+  const daveOwnAssets = [dPrmIcDatasheet, dPrmIcTestReport, dVrefDatasheet].map((a) =>
+    makeInternalDisclosureAgreement({
+      id: `da-own-${a.id}`,
+      owner: dave.party,
+      ownerDot: dave.partyDot,
+      subject: { kind: 'asset', id: a.id },
+      terms: { createdDate: a.registrationDate },
+    }),
+  )
+  const daveOwnClaims = [cChipcoPrmIc, cChipcoVref].map((c) =>
+    makeInternalDisclosureAgreement({
+      id: `da-own-${c.id}`,
+      owner: dave.party,
+      ownerDot: dave.partyDot,
+      subject: { kind: 'claim', id: c.id },
+      scope: {},
+      terms: { createdDate: c.createdDate },
+    }),
+  )
+  const daveClaimRefEdges = [cChipcoPrmIc, cChipcoVref].flatMap((claim) =>
+    claim.referencedAssetIds.map((assetId) =>
+      makeInternalDisclosureAgreement({
+        id: `da-ref-${claim.id}-${assetId}`,
+        owner: claim.owner,
+        ownerDot: claim.ownerDot,
+        subject: { kind: 'claim', id: claim.id },
+        scope: { assetIds: [assetId], includeDerivatives: true },
+        terms: { createdDate: claim.createdDate },
+      }),
+    ),
+  )
+  const daveParseResultRefEdge = makeInternalDisclosureAgreement({
+    id: `da-parse-${prChipcoPrmIcDatasheet.id}`,
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    subject: { kind: 'parseResult', id: prChipcoPrmIcDatasheet.id },
+    scope: { assetIds: [prChipcoPrmIcDatasheet.sourceAssetId], includeDerivatives: true },
+    terms: { createdDate: prChipcoPrmIcDatasheet.parseDate },
+  })
 
   // Actor → each of their Claims (Full, implicit). Edge: Actor ↔ Claim.
   const aliceOwnClaims = claims.map((c) =>
@@ -1103,6 +1256,34 @@ export function buildV22SharedArtifacts() {
     type: 'full',
     scope: { assetIds: [aEmiDatasheet.id], includeDerivatives: true },
     terms: { createdDate: '2026-02-10T15:30:00Z' },
+  })
+
+  // Phase 11A: warm-path "umbrella" DA from ChipCo to GovCo.
+  // Pre-existing inter-party DA that gives Bob directory-level visibility
+  // into ChipCo's catalog without yet pulling any Claim onto his canvas
+  // (no paired EA — Phase 11C's flow will let Bob request one). The
+  // DirectoryLayer's per-role cluster filter keys off this DA: ChipCo's
+  // dot cluster appears on Bob's directory view because at least one
+  // active DA from ChipCo to his party exists. The schema doesn't have a
+  // dedicated "umbrella" type today; semantically this is the warm-path
+  // anchor and Phase 11C may extend the schema if the umbrella concept
+  // needs first-class representation.
+  const daChipcoToBobPrmIc = makeDisclosureAgreement({
+    id: 'da-chipco-bob-prm-ic',
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoPrmIc.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: {
+      assetIds: [dPrmIcDatasheet.id, dPrmIcTestReport.id],
+      includeDerivatives: true,
+    },
+    terms: {
+      createdDate: '2026-03-12T14:00:00Z',
+      expires: '2027-03-12T14:00:00Z',
+      autoRenew: false,
+    },
   })
 
   // ── Evaluation Agreements (paired with explicit inter-party DAs) ──────
@@ -1260,12 +1441,17 @@ export function buildV22SharedArtifacts() {
     ...aliceOwnAssets,
     ...bobOwnAssets,
     ...carolOwnAssets,
+    ...daveOwnAssets,
     ...aliceOwnClaims,
+    ...daveOwnClaims,
     ...claimRefEdges,
+    ...daveClaimRefEdges,
     ...parseResultRefEdges,
+    daveParseResultRefEdge,
     daAliceToBobPrm,
     daAliceToBobVreg,
     daAliceToCarolPrm,
+    daChipcoToBobPrmIc,
     daAlicePublicPrm,
     daAlicePublicVreg,
     daAlicePublicEmi,
@@ -1276,7 +1462,7 @@ export function buildV22SharedArtifacts() {
   ]
 
   return {
-    actors: [bob, alice, carol, RADIANT_NETWORK_ACTOR],
+    actors: [bob, alice, carol, dave, RADIANT_NETWORK_ACTOR],
     assets,
     parseResults,
     claims,

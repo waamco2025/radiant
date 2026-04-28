@@ -135,30 +135,53 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
   const clipExpanded = 'circle(180% at 0% 100%)'
   const clipPath = phase === 'in' ? clipExpanded : clipCollapsed
 
-  // Alice's 3 publicly-disclosed Claims form the only real cluster in the
-  // seeded dataset. To make the Directory feel populated (per spec §8.2's
-  // "thousands of dots"), we add a handful of mock supplier clusters that are
-  // visual-only — no backing artifacts. Future polish item #NEW captures the
-  // path to real per-dot data.
+  // Alice's 3 publicly-disclosed Claims form the only real MicroCo cluster.
+  // Other clusters are visual-only mocks today (per spec §8.2 — full
+  // dots-and-clouds visualization is tracked on the polish backlog).
+  // Phase 11A: ChipCo replaces the previous ElectroGrid mock cluster, and
+  // its visibility is gated per-role: only actors with at least one active
+  // DA from ChipCo see the cluster. Today that's Bob (the warm-path DA
+  // `da-chipco-bob-prm-ic` seeded in v2_2Data.js gives him visibility).
+  // Alice and Carol don't see it.
   // NOTE: useMemo must run on every render (rules of hooks). The conditional
   // `return null` below gates only the rendered output, not hook calls.
+  const sharedForDirectory = useMemo(() => buildV22SharedArtifacts(), [])
   const publicClaimCount = useMemo(() => {
-    const shared = buildV22SharedArtifacts()
-    return shared.disclosureAgreements.filter(
+    return sharedForDirectory.disclosureAgreements.filter(
       (d) => d.grantee?.party === 'Radiant Network' && d.subject?.kind === 'claim',
     ).length
-  }, [])
+  }, [sharedForDirectory])
+  // Phase 11A: ChipCo cluster is gated on the active party having at least
+  // one active (non-revoked) DA from ChipCo. The visibility check happens
+  // at render time so role switches refresh the cluster set.
+  const chipcoVisible = useMemo(() => {
+    if (!activeParty) return false
+    return sharedForDirectory.disclosureAgreements.some((d) =>
+      d.grantor?.party === 'ChipCo' &&
+      d.grantee?.party === activeParty &&
+      !d._revokedMeta,
+    )
+  }, [sharedForDirectory, activeParty])
+  // Phase 11A: ChipCo's Claim count for the cluster label — uses the
+  // ChipCo-owned Claims in seed, giving the user a real number rather than
+  // the previous "41 public" mock label.
+  const chipcoClaimCount = useMemo(
+    () => sharedForDirectory.claims.filter((c) => c.owner === 'ChipCo').length,
+    [sharedForDirectory],
+  )
 
   if (phase === 'closed') return null
 
   // Clusters are positioned in viewport percentages so they scale with resize.
-  // Seeds are arbitrary but stable.
-  const clusters = [
+  // Seeds are arbitrary but stable. The ChipCo cluster is filtered out
+  // below for parties without a DA from ChipCo.
+  const allClusters = [
     { partyName: 'MicroCo', label: `${publicClaimCount} public Claim${publicClaimCount === 1 ? '' : 's'}`, center: { xPct: 48, yPct: 42 }, count: 28 + publicClaimCount * 6, colorVar: 'var(--accent-indigo)', seed: 101 },
-    { partyName: 'ElectroGrid Ltd', label: 'mock supplier · 41 public', center: { xPct: 22, yPct: 62 }, count: 34, colorVar: 'var(--accent-blue)', seed: 203 },
+    { partyName: 'ChipCo', label: `supplier · ${chipcoClaimCount} public`, center: { xPct: 22, yPct: 62 }, count: 18 + chipcoClaimCount * 4, colorVar: 'var(--accent-blue)', seed: 203 },
     { partyName: 'NovaFab Inc', label: 'mock supplier · 17 public', center: { xPct: 74, yPct: 30 }, count: 22, colorVar: 'var(--accent-green)', seed: 307 },
     { partyName: 'Precision Components Co', label: 'mock supplier · 8 public', center: { xPct: 68, yPct: 70 }, count: 14, colorVar: 'var(--accent-amber)', seed: 409 },
   ]
+  const clusters = allClusters.filter((c) => c.partyName !== 'ChipCo' || chipcoVisible)
 
   return (
     <div
@@ -174,32 +197,62 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
         overflow: 'hidden',
       }}
     >
-      {/* User's corner node anchor (spec §8.1 — morphs from the chrome button
-          into the Directory's bottom-left anchor node). */}
-      <Tooltip content="Exit Directory" position="top">
+      {/* Phase 11A: corner anchor refreshed from a circle button to a
+          parent-layer-style Actor node card. Same look and feel as the
+          ACTOR cards on the main canvas (CARD_W = 210px wide, ACTOR
+          badge above the party name). Click returns to the parent
+          canvas; hover applies the standard parent-layer node treatment. */}
+      <Tooltip content="Return to your network" position="top">
       <div
         onClick={onClose}
         style={{
           position: 'absolute',
           left: 32,
           bottom: 32,
-          width: 88,
-          height: 88,
-          borderRadius: '50%',
-          background: 'var(--bg-raised)',
-          border: '2px solid var(--accent-amber)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 210,
+          minHeight: 88,
+          padding: '14px 16px',
+          borderRadius: 10,
+          background: 'var(--bg-card)',
+          // Parent-layer Actor card border: warm indigo blend (matches
+          // AssetNode.jsx's WARM_BORDER convention from Phase 9A.1).
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))',
           cursor: 'pointer',
-          boxShadow: '0 0 24px color-mix(in srgb, var(--accent-amber) 40%, transparent)',
-          fontFamily: 'var(--font-display)',
-          fontSize: 12,
-          fontWeight: 700,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          color: 'var(--accent-amber)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          transition: 'border-color 150ms, background 150ms, box-shadow 150ms',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.32)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.borderColor = 'var(--accent-indigo)'
+          e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 6%, var(--bg-card))'
+          e.currentTarget.style.boxShadow = '0 6px 22px rgba(0,0,0,0.45)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
+          e.currentTarget.style.background = 'var(--bg-card)'
+          e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.32)'
         }}
       >
-        {activeParty || 'You'}
+        <span style={{
+          fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
+          color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
+          alignSelf: 'flex-start',
+        }}>ACTOR</span>
+        <div style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 13,
+          fontWeight: 600,
+          color: 'var(--text-primary)',
+          lineHeight: 1.3,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}>{activeParty || 'You'}</div>
       </div>
       </Tooltip>
 

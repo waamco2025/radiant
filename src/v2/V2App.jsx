@@ -4686,6 +4686,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 11A', items: [
+                  'New: ChipCo (Dave) seeded as a fourth actor — IC supplier whose catalog Bob has visibility into via a pre-existing Disclosure Agreement. No Claims on Bob\'s canvas yet (a future phase will let him request an Evaluation Agreement)',
+                  'Public Directory: the ElectroGrid mock cluster replaced with a real ChipCo cluster. Per-role visibility — only actors with an active DA from ChipCo see the cluster. Other clusters unchanged for all roles',
+                  'Public Directory: bottom-left corner anchor refreshed from a circle button into a proper Actor node card matching the parent-layer style. Click still returns to your network',
+                ]},
                 { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.4', items: [
                   'Cleanup: legacy Library modals relocated to src/components/modals/library/ as RequirementsPanel.jsx + ParsingTemplatesPanel.jsx. No user-visible change',
                   'Architecture spec gained a §8.6 Library section + Phase 9D + 10.x entries in the Changelog; §17.1 future-direction reference updated to past tense',
