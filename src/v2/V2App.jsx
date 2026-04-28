@@ -4682,6 +4682,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.2.1', items: [
+                  'Layout: every node card now snaps to the dot grid (positions are multiples of 100 on both axes)',
+                  'Rows distribute symmetrically around the actor — some above, some below — instead of stacking downward only',
+                  'Disclosure edges between adjacent columns no longer share horizontal lines; columns alternate Y offsets so edges gain vertical separation',
+                ]},
                 { version: '0.10.0', date: '2026-04-27', label: 'Phase 10.2', items: [
                   'New: Assets can now be registered under other Assets, restoring single-party hierarchy. Open an Asset and click "+" or "Register Asset" — the new child appears one column to the right with an edge from its parent',
                   'Detail Panel surfaces "Parent" and "Children" sections on Asset panels — clickable rows pan/zoom to the target',

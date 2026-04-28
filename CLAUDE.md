@@ -1700,3 +1700,69 @@ Closes backlog #70. Restores V1/V2/V2.1/V3 Asset hierarchy that was lost in the 
 **Pre-existing warnings noted but not fixed:** the Changelog modal's `key={release.version}` collision (many entries share `'0.9.10'`) generates duplicate-key React warnings. Pre-dates Phase 10.2 — out of scope for this commit.
 
 **Status:** [x] Complete.
+
+### Phase 10.2.1 completion notes (2026-04-28) — Layout: grid alignment + per-column row offsets
+
+QA pass on Phase 10.2 surfaced a layout issue that compounded across phases: nodes weren't snapped to the dot grid, and rows packed from y=0 downward only — disclosure edges across adjacent columns shared horizontal lines and overlapped. This phase generalises the Phase 6.5 #17 EVAL_ROW_OFFSET nudge into a system-wide grid-snapped layout convention.
+
+**Three structural changes to `buildV22Canvas` (v2_2Data.js):**
+
+**Fix 1 — Grid alignment.** All column / row / hierarchy-shift constants are now multiples of 100 so node positions snap onto the dot-grid intersections rendered by V2Canvas's `getGridParams`. Constants updated:
+- `COL_OWN_ASSET` 520 → 500
+- `ASSET_COL_GAP` 380 → 400
+- `ROW_STEP` 260 → 300
+
+The other column constants (`COL_OWN_PARSE` 900, `COL_OWN_CLAIM` 1300, `COL_OWN_EVAL` 1700, `COL_PULLED_CLAIM` 2100, `COL_PULLED_ASSET` 2500, `COL_PUBLIC` 2900, `COL_ACTOR` 0) were already grid-aligned. With `ASSET_COL_GAP = 400`, the elastic shift `assetColShift = maxDepth × 400` keeps every downstream column on grid regardless of hierarchy depth.
+
+**Fix 2 — Symmetric row distribution.** New helper `symmetricRowY(i, rowStep = ROW_STEP)` distributes N indices around y=0:
+
+```
+i=0 → 0
+i=1 → +ROW_STEP
+i=2 → -ROW_STEP
+i=3 → +2 × ROW_STEP
+i=4 → -2 × ROW_STEP
+…
+```
+
+Replaces every `i * ROW_STEP` call in `buildV22Canvas`. Visual outcome: the Actor sits centred at y=0 and other nodes pack alternately above/below, instead of the legacy top-down stack that produced increasingly top-heavy layouts as column counts grew.
+
+**Fix 3 — Per-column Y offsets.** New `COL_Y_OFFSET = 100` (one full grid step). Pairs of adjacent columns alternate between offset / no-offset so disclosure edges across columns gain a guaranteed vertical component instead of stacking on the same horizontal line. Assignments:
+
+| Column | Y offset | Source |
+|---|---|---|
+| Actor | 0 | Centerline |
+| Owned Assets | 0 | Base column |
+| Parse Results | +100 | Offset from parent Asset row |
+| Owned Claims | 0 | Two columns from Assets — no overlap risk |
+| Eval Results | +100 | Generalises Phase 6.5 #17 (was `ROW_STEP / 2 = 130` — off-grid) |
+| Pulled Claims | 0 | Far enough from Owned Claims (different X) |
+| Pulled Assets | +100 | Offset from Pulled Claims |
+| Public / Network | 0 | Anchor opposite |
+
+**Other tweaks folded in:**
+
+- Multiple Parse Results on the same Asset now stack in 100px increments — was 80px (off-grid).
+- External Eval Results' legacy `+80` magic spacer in their Y formula is gone; the symmetric distribution `symmetricRowY(erOwn.length + i)` handles separation naturally.
+- The Phase 6.5 #17 `EVAL_ROW_OFFSET = ROW_STEP / 2` constant is replaced inline with the standard `COL_Y_OFFSET`.
+
+**Implementation note — Parse Results anchoring:** the legacy code computed `baseIdx = assetRowIndex.get(pr.sourceAssetId)` against a flat index map. With Phase 10.2's depth-based grouping that flat index no longer corresponds to a Y position. Phase 10.2.1 looks up the source Asset's depth + position-within-depth via the same `assetsByDepth` Map the Asset placement loop uses, then runs `symmetricRowY(sourceIdx) + COL_Y_OFFSET + slot * 100`. Result: Parse Results follow their parent Asset's symmetric Y plus the column offset, regardless of hierarchy.
+
+**Out of scope (not changed):**
+
+- Edge routing — the curves continue to follow Three.js defaults; this phase fixes node positions only.
+- Node addition / removal / column rearrangement — same column types as Phase 10.2.
+- The `+` Asset hierarchy column rendering — still depth × `ASSET_COL_GAP` from `COL_OWN_ASSET`, just with the new constants.
+
+**Spec updates folded in:**
+
+- §3 grew a new **§3.7 Layout (Phase 10.2.1)** subsection codifying the column constants table, hierarchy shift rule, symmetric row distribution helper, per-column Y offset table, and Parse Result stacking convention.
+
+**Runtime verification:**
+
+- Build clean (88 modules, +0.1 kB main bundle vs. Phase 10.2).
+- Data-layer probe across all three roles via dynamic module import: `offGridCount: 0` in every role view (every node X and Y is a multiple of 100). Alice's PRM Assets distribute as `[0, 300, -300, 600, -600]` (symmetric around y=0). Bob's three Assets distribute as `[0, 300, -300]`. Parse Results at `+100` from their source Asset's row. Pulled Assets at `+100` from same-index Pulled Claims (Alice's Avionics Module pulled in at y=100, AuditCo Workspace at y=400). Eval Results at `+100` (`MIL-PRF-55681 Compliance` at y=100, `AuditCo PRM Audit` at y=400 — symmetric distribution + offset).
+- Browser-observable: canvas mounts; Bob's three Assets render with Avionics centred at y=0 and Thermal Subsystem / Guidance Computer alternating above and below; nodes visibly snap to dot-grid intersections.
+- No new console errors. Pre-existing Changelog `key={release.version}` collision warnings persist (still out of scope).
+
+**Status:** [x] Complete.

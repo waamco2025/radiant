@@ -1866,19 +1866,48 @@ export function deriveAgreementEdges(view) {
 
 // Column X coordinates. The actor sits at COL_ACTOR; owned artifacts extend to
 // the right; pulled-in counterparty artifacts extend further right still.
+// Phase 10.2.1: every X / Y / per-column offset / hierarchy-shift here is a
+// multiple of 100 so node positions snap cleanly onto the dot grid (the grid
+// is rendered at the same 100px step in V2Canvas's `getGridParams`). Column
+// constants kept comfortably above the visual gutter.
 const COL_ACTOR = 0
-const COL_OWN_ASSET = 520
+const COL_OWN_ASSET = 500           // Phase 10.2.1: was 520; snap to 100-grid
 const COL_OWN_PARSE = 900
 const COL_OWN_CLAIM = 1300
 const COL_OWN_EVAL = 1700
 const COL_PULLED_CLAIM = 2100
 const COL_PULLED_ASSET = 2500
 const COL_PUBLIC = 2900
-const ROW_STEP = 260
+const ROW_STEP = 300                // Phase 10.2.1: was 260; snap to 100-grid
 // Phase 10.2: per-depth horizontal spacing for the Asset hierarchy column.
-// Matches the natural gap between adjacent V2.2 columns (380px) so child
-// Assets read as siblings of the existing column rhythm rather than crowding.
-const ASSET_COL_GAP = 380
+// Phase 10.2.1: bumped 380 → 400 so it stays on the 100-grid (the elastic
+// shift `assetColShift = maxDepth × ASSET_COL_GAP` is therefore always a
+// multiple of 100, keeping every downstream column on grid too).
+const ASSET_COL_GAP = 400
+// Phase 10.2.1: per-column-type Y offset (one full grid step = 100px). Pairs
+// of adjacent columns alternate offset / no-offset so disclosure edges across
+// columns gain a guaranteed vertical component instead of stacking on the
+// same horizontal line. Generalises the Phase 6.5 #17 EVAL_ROW_OFFSET nudge.
+const COL_Y_OFFSET = 100
+
+/**
+ * Phase 10.2.1: distribute N indices symmetrically around y=0 so the Actor
+ * sits centred on the canvas and other nodes pack alternately above and
+ * below. Replaces the legacy `i * ROW_STEP` pattern that packed downward
+ * only and produced a top-heavy layout once column counts grew.
+ *
+ *   i=0 → 0
+ *   i=1 → +ROW_STEP
+ *   i=2 → -ROW_STEP
+ *   i=3 → +2*ROW_STEP
+ *   i=4 → -2*ROW_STEP
+ *   ...
+ */
+function symmetricRowY(i, rowStep = ROW_STEP) {
+  if (i === 0) return 0
+  const offset = Math.ceil(i / 2) * rowStep
+  return i % 2 === 1 ? offset : -offset
+}
 
 /**
  * Compute evaluation-result health rollup for a Claim: counts satisfactory,
@@ -2750,7 +2779,9 @@ export function buildV22Canvas(view) {
     const peers = assetsByDepth.get(depth) || []
     const i = peers.indexOf(asset)
     const x = COL_OWN_ASSET + (depth * ASSET_COL_GAP)
-    const y = i * ROW_STEP
+    // Phase 10.2.1: symmetric distribution around y=0; Asset column carries
+    // no per-column offset (it's the base column).
+    const y = symmetricRowY(i)
     const node = assetToNode(asset, x, y)
     // Phase 9A.4 Gate B: stamp _pendingTransfer so AssetNode can render the
     // TRANSFERRING badge. Canvas adapter also sets _showAsProvisional so the
@@ -2784,14 +2815,24 @@ export function buildV22Canvas(view) {
   }
 
   // ── Owned Parse Results (column 2) aligned with their source asset ───
-  const assetRowIndex = new Map(ownedAssets.map((a, i) => [a.id, i]))
-  // Multiple Parse Results on one Asset stack with small vertical offsets.
+  // Phase 10.2.1: each Parse Result anchors on the Y of its source Asset
+  // (computed via the same symmetricRowY + depth-grouping the Asset uses)
+  // plus the per-column COL_Y_OFFSET so Parse rows don't sit at the same
+  // y-line as their parent Asset. Multiple Parse Results on one Asset stack
+  // in 100px (one full grid step) increments to stay grid-aligned — was 80px.
   const parseSlotByAsset = new Map()
   view.parseResults.forEach((pr) => {
-    const baseIdx = assetRowIndex.get(pr.sourceAssetId)
+    const sourceAsset = ownedAssets.find((a) => a.id === pr.sourceAssetId)
+    let baseY = 0
+    if (sourceAsset) {
+      const sourceDepth = ownedAssetDepth.get(sourceAsset.id) || 0
+      const sourcePeers = assetsByDepth.get(sourceDepth) || []
+      const sourceIdx = sourcePeers.indexOf(sourceAsset)
+      baseY = symmetricRowY(sourceIdx)
+    }
     const slot = parseSlotByAsset.get(pr.sourceAssetId) || 0
     parseSlotByAsset.set(pr.sourceAssetId, slot + 1)
-    const y = (baseIdx != null ? baseIdx * ROW_STEP : 0) + slot * 80
+    const y = baseY + COL_Y_OFFSET + (slot * 100)
     nodes.push(parseResultToNode(pr, COL_OWN_PARSE_eff, y))
   })
 
@@ -2800,11 +2841,14 @@ export function buildV22Canvas(view) {
   const pulledClaims = view.claims.filter((c) => !view.ownedClaimIds.has(c.id))
   ownedClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
-    nodes.push(claimToNode(claim, rollup, COL_OWN_CLAIM_eff, i * ROW_STEP))
+    // Phase 10.2.1: symmetric distribution; Owned Claims at offset 0 (two
+    // columns away from owned Assets, so no overlap risk on horizontal lines).
+    nodes.push(claimToNode(claim, rollup, COL_OWN_CLAIM_eff, symmetricRowY(i)))
   })
   pulledClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
-    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM_eff, i * ROW_STEP)
+    // Phase 10.2.1: symmetric distribution; Pulled Claims at offset 0.
+    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM_eff, symmetricRowY(i))
     markProvisional(node, view.provisionalClaimIds)
     // Declined claims (Phase 5 / spec §11.4 + Phase 6.5 #3). AssetNode renders
     // its own DECLINED badge from `isDeclined`; we keep `_showAsProvisional`
@@ -2841,8 +2885,13 @@ export function buildV22Canvas(view) {
   })
 
   // ── Pulled-in counterparty Assets (column 6) ────────────────────────
+  // Phase 10.2.1: symmetric distribution + COL_Y_OFFSET so Pulled Assets
+  // sit one grid step below the Pulled Claims they live alongside —
+  // claim → asset edges across the column gap gain a guaranteed vertical
+  // component instead of stacking on the same horizontal line.
   pulledAssets.forEach((asset, i) => {
-    const node = assetToNode(asset, COL_PULLED_ASSET_eff, i * ROW_STEP)
+    const y = symmetricRowY(i) + COL_Y_OFFSET
+    const node = assetToNode(asset, COL_PULLED_ASSET_eff, y)
     markProvisional(node, view.provisionalAssetIds)
     nodes.push(node)
   })
@@ -2851,16 +2900,16 @@ export function buildV22Canvas(view) {
   // Owned Eval Results first, then proof-of-eval-visible ones from other parties.
   const erOwn = view.evaluationResults.filter((e) => e.owner === actor.party)
   const erExternal = view.evaluationResults.filter((e) => e.owner !== actor.party)
-  // Phase 6.5 #17: nudge Eval Results onto a half-row offset so the
-  // claim ↔ eval-result edge doesn't fight with the claim ↔ asset edge on
-  // the same horizontal line (especially noticeable on Bob's canvas where
-  // his sole Eval Result was sharing a row with the pulled-in Claim).
-  const EVAL_ROW_OFFSET = ROW_STEP / 2
+  // Phase 10.2.1: replaces the legacy `EVAL_ROW_OFFSET = ROW_STEP / 2`
+  // (Phase 6.5 #17) with the standard COL_Y_OFFSET (100 — one full grid
+  // step). External Eval Results stack continuously below the owned ones
+  // via `symmetricRowY(erOwn.length + i)`; the prior `+80` magic spacer is
+  // gone since the symmetric distribution handles separation naturally.
   erOwn.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, i * ROW_STEP + EVAL_ROW_OFFSET))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(i) + COL_Y_OFFSET))
   })
   erExternal.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, (erOwn.length + i) * ROW_STEP + EVAL_ROW_OFFSET + 80))
+    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────

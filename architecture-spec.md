@@ -175,6 +175,55 @@ The Public Directory, appearing as a node on the user's canvas only if the user 
 - Detail Panel: summary of the user's published Claims and directory statistics.
 - Note: the Radiant Network **button** in the canvas chrome is always present. The Radiant Network **node** on the canvas appears only if the user has published Claims.
 
+### 3.7 Layout (Phase 10.2.1)
+
+Every node position on the parent layer is a multiple of **100px** on both axes — node card top-left corners snap to the dot-grid intersections rendered by V2Canvas's `getGridParams`. The grid is the canonical alignment reference; introducing off-grid offsets is a layout regression.
+
+**Column constants** (X positions, all multiples of 100):
+
+| Column | X | Notes |
+|---|---|---|
+| Actor | 0 | Centerline anchor |
+| Owned Assets | 500 | Base column for the Asset hierarchy tree |
+| Owned Parse Results | 900 | |
+| Owned Claims | 1300 | |
+| Owned Eval Results | 1700 | |
+| Pulled Claims | 2100 | |
+| Pulled Assets | 2500 | |
+| Public / Radiant Network | 2900 | |
+
+**Asset hierarchy column gap (Phase 10.2):** `ASSET_COL_GAP = 400` (multiple of 100). Each owned Asset sits at `COL_OWN_ASSET + (depth × ASSET_COL_GAP)`. Downstream columns shift right by `maxDepth × ASSET_COL_GAP` so they don't collide with deep trees.
+
+**Row distribution — symmetric around y=0.** Within each column type, nodes distribute symmetrically using the helper `symmetricRowY(i)`:
+
+```
+i=0 → 0
+i=1 → +ROW_STEP
+i=2 → -ROW_STEP
+i=3 → +2 × ROW_STEP
+i=4 → -2 × ROW_STEP
+…
+```
+
+`ROW_STEP = 300` (multiple of 100). The Actor sits at `y=0`; other nodes pack alternately above and below. Replaces the legacy `i × ROW_STEP` pattern that packed downward only.
+
+**Per-column Y offsets** (`COL_Y_OFFSET = 100`, one full grid step) prevent disclosure edges between adjacent columns from sharing horizontal lines:
+
+| Column | Y offset | Rationale |
+|---|---|---|
+| Actor | 0 | Centerline anchor |
+| Owned Assets | 0 | Base column |
+| Parse Results | +100 | Offset from parent Asset |
+| Owned Claims | 0 | Two columns from Assets — no overlap risk |
+| Eval Results | +100 | Generalises the Phase 6.5 #17 nudge to grid-snapped 100px |
+| Pulled Claims | 0 | Far enough from Owned Claims (different X) |
+| Pulled Assets | +100 | Offset from Pulled Claims |
+| Public / Network | 0 | Anchor opposite |
+
+The pattern alternates between 0 and +100 across columns; any two adjacent (or near-adjacent) columns differ by 100px in Y, so disclosure edges between them gain a guaranteed vertical component.
+
+**Multiple Parse Results on one Asset** stack in 100px increments (one full grid step) above the per-column base — was 80px in earlier phases.
+
 ---
 
 ## 4. Edge Type
