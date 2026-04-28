@@ -830,7 +830,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — Requirements Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, onPublish, publishedSets, _noBackdrop }) {
+export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, onPublish, publishedSets, _noBackdrop, embedded = false }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')        // 'view' | 'create' | 'newversion'
   const [search, setSearch] = useState('')
@@ -881,6 +881,10 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
+        // Phase 10.3: in embedded mode, only intercept ESC while editing —
+        // otherwise let the parent LibraryModal's handler close the whole
+        // dialog. Non-embedded behaviour (own modal frame) unchanged.
+        if (embedded && mode === 'view') return
         e.preventDefault()
         e.stopPropagation()
         handleModalClose()
@@ -888,7 +892,7 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     }
     window.addEventListener('keydown', handleEsc, true)
     return () => window.removeEventListener('keydown', handleEsc, true)
-  }, [handleModalClose])
+  }, [handleModalClose, embedded, mode])
 
   const handleSelect = (id) => {
     setSelectedId(id)
@@ -1000,6 +1004,67 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
     )
   }
 
+  // Phase 10.3: shared inner two-panel body — used by both standalone (with
+  // own frame + header) and embedded (parent supplies frame + tab bar) modes.
+  const innerBody = (
+    <>
+      {/* Embedded toolbar: just the Create button + count line, since the
+          parent LibraryModal owns the title and close affordance. */}
+      {embedded && (
+        <div style={{
+          padding: '10px 16px', borderBottom: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {requirementSets.length} requirement set{requirementSets.length !== 1 ? 's' : ''}
+          </div>
+          {!isEditing && (
+            <span
+              onClick={handleCreate}
+              style={{
+                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                color: 'var(--accent-indigo)', cursor: 'pointer',
+                padding: '6px 12px', borderRadius: 6,
+                border: '1px solid color-mix(in srgb, var(--accent-indigo) 30%, transparent)',
+                transition: 'background 100ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >+ Create Requirement Set</span>
+          )}
+        </div>
+      )}
+      {/* Two-panel body */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <SetList
+          sets={requirementSets}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+          search={search}
+          setSearch={setSearch}
+          expandedLineages={expandedLineages}
+          toggleLineage={toggleLineage}
+          publishedSets={publishedSets}
+          pubExpanded={pubExpanded}
+          setPubExpanded={setPubExpanded}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {rightContent}
+        </div>
+      </div>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {innerBody}
+      </div>
+    )
+  }
+
   const content = (
     <div style={{
       width: 960, height: '80vh', background: 'var(--bg-surface)',
@@ -1045,24 +1110,7 @@ export default function RequirementsLibraryModal({ requirementSets, onClose, onS
         </div>
       </div>
 
-      {/* Two-panel body */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <SetList
-          sets={requirementSets}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          search={search}
-          setSearch={setSearch}
-          expandedLineages={expandedLineages}
-          toggleLineage={toggleLineage}
-          publishedSets={publishedSets}
-          pubExpanded={pubExpanded}
-          setPubExpanded={setPubExpanded}
-        />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {rightContent}
-        </div>
-      </div>
+      {innerBody}
     </div>
   )
 

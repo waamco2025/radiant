@@ -44,8 +44,11 @@ import { playUnravelAnimation } from './animations/unravel.js'
 // import V22RevocationNoticeModal from '../components/modals/V22RevocationNoticeModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
-import RequirementsLibraryModal from '../components/modals/RequirementsLibraryModal.jsx'
-import PEPLibraryModal from '../components/modals/PEPLibraryModal.jsx'
+// Phase 10.3: unified Library modal replaces RequirementsLibraryModal +
+// PEPLibraryModal. The two legacy files are retained as embeddable panels
+// (consumed by LibraryModal in `embedded` mode); their default-export
+// standalone forms are no longer mounted from V2App.
+import LibraryModal from '../components/modals/LibraryModal.jsx'
 import { Backdrop } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
@@ -2053,10 +2056,17 @@ export default function V2App() {
   const [revocationNotice, setRevocationNotice] = useState(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [libraryInitialSetId, setLibraryInitialSetId] = useState(null)
-  const [showPEPLibrary, setShowPEPLibrary] = useState(false)
+  // Phase 10.3: unified Library opens to a default tab; deep links can pre-set
+  // it via setLibraryInitialTab. Legacy `showPEPLibrary` removed; the
+  // `open-pep-library` event now opens the unified Library on the parsing tab.
+  const [libraryInitialTab, setLibraryInitialTab] = useState(null)
   const [publishedRequirementSets, setPublishedRequirementSets] = useState([])
   useEffect(() => {
-    const handler = () => setShowPEPLibrary(true)
+    const handler = () => {
+      setLibraryInitialTab('parsing')
+      setLibraryInitialSetId(null)
+      setShowLibrary(true)
+    }
     document.addEventListener('open-pep-library', handler)
     return () => document.removeEventListener('open-pep-library', handler)
   }, [])
@@ -2730,10 +2740,16 @@ export default function V2App() {
           </div>
           </Tooltip>
 
-          {/* Requirements Library */}
-          <Tooltip content="Requirements Library">
+          {/* Phase 10.3: unified Library — Parsing Templates + Requirement
+              Sets + Published Requirements. Replaces the two prior chrome
+              buttons (Requirements Library + PEP Template Library). */}
+          <Tooltip content="Library">
           <div
-            onClick={() => { setLibraryInitialSetId(null); setShowLibrary(true) }}
+            onClick={() => {
+              setLibraryInitialSetId(null)
+              setLibraryInitialTab(null)
+              setShowLibrary(true)
+            }}
             style={iconBtnStyle}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
@@ -2744,23 +2760,6 @@ export default function V2App() {
               <line x1="5.5" y1="7" x2="10.5" y2="7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
               <line x1="5.5" y1="9.5" x2="10.5" y2="9.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
               <line x1="5.5" y1="12" x2="8.5" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
-            </svg>
-          </div>
-          </Tooltip>
-
-          {/* PEP Template Library */}
-          <Tooltip content="PEP Template Library">
-          <div
-            onClick={() => setShowPEPLibrary(true)}
-            style={iconBtnStyle}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-surface)'}
-          >
-            <svg width={16} height={16} viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none" />
-              <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" strokeWidth="1" />
-              <line x1="6" y1="6" x2="6" y2="13" stroke="currentColor" strokeWidth="1" />
-              <line x1="10" y1="6" x2="10" y2="13" stroke="currentColor" strokeWidth="1" />
             </svg>
           </div>
           </Tooltip>
@@ -2973,7 +2972,12 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
+                          // Phase 10.3: deep-link to the unified Library's
+                          // Published Requirements tab so the recipient lands
+                          // on the surface where they can review the
+                          // newly-published standard.
                           setLibraryInitialSetId(null)
+                          setLibraryInitialTab('published')
                           setShowLibrary(true)
                         } else if (req.type === 'v22-request') {
                           // Phase 6.5 #8: do NOT dismiss on click — only on
@@ -4682,6 +4686,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.3', items: [
+                  'Library: the two chrome buttons (Requirements Library + PEP Template Library) collapsed into one. Click "Library" to see Parsing Templates, Requirement Sets, and Published Requirements as tabs in a single modal',
+                  'Renamed "PEP Template" → "Parsing Template" in user-facing copy (the data model still uses PEP per the canon)',
+                  'New "Published Requirements" tab — read-only browse of all requirement sets published to the network, including your own',
+                  'A "published_standard" notification now opens the Library on the Published tab so you land where the new standard lives',
+                ]},
                 { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.2.1', items: [
                   'Layout: every node card now snaps to the dot grid (positions are multiples of 100 on both axes)',
                   'Rows distribute symmetrically around the actor — some above, some below — instead of stacking downward only',
@@ -4987,34 +4997,31 @@ export default function V2App() {
         <V2SubgraphModal node={modalNode} onClose={handleCloseModal} />
       )} */}
 
-      {/* Library modals — Requirements Sets + PEP Templates. Reachable from
-          the chrome icons and from the V2.2 Amend / Eval flows. */}
-      {(showLibrary || showPEPLibrary) && (
-        <Backdrop onClose={() => {
-          if (showLibrary) { setShowLibrary(false); setLibraryInitialSetId(null) }
-          else if (showPEPLibrary) setShowPEPLibrary(false)
-        }}>
-          {showLibrary && (
-            <RequirementsLibraryModal
-              requirementSets={requirementSets}
-              onClose={() => { setShowLibrary(false); setLibraryInitialSetId(null) }}
-              onSave={handleSaveRequirementSet}
-              onPublish={handlePublishRequirementSet}
-              publishedSets={publishedRequirementSets}
-              initialSelectedId={libraryInitialSetId}
-              _noBackdrop
-            />
-          )}
-          {showPEPLibrary && (
-            <PEPLibraryModal
-              pepTemplates={pepTemplates}
-              onClose={() => setShowPEPLibrary(false)}
-              onSave={handleSavePEPTemplate}
-              _noBackdrop
-            />
-          )}
-        </Backdrop>
-      )}
+      {/* Phase 10.3: unified Library modal — Parsing Templates + Requirement
+          Sets + Published Requirements in a single three-tab dialog.
+          Reachable from the chrome Library icon, from the published_standard
+          notification (deep-links to the Published tab), and from the legacy
+          `open-pep-library` event (deep-links to the Parsing tab). */}
+      {showLibrary && (() => {
+        const closeLibrary = () => {
+          setShowLibrary(false)
+          setLibraryInitialSetId(null)
+          setLibraryInitialTab(null)
+        }
+        return (
+          <LibraryModal
+            pepTemplates={pepTemplates}
+            requirementSets={requirementSets}
+            publishedRequirementSets={publishedRequirementSets}
+            onSavePepTemplate={handleSavePEPTemplate}
+            onSaveRequirementSet={handleSaveRequirementSet}
+            onPublishRequirementSet={handlePublishRequirementSet}
+            initialTab={libraryInitialTab || 'requirements'}
+            initialSelectedId={libraryInitialSetId}
+            onClose={closeLibrary}
+          />
+        )
+      })()}
     </div>
   )
 }

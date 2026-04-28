@@ -390,7 +390,7 @@ function V22AssetPanel({
                   affordance is a future polish phase. */}
               <FooterButton label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
               <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
-              <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a PEP template" />
+              <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a Parsing Template" />
               <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
               <FooterButton label="Transfer" onClick={onTransferAsset} disabled={!onTransferAsset} title="Transfer ownership of this Asset to another actor" />
             </>

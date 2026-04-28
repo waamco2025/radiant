@@ -285,7 +285,7 @@ export default function V22ParseEvidenceModal({
                     border: '1px solid var(--accent-amber)', borderRadius: 6,
                     fontSize: 11, color: 'var(--text-secondary)',
                   }}>
-                    No PEP Templates in your library. Add one via the Template Library before parsing.
+                    No Parsing Templates in your library. Add one via the Library before parsing.
                   </div>
                 ) : (
                   <div role="radiogroup" aria-label="Parse Template" style={{

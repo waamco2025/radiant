@@ -1766,3 +1766,59 @@ Replaces every `i * ROW_STEP` call in `buildV22Canvas`. Visual outcome: the Acto
 - No new console errors. Pre-existing Changelog `key={release.version}` collision warnings persist (still out of scope).
 
 **Status:** [x] Complete.
+
+### Phase 10.3 completion notes (2026-04-28) — Library Modal unification
+
+Closes backlog #25. Two separate library modals (Requirements Library + PEP Template Library) merged into a single chrome button + three-tab modal. Per the client canon, "PEP Templates" rename to "Parsing Templates" in user-facing copy only — internal field names keep PEP.
+
+**Tabs:**
+
+1. **Parsing Templates** — user's own Parsing Templates. Empty for the seeded dataset (templates are user-created on demand).
+2. **Requirement Sets** — user's own Requirement Sets; published ones marked with the globe icon. Default tab when opening from chrome.
+3. **Published Requirements** — read-only browse view showing all published Requirement Sets across the network, *including the user's own publications* (Option A from the scoping conversation).
+
+**Implementation strategy.** Wrapping rather than re-implementing. The two legacy modal files (`RequirementsLibraryModal.jsx` 1070 lines + `PEPLibraryModal.jsx` 869 lines) gained an `embedded = false` prop that strips their outer card frame. When true, the modal renders only the inner two-panel body wrapped in a slim toolbar with the Create button. The new `LibraryModal.jsx` is small (~280 lines) — it owns the tab bar + outer frame, and composes the legacy modals as tab content. Tab 3 (Published Requirements) is implemented inline in `LibraryModal.jsx` as a new `PublishedRequirementsPanel` — read-only, follows the same left-list / right-detail rhythm.
+
+**State + handler routing in V2App:**
+
+- New state: `libraryInitialTab` (`'parsing' | 'requirements' | 'published'`, default `null` → resolves to `'requirements'`).
+- Removed: `showPEPLibrary` and its setter.
+- Chrome buttons: two SVG icons collapsed to one — kept the Requirements Library document-with-tab icon since it reads more generally as "library." Tooltip is just "Library."
+- Trigger sites:
+  - Chrome icon → opens with `libraryInitialTab = null` → defaults to `'requirements'`.
+  - `published_standard` notification → opens with `libraryInitialTab = 'published'` so the recipient lands on the surface where they can review the newly-published standard.
+  - Legacy `open-pep-library` document event → opens with `libraryInitialTab = 'parsing'`. (No code dispatches this today — it's a dead listener, but kept for backward-compat with any future callers.)
+
+**ESC handling.** Three potential listeners coexist (parent LibraryModal, embedded RequirementsLibraryModal, embedded PEPLibraryModal). To prevent capture-phase collisions, the embedded child's listener now early-returns when both `embedded` is true AND `mode === 'view'` — letting the parent's window listener handle the close. When the child is in edit/create/newversion mode, it intercepts ESC to exit edit mode (stopPropagation), matching the standalone-modal behavior. The new parent listener uses bubble phase (no `true` flag), so even if a child accidentally bubbles, the order is correct.
+
+**User-facing terminology rename — minimal blast radius:**
+
+- `PEPLibraryModal.jsx` line 408: "Create PEP Template" → "Create Parsing Template".
+- `PEPLibraryModal.jsx` line 152: "No PEP templates yet." → "No Parsing Templates yet."
+- `PEPLibraryModal.jsx` embedded mode Create button: "+ Create Parsing Template" (was "+ Create Template" in standalone form).
+- `V22ParseEvidenceModal.jsx` line 288 empty state: "No PEP Templates in your library. Add one via the Template Library before parsing." → "No Parsing Templates in your library. Add one via the Library before parsing."
+- `V22NodeDetailPanel.jsx` Parse Evidence footer button tooltip: "Extract structured fields from this Asset using a PEP template" → "…using a Parsing Template".
+- `V2App.jsx` chrome button tooltip: "Library" (was "Requirements Library" / "PEP Template Library").
+
+**Internal field names unchanged.** `pepTemplates`, `pepTemplateId`, `parseTemplateId` and all factory/handler signatures keep PEP per the client canon. The data model is unaffected.
+
+**Out of scope (deferred):**
+
+- **Legacy modal file deletion.** The phase brief calls for deleting `RequirementsLibraryModal.jsx` + `PEPLibraryModal.jsx` after end-to-end UI QA. Per CLAUDE.md's documented V2Canvas raycaster DOM-dispatch limitation, scripted UI walkthrough of every flow that touches the Library (Create / Save / Publish / new-version / search / multi-tab navigation) cannot be exercised from this agent session. Files retained as embeddable panels pending manual QA. A follow-up phase can either collapse them into `LibraryModal.jsx` or split them into `library/RequirementsPanel.jsx` + `library/ParsingTemplatesPanel.jsx` and remove the standalone exports.
+- **Cross-tab selection persistence.** Switching between tabs resets each tab's local `selectedId`. Acceptable simplification per the phase brief.
+- **PEP Template publishing.** Out of scope per the brief — PEP Templates have no publish concept.
+
+**Spec updates:** none. The spec doesn't currently document the Library surface in detail; a follow-up phase can codify the three-tab structure if it becomes load-bearing.
+
+**Runtime verification:**
+
+- Build clean (88 modules, +10 kB main bundle for the new `LibraryModal.jsx`).
+- Chrome shows ONE Library icon button (down from two — verified via `document.querySelectorAll` enumeration: 3 chrome icon buttons total post-Phase 10.3, was 4 pre-Phase 10.3; the second library button is gone).
+- Clicking the Library icon opens the unified modal with header "Library" + subtitle "Parsing templates, requirement sets, and published standards" + three tabs visible.
+- Default active tab is **Requirement Sets** (renders the embedded `RequirementsLibraryModal`'s SetList with three seeded sets: Material Compliance / System Integration Requirements / MIL-PRF-55681 Compliance + the "+ Create Requirement Set" toolbar button).
+- Switching to the **Parsing Templates** tab renders the embedded `PEPLibraryModal`'s body — empty state shows the renamed "No Parsing Templates yet" copy + the "+ Create Parsing Template" toolbar button.
+- Switching to **Published Requirements** renders the empty-state copy ("No published requirements visible to your network yet."). On the seeded dataset there are no published Requirement Sets, so this tab's empty state is the expected output.
+- No new console errors from Phase 10.3. Pre-existing Changelog `key={release.version}` collision warnings persist (still tracked separately; still out of scope).
+- Manual QA needed for: Create flow on each tab, Publish flow (verify cross-tab visibility), Run Evaluation deep link if it exists, full search/filter behavior. Code-path verification + tab-content rendering verified via the preview probes above.
+
+**Status:** [x] Complete.

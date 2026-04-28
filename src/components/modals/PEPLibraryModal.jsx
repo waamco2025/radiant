@@ -149,7 +149,7 @@ function TemplateList({ templates, selectedId, onSelect, search, setSearch, expa
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 10px' }}>
         {templates.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.7 }}>
-            No PEP templates yet.
+            No Parsing Templates yet.
           </div>
         )}
         {templates.length > 0 && filtered.length === 0 && (
@@ -405,7 +405,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 
   const headerText = isNewVersion
     ? `New Version: ${sourceName || editName || 'Untitled'}`
-    : 'Create PEP Template'
+    : 'Create Parsing Template'
 
   const tabs = [
     { id: 'manual', label: 'Manual' },
@@ -642,7 +642,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — PEP Template Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initialSelectedId, _noBackdrop }) {
+export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initialSelectedId, _noBackdrop, embedded = false }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')
   const [search, setSearch] = useState('')
@@ -688,6 +688,8 @@ export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initial
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
+        // Phase 10.3: in embedded mode, only intercept ESC while editing.
+        if (embedded && mode === 'view') return
         e.preventDefault()
         e.stopPropagation()
         handleModalClose()
@@ -695,7 +697,7 @@ export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initial
     }
     window.addEventListener('keydown', handleEsc, true)
     return () => window.removeEventListener('keydown', handleEsc, true)
-  }, [handleModalClose])
+  }, [handleModalClose, embedded, mode])
 
   const handleSelect = (id) => {
     setSelectedId(id)
@@ -804,6 +806,60 @@ export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initial
     )
   }
 
+  // Phase 10.3: shared inner two-panel body for embedded + standalone modes.
+  const innerBody = (
+    <>
+      {embedded && (
+        <div style={{
+          padding: '10px 16px', borderBottom: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {pepTemplates.length} template{pepTemplates.length !== 1 ? 's' : ''}
+          </div>
+          {!isEditing && (
+            <span
+              onClick={handleCreate}
+              style={{
+                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                color: 'var(--accent-purple, #a78bfa)', cursor: 'pointer',
+                padding: '6px 12px', borderRadius: 6,
+                border: '1px solid color-mix(in srgb, var(--accent-purple, #a78bfa) 30%, transparent)',
+                transition: 'background 100ms',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-purple, #a78bfa) 8%, transparent)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >+ Create Parsing Template</span>
+          )}
+        </div>
+      )}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <TemplateList
+          templates={pepTemplates}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+          search={search}
+          setSearch={setSearch}
+          expandedLineages={expandedLineages}
+          toggleLineage={toggleLineage}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {rightContent}
+        </div>
+      </div>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {innerBody}
+      </div>
+    )
+  }
+
   const content = (
     <div style={{
       width: 960, height: '80vh', background: 'var(--bg-surface)',
@@ -848,20 +904,7 @@ export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initial
         </div>
       </div>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <TemplateList
-          templates={pepTemplates}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          search={search}
-          setSearch={setSearch}
-          expandedLineages={expandedLineages}
-          toggleLineage={toggleLineage}
-        />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {rightContent}
-        </div>
-      </div>
+      {innerBody}
     </div>
   )
 
