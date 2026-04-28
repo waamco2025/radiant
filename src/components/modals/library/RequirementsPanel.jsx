@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Backdrop } from './ModalShared.jsx'
+import { Backdrop } from '../ModalShared.jsx'
 
 function HighlightMatch({ text, query }) {
   if (!query || !text) return text
@@ -830,7 +830,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — Requirements Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function RequirementsLibraryModal({ requirementSets, onClose, onSave, initialSelectedId, onPublish, publishedSets, _noBackdrop, embedded = false }) {
+export default function RequirementsPanel({ requirementSets, onClose, onSave, initialSelectedId, onPublish, publishedSets, _noBackdrop, embedded = false }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')        // 'view' | 'create' | 'newversion'
   const [search, setSearch] = useState('')

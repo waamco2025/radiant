@@ -429,6 +429,20 @@ The Directory Layer is a separate canvas layer (not part of the parent or child 
 
 > **Prototype note — Directory Layer.** The Directory Layer is ambitious. A minimal placeholder (empty canvas with title "Directory Layer") is acceptable for initial implementation; the full dots-and-clouds visualization can follow. The current shipped Phase 7 implementation renders 4 actor-party dot clusters behind a circular-wipe transition; full visualization (real force-directed layout, thousands of dots at scale, per-dot interactivity) is tracked as backlog items #29, #43, #45, #46. **In production:** the Directory Layer renders the Platform's public directory index — a real catalog of publicly disclosed Claims with discoverability metadata, indexed and searchable by the Platform. **Authority:** Platform (directory indexing); App (rendering).
 
+### 8.6 Library
+
+The Library is a chrome-accessible modal that unifies template-style artifacts in three tabs:
+
+1. **Parsing Templates** — PEP (Parse and Extract Protocol) Templates the actor owns. Used during Parse Evidence flow to extract structured fields from Assets.
+2. **Requirement Sets** — REP (RICE Evaluation Protocol) Requirements Sets the actor owns. Used during Run Evaluation flow to assess Claims against criteria.
+3. **Published Requirements** — Network-wide published Requirements Sets, including the actor's own publications. Read-only browse view; users select published sets for evaluation use.
+
+Each tab uses the same two-panel layout: left sidebar with searchable list, right detail view. Tabs 1 and 2 support Create / Edit / New Version / Publish (Requirements Sets only) affordances. Tab 3 is read-only.
+
+When an actor publishes a Requirement Set, it appears in BOTH Tab 2 (with the globe icon indicating they own and have published it) AND Tab 3 (the network-wide published list). This dual visibility lets the user see their published work in either context.
+
+> **Prototype note — Library backing.** In V2.2 the Library is backed by per-role state (`requirementSets`, `pepTemplates`) plus a globally-shared `publishedRequirementSets` array. **In production:** the Library is a view onto Platform-side artifact registries — Parsing Templates registered via DPP+PEP, Requirement Sets registered via DPP+REP, with publication being an SDP-managed lifecycle event that adds the artifact to the network-wide discoverable index. **Authority:** DPP (artifact registration), REP/PEP (per-protocol Templates), SDP (publication lifecycle).
+
 ---
 
 ## 9. AI Shopper
@@ -1094,7 +1108,7 @@ These are architectural intentions that V2.2 does not implement but should not p
 - Same split-panel UI layout (evidence viewer left, rows review right).
 - Same row component shape (reuse `ReviewRow`-style components where possible).
 - Same `ConfidenceBadge` component.
-- Same `Library` modal (Parse Templates tab + Requirements Sets tab + Published Standards tab — three tabs, one modal).
+- The unified Library modal (Parsing Templates / Requirement Sets / Published Requirements — three tabs) shipped in Phase 10.3 and serves both processes today. Future unification (one Template type with optional `criterion`) would consolidate these tabs into one.
 - Same JSON output shape where possible (both have `rows[]` or `fields[]` with `id`, `label`, `value`, `confidence`; Evaluation Results add `status` per row).
 - Similar edge styling for artifact provenance.
 
@@ -1247,3 +1261,8 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 - **§11.6 Self-evaluation — Phase 8:** section title dropped the "(Phase 6)" suffix.
 - **§11.8 Parse flow — Phase 8 (new subsection):** documented the V2.2 Parse Evidence flow (`V22ParseEvidenceModal` + `makeParseRunArtifacts` factory + internal Full DA wiring the new Parse Result to its source Asset). Closes the one remaining gap in V2.2's process coverage — parsing was seeded in demo data but had no user-facing creation flow pre-Phase-8.
 - **§1 annotation convention + §18 Production Handoff Map — Spec annotation pass (2026-04-23):** introduced a systematic Prototype-vs-Production annotation convention at the top of the document (four-part callout: Topic / Prototype behavior / Production behavior / Authority); added a client-canon terminology-mapping note on first-use of "Disclosure Agreement" (SDA), "Asset" (Data Object), and the endorsement UI step. Inline flags added in §2.3 (process authority), §2.5 (QS + endorsement, reformatted from prior partial flag), §2.6 (DOT issuance + COP lineage), §6 (view-building + access control + Permission Consumption), §8.5 (Directory Layer, reformatted), §9 (AI Shopper, reformatted), §10 opening (schema fidelity, reformatted), §10.1 / §10.3 / §10.4 / §10.5 / §10.6 (per-schema field-authority flags), §11.1 through §11.8 (every state transition, including new §11.5a for Revocation Phase 9D). New §18 Production Handoff Map consolidates every flag into a master reference for production-build planning, organized by concern area (registration, storage, agreement lifecycle, evaluation execution, access control, notifications, cryptographic primitives, out-of-scope). Protocol names used: DPP (Data Property Protocol), SDP (Selective Disclosure Protocol), REP (RICE Evaluation Protocol), PEP (Parse and Extract Protocol), COP (Change of Ownership Protocol), with "Platform" as umbrella when attribution spans multiple protocols. Addresses client-report issue C1 (Prototype-vs-Production annotation applied inconsistently).
+- **§11.5a Agreement revocation — Phase 9D (new subsection):** documented the four revocation cases (A: grantor revokes DA, B: grantee revokes DA, C: grantor revokes EA, D: grantee revokes EA), inline-vs-Claim-level Detail Panel patterns, the cascade rules (DA → paired EA, but NOT to Eval Results), the dismiss mechanic (`_dismissedRevoked`), and the unravel animation choreography (Phase 9D.2.x). Inline `Prototype note` callouts added to §11 covering SDP lifecycle authority. Eval Result persistence: Eval Results are independent artifacts that survive their backing DA's revocation; orphaned Eval Results gain a Dismiss action in their Detail Panel footer. Phase 9D.1.6 added the internal-DA carve-out to the POE cascade so an Eval Result keeps its ownership edge to its evaluator's Asset on the evaluator's canvas after revocation.
+- **§3.7 Layout — Phase 10.2.1 (new subsection):** codified grid-alignment rules (all positions multiples of 100), `symmetricRowY(i)` distribution (alternate-outward from y=0), per-column Y offset table, elastic columns based on Asset hierarchy depth.
+- **§10.1 Asset hierarchy — Phase 10.2:** added `parentAssetId` field with the Prototype note covering DPP authority. Hierarchy constraints (single-party, no cycles, parent must precede child) documented inline. §6.4 updated to clarify counterparty visibility — parent-child structure is owner-only.
+- **§8.6 Library — Phase 10.3 (new subsection):** documented the unified three-tab Library (Parsing Templates / Requirement Sets / Published Requirements) with Prototype note covering Platform-side registry authority. §17.1 Future Direction updated to reflect that the Library is shipped, not future.
+- **Register Asset modal copy — Phase 10.1:** plain-language rewrite of step 1 / step 2 / hashing-progress strings to remove model-vocabulary leakage. No structural change; copy strings only.

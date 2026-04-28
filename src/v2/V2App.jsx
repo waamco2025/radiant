@@ -4686,6 +4686,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.4', items: [
+                  'Cleanup: legacy Library modals relocated to src/components/modals/library/ as RequirementsPanel.jsx + ParsingTemplatesPanel.jsx. No user-visible change',
+                  'Architecture spec gained a §8.6 Library section + Phase 9D + 10.x entries in the Changelog; §17.1 future-direction reference updated to past tense',
+                ]},
                 { version: '0.10.0', date: '2026-04-28', label: 'Phase 10.3', items: [
                   'Library: the two chrome buttons (Requirements Library + PEP Template Library) collapsed into one. Click "Library" to see Parsing Templates, Requirement Sets, and Published Requirements as tabs in a single modal',
                   'Renamed "PEP Template" → "Parsing Template" in user-facing copy (the data model still uses PEP per the canon)',

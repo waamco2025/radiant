@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Backdrop } from './ModalShared.jsx'
-import { FIELD_CATEGORIES, FIELD_TYPES } from '../../v2/pepTemplates.js'
+import { Backdrop } from '../ModalShared.jsx'
+import { FIELD_CATEGORIES, FIELD_TYPES } from '../../../v2/pepTemplates.js'
 
 function HighlightMatch({ text, query }) {
   if (!query || !text) return text
@@ -642,7 +642,7 @@ function EditorForm({ isNewVersion, sourceName, draftVersion, editName, setEditN
 /* ═══════════════════════════════════════════════════════════════════════
    MAIN MODAL — PEP Template Library (Split Panel)
    ═══════════════════════════════════════════════════════════════════════ */
-export default function PEPLibraryModal({ pepTemplates, onClose, onSave, initialSelectedId, _noBackdrop, embedded = false }) {
+export default function ParsingTemplatesPanel({ pepTemplates, onClose, onSave, initialSelectedId, _noBackdrop, embedded = false }) {
   const [selectedId, setSelectedId] = useState(null)
   const [mode, setMode] = useState('view')
   const [search, setSearch] = useState('')

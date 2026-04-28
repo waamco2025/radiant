@@ -3,17 +3,15 @@
 //   • PEP Template Library (renamed to "Parsing Templates" in user-facing copy)
 //   • Published Requirements (network-wide; includes user's own publications)
 //
-// The frame + tab bar live here; the per-tab two-panel content is rendered by
-// the legacy modal components in `embedded` mode (Phase 10.3 added the prop).
-// This avoids duplicating ~1900 lines of list/detail/editor logic. The legacy
-// files retain their standalone form for backwards compatibility — when the
-// dust settles on Phase 10.3 QA, the legacy default-export wrappers can be
-// trimmed down to just the panels.
+// Phase 10.4: legacy library modals relocated to `./library/` subdirectory and
+// renamed as `RequirementsPanel` + `ParsingTemplatesPanel`. They keep their
+// `embedded` prop and existing API; only the file path + export identifier
+// changed.
 
 import { useState, useEffect, useMemo } from 'react'
 import { Backdrop } from './ModalShared.jsx'
-import RequirementsLibraryModal from './RequirementsLibraryModal.jsx'
-import PEPLibraryModal from './PEPLibraryModal.jsx'
+import RequirementsPanel from './library/RequirementsPanel.jsx'
+import ParsingTemplatesPanel from './library/ParsingTemplatesPanel.jsx'
 
 const TAB_DEFS = [
   { id: 'parsing',      label: 'Parsing Templates' },
@@ -311,7 +309,7 @@ export default function LibraryModal({
       {/* Tab content */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {activeTab === 'parsing' && (
-          <PEPLibraryModal
+          <ParsingTemplatesPanel
             pepTemplates={pepTemplates}
             onClose={onClose}
             onSave={onSavePepTemplate}
@@ -320,7 +318,7 @@ export default function LibraryModal({
           />
         )}
         {activeTab === 'requirements' && (
-          <RequirementsLibraryModal
+          <RequirementsPanel
             requirementSets={requirementSets}
             onClose={onClose}
             onSave={onSaveRequirementSet}

@@ -1822,3 +1822,35 @@ Closes backlog #25. Two separate library modals (Requirements Library + PEP Temp
 - Manual QA needed for: Create flow on each tab, Publish flow (verify cross-tab visibility), Run Evaluation deep link if it exists, full search/filter behavior. Code-path verification + tab-content rendering verified via the preview probes above.
 
 **Status:** [x] Complete.
+
+### Phase 10.4 completion notes (2026-04-28) — Phase 10 wrap-up: legacy modal cleanup + spec sync
+
+Two cleanup workstreams before moving to Phase 11.
+
+**Workstream 1 — Legacy modal relocation (Option B).** Phase 10.3 retained the two legacy library modals as embeddable panels (`RequirementsLibraryModal.jsx` + `PEPLibraryModal.jsx`) pending manual UI QA. Phase 10.3 verified clean; this phase relocates them into a `library/` subdirectory and renames them as panels:
+
+- `src/components/modals/PEPLibraryModal.jsx` → `src/components/modals/library/ParsingTemplatesPanel.jsx`
+- `src/components/modals/RequirementsLibraryModal.jsx` → `src/components/modals/library/RequirementsPanel.jsx`
+
+Default export identifiers renamed: `PEPLibraryModal` → `ParsingTemplatesPanel`, `RequirementsLibraryModal` → `RequirementsPanel`. Internal `Backdrop` import updated from `'./ModalShared.jsx'` → `'../ModalShared.jsx'`; `pepTemplates.js` import updated from `'../../v2/pepTemplates.js'` → `'../../../v2/pepTemplates.js'` to account for the extra directory hop. `LibraryModal.jsx` imports updated to reference the new paths and component names. Component behavior unchanged — `embedded` prop and existing API preserved.
+
+`git mv` used to preserve file history. Verified: no other files in the codebase import the old filenames (V2App.jsx mentions them only in a historical comment block; polish-backlog.md and CLAUDE.md mention them in completion notes — both are historical record, retained as-is).
+
+**Workstream 2 — Architecture spec sync.** Three updates to `architecture-spec.md`:
+
+1. **§8.6 Library (new subsection)** — placed inside §8 (Directory Layer) after §8.5 Implementation note. Documents the three-tab structure (Parsing Templates / Requirement Sets / Published Requirements), the dual-visibility rule for own publications (Tab 2 with globe icon + Tab 3), and a Prototype note callout covering Platform-side registry authority (DPP for artifact registration, REP/PEP for per-protocol Templates, SDP for publication lifecycle).
+
+2. **§17.1 Library reference updated** — the bullet that read "Same `Library` modal (Parse Templates tab + Requirements Sets tab + Published Standards tab — three tabs, one modal)" rewritten to past tense reflecting shipped state: "The unified Library modal (Parsing Templates / Requirement Sets / Published Requirements — three tabs) shipped in Phase 10.3 and serves both processes today. Future unification (one Template type with optional `criterion`) would consolidate these tabs into one."
+
+3. **Spec Changelog entries appended** — five new entries after the 2026-04-23 annotation pass entry: §11.5a Agreement revocation (Phase 9D), §3.7 Layout (Phase 10.2.1), §10.1 Asset hierarchy (Phase 10.2), §8.6 Library (Phase 10.3), Register Asset modal copy (Phase 10.1).
+
+**No feature work.** Out of scope per the phase brief.
+
+**Runtime verification:**
+- Build clean (88 modules, no change in bundle size — relocation is path-only).
+- File system: `RequirementsLibraryModal.jsx` and `PEPLibraryModal.jsx` no longer exist at `src/components/modals/`; their content lives at `src/components/modals/library/RequirementsPanel.jsx` and `src/components/modals/library/ParsingTemplatesPanel.jsx`.
+- Library opens from chrome with all three tabs rendering correctly (verified post-relocation: tabs Parsing Templates / Requirement Sets / Published Requirements, default Requirements Sets active, three seeded sets visible).
+- No console errors related to import paths.
+- Spec readable end-to-end: §8.6 Library section sits cleanly between §8.5 Implementation note and §9 AI Shopper; §17.1 references the Library in past tense; Changelog reflects Phases 9D + 10.x.
+
+**Status:** [x] Complete.
