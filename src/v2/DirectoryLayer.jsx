@@ -201,14 +201,19 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
           parent-layer-style Actor node card. Same look and feel as the
           ACTOR cards on the main canvas (CARD_W = 210px wide, ACTOR
           badge above the party name). Click returns to the parent
-          canvas; hover applies the standard parent-layer node treatment. */}
-      <Tooltip content="Return to your network" position="top">
+          canvas; hover applies the standard parent-layer node treatment.
+          Phase 11A.1: positioning lifted from the inner card div onto
+          the Tooltip's wrapper span via `wrapperStyle` so the Tooltip's
+          hover detection has a real bounding box to bind to. The card
+          itself sits inside the wrapper without absolute positioning. */}
+      <Tooltip
+        content="Return to your network"
+        position="top"
+        wrapperStyle={{ position: 'absolute', left: 32, bottom: 32 }}
+      >
       <div
         onClick={onClose}
         style={{
-          position: 'absolute',
-          left: 32,
-          bottom: 32,
           width: 210,
           minHeight: 88,
           padding: '14px 16px',
