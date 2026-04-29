@@ -203,6 +203,14 @@ export default function DirectoryLayer({
   return (
     <div
       data-v22-directory-layer
+      // Phase 11B.1: clicking empty directory area dismisses the
+      // materialized Claim. Children that should NOT dismiss (the
+      // materialized card, the ChipCo cluster hit-area) call
+      // e.stopPropagation() in their own handlers. The Detail Panel is a
+      // sibling in the DOM tree (mounted by V2App, not nested here) so
+      // its clicks don't reach this listener at all. No-op when there's
+      // no materialized claim to dismiss.
+      onClick={() => onCloseMaterializedClaim?.()}
       style={{
         position: 'fixed',
         inset: 0,
@@ -340,6 +348,10 @@ export default function DirectoryLayer({
       {materializedClaim?.claim && materializedClaim?.anchor && (
         <div
           data-v22-materialized-claim
+          // Phase 11B.1: stopProp so clicking the card itself doesn't
+          // bubble up to the directory layer's root onClick (which would
+          // dismiss the materialization).
+          onClick={(e) => e.stopPropagation()}
           style={{
             position: 'absolute',
             left: `calc(${materializedClaim.anchor.xPct}% - 105px)`,

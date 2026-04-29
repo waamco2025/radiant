@@ -67,14 +67,23 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
-function Section({ title, children }) {
+function Section({ title, children, action }) {
+  // Phase 11B.1: optional `action` slot rendered on the right side of the
+  // section title row. Used by V22AssetPanel's File section to surface an
+  // Expand button next to the FILE label without adding a new dedicated row.
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{
-        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-        letterSpacing: '0.12em', color: 'var(--text-tertiary)',
-        marginBottom: 8, textTransform: 'uppercase',
-      }}>{title}</div>
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 8,
+      }}>
+        <div style={{
+          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          letterSpacing: '0.12em', color: 'var(--text-tertiary)',
+          textTransform: 'uppercase',
+        }}>{title}</div>
+        {action ? <div>{action}</div> : null}
+      </div>
       {children}
     </div>
   )
@@ -336,6 +345,10 @@ function V22AssetPanel({
   childAssets = [],
   parentAsset = null,
   onSelectAsset,
+  // Phase 11B.1: Expand button on the File section opens the file viewer
+  // for this Asset directly. Same wiring shape as the Expand button on
+  // Asset rows in V22ClaimPanel — receives the Asset artifact.
+  onExpandAsset,
   disclosureAgreementsForNode = [],
   evaluationAgreementsForNode = [],
   resolveSubjectName,
@@ -371,7 +384,16 @@ function V22AssetPanel({
             <Row label="Owner" value={node.owner} />
             <Row label="DOT" value={asset?.dot?.pin ? <CopyBadge value={asset.dot.pin} truncated /> : '—'} />
           </Section>
-          <Section title="File">
+          <Section
+            title="File"
+            // Phase 11B.1: Expand button surfaces the file viewer directly
+            // from the Asset's own Detail Panel — previously only reachable
+            // from referenced-Asset rows in a Claim panel. Same wiring +
+            // schema as those rows.
+            action={asset && onExpandAsset ? (
+              <ExpandButton onClick={() => onExpandAsset(asset)} title={`Expand ${asset.name || 'Asset'}`} />
+            ) : null}
+          >
             <Row label="Filename" value={asset?.file?.filename} mono />
             <Row label="Size" value={formatBytes(asset?.file?.size)} />
             <Row label="MIME" value={asset?.file?.mimeType} mono />

@@ -189,6 +189,21 @@ export default function V2App() {
   // Phase 11B: Detail Panel "expand" modal — set to { artifact, schema } to
   // open; cleared on close. Schemas: 'asset' | 'parse-output' | 'eval-output'.
   const [v22ExpandedArtifact, setV22ExpandedArtifact] = useState(null)
+  // Phase 11B.1: Esc closes the directory-materialized Detail Panel when
+  // it's open AND no modal is sitting on top of it. The ExpandedArtifactModal
+  // has its own Esc handler; we defer to it via a state check rather than
+  // event-ordering tricks (both listeners would fire on the same Esc
+  // otherwise, dismissing two layers at once).
+  useEffect(() => {
+    if (!v22DirectoryMaterializedClaim) return
+    const handleEsc = (e) => {
+      if (e.key !== 'Escape') return
+      if (v22ExpandedArtifact) return // let the modal's Esc handler close it first
+      setV22DirectoryMaterializedClaim(null)
+    }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [v22DirectoryMaterializedClaim, v22ExpandedArtifact])
   // Phase 9D.2 (#124): node id currently running the unravel keyframe.
   // Set by playUnravelAnimation right before its CSS stage; cleared when
   // the primitive resolves. AssetNode reads `_unraveling` (stamped via
