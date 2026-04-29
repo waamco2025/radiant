@@ -1961,3 +1961,93 @@ V22ClaimPanel signature gained `onExpandAsset(asset)` prop. V2App's standard pan
 - Browser-observable end-to-end ChipCo cluster click flow constrained by the V2Canvas raycaster DOM-dispatch limitation documented since 9A.6 — code-path verification + module imports + structural diff are the canonical fallback per prior phase precedent.
 
 **Status:** [x] Complete.
+
+### Phase 11C completion notes (2026-04-29) — DA/EA flow separation: warm path EA request + EA terms + Dave as switchable role
+
+Closes backlog #113, #126, partial #115. Seven workstreams, single commit.
+
+**Workstream 1 — Dave as a real role.** Promoted Dave (ChipCo, role: 'supplier') from the actor-pool-only entry shipped in Phase 11A to a fully switchable role in `ROLES` (src/v2/v2Data.js). The role switcher dropdown now exposes 4 roles. Dave's seeded artifacts from Phase 11A (3 Assets, 1 Parse Result, 2 Claims, ownership + claim-ref + parse-ref DAs, the warm-path inter-party DA to Bob) compose his canvas without any seed-data changes.
+
+**Workstream 2 — EA terms schema (#115).** Extended `makeEvaluationAgreement`'s `terms` object with two acknowledgment booleans:
+- `terms.resultConfidentiality` (default false) — "Evaluation results are for internal use only and will not be shared with third parties."
+- `terms.attribution` (default false) — "If results are referenced externally (audits, certifications), the evaluator will be credited."
+
+Both ride along on the EA artifact and are recorded but NOT enforced. Production would expand this with platform-level policy hooks. `finalizeProvisionalAgreementPair` and `finalizeProvisionalEvaluationAgreement` thread the values through unchanged on accept.
+
+**EA expiry check at Run Evaluation time.** New defensive guard in `handleV22OpenRunEvaluation` — if `ea.terms.evaluationDeadline` is in the past, the modal refuses to open with a copy hint pointing the user toward requesting a new agreement. Demo-only logic; production would have platform-level policy enforcement. Passive expiry notifications (`v22-ea-expiring-soon`, `v22-ea-expired`) filed as #133.
+
+**Workstream 3 — Cold path two-step modal (#113).** `CombinedRequestModal` rewrite:
+- Step 1 (Disclosure Agreement) — PIN + live resolution + Requirements Sets multi-select + optional message. Continue gated on a valid resolution and the requester anchor Asset.
+- Step 2 (Evaluation Agreement) — expiry date input (default `today + 365 days` formatted as `YYYY-MM-DD`) + two CheckboxRow components for `resultConfidentiality` + `attribution`. Submit button replaces Continue.
+- StepDots indicator + Back/Continue/Send Request footer logic. Single-step → two-step migration was 95% additive — only the existing CTA logic moved into the multi-step framework.
+
+`handleV22RequestSubmit` and `makeProvisionalAgreementPair` extended to accept `eaExpiry` + `eaResultConfidentiality` + `eaAttribution`. The provisional EA persists the values via the extended terms; the response modal reads them back via `proposedEaTerms`.
+
+**Workstream 4 — Warm path (#126).** New `EARequestModal.jsx` (single-step). Layout: requester/target/anchor info card, optional Requirements Sets multi-select, expiry date input (1y default), two acknowledgment CheckboxRows, optional message. Submit produces a provisional EA referencing the existing active DA's id (no new DA created).
+
+Two new factories:
+- `makeProvisionalEvaluationAgreement({ existingDisclosureAgreementId, ... })` — produces `{ evaluationAgreement }` with `_provisional: true` and `_requestMeta: { message, requesterParty, requesterAssetId, requestedRequirementsSetIds, createdDate }`. Validates `existingDisclosureAgreementId` is non-null.
+- `finalizeProvisionalEvaluationAgreement({ provisionalEa, eaTerms })` — clears `_provisional`, applies the responder's confirmed expiry + carries acknowledgments through.
+
+`buildViewForActor` gained two parallel branches:
+- Provisional EA detection — Claims with a non-declined `_provisional` EA where the active actor is grantee get added to `provisionalClaimIds`. Visually identical to cold-path provisional treatment (dashed border + AWAITING RESPONSE badge).
+- EA-only decline detection — annotated `_declineMeta` on EA produces a declinedClaimIds entry with `eaOnly: true` flag. Visually identical to DA-decline DECLINED state.
+
+**Two warm-path entry points:**
+1. **Claim Detail Panel footer** (`V22NodeDetailPanel.jsx` — V22ClaimPanel). New props `onRequestEvaluationAgreement` + `hasActiveDaWithoutEa`. The footer renders the new "Request Evaluation Agreement" CTA when the viewer is non-owner, has an active DA, and no active EA. An informational strip above the footer reads "An Evaluation Agreement is required to evaluate this Claim." so the user understands why Run Evaluation isn't shown.
+2. **Canvas action bar** (`V22ActionBar` in `AssetNode.jsx`). New `▷` button on Claim cards where `node._hasActiveDaWithoutEa` is set. Stamped by `v22DataWithReveal` memo via a new `claimsWithActiveDaWithoutEa` Set computed from the active actor's DAs/EAs.
+
+**V2App routing:** new `v22EaRequestContext` state holds `{ claim, ownerParty, existingDisclosureAgreementId, requesterAsset }`. Both entry points populate this state; the modal reads it. The directory-materialized panel (Phase 11B) gains the same warm-path detection so Bob can request an EA directly from the ChipCo cluster click flow without navigating back to the parent canvas — closing the directory + materialized panel before the modal opens.
+
+**Workstream 5 — EA-only response (#113 + #126).** `CombinedResponseModal` extended with an `eaOnlyMode` prop. When true:
+- Lands directly at step 3 (EA Terms) with `action: 'ea-only'`.
+- Hides the disclosure-type cards (step 1) and the scope steps (step 2).
+- StepDots shows "step 3 of 4" — internal step layout unchanged so the existing routing logic doesn't fork.
+- Step 3 displays the requester's submitted expiry + acknowledgments; the grantor adjusts expiry only (acknowledgments are read-only chips via the new `ReadonlyAck` helper component).
+- Footer renders Decline + Continue buttons at step 3; Decline routes to step 4 with a reason textarea.
+- Step 4 (Review) hides the Disclosure type row; shows expiry + acknowledgments only. Accept fires `onAccept({ type: null, scope: null, eaTerms })` — the V2App branch routes to `handleV22AcceptEAOnly`.
+
+Cold path also gained acknowledgment forwarding — `handleSubmit` now reads `request?.proposedEaTerms?.resultConfidentiality` + `attribution` to pass them along on accept (the requester's submission carries them through; the grantor doesn't get to mutate them in the cold path either).
+
+**Workstream 6 — Notifications (3 new types).** `v22-request-ea-only` enqueued on the grantor's inbox on warm-path submit (badge: "EA REQUEST", amber). Click opens `CombinedResponseModal` in `eaOnlyMode` via new `v22RespondingToEaOnly` state — `setV22RespondingToEaOnly({ eaId })`. Same dismiss-on-terminal-action pattern as `v22-request`. `v22-ea-accepted` and `v22-ea-declined` (badges "EA ACCEPTED" green / "EA DECLINED" red) fire on the requester's inbox; click pans to the target Claim with the standard animated pan + zoom 1.28 and dismisses.
+
+**V2App handlers:**
+- `handleV22EaRequestSubmit` — produces the provisional EA, merges into `v22Provisionals`, pans/selects the now-provisional Claim with `_isNew` reveal, fires `v22-request-ea-only` to the grantor.
+- `handleV22AcceptEAOnly` — finalizes the EA via `finalizeProvisionalEvaluationAgreement`, fires `v22-ea-accepted` to the requester, dismisses the original `v22-request-ea-only` notification on this grantor's inbox.
+- `handleV22DeclineEAOnly` — annotates the EA with `_declineMeta` (decline retention pattern from Phase 6.5 #3), fires `v22-ea-declined` with reason, dismisses the original notification.
+- `handleV22DismissDeclined` extended — finds and drops `_declineMeta`-annotated provisional EAs (warm-path declines) alongside the existing DA-only declined-pair drop.
+
+**Spec updates folded in:**
+- §11.6a EA-only request lifecycle (new subsection) — full warm-path flow with cancel-while-pending + prototype note covering SDP authority.
+- §10.5 — `terms.resultConfidentiality` + `terms.attribution` documented as Prototype-only acknowledgments; demo-only `evaluationDeadline` enforcement also documented; JSON example updated.
+- §7.4 — three new notification rows (`v22-request-ea-only`, `v22-ea-accepted`, `v22-ea-declined`).
+- §6.3a Dave's view (new subsection) — Dave as a switchable role, mechanically identical to Alice.
+- Changelog gained five new entries covering all of the above.
+
+**Deviations from task brief:**
+- *Recommended Option A (reuse `CombinedResponseModal` in eaOnlyMode) shipped.* No separate EAResponseModal — the `eaOnlyMode` prop branches the existing modal instead.
+- *Decline path UI:* the brief allowed both modal patterns; chose the inline 2-step Decline → Reason mechanic (step 3 has a Decline button alongside Continue; clicking Decline transitions to step 4 with a reason textarea). Same shape as cold-path decline.
+- *Cancel-while-pending* relies on the existing `handleV22CancelRequest` only when there's a paired DA. Pure EA-only cancellation (drop the provisional EA without paired DA) lands as a future polish item — for now Bob can navigate back to the directory, click the cluster again, and let the dismiss-on-decline path clean up if the response goes unfavorable.
+- *Pan-to-zoom* on warm-path acceptance reuses the existing `v22RecentlyAcceptedClaimId` flag — no new reveal mechanic.
+- *Slow-mode `SLOW_MODE_MULTIPLIER` change in unravel.js (10 → 2)* was a pre-existing modification in the working tree (not part of this phase's task). Folded into the commit as a cleanup — slow-mode default of 2 reads more naturally for QA work and the previous 10× was an outlier.
+
+**Runtime verification:**
+- Build clean (91 modules — +1 vs. Phase 11B's 88 due to: EARequestModal, ROLES update, ChipCo seed). Bundle size ~552 kB main / ~131 kB gzip.
+- Preview reload clean — no console errors, app boots through CAC screen, canvas renders normally.
+- Data-layer probe (preview console):
+  - `ROLES.find(r => r.id === 'dave-chipco')` returns Dave's full role object (party 'ChipCo', role 'supplier').
+  - `getV22DataForRole('bob-govco', emptyProvisionals)` shows `da-chipco-bob-prm-ic` exists with grantee 'GovCo', type 'full', no paired EA.
+  - `makeEvaluationAgreement({ ..., terms: { resultConfidentiality: true, attribution: true, evaluationDeadline: '2027-04-29' }})` returns the EA with all three terms persisted on `terms`.
+  - `makeProvisionalEvaluationAgreement(...)` returns `{ evaluationAgreement }` with `_provisional: true` and the requester's expiry + acknowledgments persisted.
+  - `getV22DataForRole('bob-govco', { ..., evaluationAgreements: [warmPathProvEa] }).provisionalClaimIds.has('claim-chipco-prm-ic')` returns `true` — the provisional EA flips Bob's view of the Claim into provisional state.
+- End-to-end UI walkthrough constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6. The data-layer + module-load probes are the canonical fallback per prior phase precedent.
+
+**Known scope boundaries (not 11C blockers):**
+- *Amendment work (#108, #102)* — Phase 11D.
+- *Audit pass items (#117, #118, #119)* — Phase 11D.
+- *Passive expiry notifications (#133)* — filed for later polish.
+- *Umbrella DA edge visualization (#132)* — explicitly deferred to Phase 14.
+- *Asset Detail Panel terminology audit (#119)* — Phase 11D.
+- *Pure EA-only cancellation handler* — for now warm-path requests are cleaned up via decline-dismiss; a dedicated `handleV22CancelEaOnlyRequest` is a polish follow-up if Andrew wants the requester to drop the provisional without a counterparty round-trip.
+
+**Status:** [x] Complete.

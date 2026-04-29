@@ -41,6 +41,7 @@ export const GLOBE_ICON_PATHS = {
 const GOVCO_DOT = makeDot('GovCo')
 const MICROCO_DOT = makeDot('MicroCo')
 const AUDITCO_DOT = makeDot('AuditCo')
+const CHIPCO_DOT = makeDot('ChipCo')
 
 export const ROLES = [
   {
@@ -73,6 +74,19 @@ export const ROLES = [
     role: 'auditor',
     credits: 2400,
     vertical: 'Audit Services',
+  },
+  {
+    // Phase 11C: Dave (ChipCo) — IC supplier. Promoted from actor-pool only
+    // to a full switchable role so the warm-path EA request flow (Bob → Dave)
+    // can be fully exercised in the demo. Matches the `dave-chipco` actor in
+    // `buildV22SharedArtifacts`.
+    id: 'dave-chipco',
+    user: 'Dave',
+    party: 'ChipCo',
+    partyDot: CHIPCO_DOT,
+    role: 'supplier',
+    credits: 2400,
+    vertical: 'Electronics',
   },
 ]
 

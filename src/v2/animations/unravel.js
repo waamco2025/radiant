@@ -46,7 +46,7 @@
 // The constant is exported so AssetNode can pull the same value — single
 // source of truth so JS-side timings and CSS-side animation-durations
 // stay in sync at any multiplier.
-export const SLOW_MODE_MULTIPLIER = 10
+export const SLOW_MODE_MULTIPLIER = 2
 
 const _PAN_MS = 400
 const _PAN_PAD = 60

@@ -321,6 +321,10 @@ Each actor sees a different slice of the graph. What appears on a canvas is dete
 
 Carol's view is mechanically identical to Bob's. The "auditor" designation is informational; Carol's workflow uses the same processes as any other evaluator. Her Evaluation Results are her own and can be disclosed to other parties (e.g., to Bob as proof of audit completion), which in turn uses a proof-only Disclosure Agreement + Evaluation Agreement from Carol's Evaluation Result back to Bob's Asset.
 
+### 6.3a Dave's View (supplier — Phase 11C)
+
+Dave (ChipCo) is a fourth switchable demo role added in Phase 11C alongside Bob, Alice, and Carol. Mechanically identical to Alice — supplier-side view with his own Assets, his own Claims, his Parse Result on the IC datasheet, and an active inter-party DA to Bob (the warm-path anchor that Phase 11C's EA-only request flow builds on, see §11.6a). Dave's role exists primarily to make the warm-path demo realistic — Bob requests an EA from Dave, Dave receives the request notification, Dave responds via `CombinedResponseModal` in `eaOnlyMode`. Without Dave as a switchable role the warm-path response path was untestable.
+
 ### 6.4 What does NOT appear on each view
 
 - Alice does not see Bob's internal Assets (the ones not involved in an Agreement with her).
@@ -383,13 +387,16 @@ Carol audits Alice's Claim. Bob wants to use Carol's audit as proof without re-r
 
 ### 7.4 Notification Types
 
-Three new notification types drive cross-role deep-links in V2.2. All three ride on the V2.1 notification inbox UI (no new surfaces); the `type` field branches rendering and click behaviour in `V2App.jsx`. (Phases 4–6.5.)
+Three notification types drive cross-role deep-links in V2.2 (Phases 4–6.5). Phase 11C added three more for the warm-path EA-only flow (§11.6a). All ride on the V2.1 notification inbox UI (no new surfaces); the `type` field branches rendering and click behaviour in `V2App.jsx`.
 
 | Type | Delivered to | Fired by | Click behaviour | Persistence |
 |---|---|---|---|---|
 | `v22-request` | Grantor (Claim owner) | Requester submits `CombinedRequestModal` | Opens `CombinedResponseModal` anchored on the provisional DA. Does NOT auto-dismiss on click. | Persists until `handleV22Accept` or `handleV22Decline` explicitly dismisses (the grantor can accidentally close the modal without losing the request). |
 | `v22-amendment` | Grantee of the amended DA | Grantor submits `AmendDisclosureModal` | Deep-links to the Claim on the grantee's canvas; animated pan + zoom 1.28 + `_isNew` reveal. | Dismisses on click or on the V2.1 inbox's standard dismissal UI. |
 | `v22-evaluation` | Claim owner (grantor of the backing DA) | Evaluator submits `V22RunEvaluationModal` (inter-party or supersede) | Deep-links to the new Eval Result node on the grantor's canvas; animated pan + zoom 1.28. Badge renders as `EVALUATED` for first result or `RE-EVALUATED` when `supersedesPriorResultId` is set. | Dismisses on click or standard dismissal. |
+| `v22-request-ea-only` | Grantor (Claim owner) | Requester submits `EARequestModal` (warm path, §11.6a) | Opens `CombinedResponseModal` in `eaOnlyMode = true`. Does NOT auto-dismiss on click. | Persists until `handleV22AcceptEAOnly` or `handleV22DeclineEAOnly` explicitly dismisses. |
+| `v22-ea-accepted` | Requester | Grantor accepts in `CombinedResponseModal` (eaOnlyMode) | Deep-links to the Claim on the requester's canvas; animated pan + zoom 1.28. Badge renders as `EA ACCEPTED`. | Dismisses on click. |
+| `v22-ea-declined` | Requester | Grantor declines in `CombinedResponseModal` (eaOnlyMode) | Deep-links to the Claim on the requester's canvas (now in declined state with reason rendered in the Detail Panel). Badge renders as `EA DECLINED`. | Dismisses on click. |
 
 Accept / decline outcomes for a `v22-request` also enqueue `v22-accepted` / `v22-declined` entries on the requester's inbox (same delivery, simpler metadata) — these exist today as renderer branches on the same inbox entry shape rather than separate types.
 
@@ -615,6 +622,10 @@ Typical subject assignments across DA variants:
 
 The `authorizedRequirementsSetIds` field is **advisory / informational**, not enforced. It records the Requirements Sets the requester suggested when sending the original combined request, so the grantor sees the requester's stated intent during the response flow. Once an Evaluation Agreement exists, the grantee may run **any** Requirements Set from their library against the Claim — the platform does not gate evaluation by this list. (Earlier Round 11 spec drafts implied enforcement; the product decision in Phase 6 was that gating evaluation by an authorized list adds friction without meaningfully improving trust.)
 
+`terms.evaluationDeadline` is the EA's expiry date. The cold-path two-step request modal (and warm-path `EARequestModal`) defaults this to one year from the request submission. The prototype also enforces a demo-only expiry check at evaluation time — `Run Evaluation` refuses to open if the deadline is in the past, with a copy hint pointing the user toward requesting a new agreement (#115). Production will replace this with a platform-level policy check. Passive expiry notifications (`v22-ea-expiring-soon`, `v22-ea-expired`) are deferred (#128).
+
+`terms.resultConfidentiality` and `terms.attribution` are **acknowledgment booleans** introduced in Phase 11C (#115). They default to `false` and are surfaced as visual checkboxes during the request flow (Step 2 of `CombinedRequestModal` in cold path, single-step in `EARequestModal` for warm path). The grantor sees them read-only at the response modal's EA-Terms step (chips on the EA Terms step + a summary row on Review). The platform records the values on the agreement but does not automatically enforce them — they document the requester's commitments for audit and dispute resolution. Production would expand this with platform-level policy hooks (e.g., flagging Eval Result publication that contradicts a `resultConfidentiality: true` agreement).
+
 ```json
 {
   "artifactType": "evaluationAgreement",
@@ -633,7 +644,9 @@ The `authorizedRequirementsSetIds` field is **advisory / informational**, not en
     "createdDate": "2026-03-04T16:42:00Z",
     "evaluationDeadline": "2026-04-04T16:42:00Z",
     "resultExpiry": null,
-    "flowDownRequirements": []
+    "flowDownRequirements": [],
+    "resultConfidentiality": false,
+    "attribution": false
   },
   "incentives": {
     "onSatisfactory": "Certificate of compliance issued to grantee",
@@ -762,6 +775,21 @@ Alice evaluates her own Claim against a Requirements Set without a counterparty.
 5. Duplicate detection and supersede semantics (§11.3) apply identically to self-evaluation.
 
 > **Prototype note — Self-evaluation execution.** Same execution authority as inter-party evaluation (§11.3): REP runs the Requirements Set against the Claim's evidence and produces the result; the result is a Proof-of-Evaluation artifact. The internal proof-of-eval DA + ownership DA pattern in the prototype is a modeling convenience to keep edge derivation consistent; in production, these internal agreements may be implicit (not separate SDP-provisioned artifacts) since grantor == grantee means no cross-party consent is required. **Authority:** REP (execution); DPP (result registration); SDP (internal agreement modeling TBD — may simplify in production).
+
+### 11.6a EA-only request lifecycle (warm path)
+
+When a counterparty already holds an active Disclosure Agreement on a Claim but has no Evaluation Agreement, the warm path lets them propose adding an EA without renegotiating disclosure scope. The DA is unchanged; only the EA is created.
+
+1. **Trigger.** Bob clicks **Request Evaluation Agreement** on the target Claim's Detail Panel footer or canvas action bar (▷ icon). Both surfaces render only when (a) the viewer is non-owner, (b) at least one active DA from the Claim's owner to the viewer exists, and (c) no active EA on this Claim where the viewer is grantee. The Detail Panel additionally surfaces an inline informational strip — "An Evaluation Agreement is required to evaluate this Claim." — above the footer, so the user understands why Run Evaluation isn't shown.
+2. **Modal.** `EARequestModal` opens single-step. Bob selects optional Requirements Sets, sets the EA expiry (defaults to 1 year from today), checks any acknowledgments (result confidentiality / attribution), and adds an optional message. The DA's id is captured into the request as `existingDisclosureAgreementId`.
+3. **Submission.** `makeProvisionalEvaluationAgreement({ existingDisclosureAgreementId, ... })` produces a provisional EA referencing the existing DA. The EA carries `_provisional: true` and `_requestMeta` for round-trip display in the response modal. The DA is **not** mutated — it stays active. Bob's Claim flips to provisional state on his canvas (dashed border + AWAITING RESPONSE badge); the view-builder picks up the provisional EA via a dedicated branch parallel to the cold-path DA-provisional check.
+4. **Notification.** A `v22-request-ea-only` notification is enqueued on the grantor's inbox. Click opens `CombinedResponseModal` in `eaOnlyMode = true` — the disclosure-type + scope steps are hidden, the modal lands at step 3 (EA Terms) with the requester's expiry + acknowledgments rendered for review, and the StepDots indicator shows step 3 of 4. Decline routes to a single decline-reason step (step 4) before Confirm Decline. Same dismiss-on-terminal-action semantics as `v22-request` — closing the modal without resolving leaves the notification in place.
+5. **Accept path.** `finalizeProvisionalEvaluationAgreement({ provisionalEa, eaTerms })` flips the EA to active (clears `_provisional`, applies the responder's confirmed expiry). The grantor's `v22-request-ea-only` notification dismisses; Bob receives a `v22-ea-accepted` notification carrying the Claim's id. Click pans to the now-active Claim on Bob's canvas; the existing `_isNew` reveal animation fires. Bob's Claim Detail Panel footer now shows **Run Evaluation** (an active EA exists).
+6. **Decline path.** Same modal, Decline button with optional reason textarea. The provisional EA is annotated with `_declineMeta`; the Claim transitions from provisional to declined on Bob's canvas (DECLINED badge + red-tinted Detail Panel branch). Bob receives a `v22-ea-declined` notification carrying the reason. Bob can re-request another EA after dismissing the declined Claim.
+
+**Cancel-while-pending.** Bob can cancel his own request from the provisional Claim's Detail Panel footer (Cancel Request CTA, mirrors the cold-path DA-provisional cancel). Cancellation drops the provisional EA from state; no notification fires to the grantor in the demo (deferred — production would cancel the SDP transaction explicitly).
+
+> **Prototype note — Warm-path EA lifecycle.** The prototype creates provisional EAs in `v22Provisionals.evaluationAgreements` referencing an existing active DA's id; flip-to-active on accept is a state mutation; decline is annotated state retention (`_declineMeta`). **In production:** the warm path is a SDP operation — the existing DA stays untouched, and SDP creates and provisions the EA in its own pending → active lifecycle. Notifications are emitted by SDP as lifecycle events, not by app-side enqueues. **Authority:** SDP (EA provisioning + lifecycle); Platform (notification dispatch).
 
 ### 11.7 Ownership transfer (Transferring process)
 
@@ -1285,3 +1313,8 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 - **§10.1 Asset hierarchy — Phase 10.2:** added `parentAssetId` field with the Prototype note covering DPP authority. Hierarchy constraints (single-party, no cycles, parent must precede child) documented inline. §6.4 updated to clarify counterparty visibility — parent-child structure is owner-only.
 - **§8.6 Library — Phase 10.3 (new subsection):** documented the unified three-tab Library (Parsing Templates / Requirement Sets / Published Requirements) with Prototype note covering Platform-side registry authority. §17.1 Future Direction updated to reflect that the Library is shipped, not future.
 - **Register Asset modal copy — Phase 10.1:** plain-language rewrite of step 1 / step 2 / hashing-progress strings to remove model-vocabulary leakage. No structural change; copy strings only.
+- **§11.6a EA-only request lifecycle — Phase 11C (new subsection):** documented the warm-path EA-only request flow. New `EARequestModal` (single-step) for the requester; `CombinedResponseModal` extended with `eaOnlyMode` for the grantor's response (lands at step 3, hides DA scope/type steps). New factories `makeProvisionalEvaluationAgreement` and `finalizeProvisionalEvaluationAgreement`. Three new notification types added to §7.4 (`v22-request-ea-only`, `v22-ea-accepted`, `v22-ea-declined`).
+- **§10.5 EA terms — Phase 11C (#115):** added `terms.resultConfidentiality` and `terms.attribution` acknowledgment booleans (default false; surfaced as checkboxes in the request flow, read-only in the response flow). Production enforcement out of scope; demo records the values for audit.
+- **§10.5 EA expiry — Phase 11C:** documented the demo-only `evaluationDeadline` check at Run Evaluation time (modal refuses to open when the deadline is past). Production replaces with platform-level policy.
+- **§6.3a Dave's view — Phase 11C (new subsection):** Dave (ChipCo) added to ROLES so the warm-path response flow is testable end-to-end. Mechanically identical to Alice (supplier-side view).
+- **CombinedRequestModal two-step — Phase 11C (#113):** cold-path request flow split into Step 1 (Disclosure: PIN + Req Sets + message) and Step 2 (EA: expiry + acknowledgments). Submission produces a provisional DA + EA pair carrying the new EA terms.

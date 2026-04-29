@@ -27,16 +27,23 @@ const TYPE_DECISIONS = [
 ]
 
 export default function CombinedResponseModal({
-  request,              // { claim, ownerParty, requesterParty, requesterAsset, message, requestedRequirementsSetIds }
+  request,              // { claim, ownerParty, requesterParty, requesterAsset, message, requestedRequirementsSetIds, proposedEaTerms? }
   referencedAssets = [],   // [{ id, name }] — Assets referenced by the Claim (owned by the grantor)
   parseResults = [],       // [{ id, sourceAssetId, templateName, fields: [{ id, name }] }]
   evalResultsForClaim = [], // [{ id, requirementsSet: { name, version }, evaluationDate, status }] — for Proof-Only scope step
   onAccept,             // ({ type, scope, eaTerms }) => void
   onDecline,            // ({ reason }) => void
   onClose,
+  // Phase 11C: when true, hide the DA-type + scope steps and open directly
+  // at the EA-Terms review step. Used by the warm-path EA-only response
+  // (notification → modal). On accept, fires onAccept with `type: null`,
+  // `scope: null`, and just the EA terms; the V2App handler routes to
+  // handleV22AcceptEAOnly.
+  eaOnlyMode = false,
 }) {
-  const [action, setAction] = useState(null) // 'full' | 'selective' | 'proofonly' | 'decline'
-  const [step, setStep] = useState(1)
+  const [action, setAction] = useState(eaOnlyMode ? 'ea-only' : null) // 'full' | 'selective' | 'proofonly' | 'decline' | 'ea-only'
+  // EA-only mode opens directly at step 3 (the EA-terms review step).
+  const [step, setStep] = useState(eaOnlyMode ? 3 : 1)
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [selectedFieldIds, setSelectedFieldIds] = useState([])
   const [selectedEvalResultIds, setSelectedEvalResultIds] = useState([])
@@ -58,8 +65,15 @@ export default function CombinedResponseModal({
     setSelectedAssetIds([])
   }, [action])
 
-  const totalSteps = action === 'decline' ? 2 : action ? 4 : 1
+  // In eaOnlyMode the user lands on step 3 (EA Terms) and progresses to
+  // step 4 (Review). Decline path: we show a single decline-reason step
+  // (numbered 4) so the StepDots indicator stays meaningful. Otherwise,
+  // standard cold-path flow applies.
   const isDecline = action === 'decline'
+  const isEaOnly = eaOnlyMode || action === 'ea-only'
+  const totalSteps = isEaOnly
+    ? (isDecline ? 4 : 4) // EA-only: step 3 (terms) → step 4 (review or decline reason)
+    : (isDecline ? 2 : action ? 4 : 1)
 
   const toggle = (arr, setArr, id) => {
     setArr(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
@@ -112,6 +126,23 @@ export default function CombinedResponseModal({
       onDecline?.({ reason: declineReason.trim() })
       return
     }
+    // Phase 11C: EA-only mode preserves the requester's submitted EA terms by
+    // default. The grantor reviewed them and accepted as-is — they don't get
+    // to mutate the requester's acknowledgments. Only `expires` is updatable
+    // here (via the ExpiryPicker).
+    if (isEaOnly) {
+      onAccept?.({
+        type: null,
+        scope: null,
+        eaTerms: {
+          authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
+          expires: computeExpiryIso(),
+          resultConfidentiality: !!request?.proposedEaTerms?.resultConfidentiality,
+          attribution: !!request?.proposedEaTerms?.attribution,
+        },
+      })
+      return
+    }
     onAccept?.({
       type: action,
       scope: buildScope(),
@@ -119,6 +150,12 @@ export default function CombinedResponseModal({
         // §10.5: forward the original requester's suggestions as advisory only.
         authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
         expires: computeExpiryIso(),
+        // Phase 11C: forward the requester's submitted acknowledgments. In
+        // EA-only mode they're carried straight through; in the cold-path
+        // they default to false unless the requester opted in at Step 2 of
+        // CombinedRequestModal.
+        resultConfidentiality: !!request?.proposedEaTerms?.resultConfidentiality,
+        attribution: !!request?.proposedEaTerms?.attribution,
       },
     })
   }
@@ -135,9 +172,14 @@ export default function CombinedResponseModal({
   const canAdvanceFromStep3 = true
   const canSubmitDecline = true // decline reason is optional per spec §11.4
 
+  // Phase 11C: header copy branches on (isDecline, isEaOnly).
   const header = isDecline
-    ? { title: 'Decline Request', subtitle: `Decline ${request.requesterParty}'s request. Both provisional artifacts (Disclosure + Evaluation) will be deleted.` }
-    : { title: 'Respond to Request', subtitle: `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.` }
+    ? isEaOnly
+      ? { title: 'Decline Evaluation Agreement', subtitle: `Decline ${request.requesterParty}'s Evaluation Agreement request. The provisional EA will be removed.` }
+      : { title: 'Decline Request', subtitle: `Decline ${request.requesterParty}'s request. Both provisional artifacts (Disclosure + Evaluation) will be deleted.` }
+    : isEaOnly
+      ? { title: 'Respond to EA Request', subtitle: `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.` }
+      : { title: 'Respond to Request', subtitle: `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.` }
 
   return (
     <Backdrop onClose={onClose}>
@@ -401,16 +443,22 @@ export default function CombinedResponseModal({
           {/* STEP 3 — Agreement terms (accept flows only). Per Phase 6 carry-over #1,
               Requirements Sets in the EA are advisory and the grantor no longer
               authorizes them here — only expiry is set. The requester's suggested
-              Req Sets ride along with the EA artifact unchanged. */}
+              Req Sets ride along with the EA artifact unchanged.
+              Phase 11C: also surface the requester's submitted EA acknowledgments
+              (result confidentiality + attribution) read-only — the grantor
+              accepts or declines as a whole, can't mutate them. */}
           {step === 3 && !isDecline && (
             <>
-              <FieldLabel label="Agreement expiry" />
+              <FieldLabel label={isEaOnly ? 'Evaluation Agreement' : 'Agreement expiry'} />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
-                {request.requestedRequirementsSetIds?.length > 0 && (
-                  <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
-                )}
-                .
+                {isEaOnly
+                  ? `${request.requesterParty} is requesting evaluation rights on this Claim. Review their proposed terms below; you may adjust the expiry. Their commitments ride along on the EA.`
+                  : (
+                    <>Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
+                    {request.requestedRequirementsSetIds?.length > 0 && (
+                      <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
+                    )}.</>
+                  )}
               </div>
               <ExpiryPicker
                 expiry={expiry}
@@ -418,6 +466,23 @@ export default function CombinedResponseModal({
                 customDate={customExpiry}
                 setCustomDate={setCustomExpiry}
               />
+              {/* Phase 11C — read-only acknowledgments the requester submitted */}
+              {(request?.proposedEaTerms?.resultConfidentiality || request?.proposedEaTerms?.attribution) && (
+                <>
+                  <FieldLabel label="Requester acknowledgments" />
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
+                    The requester accepted these commitments when they submitted the request. Accepting this agreement records them on the Evaluation Agreement.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                    {request?.proposedEaTerms?.resultConfidentiality && (
+                      <ReadonlyAck label="Result confidentiality" desc="Evaluation results are for internal use only and will not be shared with third parties." />
+                    )}
+                    {request?.proposedEaTerms?.attribution && (
+                      <ReadonlyAck label="Attribution" desc="If results are referenced externally (audits, certifications), the evaluator will be credited." />
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -426,13 +491,17 @@ export default function CombinedResponseModal({
             <>
               <FieldLabel label="Review your response" />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
-                Accepting creates an active Disclosure Agreement and Evaluation Agreement. Both parties' canvases will update.
+                {isEaOnly
+                  ? 'Accepting flips the Evaluation Agreement to active. The existing Disclosure Agreement is unaffected.'
+                  : 'Accepting creates an active Disclosure Agreement and Evaluation Agreement. Both parties\' canvases will update.'}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Disclosure type</div>
-                  <div style={{ color: 'var(--text-primary)' }}>{TYPE_DECISIONS.find((d) => d.id === action)?.label}</div>
-                </div>
+                {!isEaOnly && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Disclosure type</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{TYPE_DECISIONS.find((d) => d.id === action)?.label}</div>
+                  </div>
+                )}
                 {action === 'selective' && (
                   <div style={{ display: 'flex', gap: 14 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Fields in scope</div>
@@ -455,7 +524,45 @@ export default function CombinedResponseModal({
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Agreement expires</div>
                   <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
                 </div>
+                {(request?.proposedEaTerms?.resultConfidentiality || request?.proposedEaTerms?.attribution) && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Acknowledgments</div>
+                    <div style={{ color: 'var(--text-primary)' }}>
+                      {[
+                        request?.proposedEaTerms?.resultConfidentiality && 'Result confidentiality',
+                        request?.proposedEaTerms?.attribution && 'Attribution',
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                )}
               </div>
+            </>
+          )}
+
+          {/* STEP 4 (decline path in EA-only mode) — reason textarea */}
+          {step === 4 && isDecline && isEaOnly && (
+            <>
+              <FieldLabel label="Decline reason (optional)" />
+              <textarea
+                rows={4}
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                placeholder="Explain why you're declining (optional — falls back to 'No reason given')"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  fontFamily: 'var(--font-display)',
+                  color: 'var(--text-primary)',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  resize: 'vertical',
+                  lineHeight: 1.5,
+                }}
+              />
             </>
           )}
         </ModalBody>
@@ -463,8 +570,23 @@ export default function CombinedResponseModal({
         <ModalFooter>
           <StepDots current={step} total={totalSteps} />
           <div style={{ display: 'flex', gap: 8 }}>
-            {step > 1 && <Btn label="Back" onClick={() => setStep((s) => s - 1)} />}
-            {step < totalSteps && !isDecline && (
+            {/* Back: only in cold-path; EA-only mode has just two effective
+                steps and lands at step 3 with no prior step to return to. */}
+            {!isEaOnly && step > 1 && <Btn label="Back" onClick={() => setStep((s) => s - 1)} />}
+            {isEaOnly && step === 4 && (
+              <Btn label="Back" onClick={() => { setAction('ea-only'); setStep(3) }} />
+            )}
+            {/* Phase 11C: in EA-only mode, the grantor lands at step 3 with
+                a Decline option alongside Continue. Decline routes to step 4
+                with a reason textarea. */}
+            {isEaOnly && step === 3 && !isDecline && (
+              <>
+                <Btn label="Decline" danger onClick={() => { setAction('decline'); setStep(4) }} />
+                <Btn label="Continue" accent onClick={() => setStep(4)} />
+              </>
+            )}
+            {/* Cold-path Continue button */}
+            {!isEaOnly && step < totalSteps && !isDecline && (
               <Btn
                 label="Continue"
                 accent
@@ -476,9 +598,10 @@ export default function CombinedResponseModal({
                 onClick={() => setStep((s) => s + 1)}
               />
             )}
-            {step === 1 && isDecline && (
+            {!isEaOnly && step === 1 && isDecline && (
               <Btn label="Continue" danger onClick={() => setStep(2)} />
             )}
+            {/* Final Accept / Decline buttons */}
             {step === totalSteps && !isDecline && (
               <Btn label="Accept" accent onClick={handleSubmit} />
             )}
@@ -492,3 +615,33 @@ export default function CombinedResponseModal({
   )
 }
 
+// Phase 11C — read-only EA acknowledgment chip surfaced on the response
+// modal's EA Terms step. Visual rhythm matches the cold-path request modal's
+// CheckboxRow but without click affordance — the grantor is reviewing, not
+// editing.
+function ReadonlyAck({ label, desc }) {
+  return (
+    <div style={{
+      padding: '10px 14px',
+      background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, var(--border))',
+      borderRadius: 8,
+      display: 'flex', alignItems: 'flex-start', gap: 12,
+    }}>
+      <div style={{
+        width: 14, height: 14, borderRadius: 3,
+        border: `1.5px solid var(--accent-indigo)`,
+        background: 'var(--accent-indigo)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+        marginTop: 2,
+      }}>
+        <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 3 }}>{label}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc}</div>
+      </div>
+    </div>
+  )
+}

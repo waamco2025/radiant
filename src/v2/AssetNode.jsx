@@ -927,6 +927,12 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           buttons.push({ icon: '◆', tooltip: 'Self-Evaluate', onClick: fire('selfEvaluate') })
         } else if (evaluationAgreementForActor) {
           buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: fire('runEvaluation') })
+        } else if (node._hasActiveDaWithoutEa) {
+          // Phase 11C: warm-path "Request Evaluation Agreement" CTA. The
+          // _hasActiveDaWithoutEa flag is stamped by V2App's
+          // v22DataWithReveal memo so the action bar can decide without
+          // re-deriving the DA/EA state.
+          buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
         }
       }
       break

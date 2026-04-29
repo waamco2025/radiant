@@ -547,6 +547,14 @@ export function makeEvaluationAgreement({
       evaluationDeadline: terms.evaluationDeadline || null,
       resultExpiry: terms.resultExpiry || null,
       flowDownRequirements: terms.flowDownRequirements ? [...terms.flowDownRequirements] : [],
+      // Phase 11C (#115): EA-level acknowledgments. Both default to false and
+      // are surfaced as visual checkboxes during the request + response flow.
+      // Spec §10.5 documents these as Prototype-only — the platform records
+      // their values but does not enforce confidentiality or attribution
+      // automatically; production would expand this with platform-level
+      // policy hooks.
+      resultConfidentiality: terms.resultConfidentiality ?? false,
+      attribution: terms.attribution ?? false,
     },
     incentives: {
       onSatisfactory: incentives.onSatisfactory ?? null,
@@ -1662,6 +1670,23 @@ function buildViewForActor(actor, shared) {
       declinedDate: d._declineMeta.declinedDate,
     })
   }
+  // Phase 11C (spec §11.6a): warm-path EA-only declines flag the Claim as
+  // declined for the requester. Same pattern as DA decline above but the
+  // declined artifact is the EA, not the DA.
+  for (const e of evaluationAgreements) {
+    if (!e._declineMeta) continue
+    if (e.grantee?.party !== party) continue
+    if (declinedClaimIds.has(e.claimId)) continue
+    declinedClaimIds.set(e.claimId, {
+      claimId: e.claimId,
+      requesterParty: e.grantee.party,
+      ownerParty: e.grantor.party,
+      requesterAssetId: e.granteeAssetId,
+      reason: e._declineMeta.reason,
+      declinedDate: e._declineMeta.declinedDate,
+      eaOnly: true, // flag so handlers can route to EA-only dismiss
+    })
+  }
   // Add the declined claims to the visible set so the adapter can render them.
   for (const [claimId, r] of declinedClaimIds) {
     if (!visibleClaims.some((c) => c.id === claimId)) {
@@ -1689,6 +1714,18 @@ function buildViewForActor(actor, shared) {
     if (relatedDAs.length > 0 && relatedDAs.every((d) => d.type === 'provisional' || d.status !== 'active')) {
       provisionalClaimIds.add(pulledId)
     }
+  }
+  // Phase 11C (spec §11.6a): warm-path provisional EAs flag the Claim as
+  // provisional on the requester's view too. The DA is already active so the
+  // legacy DA-only check above wouldn't catch it; we also add Claims that
+  // have a provisional EA where the active actor is grantee (and the EA isn't
+  // declined). Visually identical to cold-path provisional treatment.
+  for (const ea of evaluationAgreements) {
+    if (!ea._provisional) continue
+    if (ea._declineMeta) continue
+    if (ea.grantee?.party !== party) continue
+    if (declinedClaimIds.has(ea.claimId)) continue
+    provisionalClaimIds.add(ea.claimId)
   }
   for (const pulledId of pulledInAssetIds) {
     const relatedDAs = disclosureAgreements.filter(
@@ -1793,6 +1830,12 @@ export function buildCarolView(shared) {
   return buildViewForActor(src.actors.find((a) => a.id === 'carol-auditco'), src)
 }
 
+/** Dave's view — ChipCo (supplier). spec §6.3a (Phase 11C). */
+export function buildDaveView(shared) {
+  const src = shared || buildV22SharedArtifacts()
+  return buildViewForActor(src.actors.find((a) => a.id === 'dave-chipco'), src)
+}
+
 /**
  * Merge optional runtime artifacts (request/response/eval-run flows) into a
  * shared artifact set. Used by V2App for Phase 4 provisional cycles AND Phase 5
@@ -1860,6 +1903,7 @@ export function getV22DataForRole(roleId, provisionals) {
   const shared = mergeProvisionals(buildV22SharedArtifacts(), provisionals)
   if (roleId === 'alice-microco') return buildAliceView(shared)
   if (roleId === 'carol-auditco') return buildCarolView(shared)
+  if (roleId === 'dave-chipco') return buildDaveView(shared)
   return buildBobView(shared)
 }
 
@@ -2420,6 +2464,12 @@ export function makeProvisionalAgreementPair({
   claimId,
   requestedRequirementsSetIds = [],
   message = '',
+  // Phase 11C: EA terms submitted by the requester at the EA step of the
+  // cold-path two-step modal. Preserved on the provisional EA so the
+  // responder sees the requester's proposed expiry + acknowledgments.
+  eaExpiry = null,
+  eaResultConfidentiality = false,
+  eaAttribution = false,
 }) {
   const stamp = idSeed || `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
   const daId = `da-prov-${stamp}`
@@ -2446,7 +2496,12 @@ export function makeProvisionalAgreementPair({
     granteeAssetId: requesterAssetId,
     disclosureAgreementId: daId,
     authorizedRequirementsSetIds: requestedRequirementsSetIds,
-    terms: { createdDate },
+    terms: {
+      createdDate,
+      evaluationDeadline: eaExpiry,
+      resultConfidentiality: eaResultConfidentiality,
+      attribution: eaAttribution,
+    },
     status: 'active',
   })
 
@@ -2455,6 +2510,101 @@ export function makeProvisionalAgreementPair({
   da._requestMeta = { message, requestedRequirementsSetIds: [...requestedRequirementsSetIds] }
 
   return { disclosureAgreement: da, evaluationAgreement: ea }
+}
+
+/**
+ * Phase 11C — flip a warm-path provisional EA to active.
+ * Returns the updated EA (same id) with `_provisional` cleared and the
+ * responder-confirmed terms (defaults to the requester's submitted values).
+ */
+export function finalizeProvisionalEvaluationAgreement({
+  provisionalEa,
+  eaTerms,
+}) {
+  if (!provisionalEa) throw new Error('finalizeProvisionalEvaluationAgreement: provisionalEa is required')
+  return makeEvaluationAgreement({
+    id: provisionalEa.id,
+    grantor: provisionalEa.grantor,
+    grantee: provisionalEa.grantee,
+    claimId: provisionalEa.claimId,
+    granteeAssetId: provisionalEa.granteeAssetId,
+    disclosureAgreementId: provisionalEa.disclosureAgreementId,
+    authorizedRequirementsSetIds: eaTerms?.authorizedRequirementsSetIds ?? provisionalEa.authorizedRequirementsSetIds,
+    restrictions: provisionalEa.restrictions,
+    terms: {
+      createdDate: provisionalEa.terms?.createdDate,
+      evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
+      resultExpiry: provisionalEa.terms?.resultExpiry,
+      flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
+      resultConfidentiality: eaTerms?.resultConfidentiality ?? provisionalEa.terms?.resultConfidentiality ?? false,
+      attribution: eaTerms?.attribution ?? provisionalEa.terms?.attribution ?? false,
+    },
+    incentives: provisionalEa.incentives,
+    status: 'active',
+  })
+}
+
+/**
+ * Phase 11C — warm-path Evaluation-Agreement-only request factory (spec §11.6a).
+ * Used when an active DA already exists between requester and Claim owner; the
+ * requester proposes adding an EA to gain evaluation rights without renegotiating
+ * disclosure scope.
+ *
+ * Produces a provisional EA referencing the existing active DA (no new DA is
+ * created). On accept, the EA flips to active. On decline, the EA is annotated
+ * `_declineMeta` and dismissable from the requester's canvas.
+ *
+ * Returns `{ evaluationAgreement }`.
+ */
+export function makeProvisionalEvaluationAgreement({
+  idSeed,
+  requesterParty, requesterDot,
+  requesterAssetId,
+  ownerParty, ownerDot,
+  claimId,
+  existingDisclosureAgreementId,
+  requestedRequirementsSetIds = [],
+  message = '',
+  expiry = null,
+  resultConfidentiality = false,
+  attribution = false,
+}) {
+  if (!existingDisclosureAgreementId) {
+    throw new Error('makeProvisionalEvaluationAgreement: existingDisclosureAgreementId is required')
+  }
+  const stamp = idSeed || `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+  const eaId = `ea-prov-${stamp}`
+  const createdDate = new Date().toISOString()
+
+  const ea = makeEvaluationAgreement({
+    id: eaId,
+    grantor: { party: ownerParty, dot: ownerDot || makeDot(ownerParty) },
+    grantee: { party: requesterParty, dot: requesterDot || makeDot(requesterParty) },
+    claimId,
+    granteeAssetId: requesterAssetId,
+    disclosureAgreementId: existingDisclosureAgreementId,
+    authorizedRequirementsSetIds: requestedRequirementsSetIds,
+    terms: {
+      createdDate,
+      evaluationDeadline: expiry,
+      resultConfidentiality,
+      attribution,
+    },
+    status: 'active',
+  })
+
+  // _provisional flag distinguishes the warm-path EA from finalized EAs in the
+  // view layer. Adapter renders the Claim with the standard provisional
+  // dashed border + AWAITING RESPONSE badge.
+  ea._provisional = true
+  ea._requestMeta = {
+    message,
+    requesterParty,
+    requesterAssetId,
+    requestedRequirementsSetIds: [...requestedRequirementsSetIds],
+    createdDate,
+  }
+  return { evaluationAgreement: ea }
 }
 
 /**
@@ -2497,6 +2647,11 @@ export function finalizeProvisionalAgreementPair({
       evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
       resultExpiry: provisionalEa.terms?.resultExpiry,
       flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
+      // Phase 11C (#115): preserve the requester's submitted EA acknowledgments
+      // through finalization so the active EA carries the same values surfaced
+      // to the responder for review.
+      resultConfidentiality: eaTerms?.resultConfidentiality ?? provisionalEa.terms?.resultConfidentiality ?? false,
+      attribution: eaTerms?.attribution ?? provisionalEa.terms?.attribution ?? false,
     },
     incentives: provisionalEa.incentives,
     status: 'active',

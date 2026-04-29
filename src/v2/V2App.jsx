@@ -20,12 +20,15 @@ import {
   // flow so V22NodeDetailPanel can render for a Claim that lives only on
   // the directory layer (no parent-canvas node present).
   buildClaimNodeForDirectoryMaterialization,
+  // Phase 11C: warm-path EA-only request factories.
+  makeProvisionalEvaluationAgreement, finalizeProvisionalEvaluationAgreement,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
 import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
 import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
+import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
 import Tooltip from '../components/Tooltip.jsx'
@@ -189,6 +192,16 @@ export default function V2App() {
   // Phase 11B: Detail Panel "expand" modal — set to { artifact, schema } to
   // open; cleared on close. Schemas: 'asset' | 'parse-output' | 'eval-output'.
   const [v22ExpandedArtifact, setV22ExpandedArtifact] = useState(null)
+  // Phase 11C — warm-path EA request modal state.
+  //   v22EaRequestContext shape: { claim, ownerParty, existingDisclosureAgreementId, requesterAsset }
+  // Set when the user clicks "Request Evaluation Agreement" on a Claim with
+  // an active DA but no EA (footer button or canvas action bar). Cleared
+  // when the modal submits or closes.
+  const [v22EaRequestContext, setV22EaRequestContext] = useState(null)
+  // Phase 11C — EA-only response modal state. Mirrors v22RespondingTo but
+  // for the warm-path notification path. Shape: { eaId } where eaId is the
+  // provisional EA the grantor is responding to.
+  const [v22RespondingToEaOnly, setV22RespondingToEaOnly] = useState(null)
   // Phase 11B.1: Esc closes the directory-materialized Detail Panel when
   // it's open AND no modal is sitting on top of it. The ExpandedArtifactModal
   // has its own Esc handler; we defer to it via a state check rather than
@@ -290,9 +303,26 @@ export default function V2App() {
     const eaByClaimForActor = {}
     if (v22View) {
       for (const ea of (v22View.evaluationAgreements || [])) {
-        if (ea.grantee?.party === activeRole.party && ea.claimId) {
+        if (ea.grantee?.party === activeRole.party && ea.claimId && !ea._provisional) {
           eaByClaimForActor[ea.claimId] = ea
         }
+      }
+    }
+    // Phase 11C: detect Claims where the active actor has an active DA but
+    // no EA. The action-bar "Request Evaluation Agreement" CTA renders for
+    // these Claims. We only need a Set of claim ids — the modal context is
+    // derived in V2App when the user clicks the button.
+    const claimsWithActiveDaWithoutEa = new Set()
+    if (v22View) {
+      const grantedActiveDaClaims = new Set()
+      for (const da of (v22View.disclosureAgreements || [])) {
+        if (da.subject?.kind !== 'claim') continue
+        if (da.grantee?.party !== activeRole.party) continue
+        if (da.type === 'provisional' || da._declineMeta || da._revokedMeta) continue
+        grantedActiveDaClaims.add(da.subject.id)
+      }
+      for (const claimId of grantedActiveDaClaims) {
+        if (!eaByClaimForActor[claimId]) claimsWithActiveDaWithoutEa.add(claimId)
       }
     }
     // Phase 9D.2 (#124): unravel-flag stamping. Only one node animates at a
@@ -301,14 +331,16 @@ export default function V2App() {
     const unravelingId = v22UnravelingNodeId
     const anyDecoration = flagged.size > 0 || endpointSet.size > 0
       || Object.keys(eaByClaimForActor).length > 0
+      || claimsWithActiveDaWithoutEa.size > 0
       || unravelingId != null
     if (!anyDecoration) return v22Data
     const nodes = v22Data.nodes.map(n => {
       const needsReveal = flagged.has(n.id)
       const isEndpoint = endpointSet.has(n.id)
       const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
+      const hasActiveDaWithoutEa = n.v22Type === 'CLAIM' && claimsWithActiveDaWithoutEa.has(n.id)
       const isUnraveling = unravelingId === n.id
-      if (!needsReveal && !isEndpoint && !eaForClaim && !isUnraveling) return n
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling) return n
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
@@ -317,6 +349,7 @@ export default function V2App() {
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
         } : {}),
         ...(eaForClaim ? { _evaluationAgreementForActor: eaForClaim } : {}),
+        ...(hasActiveDaWithoutEa ? { _hasActiveDaWithoutEa: true } : {}),
         ...(isUnraveling ? { _unraveling: true } : {}),
       }
     })
@@ -376,7 +409,7 @@ export default function V2App() {
   }, [updateRoleState])
 
   const handleV22RequestSubmit = useCallback((payload) => {
-    const { claim, ownerParty, selectedRequirementsSetIds, message } = payload
+    const { claim, ownerParty, selectedRequirementsSetIds, message, eaTerms } = payload
     const anchorNode = v22RequestAnchor
       || v22Data?.nodes.find((n) => n.v22Type === 'ASSET' && n.owner === activeRole.party)
     if (!anchorNode) return
@@ -388,6 +421,10 @@ export default function V2App() {
       claimId: claim.id,
       requestedRequirementsSetIds: selectedRequirementsSetIds,
       message,
+      // Phase 11C (#115): preserve the Step-2 EA terms on the provisional EA.
+      eaExpiry: eaTerms?.expires || null,
+      eaResultConfidentiality: !!eaTerms?.resultConfidentiality,
+      eaAttribution: !!eaTerms?.attribution,
     })
     pair.disclosureAgreement._requestMeta = {
       ...(pair.disclosureAgreement._requestMeta || {}),
@@ -603,10 +640,18 @@ export default function V2App() {
           .filter((e) => matchingDaIds.has(e.disclosureAgreementId))
           .map((e) => e.id),
       )
+      // Phase 11C: also drop any EA-only declined provisional EAs on this
+      // Claim (warm-path decline path). The DA is unchanged in that case —
+      // it stays active.
+      const matchingEaOnlyIds = new Set(
+        prev.evaluationAgreements
+          .filter((e) => e.claimId === claimId && e._declineMeta && e.grantee?.party === activeRole.party)
+          .map((e) => e.id),
+      )
       return {
         ...prev,
         disclosureAgreements: prev.disclosureAgreements.filter((d) => !matchingDaIds.has(d.id)),
-        evaluationAgreements: prev.evaluationAgreements.filter((e) => !matchingEaIds.has(e.id)),
+        evaluationAgreements: prev.evaluationAgreements.filter((e) => !matchingEaIds.has(e.id) && !matchingEaOnlyIds.has(e.id)),
         declineRecords: prev.declineRecords.filter(
           (r) => !(r.claimId === claimId && r.requesterParty === activeRole.party),
         ),
@@ -614,6 +659,170 @@ export default function V2App() {
     })
     setSel(null)
   }, [activeRole.party])
+
+  // ── Phase 11C: warm-path EA-only flow handlers ──────────────────────
+  // The cold path (handleV22RequestSubmit / handleV22Accept / handleV22Decline /
+  // handleV22CancelRequest) creates a provisional DA + EA pair. The warm path
+  // creates only a provisional EA referencing an existing active DA.
+
+  const handleV22EaRequestSubmit = useCallback((payload) => {
+    const { claim, ownerParty, existingDisclosureAgreementId, requesterAsset, selectedRequirementsSetIds, message, eaTerms } = payload
+    if (!claim || !ownerParty || !existingDisclosureAgreementId) return
+    const { evaluationAgreement } = makeProvisionalEvaluationAgreement({
+      requesterParty: activeRole.party,
+      requesterDot: activeRole.partyDot,
+      requesterAssetId: requesterAsset?.id || null,
+      ownerParty,
+      claimId: claim.id,
+      existingDisclosureAgreementId,
+      requestedRequirementsSetIds: selectedRequirementsSetIds || [],
+      message,
+      expiry: eaTerms?.expires || null,
+      resultConfidentiality: !!eaTerms?.resultConfidentiality,
+      attribution: !!eaTerms?.attribution,
+    })
+    // Annotate request meta for the response modal's requester display.
+    evaluationAgreement._requestMeta = {
+      ...(evaluationAgreement._requestMeta || {}),
+      requesterParty: activeRole.party,
+      requesterAssetName: requesterAsset?.name || null,
+      message: message || '',
+    }
+    setV22Provisionals((prev) => ({
+      ...prev,
+      evaluationAgreements: [...prev.evaluationAgreements, evaluationAgreement],
+    }))
+    setV22EaRequestContext(null)
+    // Pan/select the now-provisional Claim so the requester sees their action.
+    setSel(claim.id)
+    setForcePanelTab(null)
+    setForceExpandSda(null)
+    setV22PanToClaimId(claim.id)
+    setV22RecentlyAcceptedClaimId(claim.id)
+    // Notify the grantor.
+    const grantorRole = ROLES.find((r) => r.party === ownerParty)
+    if (grantorRole) {
+      enqueueV22NotificationForRequester(grantorRole.id, {
+        id: `v22-request-ea-only-${evaluationAgreement.id}`,
+        type: 'v22-request-ea-only',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: claim.name, pin: claim.pin },
+        connectTo: { id: requesterAsset?.id || null, pin: null },
+        v22EaId: evaluationAgreement.id,
+        message: message || '',
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  const handleV22AcceptEAOnly = useCallback(({ eaTerms }) => {
+    if (!v22RespondingToEaOnly) return
+    const eaId = v22RespondingToEaOnly.eaId
+    let claimIdForReveal = null
+    let requesterPartyForNotif = null
+    let claimNameForNotif = null
+    let claimPinForNotif = null
+    let anchorIdForNotif = null
+
+    setV22Provisionals((prev) => {
+      const provisionalEa = prev.evaluationAgreements.find((e) => e.id === eaId)
+      if (!provisionalEa || !provisionalEa._provisional) return prev
+      const finalized = finalizeProvisionalEvaluationAgreement({ provisionalEa, eaTerms })
+      // Preserve _requestMeta for any post-mortem / panel display, but clear
+      // _provisional so the view layer treats it as active.
+      finalized._requestMeta = provisionalEa._requestMeta
+      claimIdForReveal = provisionalEa.claimId
+      requesterPartyForNotif = provisionalEa.grantee.party
+      anchorIdForNotif = provisionalEa.granteeAssetId
+      const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), prev).claims.find((c) => c.id === provisionalEa.claimId)
+      if (sharedClaim) {
+        claimNameForNotif = sharedClaim.name
+        claimPinForNotif = sharedClaim.pin
+      }
+      return {
+        ...prev,
+        evaluationAgreements: prev.evaluationAgreements.map((e) => e.id === eaId ? finalized : e),
+      }
+    })
+    setV22RespondingToEaOnly(null)
+    if (claimIdForReveal) {
+      setV22RecentlyAcceptedClaimId(claimIdForReveal)
+    }
+    // Dismiss the original v22-request-ea-only notification on this grantor's
+    // inbox now that the request has been resolved.
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-request-ea-only-${eaId}`],
+    }))
+    if (requesterPartyForNotif && claimPinForNotif) {
+      const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
+      if (requesterRole) {
+        enqueueV22NotificationForRequester(requesterRole.id, {
+          id: `v22-ea-accepted-${eaId}-${Date.now().toString(36)}`,
+          type: 'v22-ea-accepted',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: { id: anchorIdForNotif, pin: null },
+          claimId: claimIdForReveal,
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22RespondingToEaOnly, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
+
+  const handleV22DeclineEAOnly = useCallback(({ reason } = {}) => {
+    if (!v22RespondingToEaOnly) return
+    const eaId = v22RespondingToEaOnly.eaId
+    let claimNameForNotif = null
+    let claimPinForNotif = null
+    let requesterPartyForNotif = null
+    let claimIdForNotif = null
+
+    setV22Provisionals((prev) => {
+      const provisionalEa = prev.evaluationAgreements.find((e) => e.id === eaId)
+      if (!provisionalEa) return prev
+      requesterPartyForNotif = provisionalEa.grantee.party
+      claimIdForNotif = provisionalEa.claimId
+      const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), prev).claims.find((c) => c.id === provisionalEa.claimId)
+      if (sharedClaim) {
+        claimNameForNotif = sharedClaim.name
+        claimPinForNotif = sharedClaim.pin
+      }
+      // Annotate the EA as declined so the requester's canvas keeps the Claim
+      // in the declined-state until they Dismiss (mirroring the cold-path
+      // _declineMeta retention pattern from Phase 6.5 #3).
+      const annotatedEa = {
+        ...provisionalEa,
+        _declineMeta: {
+          reason: (reason || '').trim(),
+          declinedDate: new Date().toISOString(),
+        },
+      }
+      return {
+        ...prev,
+        evaluationAgreements: prev.evaluationAgreements.map((e) => e.id === eaId ? annotatedEa : e),
+      }
+    })
+    setV22RespondingToEaOnly(null)
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-request-ea-only-${eaId}`],
+    }))
+    if (requesterPartyForNotif && claimPinForNotif) {
+      const requesterRole = ROLES.find((r) => r.party === requesterPartyForNotif)
+      if (requesterRole) {
+        enqueueV22NotificationForRequester(requesterRole.id, {
+          id: `v22-ea-declined-${eaId}-${Date.now().toString(36)}`,
+          type: 'v22-ea-declined',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          claimId: claimIdForNotif,
+          reason: (reason || '').trim(),
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22RespondingToEaOnly, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
   // ─────────────────────────────────────────────────────────────────────
   // Phase 9D (#112) — Revocation handlers
@@ -1081,6 +1290,16 @@ export default function V2App() {
 
   const handleV22OpenRunEvaluation = useCallback((evaluationAgreement) => {
     if (!evaluationAgreement) return
+    // Phase 11C (#115): demo-only EA expiry check. The Run Evaluation flow
+    // refuses to open the modal when the EA's evaluationDeadline is in the
+    // past. Production would have real time-based policy enforcement at the
+    // platform layer; this in-memory check covers the prototype's demo flow.
+    const deadline = evaluationAgreement.terms?.evaluationDeadline
+    if (deadline && new Date(deadline).getTime() < Date.now()) {
+      // eslint-disable-next-line no-alert
+      alert(`This Evaluation Agreement expired on ${deadline.slice(0, 10)}. Request a new agreement to continue evaluating.`)
+      return
+    }
     setV22EvalContext({
       evaluationAgreementId: evaluationAgreement.id,
       claimId: evaluationAgreement.claimId,
@@ -2912,6 +3131,10 @@ export default function V2App() {
                     const isV22Request = req.type === 'v22-request'
                     const isV22Amendment = req.type === 'v22-amendment'
                     const isV22Evaluation = req.type === 'v22-evaluation'
+                    // Phase 11C: warm-path EA-only notifications.
+                    const isV22EaRequest = req.type === 'v22-request-ea-only'
+                    const isV22EaAccepted = req.type === 'v22-ea-accepted'
+                    const isV22EaDeclined = req.type === 'v22-ea-declined'
                     // Phase 9A.4 Gate C: four new Transferring notification types.
                     const isV22TransferRequest = req.type === 'v22-transfer-request'
                     const isV22TransferAccepted = req.type === 'v22-transfer-accepted'
@@ -2920,8 +3143,8 @@ export default function V2App() {
                     // Phase 9D (#112): revocation notifications.
                     const isV22DaRevoked = req.type === 'v22-da-revoked'
                     const isV22EaRevoked = req.type === 'v22-ea-revoked'
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -3017,6 +3240,26 @@ export default function V2App() {
                           // / handleV22Decline). If the user closes the modal
                           // without resolving, the notification reappears.
                           if (req.v22DaId) setV22RespondingTo({ daId: req.v22DaId })
+                        } else if (req.type === 'v22-request-ea-only') {
+                          // Phase 11C: warm-path EA-only request → open the
+                          // CombinedResponseModal in eaOnlyMode (same dismiss-
+                          // on-terminal-action semantics as v22-request).
+                          if (req.v22EaId) setV22RespondingToEaOnly({ eaId: req.v22EaId })
+                        } else if (req.type === 'v22-ea-accepted' || req.type === 'v22-ea-declined') {
+                          // Phase 11C: informational EA-only notifications.
+                          // Click pans/selects the target Claim and dismisses.
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
+                            const claimId = req.claimId
+                            const targetNode = claimId ? nodeMap[claimId] : null
+                            if (targetNode) {
+                              setSel(targetNode.id)
+                              canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                            }
+                          })
                         } else if (req.type === 'v22-amendment') {
                           // Phase 6 own scope: amendment notifications deep-link
                           // to the amended Claim on the recipient's canvas.
@@ -3175,7 +3418,13 @@ export default function V2App() {
                                                 ? (req.cascadedFromDa
                                                   ? `Evaluation Agreement on ${req.claim?.name || 'a Claim'} was revoked (cascade from Disclosure revocation).`
                                                   : `${req.from.name} revoked your Evaluation Agreement on ${req.claim?.name || 'a Claim'}.`)
-                                                : req.asset?.name || ''
+                                                : isV22EaRequest
+                                                  ? `${req.from.name} is requesting an Evaluation Agreement on ${req.asset?.name || 'a Claim'}.`
+                                                  : isV22EaAccepted
+                                                    ? `${req.from.name} accepted your Evaluation Agreement request on ${req.asset?.name || 'a Claim'}.`
+                                                    : isV22EaDeclined
+                                                      ? (req.reason ? `${req.from.name} declined your Evaluation Agreement request — "${req.reason}"` : `${req.from.name} declined your Evaluation Agreement request on ${req.asset?.name || 'a Claim'}.`)
+                                                      : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -3589,6 +3838,27 @@ export default function V2App() {
                 if (ea) handleV22OpenRunEvaluation(ea)
                 return
               }
+              case 'requestEvaluationAgreement': {
+                // Phase 11C: warm-path entry from the card action bar.
+                // Same logic as the Detail Panel footer button (above) —
+                // open EARequestModal with the existing active DA's id.
+                if (node.v22Type !== 'CLAIM') return
+                const activeDa = (v22View?.disclosureAgreements || []).find(d =>
+                  d.subject?.kind === 'claim' && d.subject.id === node.id &&
+                  d.grantee?.party === activeRole.party &&
+                  d.type !== 'provisional' && !d._declineMeta && !d._revokedMeta,
+                )
+                if (!activeDa) return
+                setV22EaRequestContext({
+                  claim: node.v22Artifact,
+                  ownerParty: node.owner,
+                  existingDisclosureAgreementId: activeDa.id,
+                  requesterAsset: activeDa.granteeAssetId
+                    ? { id: activeDa.granteeAssetId, name: (v22View?.assets || []).find(a => a.id === activeDa.granteeAssetId)?.name || activeDa.granteeAssetId }
+                    : null,
+                })
+                return
+              }
               case 'reRunEvaluation': {
                 const er = node.v22Artifact
                 if (!er) return
@@ -3955,6 +4225,41 @@ export default function V2App() {
                 evaluationAgreementForActor={null}
                 disclosureAgreementsForNode={[]}
                 evaluationAgreementsForNode={[]}
+                // Phase 11C: warm-path entry from the directory-materialized
+                // panel. Detect the umbrella DA from the materialized Claim's
+                // owner to the active actor, and surface the CTA when no EA
+                // is paired yet. This is the canonical warm-path entry point
+                // — the user clicks ChipCo's cluster, sees the Claim, then
+                // requests an EA.
+                {...(() => {
+                  const activeDa = (sharedForPanel.disclosureAgreements || []).find(d =>
+                    d.subject?.kind === 'claim' && d.subject.id === claim.id &&
+                    d.grantee?.party === activeRole.party &&
+                    d.type !== 'provisional' && !d._declineMeta && !d._revokedMeta,
+                  )
+                  const hasEa = (sharedForPanel.evaluationAgreements || []).some(e =>
+                    e.claimId === claim.id && e.grantee?.party === activeRole.party && e.status === 'active' && !e._provisional,
+                  )
+                  const showWarm = !!activeDa && !hasEa && claim.owner !== activeRole.party
+                  if (!showWarm) return {}
+                  return {
+                    hasActiveDaWithoutEa: true,
+                    onRequestEvaluationAgreement: () => {
+                      setV22EaRequestContext({
+                        claim,
+                        ownerParty: claim.owner,
+                        existingDisclosureAgreementId: activeDa.id,
+                        requesterAsset: activeDa.granteeAssetId
+                          ? { id: activeDa.granteeAssetId, name: (sharedForPanel.assets || []).find(a => a.id === activeDa.granteeAssetId)?.name || activeDa.granteeAssetId }
+                          : null,
+                      })
+                      // Close directory + materialized panel — the EA request
+                      // modal becomes the foreground UI.
+                      setV22DirectoryMaterializedClaim(null)
+                      setV22DirectoryOpen(false)
+                    },
+                  }
+                })()}
               />
             </div>
           )
@@ -4055,6 +4360,14 @@ export default function V2App() {
           // this Claim (includes both grantor-owned and proof-of-eval-shared).
           const evalResultsForClaim = (v22View?.evaluationResults || [])
             .filter(er => er.claimId === claim.id)
+          // Phase 11C: surface the requester's proposed EA terms so the
+          // response modal can display them at step 3 + step 4 review.
+          const provisionalEa = v22Provisionals.evaluationAgreements.find(e => e.disclosureAgreementId === da.id)
+          const proposedEaTerms = provisionalEa ? {
+            expires: provisionalEa.terms?.evaluationDeadline || null,
+            resultConfidentiality: !!provisionalEa.terms?.resultConfidentiality,
+            attribution: !!provisionalEa.terms?.attribution,
+          } : null
           return (
             <CombinedResponseModal
               request={{
@@ -4064,6 +4377,7 @@ export default function V2App() {
                 requesterAsset: da.granteeAssetId,
                 message: da._requestMeta?.message || '',
                 requestedRequirementsSetIds: da._requestMeta?.requestedRequirementsSetIds || [],
+                proposedEaTerms,
               }}
               referencedAssets={referencedAssets}
               parseResults={parseResultsForModal}
@@ -4071,6 +4385,58 @@ export default function V2App() {
               onAccept={handleV22Accept}
               onDecline={handleV22Decline}
               onClose={() => setV22RespondingTo(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 11C: warm-path EA Request modal — opens via the
+            "Request Evaluation Agreement" footer button or canvas action bar
+            on Claims where the active actor has an active DA but no EA. */}
+        {v22EaRequestContext && (
+          <EARequestModal
+            requesterParty={activeRole.party}
+            requesterAsset={v22EaRequestContext.requesterAsset}
+            claim={v22EaRequestContext.claim}
+            ownerParty={v22EaRequestContext.ownerParty}
+            existingDisclosureAgreementId={v22EaRequestContext.existingDisclosureAgreementId}
+            availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
+            onSubmit={handleV22EaRequestSubmit}
+            onClose={() => setV22EaRequestContext(null)}
+          />
+        )}
+
+        {/* Phase 11C: EA-only response modal — opens when the grantor clicks
+            a v22-request-ea-only notification. Reuses CombinedResponseModal
+            in eaOnlyMode. */}
+        {v22RespondingToEaOnly && (() => {
+          const ea = v22Provisionals.evaluationAgreements.find(e => e.id === v22RespondingToEaOnly.eaId)
+          if (!ea) return null
+          const sharedForEa = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const claim = sharedForEa.claims.find(c => c.id === ea.claimId)
+          if (!claim) return null
+          const proposedEaTerms = {
+            expires: ea.terms?.evaluationDeadline || null,
+            resultConfidentiality: !!ea.terms?.resultConfidentiality,
+            attribution: !!ea.terms?.attribution,
+          }
+          return (
+            <CombinedResponseModal
+              eaOnlyMode
+              request={{
+                claim,
+                ownerParty: ea.grantor.party,
+                requesterParty: ea.grantee.party,
+                requesterAsset: ea.granteeAssetId,
+                message: ea._requestMeta?.message || '',
+                requestedRequirementsSetIds: ea._requestMeta?.requestedRequirementsSetIds || ea.authorizedRequirementsSetIds || [],
+                proposedEaTerms,
+              }}
+              referencedAssets={[]}
+              parseResults={[]}
+              evalResultsForClaim={[]}
+              onAccept={handleV22AcceptEAOnly}
+              onDecline={handleV22DeclineEAOnly}
+              onClose={() => setV22RespondingToEaOnly(null)}
             />
           )
         })()}
@@ -4448,10 +4814,22 @@ export default function V2App() {
             e.claimId === node.id &&
             e.grantee.party === activeRole.party &&
             e.status === 'active' &&
+            !e._provisional &&
             (v22Provisionals.disclosureAgreements.find(d => d.id === e.disclosureAgreementId)?.type !== 'provisional')
           ) || (v22View?.evaluationAgreements || []).find(e =>
-            e.claimId === node.id && e.grantee.party === activeRole.party && e.status === 'active'
+            e.claimId === node.id && e.grantee.party === activeRole.party && e.status === 'active' && !e._provisional
           )
+          // Phase 11C: warm-path detection. Active DA exists + no EA on this
+          // Claim where the viewer is grantee → surface the
+          // "Request Evaluation Agreement" CTA (footer + canvas action bar).
+          const activeDaForActor = node.v22Type === 'CLAIM'
+            ? (v22View?.disclosureAgreements || []).find(d =>
+                d.subject?.kind === 'claim' && d.subject.id === node.id &&
+                d.grantee?.party === activeRole.party &&
+                d.type !== 'provisional' && !d._declineMeta && !d._revokedMeta,
+              )
+            : null
+          const hasActiveDaWithoutEa = !!activeDaForActor && !evaluationAgreementForActor
           const sourceAsset = node.v22Artifact?.sourceAssetId
             ? (v22View?.assets || []).find(a => a.id === node.v22Artifact.sourceAssetId)
             : null
@@ -4684,6 +5062,20 @@ export default function V2App() {
                 onCancelRequest={() => handleV22CancelRequest(node.id)}
                 onDismissDeclined={() => handleV22DismissDeclined(node.id)}
                 onRunEvaluation={() => handleV22OpenRunEvaluation(evaluationAgreementForActor)}
+                // Phase 11C: warm-path EA request entry from the Claim panel.
+                // Renders only when active DA exists + no EA. Click opens
+                // EARequestModal with the existing DA's id baked in.
+                onRequestEvaluationAgreement={hasActiveDaWithoutEa
+                  ? () => setV22EaRequestContext({
+                    claim: node.v22Artifact,
+                    ownerParty: node.owner,
+                    existingDisclosureAgreementId: activeDaForActor.id,
+                    requesterAsset: activeDaForActor.granteeAssetId
+                      ? { id: activeDaForActor.granteeAssetId, name: (v22View?.assets || []).find(a => a.id === activeDaForActor.granteeAssetId)?.name || activeDaForActor.granteeAssetId }
+                      : null,
+                  })
+                  : undefined}
+                hasActiveDaWithoutEa={hasActiveDaWithoutEa}
                 onAmendClaim={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => setV22AmendingClaimId(node.id) : undefined}
                 onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
                 // Parse Result actions
@@ -4792,7 +5184,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.10.0 &middot; Changelog
+          v0.11.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -4839,6 +5231,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.0', date: '2026-04-29', label: 'Phase 11C', items: [
+                  'New: Disclosure and Evaluation Agreements now have distinct request flows. Cold-path Request Agreement modal split into two steps — Step 1 picks the target Claim and suggests Requirements Sets; Step 2 sets the Evaluation Agreement\'s expiry (defaults to 1 year) and acknowledgments (result confidentiality + attribution)',
+                  'Warm path: when you already have a Disclosure Agreement on a Claim but no Evaluation Agreement, a Request Evaluation Agreement button appears on the Claim Detail Panel + canvas action bar (▷). Submits a single-step EA request without renegotiating the existing DA',
+                  'Dave (ChipCo) is now a switchable role alongside Bob, Alice, and Carol. Bob can request an EA from Dave through the warm path; Dave responds via the standard response flow showing only the EA terms (DA scope is unchanged)',
+                  'Three new notifications: an EA-only request lands on the grantor\'s inbox; accept/decline outcomes notify the requester. Click an EA request to respond; click an accept/decline to pan to the Claim',
+                  'Demo-only EA expiry check: clicking Run Evaluation refuses to open if the agreement\'s deadline is past, with a copy hint pointing toward requesting a new agreement',
+                ]},
                 { version: '0.10.0', date: '2026-04-28', label: 'Phase 11B', items: [
                   'New: ChipCo cluster in the Public Directory is now clickable. Click materializes a Claim card on top of the cluster + opens its Detail Panel for browsing the Claim and its referenced Assets',
                   'Restored a V2/V2.1 Detail Panel feature lost in the V2.2 retreat: an Expand button on referenced-Asset rows opens a two-tab modal (Output / JSON). Output tab shows the file in an iframe with metadata header; JSON tab shows the raw artifact JSON',

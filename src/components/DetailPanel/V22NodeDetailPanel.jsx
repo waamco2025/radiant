@@ -623,6 +623,12 @@ function V22ClaimPanel({
   onRunEvaluation,
   onAmendClaim,
   onSelfEvaluate,
+  // Phase 11C: warm-path "Request Evaluation Agreement" footer button.
+  // Renders when the viewer is non-owner, has an active DA on this Claim,
+  // and does NOT yet have an EA. Click opens EARequestModal pre-populated
+  // with the Claim + grantor + existing DA's id.
+  onRequestEvaluationAgreement,
+  hasActiveDaWithoutEa = false,
   referencedAssetNames = [],
   // Phase 11B: handler for the Expand button on referenced-Asset rows.
   // Receives the full Asset artifact so the modal can read file metadata
@@ -856,6 +862,21 @@ function V22ClaimPanel({
           {claim?.description && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>{claim.description}</div>
           )}
+          {/* Phase 11C: warm-path hint surfacing the next-action context for
+              non-owner viewers with a DA but no EA. The footer's
+              "Request Evaluation Agreement" button is the action; this strip
+              tells the viewer why they don't see a Run Evaluation button. */}
+          {!isOwner && hasActiveDaWithoutEa && !evaluationAgreementForActor && (
+            <div style={{
+              fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+              padding: '10px 12px', marginBottom: 14,
+              background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+              borderRadius: 6,
+            }}>
+              An Evaluation Agreement is required to evaluate this Claim.
+            </div>
+          )}
           <Section title="Owner">
             <Row label="Party" value={node.owner} />
             <Row label="Created" value={formatDateTime(claim?.createdDate)} />
@@ -945,9 +966,12 @@ function V22ClaimPanel({
         // losing access to their Claim actions.
         // Owner: Amend Claim + (optional) Self-Evaluate (+ Dismiss).
         // Non-owner with active EA: Run Evaluation (+ Dismiss).
+        // Phase 11C: Non-owner with active DA but no EA: Request Evaluation
+        // Agreement (warm path).
         const hasOwnerActions = isOwner
         const hasEvalAction = !isOwner && !!evaluationAgreementForActor
-        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction) return null
+        const hasWarmPathAction = !isOwner && !hasEvalAction && hasActiveDaWithoutEa && !!onRequestEvaluationAgreement
+        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction) return null
         return (
           <>
             {noticeForPanel && (
@@ -962,6 +986,8 @@ function V22ClaimPanel({
               </>
             ) : hasEvalAction ? (
               <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+            ) : hasWarmPathAction ? (
+              <FooterButton label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
             ) : null}
           </>
         )
