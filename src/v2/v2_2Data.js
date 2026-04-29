@@ -246,6 +246,10 @@ export function makeAsset({
       size: file.size ?? null,
       mimeType: file.mimeType ?? null,
       hash: file.hash ?? null,
+      // Phase 11B: Prototype-only pointer to a placeholder PDF in /public/
+      // so AssetEvidenceViewer's iframe has something real to render.
+      // Production resolves files via Platform-side QS URI lookups instead.
+      localPath: file.localPath ?? null,
     },
     registrationDate,
     parseResultIds: [...parseResultIds],
@@ -696,6 +700,11 @@ export function buildV22SharedArtifacts() {
       size: 2458792,
       mimeType: 'application/pdf',
       hash: 'sha256:prm-datasheet-v4',
+      // Phase 11B: localPath points at a placeholder PDF in /public/ so
+      // the Detail Panel's expand-evidence iframe has something real to
+      // render. Prototype-only field; production resolves the file via
+      // the QS URI lookup against `file.uri` instead.
+      localPath: '/powerregulationmodule-datasheet.pdf',
     },
     registrationDate: '2026-02-10T14:18:00Z',
     parseResultIds: ['parse-prm-datasheet'],
@@ -744,6 +753,7 @@ export function buildV22SharedArtifacts() {
       size: 1887437,
       mimeType: 'application/pdf',
       hash: 'sha256:vreg-datasheet-v2',
+      localPath: '/voltageregulator-datasheet.pdf',
     },
     registrationDate: '2026-02-12T16:05:00Z',
     parseResultIds: ['parse-vreg-datasheet'],
@@ -760,6 +770,7 @@ export function buildV22SharedArtifacts() {
       size: 1258291,
       mimeType: 'application/pdf',
       hash: 'sha256:emi-datasheet-v1',
+      localPath: '/emishielding-datasheet.pdf',
     },
     registrationDate: '2026-02-08T13:41:00Z',
     parseResultIds: ['parse-emi-datasheet'],
@@ -868,10 +879,12 @@ export function buildV22SharedArtifacts() {
     description: 'Datasheet for the buck-converter IC used in MicroCo PRM-3A.',
     file: {
       uri: 'provenance://evidence/chipco-prm-ic-datasheet-v3',
-      filename: 'chipco-prm-ic-datasheet.pdf',
+      filename: 'prm-3a-ic-datasheet.pdf',
       size: 1738112,
       mimeType: 'application/pdf',
       hash: 'sha256:chipco-prm-ic-datasheet-v3',
+      // Phase 11B: placeholder PDF generated via scripts/generate-placeholder-pdfs.js.
+      localPath: '/prm-3a-ic-datasheet.pdf',
     },
     registrationDate: '2026-02-04T11:00:00Z',
     parseResultIds: ['parse-chipco-prm-ic-datasheet'],
@@ -884,10 +897,11 @@ export function buildV22SharedArtifacts() {
     description: 'Bench + radiation qualification report for the PRM-3A IC.',
     file: {
       uri: 'provenance://evidence/chipco-prm-ic-testreport-v3',
-      filename: 'chipco-prm-ic-qualification.pdf',
+      filename: 'prm-3a-ic-qualification-report.pdf',
       size: 2197504,
       mimeType: 'application/pdf',
       hash: 'sha256:chipco-prm-ic-testreport-v3',
+      localPath: '/prm-3a-ic-qualification-report.pdf',
     },
     registrationDate: '2026-02-09T15:30:00Z',
     parseResultIds: [],
@@ -900,10 +914,11 @@ export function buildV22SharedArtifacts() {
     description: 'Datasheet for ChipCo VREF-IC-220 ±0.05% precision reference.',
     file: {
       uri: 'provenance://evidence/chipco-vref-datasheet-v1',
-      filename: 'chipco-vref-datasheet.pdf',
+      filename: 'voltage-reference-ic-datasheet.pdf',
       size: 1428736,
       mimeType: 'application/pdf',
       hash: 'sha256:chipco-vref-datasheet-v1',
+      localPath: '/voltage-reference-ic-datasheet.pdf',
     },
     registrationDate: '2026-02-12T09:18:00Z',
     parseResultIds: [],
@@ -2100,6 +2115,13 @@ function symmetricRowY(i, rowStep = ROW_STEP) {
  * warn (unused), and unsatisfactory rows across all non-superseded Eval Results
  * targeting that Claim. N/A rows excluded per spec §3.5.
  */
+// Phase 11B: exported so V2App can synthesize a Detail-Panel-shaped node
+// for the materialized ChipCo Claim that lives only on the directory layer.
+export function buildClaimNodeForDirectoryMaterialization(claim, evalResults = []) {
+  const rollup = rollupClaimHealth(claim.id, evalResults)
+  return claimToNode(claim, rollup, 0, 0)
+}
+
 function rollupClaimHealth(claimId, evalResults) {
   let ok = 0
   let warn = 0

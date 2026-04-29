@@ -1899,3 +1899,65 @@ Phase 11 covers DA/EA flow separation work (#113, #115, #114, #126) + related it
 - No new console errors; pre-existing Changelog `key={release.version}` collision warnings persist (out of scope).
 
 **Status:** [x] Complete.
+
+### Phase 11B completion notes (2026-04-28) — ChipCo cluster interactivity + Detail Panel "expand" evidence viewer
+
+Builds on Phase 11A's foundations. Three workstreams.
+
+**Workstream 1 — ChipCo cluster click → Claim materialization.**
+
+- DirectoryLayer accepts new props: `onClusterClick(cluster)`, `materializedClaim` (`{ claim, anchor: { xPct, yPct } }` or null), and `onCloseMaterializedClaim`. Other clusters remain inert visual dots.
+- The ChipCo cluster is wrapped in a 180×180 hit-area (centred on the cluster's `xPct`/`yPct`). Hover bumps `transform: scale(1.06)` + `filter: brightness(1.25)` so clickability reads. Click fires `onClusterClick(cluster)`.
+- V2App's `onClusterClick` handler resolves the warm-path Claim (`claim-chipco-prm-ic` from Phase 11A's seed), sets `v22DirectoryMaterializedClaim = { claim, anchor }`. DirectoryLayer renders a 210px Claim card at the anchor with the parent-layer CLAIM card visual (CLAIM badge, name, owner) + a thicker 2px amber selected border + amber glow box-shadow so the card reads as the selected element.
+- V2App also mounts a synthetic-node V22NodeDetailPanel for the materialized Claim. New exported helper `buildClaimNodeForDirectoryMaterialization(claim, evalResults)` in v2_2Data.js wraps the existing `claimToNode` + `rollupClaimHealth` private helpers. Synthetic node carries the Claim's `v22Type: 'CLAIM'` + `v22Artifact` + standard fields, so V22ClaimPanel's existing rendering path applies without changes.
+- Detail Panel positioned `position: fixed, top: 0, right: 0, bottom: 0, width: 480, zIndex: 200` — above the directory layer (z-index 150) and the materialized card (z-index 10) but below the modal stack (10000).
+- Closing the panel (× / `onClose`) clears `v22DirectoryMaterializedClaim`. Closing the directory layer entirely also clears it.
+- "Request Evaluation Agreement" footer button intentionally NOT wired — that's Phase 11C scope. The non-owner V22ClaimPanel branch already produces an empty footer for this case (no Run Evaluation without an EA, no Amend/Self-Evaluate for non-owners), so the panel renders cleanly as a read-only browse view.
+
+**Workstream 2 — Detail Panel "expand" modal restored.**
+
+New file `src/components/modals/ExpandedArtifactModal.jsx` with three sub-components:
+
+- **`AssetEvidenceViewer`** — file metadata header (filename / size / MIME / truncated hash with click-to-copy) + body that shows an iframe pointed at `file.localPath` when set (height 400px, full width, dashed-border fallback). Footer rows for owner + registration date.
+- **`ArtifactRow`** — schema-aware row: parse-output rows show a confidence chip (green/amber/red color band by threshold); eval-output rows show a status badge (SAT/UNSAT/MISSING/N/A with the established color palette).
+- **`TabBar`** — Output / JSON tabs, indigo underline + bold for active, color shift on hover for inactive.
+
+Modal frame: 720px × 80vh, portal via shared Backdrop, ESC to close.
+
+New `ExpandButton` component in V22NodeDetailPanel.jsx — outward-arrow SVG icon button (square with diagonal arrow), 11×11 icon, indigo-on-hover. Wired onto referenced-Asset rows in V22ClaimPanel's "Referenced Assets" section. The row layout grew from a flat single-line treatment to a flex row with name on the left + Expand button on the right.
+
+V22ClaimPanel signature gained `onExpandAsset(asset)` prop. V2App's standard panel mount and the new directory-materialized panel mount both wire it to `setV22ExpandedArtifact({ artifact: asset, schema: 'asset' })`. New V2App state `v22ExpandedArtifact = { artifact, schema } | null` drives the modal mount.
+
+`referencedAssetNames` data shape extended from `{ id, name }` to `{ id, name, asset }` so the Expand button can hand the full Asset artifact to the modal. Both the standard panel mount (`/v2/V2App.jsx` ~4264) and the new directory-materialized panel mount build the same `{ id, name, asset }` row format using a shared `resolveAsset` helper.
+
+**Parse Result + Eval Result expand wiring deferred** — the modal supports `'parse-output'` and `'eval-output'` schemas (so the modal is ready), but Expand buttons aren't yet wired onto V22ParseResultPanel / V22EvalResultPanel rows. Phase 11B's priority was Asset rows for the ChipCo browse flow; Parse/Eval expansion can land in a follow-up by adding `onExpandParseResult` / `onExpandEvalResult` props and `ExpandButton` instances to those panels.
+
+**Workstream 3 — Seed data: localPath + ChipCo placeholder PDFs.**
+
+- New devDependency `pdfkit ^0.18.0`. New script `scripts/generate-placeholder-pdfs.js` writes 3 placeholder PDFs to `/public/`: `prm-3a-ic-datasheet.pdf`, `prm-3a-ic-qualification-report.pdf`, `voltage-reference-ic-datasheet.pdf` (all ~2 KB each, 1 page, title + filler description). Re-runnable for future placeholders.
+- Backfilled `localPath` on three existing Alice Assets whose filenames match `/public/` PDFs: `aPrmDatasheet` → `/powerregulationmodule-datasheet.pdf`, `aVregDatasheet` → `/voltageregulator-datasheet.pdf`, `aEmiDatasheet` → `/emishielding-datasheet.pdf`.
+- ChipCo's 3 Assets gained `localPath` pointing at the new PDFs + their seed `file.filename` updated to match the public-folder filenames.
+- Other seed Assets (Alice's PRM Test Report + Thermal Analysis, Bob's Avionics + Guidance + Thermal, Carol's two .md files) intentionally left without `localPath` — the AssetEvidenceViewer falls back to "Document preview not available" for these. Backfilling can happen as more placeholder PDFs are generated.
+
+**Spec updates:**
+
+- §10.1 Asset artifact: `file.localPath` documented as a Prototype-only field; Prototype note callout split to call out `localPath` separately from the other prototype-vs-production schema fields.
+- §8.7 Detail Panel — Expand modal (Phase 11B) — new subsection covering the three schemas (asset / parse-output / eval-output), the modal dimensions, the close affordances, and a Prototype note that production resolves files via QS URI lookups instead of `localPath`.
+
+**Out of scope (deferred):**
+
+- DA/EA flow separation work (Phase 11C — #113, #115, #114, #126).
+- Amendment work (Phase 11D — #108, #102).
+- Real PDF.js integration (#41 — partial: 11B shipped iframe-based viewer; full PDF.js integration deferred).
+- Umbrella DA edge visualization (#132 — explicitly deferred to Phase 14).
+- "Request Evaluation Agreement" footer button (Phase 11C entry point).
+- Parse Result + Eval Result Expand wiring (modal supports the schemas; per-panel button wiring deferred).
+
+**Runtime verification:**
+
+- Build clean (88 modules, +13 KB main bundle for the new Expand modal + DirectoryLayer additions + V2App wiring).
+- 3 placeholder PDFs written under `/public/` (~2 KB each).
+- Data-layer probe: `buildClaimNodeForDirectoryMaterialization(chipcoClaim, [])` returns a synthetic node with `v22Type: 'CLAIM'`, `v22Artifact === chipcoClaim`, `name === 'PRM-3A IC Compliance'`. ChipCo's 3 Assets all carry `file.localPath` pointing at the new PDFs. Alice's 3 publication-cluster Assets carry `localPath` pointing at the existing /public/ PDFs.
+- Browser-observable end-to-end ChipCo cluster click flow constrained by the V2Canvas raycaster DOM-dispatch limitation documented since 9A.6 — code-path verification + module imports + structural diff are the canonical fallback per prior phase precedent.
+
+**Status:** [x] Complete.

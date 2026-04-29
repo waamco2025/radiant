@@ -16,6 +16,10 @@ import {
   makeInternalDisclosureAgreement,
   makeRevocationRecord,
   buildV22SharedArtifacts, mergeProvisionals,
+  // Phase 11B: synthetic-node helper used by the directory cluster-click
+  // flow so V22NodeDetailPanel can render for a Claim that lives only on
+  // the directory layer (no parent-canvas node present).
+  buildClaimNodeForDirectoryMaterialization,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -36,6 +40,11 @@ import V22RevocationConfirmModal from '../components/modals/V22RevocationConfirm
 // Phase 9D.1.4 Fix 2: confirmation modal for orphaned-Eval-Result Dismiss.
 // Replaces the prior window.confirm dialog.
 import V22DismissEvalResultModal from '../components/modals/V22DismissEvalResultModal.jsx'
+// Phase 11B: restored Detail Panel "expand" modal for Assets / Parse Results
+// / Eval Results — port of the V2/V2.1 pattern that was lost in the V2.2
+// retreat. Two tabs (Output / JSON); Output uses iframe-based file viewer
+// for Assets when `file.localPath` is set.
+import ExpandedArtifactModal from '../components/modals/ExpandedArtifactModal.jsx'
 // Phase 9D.2 (#124): unravel animation primitive for nodes leaving the canvas.
 import { playUnravelAnimation } from './animations/unravel.js'
 // Phase 9D.1: V22RevocationNoticeModal is no longer mounted — notification
@@ -136,6 +145,11 @@ export default function V2App() {
   const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
   // V2.2 Phase 7 — Directory Layer + AI Shopper (spec §8 / §9)
   const [v22DirectoryOpen, setV22DirectoryOpen] = useState(false)
+  // Phase 11B: when the user clicks the ChipCo cluster in the Directory,
+  // we materialize one of ChipCo's Claims as a card on top of the cluster
+  // and open the Detail Panel for it. Shape: { claim, anchor: { xPct, yPct } }
+  // or null. Cleared when the panel closes or the Directory closes.
+  const [v22DirectoryMaterializedClaim, setV22DirectoryMaterializedClaim] = useState(null)
   const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
@@ -172,6 +186,9 @@ export default function V2App() {
   // renders. Confirm calls handleV22DismissOrphanedEvalResult; Cancel just
   // clears the state.
   const [v22DismissingEvalResult, setV22DismissingEvalResult] = useState(null)
+  // Phase 11B: Detail Panel "expand" modal — set to { artifact, schema } to
+  // open; cleared on close. Schemas: 'asset' | 'parse-output' | 'eval-output'.
+  const [v22ExpandedArtifact, setV22ExpandedArtifact] = useState(null)
   // Phase 9D.2 (#124): node id currently running the unravel keyframe.
   // Set by playUnravelAnimation right before its CSS stage; cleared when
   // the primitive resolves. AssetNode reads `_unraveling` (stamped via
@@ -3825,9 +3842,100 @@ export default function V2App() {
             open={v22DirectoryOpen}
             activeParty={activeRole.party}
             onOpenAIShopper={() => setV22AIShopperOpen(true)}
-            onClose={() => setV22DirectoryOpen(false)}
+            onClose={() => {
+              setV22DirectoryOpen(false)
+              setV22DirectoryMaterializedClaim(null)
+            }}
+            // Phase 11B: ChipCo cluster click → materialize the warm-path
+            // Claim card + open its Detail Panel. The seeded warm-path is
+            // `claim-chipco-prm-ic`; if the user has already accepted an EA
+            // for it via Phase 11C, that flow will own the Claim's
+            // visibility on the parent canvas instead.
+            onClusterClick={(cluster) => {
+              if (cluster.partyName !== 'ChipCo') return
+              const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              const claim = shared.claims.find(c => c.id === 'claim-chipco-prm-ic')
+              if (!claim) return
+              setV22DirectoryMaterializedClaim({
+                claim,
+                anchor: { xPct: cluster.center.xPct, yPct: cluster.center.yPct },
+              })
+            }}
+            materializedClaim={v22DirectoryMaterializedClaim}
+            onCloseMaterializedClaim={() => setV22DirectoryMaterializedClaim(null)}
           />
         )}
+
+        {/* Phase 11B: Detail Panel for the materialized directory Claim.
+            Mounted alongside the DirectoryLayer (not inside it) so the
+            existing Detail Panel z-index ordering and panel-shell styling
+            apply. The panel reuses V22NodeDetailPanel's standard CLAIM
+            rendering path; the claim is never on the parent canvas, so a
+            synthetic node is built via buildClaimNodeForDirectoryMaterialization.
+            "Request Evaluation Agreement" footer button is intentionally
+            NOT wired in 11B — that's Phase 11C. The non-owner branch of
+            V22ClaimPanel doesn't render Amend/Self-Evaluate; Run Evaluation
+            requires an EA which Bob doesn't have for this Claim, so the
+            footer is empty by design. */}
+        {v22DirectoryOpen && v22DirectoryMaterializedClaim && (() => {
+          const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const claim = v22DirectoryMaterializedClaim.claim
+          const syntheticNode = buildClaimNodeForDirectoryMaterialization(claim, sharedForPanel.evaluationResults || [])
+          // Build the in-scope referenced-Asset rows (same shape as the
+          // standard panel mount). For non-owners, scope-filter to Assets
+          // covered by an active DA where the active actor is grantee.
+          const refIds = claim.referencedAssetIds || []
+          const isOwnerViewing = claim.owner === activeRole.party
+          const resolveAsset = (id) => sharedForPanel.assets.find((x) => x.id === id) || null
+          let refAssetRows
+          if (isOwnerViewing) {
+            refAssetRows = refIds.map(id => {
+              const a = resolveAsset(id)
+              return a ? { id: a.id, name: a.name, asset: a } : null
+            }).filter(Boolean)
+          } else {
+            const inScope = new Set()
+            for (const da of (sharedForPanel.disclosureAgreements || [])) {
+              if (da.subject?.id !== claim.id) continue
+              if (da.grantee.party !== activeRole.party) continue
+              if (da.type === 'provisional' || da._declineMeta || da._revokedMeta) continue
+              if (Array.isArray(da.scope?.assetIds)) {
+                for (const id of da.scope.assetIds) inScope.add(id)
+              }
+            }
+            refAssetRows = refIds
+              .filter(id => inScope.has(id))
+              .map(id => {
+                const a = resolveAsset(id)
+                return a ? { id: a.id, name: a.name, asset: a } : null
+              })
+              .filter(Boolean)
+          }
+          // Slide-in from the right; z-index above the directory (150)
+          // and the materialized card (10), below the modal stack (10000).
+          return (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 480,
+              zIndex: 200,
+            }}>
+              <V22NodeDetailPanel
+                node={syntheticNode}
+                activeParty={activeRole.party}
+                onClose={() => setV22DirectoryMaterializedClaim(null)}
+                referencedAssetNames={refAssetRows}
+                onExpandAsset={(asset) => setV22ExpandedArtifact({ artifact: asset, schema: 'asset' })}
+                evaluationResultsForClaim={[]}
+                evaluationAgreementForActor={null}
+                disclosureAgreementsForNode={[]}
+                evaluationAgreementsForNode={[]}
+              />
+            </div>
+          )
+        })()}
 
         {/* V2.2 Phase 7 — AI Shopper modal (spec §9). Opens either from the
             chrome icon (user had no Directory context in mind) or from within
@@ -4236,6 +4344,17 @@ export default function V2App() {
           />
         )}
 
+        {/* Phase 11B: Detail Panel "expand" modal — opens from the Expand
+            button on referenced-Asset rows in V22ClaimPanel (and from any
+            future caller that sets v22ExpandedArtifact). */}
+        {v22ExpandedArtifact && (
+          <ExpandedArtifactModal
+            artifact={v22ExpandedArtifact.artifact}
+            schema={v22ExpandedArtifact.schema}
+            onClose={() => setV22ExpandedArtifact(null)}
+          />
+        )}
+
         {/* Phase 9D.1 (#112 UX redo): V22RevocationNoticeModal mount removed.
             Notification-click now pans/selects the Claim and opens the Detail
             Panel, which renders the revocation notice inline — grantee-side
@@ -4264,10 +4383,19 @@ export default function V2App() {
           let referencedAssetNames = []
           if (node.v22Artifact?.referencedAssetIds) {
             const refIds = node.v22Artifact.referencedAssetIds
+            // Phase 11B: include the full Asset artifact (`asset`) so the
+            // ExpandButton in V22ClaimPanel can hand it to the modal. The
+            // canvas-node lookup via `nodeMap[id]` returns a node with
+            // `v22Artifact`; the seeded fallback returns a raw Asset.
+            const resolveAsset = (id) => {
+              const node = nodeMap[id]
+              if (node?.v22Artifact) return node.v22Artifact
+              return sharedForPanel.assets.find((x) => x.id === id) || null
+            }
             if (isOwnerViewing) {
               referencedAssetNames = refIds.map(id => {
-                const a = nodeMap[id] || sharedForPanel.assets.find(x => x.id === id)
-                return a ? { id: a.id, name: a.name } : null
+                const a = resolveAsset(id)
+                return a ? { id: a.id, name: a.name, asset: a } : null
               }).filter(Boolean)
             } else {
               // Build the union of in-scope Asset ids across all visible active
@@ -4284,8 +4412,8 @@ export default function V2App() {
               referencedAssetNames = refIds
                 .filter(id => inScope.has(id))
                 .map(id => {
-                  const a = nodeMap[id] || sharedForPanel.assets.find(x => x.id === id)
-                  return a ? { id: a.id, name: a.name } : null
+                  const a = resolveAsset(id)
+                  return a ? { id: a.id, name: a.name, asset: a } : null
                 })
                 .filter(Boolean)
             }
@@ -4514,6 +4642,8 @@ export default function V2App() {
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
+                // Phase 11B: open the ExpandedArtifactModal for an Asset row.
+                onExpandAsset={(asset) => setV22ExpandedArtifact({ artifact: asset, schema: 'asset' })}
                 evaluationResultsForClaim={evaluationResultsForClaim}
                 evaluationAgreementForActor={evaluationAgreementForActor && evaluationAgreementForActor.disclosureAgreementId &&
                   (() => {
@@ -4686,6 +4816,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 11B', items: [
+                  'New: ChipCo cluster in the Public Directory is now clickable. Click materializes a Claim card on top of the cluster + opens its Detail Panel for browsing the Claim and its referenced Assets',
+                  'Restored a V2/V2.1 Detail Panel feature lost in the V2.2 retreat: an Expand button on referenced-Asset rows opens a two-tab modal (Output / JSON). Output tab shows the file in an iframe with metadata header; JSON tab shows the raw artifact JSON',
+                  '3 placeholder PDFs generated for ChipCo so the iframe has something real to render. Existing Assets matching /public/ PDFs (Power Reg, Voltage Regulator, EMI Shield) backfilled with localPath',
+                ]},
+                { version: '0.10.0', date: '2026-04-28', label: 'Phase 11A.1', items: [
+                  'Fixed: actor corner card in the Public Directory now actually shows its hover tooltip — positioning was on the inner card div instead of the Tooltip wrapper, so the wrapper had zero size for hover detection',
+                ]},
                 { version: '0.10.0', date: '2026-04-28', label: 'Phase 11A', items: [
                   'New: ChipCo (Dave) seeded as a fourth actor — IC supplier whose catalog Bob has visibility into via a pre-existing Disclosure Agreement. No Claims on Bob\'s canvas yet (a future phase will let him request an Evaluation Agreement)',
                   'Public Directory: the ElectroGrid mock cluster replaced with a real ChipCo cluster. Per-role visibility — only actors with an active DA from ChipCo see the cluster. Other clusters unchanged for all roles',

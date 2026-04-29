@@ -15,6 +15,10 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import Tooltip from '../components/Tooltip.jsx'
 import { buildV22SharedArtifacts } from './v2_2Data.js'
+// Phase 11B: ChipCo cluster click materializes one of ChipCo's Claims as a
+// card on top of the cluster. The cluster id → Claim resolution happens in
+// V2App via the `onClusterClick` callback; DirectoryLayer just owns the
+// card rendering at the cluster anchor.
 
 // Deterministic PRNG so cluster dot positions stay stable across renders.
 function seededRandom(seed) {
@@ -91,7 +95,20 @@ function ClusterDots({ center, count, colorVar, seed, label, partyName }) {
   )
 }
 
-export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onClose }) {
+export default function DirectoryLayer({
+  open,
+  activeParty,
+  onOpenAIShopper,
+  onClose,
+  // Phase 11B: cluster-click coordination with V2App. `onClusterClick` is
+  // invoked when the ChipCo cluster is clicked (other clusters remain
+  // inert). `materializedClaim` is `{ claim, anchor: { xPct, yPct } }` or
+  // null — when set, DirectoryLayer renders a Claim card at the anchor
+  // and dims the rest of the directory chrome.
+  onClusterClick,
+  materializedClaim,
+  onCloseMaterializedClaim,
+}) {
   // Track whether the wipe should expand (opening) or contract (closing).
   // `phase` is 'in' | 'out' | 'closed'. We keep the layer mounted during the
   // out-phase so the reverse animation plays before unmount.
@@ -261,10 +278,108 @@ export default function DirectoryLayer({ open, activeParty, onOpenAIShopper, onC
       </div>
       </Tooltip>
 
-      {/* Cluster dot clouds */}
-      {clusters.map((c) => (
-        <ClusterDots key={c.partyName} {...c} />
-      ))}
+      {/* Cluster dot clouds. Phase 11B: ChipCo's cluster is wrapped in a
+          clickable button that fires onClusterClick with the ChipCo Claim
+          we want to materialize (the warm-path Claim today). Other
+          clusters render as inert visual dots, unchanged. */}
+      {clusters.map((c) => {
+        const isChipco = c.partyName === 'ChipCo'
+        if (!isChipco || !onClusterClick) {
+          return <ClusterDots key={c.partyName} {...c} />
+        }
+        // Hit-area for the ChipCo cluster — sits behind the dots, sized
+        // generously so the user has an easy click target across the
+        // entire dot cloud. Hover bump nudges dot opacity via the
+        // wrapper's transform (no per-dot rebuild needed).
+        return (
+          <div
+            key={c.partyName}
+            data-cluster-id="chipco"
+            onClick={(e) => {
+              e.stopPropagation()
+              onClusterClick(c)
+            }}
+            style={{
+              position: 'absolute',
+              left: `calc(${c.center.xPct}% - 90px)`,
+              top: `calc(${c.center.yPct}% - 90px)`,
+              width: 180,
+              height: 180,
+              borderRadius: '50%',
+              cursor: 'pointer',
+              transition: 'transform 200ms, filter 200ms',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.06)'
+              e.currentTarget.style.filter = 'brightness(1.25)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)'
+              e.currentTarget.style.filter = 'brightness(1)'
+            }}
+          >
+            {/* Render the dot cluster relative to this hit-area's center
+                (the ClusterDots component already centres around its own
+                left/top via its dx/dy offsets, so we re-anchor it here
+                with center.xPct/yPct = 50/50 of the local box). */}
+            <ClusterDots
+              {...c}
+              center={{ xPct: 50, yPct: 50 }}
+            />
+          </div>
+        )
+      })}
+
+      {/* Phase 11B: materialized Claim card on top of the cluster. Renders
+          when V2App has set materializedClaim. Anchored at the cluster's
+          centre. Card visual mirrors the parent-layer CLAIM card style
+          (CARD_W = 210px, CLAIM badge above the name, indigo selected
+          border so it reads as the active selection). Click outside the
+          card / click on the close X dismisses both the card and the
+          companion Detail Panel — V2App owns the dismissal handler. */}
+      {materializedClaim?.claim && materializedClaim?.anchor && (
+        <div
+          data-v22-materialized-claim
+          style={{
+            position: 'absolute',
+            left: `calc(${materializedClaim.anchor.xPct}% - 105px)`,
+            top: `calc(${materializedClaim.anchor.yPct}% - 60px)`,
+            width: 210,
+            padding: '14px 16px',
+            borderRadius: 10,
+            background: 'var(--bg-card)',
+            borderWidth: 2,
+            borderStyle: 'solid',
+            borderColor: 'var(--accent-amber)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.55), 0 0 24px color-mix(in srgb, var(--accent-amber) 30%, transparent)',
+            zIndex: 10,
+          }}
+        >
+          <span style={{
+            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
+            color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
+            alignSelf: 'flex-start',
+          }}>CLAIM</span>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            lineHeight: 1.3,
+            // Allow two-line wrap for longer Claim names — matches Phase 9A
+            // wrap behaviour for parent-layer Claim cards.
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}>{materializedClaim.claim.name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{materializedClaim.claim.owner}</div>
+        </div>
+      )}
 
       {/* Header + AI Shopper CTA (spec §8.3 — Directory Layer exposes the
           AI Shopper as a prominent entry point). */}

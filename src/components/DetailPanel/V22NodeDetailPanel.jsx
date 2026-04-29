@@ -96,6 +96,48 @@ function Row({ label, value, mono }) {
   )
 }
 
+// Phase 11B: ExpandButton — outward-arrow icon button that opens the
+// ExpandedArtifactModal for the row's artifact. Restored from V2/V2.1's
+// Detail Panel pattern (lost in the V2.2 retreat).
+function ExpandButton({ onClick, title = 'Expand to view artifact' }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
+      title={title}
+      aria-label={title}
+      style={{
+        background: 'transparent',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '3px 5px',
+        cursor: 'pointer',
+        color: 'var(--text-tertiary)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'background 100ms, border-color 100ms, color 100ms',
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
+        e.currentTarget.style.borderColor = 'var(--accent-indigo)'
+        e.currentTarget.style.color = 'var(--accent-indigo)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.borderColor = 'var(--border)'
+        e.currentTarget.style.color = 'var(--text-tertiary)'
+      }}
+    >
+      {/* Outward-arrow icon — diagonal arrow pointing top-right out of a square */}
+      <svg width={11} height={11} viewBox="0 0 16 16" fill="none">
+        <path d="M3 13 L13 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <path d="M7 3 H13 V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      </svg>
+    </button>
+  )
+}
+
 // Phase 10.2: small clickable row for Parent / Children sections in the Asset
 // Detail Panel. Renders as `[ASSET]  {name}` — clicking pans/zooms and opens
 // the target Asset's panel via `onSelectAsset(id)`.
@@ -560,6 +602,10 @@ function V22ClaimPanel({
   onAmendClaim,
   onSelfEvaluate,
   referencedAssetNames = [],
+  // Phase 11B: handler for the Expand button on referenced-Asset rows.
+  // Receives the full Asset artifact so the modal can read file metadata
+  // + dot lineage. Optional — when omitted, no Expand button renders.
+  onExpandAsset,
   evaluationResultsForClaim = [],
   evaluationAgreementForActor,
   disclosureAgreementsForNode = [],
@@ -798,8 +844,23 @@ function V22ClaimPanel({
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {referencedAssetNames.map((n) => (
-                  <div key={n.id} style={{ fontSize: 12, color: 'var(--text-primary)', padding: '4px 6px', background: 'var(--bg-raised)', borderRadius: 3 }}>
-                    {n.name}
+                  <div key={n.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
+                    padding: '6px 8px',
+                    background: 'var(--bg-raised)',
+                    borderRadius: 3,
+                  }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
+                    {/* Phase 11B: Expand button for Asset rows. Falls back to
+                        ignoring the click when no asset object or handler is
+                        wired (defensive — should always be wired today). */}
+                    {n.asset && onExpandAsset && (
+                      <ExpandButton onClick={() => onExpandAsset(n.asset)} title={`Expand ${n.name}`} />
+                    )}
                   </div>
                 ))}
               </div>

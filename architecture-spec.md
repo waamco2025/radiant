@@ -447,6 +447,20 @@ When an actor publishes a Requirement Set, it appears in BOTH Tab 2 (with the gl
 
 > **Prototype note — Library backing.** In V2.2 the Library is backed by per-role state (`requirementSets`, `pepTemplates`) plus a globally-shared `publishedRequirementSets` array. **In production:** the Library is a view onto Platform-side artifact registries — Parsing Templates registered via DPP+PEP, Requirement Sets registered via DPP+REP, with publication being an SDP-managed lifecycle event that adds the artifact to the network-wide discoverable index. **Authority:** DPP (artifact registration), REP/PEP (per-protocol Templates), SDP (publication lifecycle).
 
+### 8.7 Detail Panel — Expand modal (Phase 11B)
+
+The Expand modal restores a V2/V2.1 surface that was lost in the V2.2 retreat. Any row in a Detail Panel that points at a self-contained artifact (referenced Asset rows, parsed-field rows, evaluation-result rows) carries a small outward-arrow `ExpandButton` on its right side. Click → portal-rendered modal with two tabs:
+
+1. **Output** — schema-aware view of the artifact:
+   - `schema='asset'` — `AssetEvidenceViewer`: file metadata header (filename, size, MIME, truncated hash with click-to-copy) + iframe showing `file.localPath` content (in V2.2; production uses QS URI resolution) + footer with owner + registration date. Falls back to a "Document preview not available" card when no localPath is set.
+   - `schema='parse-output'` — `ArtifactRow` list of `parseResult.fields[]` (label + value + confidence chip).
+   - `schema='eval-output'` — `ArtifactRow` list of `evaluationResult.results[]` (label + value + status badge: SAT / UNSAT / MISSING / N/A).
+2. **JSON** — universal: `JSON.stringify(artifact, null, 2)` in a scrollable preformatted block.
+
+Modal: 720px wide × 80vh tall, portal-rendered via the shared Backdrop, closes on backdrop click / × / Escape.
+
+> **Prototype note — Expand modal evidence.** Phase 11B uses iframe-based PDF rendering against `file.localPath` because the prototype ships placeholder PDFs in `/public/`. **In production:** the expand viewer fetches files from QS via the Platform-managed `file.uri` lookup and renders through the same iframe (or a dedicated PDF.js component — see polish backlog #41). **Authority:** Platform (file storage + URI resolution); App (rendering). The iframe-based viewer is sufficient for the prototype; a real PDF.js integration is tracked as backlog #41.
+
 ---
 
 ## 9. AI Shopper
@@ -476,7 +490,7 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
 
 ### 10.1 Asset artifact
 
-> **Prototype note — Asset field authority.** Platform-issued fields in production: `pin`, `ownerDot`, `file.hash` (verified at ingest), `registrationDate`. App-derived / actor-input fields: `name`, `description`, `file.uri`, `file.filename`, `file.size`, `file.mimeType`, `parentAssetId`. The prototype populates the Platform-issued fields client-side via `makeDotObject` and mock hash computation. **Authority:** DPP (Platform-issued fields); Actor + App (actor-input fields).
+> **Prototype note — Asset field authority.** Platform-issued fields in production: `pin`, `ownerDot`, `file.hash` (verified at ingest), `registrationDate`. App-derived / actor-input fields: `name`, `description`, `file.uri`, `file.filename`, `file.size`, `file.mimeType`, `parentAssetId`. **Prototype-only field:** `file.localPath` — pointer to a placeholder PDF in `/public/` so the Detail Panel's expand-evidence iframe has something real to render. **In production:** files are resolved via Platform-side QS URI lookups against `file.uri`; there is no `localPath`. **Authority:** DPP (Platform-issued fields); Actor + App (actor-input fields); App-only (`localPath`).
 
 ```json
 {
@@ -493,7 +507,8 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
     "filename": "prm-datasheet-v4.pdf",
     "size": 2458792,
     "mimeType": "application/pdf",
-    "hash": "sha256:..."
+    "hash": "sha256:...",
+    "localPath": "/powerregulationmodule-datasheet.pdf"
   },
   "registrationDate": "2026-02-10T14:18:00Z",
   "parseResultIds": ["parse-001", "parse-002"]
