@@ -3928,10 +3928,18 @@ export default function V2App() {
           }
           // Slide-in from the right; z-index above the directory (150)
           // and the materialized card (10), below the modal stack (10000).
+          // Phase 11B.2: top offset matches the app chrome's bottom edge so
+          // the panel header (and its X close button) doesn't sit underneath
+          // the chrome (which is zIndex 300 — above the panel's 200). The
+          // parent-canvas Detail Panel doesn't need this because it mounts
+          // inside the canvas container, which is already offset below the
+          // chrome via the V2App flex layout. This panel mounts at the V2App
+          // root level (sibling of the chrome flex item), so position:fixed
+          // places it relative to the viewport — hence the explicit offset.
           return (
             <div style={{
               position: 'fixed',
-              top: 0,
+              top: 61, // chrome height — measured from getBoundingClientRect
               right: 0,
               bottom: 0,
               width: 480,
