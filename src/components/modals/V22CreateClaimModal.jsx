@@ -56,6 +56,12 @@ export default function V22CreateClaimModal({
   const [description, setDescription] = useState('')
   const [selected, setSelected] = useState(() => new Set(initialAssetIds))
   const [showNestedRegister, setShowNestedRegister] = useState(false)
+  // Phase 11C.1: pre-set acknowledgments authored at Claim creation time.
+  // Local rows carry transient client keys for React; the factory generates
+  // stable ids on submit. Empty rows (no title AND no description) are
+  // dropped on submit.
+  const [acks, setAcks] = useState([])
+  const newAckKey = () => `ack-row-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
 
   const toggle = (id) => {
     setSelected(prev => {
@@ -74,10 +80,17 @@ export default function V22CreateClaimModal({
   const handleComplete = () => {
     if (!canReview) return
     if (!hasSufficientCredits) return
+    // Strip empty acknowledgment rows on submit; the factory also re-filters
+    // and generates stable ids — duplicate filtering here keeps the call site
+    // self-documenting.
+    const finalAcks = acks
+      .filter((a) => (a.title || '').trim() || (a.description || '').trim())
+      .map((a) => ({ title: (a.title || '').trim(), description: (a.description || '').trim() }))
     onComplete?.({
       name: name.trim(),
       description: description.trim(),
       referencedAssetIds: Array.from(selected),
+      acknowledgments: finalAcks,
     })
   }
 
@@ -252,6 +265,97 @@ export default function V22CreateClaimModal({
                 </div>
               )}
             </div>
+
+            {/* Phase 11C.1: Acknowledgments section.
+                Pre-set terms requesters must accept before requesting any DA
+                or EA on this Claim. Optional — if no acknowledgments are added,
+                requesters proceed without a gate. */}
+            <div>
+              <FieldLabel label="Acknowledgments (optional)" />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 10 }}>
+                Pre-set terms that requesters must accept before requesting Disclosure or
+                Evaluation Agreements on this Claim.
+              </div>
+
+              {acks.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
+                  {acks.map((a) => (
+                    <div
+                      key={a._key}
+                      style={{
+                        padding: '10px 12px', borderRadius: 6,
+                        border: '1px solid var(--border)', background: 'var(--bg-card)',
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <input
+                          value={a.title}
+                          onChange={(e) => setAcks(prev => prev.map(x => x._key === a._key ? { ...x, title: e.target.value } : x))}
+                          placeholder="Title (e.g. Result confidentiality)"
+                          style={{
+                            flex: 1, padding: '7px 10px', borderRadius: 5,
+                            border: '1px solid var(--border-faint)',
+                            background: 'var(--bg-deep)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-display)', fontSize: 12,
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          onClick={() => setAcks(prev => prev.filter(x => x._key !== a._key))}
+                          title="Remove acknowledgment"
+                          style={{
+                            padding: '6px 10px', borderRadius: 5, cursor: 'pointer',
+                            border: '1px solid var(--border)',
+                            background: 'transparent',
+                            color: 'var(--text-dim)',
+                            fontSize: 11, fontFamily: 'var(--font-mono)',
+                            lineHeight: 1,
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-red)'; e.currentTarget.style.borderColor = 'var(--accent-red)' }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <textarea
+                        value={a.description}
+                        onChange={(e) => setAcks(prev => prev.map(x => x._key === a._key ? { ...x, description: e.target.value } : x))}
+                        placeholder="Description — what is the requester acknowledging?"
+                        rows={2}
+                        style={{
+                          width: '100%', padding: '7px 10px', borderRadius: 5,
+                          border: '1px solid var(--border-faint)',
+                          background: 'var(--bg-deep)',
+                          color: 'var(--text-primary)',
+                          fontFamily: 'var(--font-display)', fontSize: 12,
+                          outline: 'none', resize: 'vertical', lineHeight: 1.5,
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setAcks(prev => [...prev, { _key: newAckKey(), title: '', description: '' }])}
+                style={{
+                  width: '100%', padding: '9px 14px', borderRadius: 6, cursor: 'pointer',
+                  border: '1px dashed var(--border-hover)',
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  transition: 'all 120ms',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-indigo)'; e.currentTarget.style.color = 'var(--accent-indigo)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+              >
+                + Add Acknowledgment
+              </button>
+            </div>
           </div>
         )}
 
@@ -277,6 +381,10 @@ export default function V22CreateClaimModal({
               )}
               <InfoRow label="Owner" value={activeParty} />
               <InfoRow label="Referenced Assets" value={`${selectedList.length}`} />
+              {(() => {
+                const reviewAckCount = acks.filter((a) => (a.title || '').trim() || (a.description || '').trim()).length
+                return <InfoRow label="Acknowledgments" value={reviewAckCount === 0 ? 'None' : `${reviewAckCount}`} />
+              })()}
               <InfoRow label="Created" value="On submit" />
             </div>
 

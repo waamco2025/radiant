@@ -5,13 +5,16 @@
 //     • Enter the target Claim's PIN (with live resolution).
 //     • (Optional) Suggest one or more Requirements Sets to authorize.
 //     • Optional message for the grantor.
-//   Step 2 — Evaluation Agreement (Phase 11C / #115)
-//     • Set the EA's expiry date (default: 1 year from today).
-//     • Acknowledgments: result confidentiality + attribution.
+//   Step 2 — Acknowledge the Claim owner's terms (Phase 11C.1 architectural
+//     correction): the Claim's pre-set `acknowledgments[]` render as required
+//     checkboxes. All must be checked before Submit enables. If the Claim
+//     has no acknowledgments, the step explains the user can proceed directly.
+//     The agreement's expiry + responder-authored terms are set by the
+//     responder on accept (CombinedResponseModal Step 3).
 //
-// Submission creates a provisional DA + EA pair on the requester's canvas.
-// Visual language inherits the V2.1 modal primitives (Backdrop / Modal /
-// ModalHeader / ModalBody / ModalFooter, Btn, StepDots).
+// Submission creates a provisional DA + EA pair on the requester's canvas
+// carrying the ids of the acknowledgments the requester checked
+// (`acknowledgmentsAccepted`).
 
 import { useState, useMemo } from 'react'
 import {
@@ -20,16 +23,9 @@ import {
 } from './ModalShared'
 
 const PIN_PREFIX = 'PIN-0x'
-const DEFAULT_EXPIRY_DAYS = 365
 
 function isValidPinShape(pin) {
   return typeof pin === 'string' && pin.startsWith(PIN_PREFIX) && pin.length >= PIN_PREFIX.length + 8
-}
-
-// Default expiry — 1 year from today, formatted as YYYY-MM-DD for the date input.
-function defaultExpiryIsoDate() {
-  const d = new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
-  return d.toISOString().slice(0, 10)
 }
 
 export default function CombinedRequestModal({
@@ -46,11 +42,10 @@ export default function CombinedRequestModal({
   const [pin, setPin] = useState(initialPin)
   const [message, setMessage] = useState('')
   const [selectedReqSets, setSelectedReqSets] = useState(() => [...initialRequirementsSetIds])
-  // Phase 11C — Step 2 state. Default expiry = today + 1y; both checkboxes
-  // default to false (acknowledgments require explicit opt-in).
-  const [expiryDate, setExpiryDate] = useState(() => defaultExpiryIsoDate())
-  const [resultConfidentiality, setResultConfidentiality] = useState(false)
-  const [attribution, setAttribution] = useState(false)
+  // Phase 11C.1 — Step 2 state: ids of the Claim's acknowledgments that the
+  // requester has checked. All required acknowledgments must be checked
+  // before Submit enables (when the Claim has any).
+  const [ackChecked, setAckChecked] = useState(new Set())
 
   const trimmed = pin.trim()
   const pinShapeOk = isValidPinShape(trimmed)
@@ -64,12 +59,22 @@ export default function CombinedRequestModal({
   }, [trimmed, pinShapeOk, resolveClaimByPin, requesterParty])
 
   const canAdvanceFromStep1 = resolution.state === 'ok' && !!requesterAsset
-  // Step 2 — expiry is optional (empty = "no expiry"); checkboxes default off
-  // and don't gate submission. Always advanceable once Step 1 is valid.
-  const canSubmit = canAdvanceFromStep1
+  const claimAcks = (resolution.state === 'ok' ? resolution.claim?.acknowledgments : null) || []
+  const allAcksChecked = claimAcks.every((a) => ackChecked.has(a.id))
+  // Step 2 enables submission only when every Claim ack has been checked.
+  // Zero-ack Claims trivially satisfy the "all checked" gate.
+  const canSubmit = canAdvanceFromStep1 && allAcksChecked
 
   const toggleReqSet = (id) => {
     setSelectedReqSets((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+  const toggleAck = (ackId) => {
+    setAckChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(ackId)) next.delete(ackId)
+      else next.add(ackId)
+      return next
+    })
   }
 
   const handleSubmit = () => {
@@ -80,12 +85,11 @@ export default function CombinedRequestModal({
       ownerParty: resolution.ownerParty,
       selectedRequirementsSetIds: selectedReqSets,
       message: message.trim(),
-      eaTerms: {
-        // Empty string → null (no expiry); else ISO timestamp at end of day UTC.
-        expires: expiryDate ? new Date(`${expiryDate}T23:59:59Z`).toISOString() : null,
-        resultConfidentiality,
-        attribution,
-      },
+      // Phase 11C.1: forward the ids the requester checked. Zero-ack Claims
+      // produce an empty array (audit-trail still records "nothing required").
+      acknowledgmentsAccepted: claimAcks
+        .filter((a) => ackChecked.has(a.id))
+        .map((a) => a.id),
     })
   }
 
@@ -98,8 +102,8 @@ export default function CombinedRequestModal({
           title="Request Agreement"
           subtitle={
             step === 1
-              ? 'Step 1 — Disclosure Agreement. Identify the Claim and suggest the Requirements Sets you want to evaluate against.'
-              : 'Step 2 — Evaluation Agreement. Set the agreement’s expiry and acknowledgments.'
+              ? 'Step 1 — Identify the Claim. The owner sets the agreement’s terms when they respond; only their pre-set acknowledgments require your action up front.'
+              : 'Step 2 — Acknowledge the Claim owner’s pre-set terms. All required acknowledgments must be checked before submission.'
           }
           step={step}
           totalSteps={totalSteps}
@@ -253,47 +257,35 @@ export default function CombinedRequestModal({
             </>
           )}
 
-          {/* ─── STEP 2 — Evaluation Agreement (Phase 11C / #115) ─── */}
+          {/* ─── STEP 2 — Acknowledge the Claim owner's terms (Phase 11C.1) ─── */}
           {step === 2 && (
             <>
-              <FieldLabel label="Agreement expiry" />
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                Set when both agreements expire. Defaults to one year from today. Leave blank for no expiry.
-              </div>
-              <input
-                type="date"
-                value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                style={{
-                  width: '100%', height: 38, padding: '0 14px',
-                  borderRadius: 6,
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  outline: 'none',
-                  marginBottom: 22,
-                  boxSizing: 'border-box',
-                }}
-              />
-
-              <FieldLabel label="Acknowledgments" />
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                These commitments ride along with the Evaluation Agreement and are surfaced to the grantor for review.
-              </div>
-              <CheckboxRow
-                checked={resultConfidentiality}
-                onToggle={() => setResultConfidentiality(v => !v)}
-                label="Result confidentiality"
-                desc="Evaluation results are for internal use only and will not be shared with third parties."
-              />
-              <CheckboxRow
-                checked={attribution}
-                onToggle={() => setAttribution(v => !v)}
-                label="Attribution"
-                desc="If results are referenced externally (audits, certifications), the evaluator will be credited."
-              />
+              <FieldLabel label={`Acknowledge ${resolution.ownerParty || 'the Claim owner'}'s terms`} required={claimAcks.length > 0} />
+              {claimAcks.length === 0 ? (
+                <div style={{
+                  padding: '14px 16px', borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, var(--border))',
+                  fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+                }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>{resolution.ownerParty || 'The Claim owner'}</strong> has set no acknowledgments on this Claim. You can proceed directly.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+                    Before requesting access, please acknowledge the following terms set by <strong style={{ color: 'var(--text-secondary)' }}>{resolution.ownerParty}</strong>. All acknowledgments are required.
+                  </div>
+                  {claimAcks.map((a) => (
+                    <CheckboxRow
+                      key={a.id}
+                      checked={ackChecked.has(a.id)}
+                      onToggle={() => toggleAck(a.id)}
+                      label={a.title || '(Untitled acknowledgment)'}
+                      desc={a.description || ''}
+                    />
+                  ))}
+                </>
+              )}
             </>
           )}
         </ModalBody>

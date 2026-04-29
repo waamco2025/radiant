@@ -3,12 +3,16 @@
 //
 // Used when the requester already has an active Disclosure Agreement on the
 // target Claim and wants to add an Evaluation Agreement to gain evaluation
-// rights. Single-step modal — the DA scope/type is fixed (already negotiated),
-// so the requester only needs to propose EA terms.
+// rights. Single-step modal — the DA scope/type is fixed (already
+// negotiated), and per the Phase 11C.1 architectural correction the EA's
+// terms are responder-authored. The only requester-side action up front is
+// acknowledging the Claim owner's pre-set terms (the Claim's
+// `acknowledgments[]` array), which the requester must check off before
+// submission.
 //
 // Submission creates a provisional EA referencing the existing active DA.
-// The Claim flips to provisional state on the requester's canvas; the grantor
-// receives a `v22-request-ea-only` notification and responds via
+// The Claim flips to provisional state on the requester's canvas; the
+// grantor receives a `v22-request-ea-only` notification and responds via
 // CombinedResponseModal in `eaOnlyMode`.
 
 import { useState } from 'react'
@@ -17,45 +21,48 @@ import {
   Btn, FieldLabel,
 } from './ModalShared'
 
-const DEFAULT_EXPIRY_DAYS = 365
-
-function defaultExpiryIsoDate() {
-  const d = new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
-  return d.toISOString().slice(0, 10)
-}
-
 export default function EARequestModal({
   requesterParty,        // e.g. 'GovCo'
   requesterAsset,        // { id, name } — anchor on the requester's canvas
-  claim,                 // { id, name, ownerParty } — the Claim being requested for
+  claim,                 // { id, name, ownerParty, acknowledgments[] } — target Claim
   ownerParty,            // grantor (= claim.owner)
   existingDisclosureAgreementId, // the active DA's id (warm path anchor)
   availableRequirementsSets = [], // [{ id, name, version }]
-  onSubmit,              // ({ claim, ownerParty, existingDisclosureAgreementId, selectedRequirementsSetIds, message, eaTerms }) => void
+  onSubmit,              // ({ claim, ownerParty, existingDisclosureAgreementId, requesterAsset, selectedRequirementsSetIds, message, acknowledgmentsAccepted }) => void
   onClose,
 }) {
   const [message, setMessage] = useState('')
   const [selectedReqSets, setSelectedReqSets] = useState([])
-  const [expiryDate, setExpiryDate] = useState(() => defaultExpiryIsoDate())
-  const [resultConfidentiality, setResultConfidentiality] = useState(false)
-  const [attribution, setAttribution] = useState(false)
+  const [ackChecked, setAckChecked] = useState(new Set())
+
+  const claimAcks = Array.isArray(claim?.acknowledgments) ? claim.acknowledgments : []
+  const allAcksChecked = claimAcks.every((a) => ackChecked.has(a.id))
+  const canSubmit = allAcksChecked
 
   const toggleReqSet = (id) => {
     setSelectedReqSets((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
+  const toggleAck = (ackId) => {
+    setAckChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(ackId)) next.delete(ackId)
+      else next.add(ackId)
+      return next
+    })
+  }
 
   const handleSubmit = () => {
+    if (!canSubmit) return
     onSubmit?.({
       claim,
       ownerParty,
       existingDisclosureAgreementId,
+      requesterAsset,
       selectedRequirementsSetIds: selectedReqSets,
       message: message.trim(),
-      eaTerms: {
-        expires: expiryDate ? new Date(`${expiryDate}T23:59:59Z`).toISOString() : null,
-        resultConfidentiality,
-        attribution,
-      },
+      acknowledgmentsAccepted: claimAcks
+        .filter((a) => ackChecked.has(a.id))
+        .map((a) => a.id),
     })
   }
 
@@ -64,7 +71,7 @@ export default function EARequestModal({
       <Modal width={640}>
         <ModalHeader
           title="Request Evaluation Agreement"
-          subtitle={`Request evaluation rights on ${claim?.name || 'this Claim'} from ${ownerParty}. Your existing Disclosure Agreement remains in place.`}
+          subtitle={`Request evaluation rights on ${claim?.name || 'this Claim'} from ${ownerParty}. Your existing Disclosure Agreement remains in place. ${ownerParty} sets the agreement's terms when they respond.`}
           onClose={onClose}
         />
 
@@ -92,6 +99,35 @@ export default function EARequestModal({
               </div>
             )}
           </div>
+
+          {/* Phase 11C.1: acknowledgments — required gate before Submit. */}
+          <FieldLabel label={`Acknowledge ${ownerParty}'s terms`} required={claimAcks.length > 0} />
+          {claimAcks.length === 0 ? (
+            <div style={{
+              padding: '14px 16px', borderRadius: 8,
+              background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, var(--border))',
+              fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+              marginBottom: 22,
+            }}>
+              <strong style={{ color: 'var(--text-primary)' }}>{ownerParty}</strong> has set no acknowledgments on this Claim. You can proceed directly.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+                Before requesting an Evaluation Agreement, please acknowledge the following terms set by <strong style={{ color: 'var(--text-secondary)' }}>{ownerParty}</strong>. All acknowledgments are required.
+              </div>
+              {claimAcks.map((a) => (
+                <CheckboxRow
+                  key={a.id}
+                  checked={ackChecked.has(a.id)}
+                  onToggle={() => toggleAck(a.id)}
+                  label={a.title || '(Untitled acknowledgment)'}
+                  desc={a.description || ''}
+                />
+              ))}
+            </>
+          )}
 
           <FieldLabel label="Requested Requirements Sets (optional)" />
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
@@ -147,45 +183,6 @@ export default function EARequestModal({
             )}
           </div>
 
-          <FieldLabel label="Agreement expiry" />
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-            Set when the Evaluation Agreement expires. Defaults to one year from today. Leave blank for no expiry.
-          </div>
-          <input
-            type="date"
-            value={expiryDate}
-            onChange={(e) => setExpiryDate(e.target.value)}
-            style={{
-              width: '100%', height: 38, padding: '0 14px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              color: 'var(--text-primary)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              outline: 'none',
-              marginBottom: 22,
-              boxSizing: 'border-box',
-            }}
-          />
-
-          <FieldLabel label="Acknowledgments" />
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-            These commitments ride along with the Evaluation Agreement and are surfaced to the grantor for review.
-          </div>
-          <CheckboxRow
-            checked={resultConfidentiality}
-            onToggle={() => setResultConfidentiality(v => !v)}
-            label="Result confidentiality"
-            desc="Evaluation results are for internal use only and will not be shared with third parties."
-          />
-          <CheckboxRow
-            checked={attribution}
-            onToggle={() => setAttribution(v => !v)}
-            label="Attribution"
-            desc="If results are referenced externally (audits, certifications), the evaluator will be credited."
-          />
-
           <FieldLabel label="Message (optional)" />
           <textarea
             rows={3}
@@ -215,7 +212,7 @@ export default function EARequestModal({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn label="Cancel" onClick={onClose} />
-            <Btn label="Send Request" accent onClick={handleSubmit} />
+            <Btn label="Send Request" accent disabled={!canSubmit} onClick={handleSubmit} />
           </div>
         </ModalFooter>
       </Modal>
@@ -223,7 +220,8 @@ export default function EARequestModal({
   )
 }
 
-// Same checkbox row pattern as CombinedRequestModal Step 2.
+// Acknowledgment checkbox row — same visual rhythm as
+// CombinedRequestModal Step 2.
 function CheckboxRow({ checked, onToggle, label, desc }) {
   return (
     <div
@@ -253,7 +251,9 @@ function CheckboxRow({ checked, onToggle, label, desc }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 3 }}>{label}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc}</div>
+        {desc && (
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc}</div>
+        )}
       </div>
     </div>
   )

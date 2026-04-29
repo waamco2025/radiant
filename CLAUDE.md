@@ -2051,3 +2051,44 @@ Cold path also gained acknowledgment forwarding — `handleSubmit` now reads `re
 - *Pure EA-only cancellation handler* — for now warm-path requests are cleaned up via decline-dismiss; a dedicated `handleV22CancelEaOnlyRequest` is a polish follow-up if Andrew wants the requester to drop the provisional without a counterparty round-trip.
 
 **Status:** [x] Complete.
+
+### Phase 11C.1 completion notes (2026-04-29) — Acknowledgments architecture + warm path bug fixes
+
+Twelve workstreams in a single commit, structured around a fundamental Phase 11C architectural correction: terms are responder-authored; the requester's role at request time is acknowledging pre-set commitments the Claim owner authored on the Claim itself.
+
+**W1 — Acknowledgments on Claim schema.** `makeClaim` factory extended with optional `acknowledgments[]` (`{ id, title, description }`). Seeded 2 acks on Alice's PRM Assembly Claim ("Result confidentiality", "Attribution") and 1 ack on ChipCo's PRM-3A IC Compliance Claim. `makeAmendedClaim` preserves acknowledgments through Asset amendments. `makeClaimCreationArtifacts` generates stable per-row ids and filters empty rows on submit.
+
+**W2 — Claim creation modal.** New Acknowledgments section in `V22CreateClaimModal` Step 0, between Referenced Assets and the next field. Title input + description textarea per row, Remove button, "+ Add Acknowledgment" CTA. Empty rows (no title AND no description) dropped on submit. Review step gained an Acknowledgments InfoRow showing the count.
+
+**W3 — Cold path Step 2 redesign.** `CombinedRequestModal` Step 2 rewritten. The earlier (wrong-shape) requester-authored expiry + result-confidentiality + attribution checkboxes are gone. Step 2 now renders the target Claim's `acknowledgments[]` as required checkboxes. All boxes must be checked before Submit enables. Zero-ack Claims surface a "no acknowledgments required" callout and proceed directly.
+
+**W4 — Warm path EARequestModal redesign.** Same shape as cold path Step 2: acknowledgments as required checkboxes, no expiry / confidentiality / attribution UI. Optional message field retained.
+
+**W5 — Response modal redesign.** `CombinedResponseModal` step 3 keeps the responder-authored `ExpiryPicker` (defaults 1y from response date). Dropped the read-only chips that surfaced the requester's confidentiality / attribution selections. Added a read-only "Requester accepted these acknowledgments" panel listing the ids the requester checked, resolved against the Claim's `acknowledgments[]`. Step 4 review row swapped from named chips to a count.
+
+**W6 — EA artifact schema cleanup.** `makeEvaluationAgreement` removed `terms.resultConfidentiality` + `terms.attribution`. Added top-level `acknowledgmentsAccepted: [id, ...]` (audit trail; ids reference the Claim's `acknowledgments[]`). Both finalize factories carry the array through unchanged. Both provisional factories accept the new parameter; legacy `eaExpiry` / `eaResultConfidentiality` / `eaAttribution` parameters dropped.
+
+**W7 — Cold-path provisional state regression fix.** The legacy provisional check at the view-builder layer required ALL of an actor's DAs on a Claim to be `type === 'provisional'` — missing the case where the user re-requests against a Claim they already have an active DA on. Replaced with `find()` matching any provisional DA where the actor is grantee. Backlog #134 filed for the upstream UX gate (PIN-existing-Claim validation in cold path Step 1) since the fix here is purely visual fallout — production should prevent the duplicate request entirely.
+
+**W8 + W9 — Warm-path acceptance reveal.** `handleV22AcceptEAOnly` extended to mirror the cold-path acceptance reveal:
+- Sets `v22RecentlyAcceptedClaimId` + `v22PanToClaimId` for the Claim — drives Bob's provisional → active transition with `_isNew` reveal animation.
+- Sets `v22RecentlyAcceptedAssetId` + `setSel` + `v22PanToClaimId` for the grantee anchor Asset — Dave's canvas now pans/zooms to Bob's Avionics Module as it materializes with NEW badge.
+
+This pairs the cold-path's Phase 6.5 #4 fix exactly. Both bugs (Bob's transition not animating, Dave not panning to the new Asset) collapse into the same wiring.
+
+**W10 — Unravel animation on declined dismiss.** `handleV22DismissDeclined` converted to async; `await playUnravelAnimation(...)` runs before state mutation. setSel(null) BEFORE the unravel so the selection border doesn't compete with the border-erasure stage (same pattern Phase 9D.2.3 Fix 2 established). Cold path declined Claims (provisional Claim pulled in via the request) and warm path declined Claims (still on canvas via active DA, EA annotated `_declineMeta`) both animate uniformly. The primitive gracefully no-ops on nodes that aren't on canvas, so no defensive guard needed.
+
+**W11 — Detail Panel clears on Directory navigation.** Directory icon click handler now calls `setSel(null)` + `setForcePanelTab(null)` + `setForceExpandSda(null)` before flipping `v22DirectoryOpen`. Closing the layer also clears `v22DirectoryMaterializedClaim` so directory-side panel state doesn't survive the transition. Cleanly tested: open Bob → select a Claim → click globe → directory layer renders without the panel persisting.
+
+**W12 — Documentation.** Spec: §10.3 Claim acknowledgments[] field documented with format spec + carry-through note to §10.5; §10.5 dropped requester-authored terms paragraph + added Prototype note about the architectural correction + `acknowledgmentsAccepted` field documented; §11.6a updated to reflect the new flow. Spec Changelog gained the 11C.1 correction entry. polish-backlog: new entries #134 (PIN-existing-Claim validation), #135 (counterparty-pulled Asset panel sections), #136 (Cancel Request action bar button) — all out-of-scope per the brief. Update Log entry. Changelog modal v0.11.0 → v0.11.1 entry appended; footer version bumped.
+
+**Deviations from task brief:**
+- **None material.** All 12 workstreams shipped as briefed. The W7 regression fix was a one-line `every` → `find` change, much simpler than expected — the regression was a logical edge case the original Phase 6 author hadn't considered (re-request against an already-disclosed Claim) rather than a 11C-specific introduction. Filed the architectural-correctness item as #134 backlog so the Phase 11C.1 fix doesn't end the conversation.
+- **W10 unravel** uses the existing `playUnravelAnimation` primitive without modifications. The primitive's own graceful-no-op behavior on missing nodes meant no defensive guard was needed at the call site.
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~553 kB main / ~131 kB gzip).
+- Data-layer probe via dynamic import: cold-path against EMI Claim correctly flags `provisionalClaimIds: [claim-emi-shield]`; warm-path provisional EA correctly flags ChipCo Claim provisional on Bob's view; finalize clears `_provisional` and preserves `acknowledgmentsAccepted`; EA terms keys no longer include `resultConfidentiality` / `attribution`; seeded acks present on PRM Assembly (2) and ChipCo PRM-3A (1).
+- End-to-end UI walkthrough constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-path verification + module-load + data-layer probes are the canonical fallback per prior phase precedent.
+
+**Status:** [x] Complete.

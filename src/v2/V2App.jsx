@@ -409,7 +409,7 @@ export default function V2App() {
   }, [updateRoleState])
 
   const handleV22RequestSubmit = useCallback((payload) => {
-    const { claim, ownerParty, selectedRequirementsSetIds, message, eaTerms } = payload
+    const { claim, ownerParty, selectedRequirementsSetIds, message, acknowledgmentsAccepted } = payload
     const anchorNode = v22RequestAnchor
       || v22Data?.nodes.find((n) => n.v22Type === 'ASSET' && n.owner === activeRole.party)
     if (!anchorNode) return
@@ -421,10 +421,9 @@ export default function V2App() {
       claimId: claim.id,
       requestedRequirementsSetIds: selectedRequirementsSetIds,
       message,
-      // Phase 11C (#115): preserve the Step-2 EA terms on the provisional EA.
-      eaExpiry: eaTerms?.expires || null,
-      eaResultConfidentiality: !!eaTerms?.resultConfidentiality,
-      eaAttribution: !!eaTerms?.attribution,
+      // Phase 11C.1: ids of the Claim's acknowledgments the requester checked
+      // at submission. Audit trail; rides through finalize onto the active EA.
+      acknowledgmentsAccepted: acknowledgmentsAccepted || [],
     })
     pair.disclosureAgreement._requestMeta = {
       ...(pair.disclosureAgreement._requestMeta || {}),
@@ -627,7 +626,21 @@ export default function V2App() {
     setSel(null)
   }, [activeRole.party])
 
-  const handleV22DismissDeclined = useCallback((claimId) => {
+  const handleV22DismissDeclined = useCallback(async (claimId) => {
+    if (!claimId) return
+    // Phase 11C.1 W10: play the unravel animation BEFORE dropping state, so
+    // declined Claims (cold or warm path) leave the canvas with the same
+    // visual ceremony revoked Claims get. Mirrors handleV22DismissRevoked
+    // above. setSel(null) MUST happen before playUnravel so the selection
+    // border doesn't compete with the border-erasure stage. The primitive
+    // gracefully no-ops on nodes that aren't on canvas.
+    setSel(null)
+    await playUnravelAnimation({
+      nodeId: claimId,
+      canvasRef,
+      setUnravelingNodeId: setV22UnravelingNodeId,
+      waitForPanelClose: true,
+    })
     setV22Provisionals((prev) => {
       // Find the declined DA(s) for this claim/actor and drop them along with
       // their paired EA(s) so the synthetic edge disappears on dismissal.
@@ -657,7 +670,6 @@ export default function V2App() {
         ),
       }
     })
-    setSel(null)
   }, [activeRole.party])
 
   // ── Phase 11C: warm-path EA-only flow handlers ──────────────────────
@@ -666,7 +678,7 @@ export default function V2App() {
   // creates only a provisional EA referencing an existing active DA.
 
   const handleV22EaRequestSubmit = useCallback((payload) => {
-    const { claim, ownerParty, existingDisclosureAgreementId, requesterAsset, selectedRequirementsSetIds, message, eaTerms } = payload
+    const { claim, ownerParty, existingDisclosureAgreementId, requesterAsset, selectedRequirementsSetIds, message, acknowledgmentsAccepted } = payload
     if (!claim || !ownerParty || !existingDisclosureAgreementId) return
     const { evaluationAgreement } = makeProvisionalEvaluationAgreement({
       requesterParty: activeRole.party,
@@ -677,9 +689,9 @@ export default function V2App() {
       existingDisclosureAgreementId,
       requestedRequirementsSetIds: selectedRequirementsSetIds || [],
       message,
-      expiry: eaTerms?.expires || null,
-      resultConfidentiality: !!eaTerms?.resultConfidentiality,
-      attribution: !!eaTerms?.attribution,
+      // Phase 11C.1: ids of the Claim's acknowledgments the requester
+      // checked at submission. Audit trail; rides through finalize.
+      acknowledgmentsAccepted: acknowledgmentsAccepted || [],
     })
     // Annotate request meta for the response modal's requester display.
     evaluationAgreement._requestMeta = {
@@ -746,7 +758,24 @@ export default function V2App() {
     })
     setV22RespondingToEaOnly(null)
     if (claimIdForReveal) {
+      // Phase 11C.1 W8: mirror the cold-path acceptance reveal — set the
+      // recently-accepted id (drives the `_isNew` reveal on the requester's
+      // canvas via v22DataWithReveal stamping) AND set the pan-to id so
+      // V2Canvas's selection-pan effect targets the now-active Claim when
+      // the requester switches in.
       setV22RecentlyAcceptedClaimId(claimIdForReveal)
+      setV22PanToClaimId(claimIdForReveal)
+    }
+    // Phase 11C.1 W9: when Dave accepts, Bob's anchor Asset becomes pulled-in
+    // on Dave's canvas. Set the recently-accepted Asset id + pan-to so Dave
+    // sees the new node materialize with reveal animation, and pan/zoom to
+    // the just-pulled-in Asset just like the cold-path Phase 6.5 #4 fix.
+    if (anchorIdForNotif) {
+      setV22RecentlyAcceptedAssetId(anchorIdForNotif)
+      setSel(anchorIdForNotif)
+      setForcePanelTab(null)
+      setForceExpandSda(null)
+      setV22PanToClaimId(anchorIdForNotif)
     }
     // Dismiss the original v22-request-ea-only notification on this grantor's
     // inbox now that the request has been resolved.
@@ -1551,7 +1580,7 @@ export default function V2App() {
   // Phase 9A.3: V2.2 Claim creation. Produces a new Claim + Actor→Claim
   // ownership DA + one Claim→Asset internal DA per reference. Unilateral.
   // NEW badge + pan-to via the shared `_isNew` reveal path.
-  const handleV22CreateClaimSubmit = useCallback(({ name, description, referencedAssetIds }) => {
+  const handleV22CreateClaimSubmit = useCallback(({ name, description, referencedAssetIds, acknowledgments }) => {
     if (!name || !name.trim() || !Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
       return null
     }
@@ -1561,6 +1590,8 @@ export default function V2App() {
       name,
       description,
       referencedAssetIds,
+      // Phase 11C.1: pass through acknowledgments authored at creation time.
+      acknowledgments: acknowledgments || [],
     })
     setV22Provisionals((prev) => ({
       ...prev,
@@ -3022,7 +3053,20 @@ export default function V2App() {
           <>
               <Tooltip content={v22DirectoryOpen ? 'Close the Public Directory' : 'Radiant Network — browse the Public Directory'} width={280}>
               <div
-                onClick={() => setV22DirectoryOpen((v) => !v)}
+                onClick={() => {
+                  // Phase 11C.1 W11: clear any active node selection (and its
+                  // Detail Panel) when navigating into / out of the Directory
+                  // Layer so the panel doesn't persist over the directory.
+                  // Also clear the directory-materialized Claim panel when
+                  // closing the layer.
+                  setSel(null)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22DirectoryOpen((open) => {
+                    if (open) setV22DirectoryMaterializedClaim(null)
+                    return !open
+                  })
+                }}
                 style={{
                   ...iconBtnStyle,
                   // Phase 8 polish #2: button reads as active when Directory
@@ -4360,13 +4404,12 @@ export default function V2App() {
           // this Claim (includes both grantor-owned and proof-of-eval-shared).
           const evalResultsForClaim = (v22View?.evaluationResults || [])
             .filter(er => er.claimId === claim.id)
-          // Phase 11C: surface the requester's proposed EA terms so the
-          // response modal can display them at step 3 + step 4 review.
+          // Phase 11C.1: surface the requester's accepted acknowledgments (ids
+          // referencing the Claim's `acknowledgments[]`) so the response
+          // modal can render the read-only audit panel at step 3 + step 4.
           const provisionalEa = v22Provisionals.evaluationAgreements.find(e => e.disclosureAgreementId === da.id)
           const proposedEaTerms = provisionalEa ? {
-            expires: provisionalEa.terms?.evaluationDeadline || null,
-            resultConfidentiality: !!provisionalEa.terms?.resultConfidentiality,
-            attribution: !!provisionalEa.terms?.attribution,
+            acknowledgmentsAccepted: [...(provisionalEa.acknowledgmentsAccepted || [])],
           } : null
           return (
             <CombinedResponseModal
@@ -4415,9 +4458,7 @@ export default function V2App() {
           const claim = sharedForEa.claims.find(c => c.id === ea.claimId)
           if (!claim) return null
           const proposedEaTerms = {
-            expires: ea.terms?.evaluationDeadline || null,
-            resultConfidentiality: !!ea.terms?.resultConfidentiality,
-            attribution: !!ea.terms?.attribution,
+            acknowledgmentsAccepted: [...(ea.acknowledgmentsAccepted || [])],
           }
           return (
             <CombinedResponseModal
@@ -5184,7 +5225,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.0 &middot; Changelog
+          v0.11.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5231,6 +5272,16 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.1', date: '2026-04-29', label: 'Phase 11C.1', items: [
+                  'Architectural correction: Evaluation Agreement terms are set by the responder (Claim owner), not the requester. Removed the result-confidentiality / attribution checkboxes from the requester-side modals',
+                  'New: Claims can carry pre-set acknowledgments (title + description). When you create a Claim, an Acknowledgments section lets you author terms requesters must accept before requesting Disclosure or Evaluation Agreements',
+                  'Cold path Step 2 + warm path EA request modal both render the target Claim\'s acknowledgments as required checkboxes. Submit gates on every box checked. Zero-ack Claims proceed directly',
+                  'Response modal step 3 shows a read-only "Requester accepted these acknowledgments" panel listing the requester\'s acceptances; the responder still authors the agreement\'s expiry',
+                  'Fix: cold path requests now correctly render in provisional state on the requester\'s canvas',
+                  'Fix: when an Evaluation Agreement is accepted on the warm path, the requester\'s Claim transitions provisional → active with the same reveal animation as the cold path, and the responder\'s canvas pans to the newly-pulled-in Asset',
+                  'Fix: dismissing a declined Claim now plays the unravel animation before removing the node from the canvas',
+                  'Fix: opening the Public Directory now clears any active node selection, so the Detail Panel doesn\'t persist over the directory layer',
+                ]},
                 { version: '0.11.0', date: '2026-04-29', label: 'Phase 11C', items: [
                   'New: Disclosure and Evaluation Agreements now have distinct request flows. Cold-path Request Agreement modal split into two steps — Step 1 picks the target Claim and suggests Requirements Sets; Step 2 sets the Evaluation Agreement\'s expiry (defaults to 1 year) and acknowledgments (result confidentiality + attribution)',
                   'Warm path: when you already have a Disclosure Agreement on a Claim but no Evaluation Agreement, a Request Evaluation Agreement button appears on the Claim Detail Panel + canvas action bar (▷). Submits a single-step EA request without renegotiating the existing DA',

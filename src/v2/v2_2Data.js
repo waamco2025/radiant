@@ -305,6 +305,11 @@ export function makeClaim({
   name,
   description = '',
   referencedAssetIds = [],
+  // Phase 11C.1: pre-set acknowledgments authored by the Claim owner.
+  // Format: [{ id, title, description }]. Surface to requesters as
+  // required-checkbox gates for any DA / EA / combined request against
+  // this Claim.
+  acknowledgments = [],
   createdDate,
   amendments = [],
   dot,   // optional structured DOT; derived below if absent
@@ -333,6 +338,11 @@ export function makeClaim({
     name,
     description,
     referencedAssetIds: [...referencedAssetIds],
+    acknowledgments: acknowledgments.map((a) => ({
+      id: a.id,
+      title: a.title,
+      description: a.description,
+    })),
     createdDate,
     amendments: amendments.map((a) => ({
       date: a.date,
@@ -510,6 +520,10 @@ export function makeEvaluationAgreement({
   granteeAssetId = null,
   disclosureAgreementId,
   authorizedRequirementsSetIds = [],
+  // Phase 11C.1: top-level audit-trail field — ids of acknowledgments on the
+  // Claim that the requester checked at request time. Empty array when the
+  // Claim has no acknowledgments OR when this artifact predates 11C.1.
+  acknowledgmentsAccepted = [],
   restrictions = {},
   terms = {},
   incentives = {},
@@ -536,6 +550,7 @@ export function makeEvaluationAgreement({
     granteeAssetId,
     disclosureAgreementId,
     authorizedRequirementsSetIds: [...authorizedRequirementsSetIds],
+    acknowledgmentsAccepted: [...acknowledgmentsAccepted],
     restrictions: {
       priorEvaluationRequired: restrictions.priorEvaluationRequired ?? null,
       additionalParticipants: restrictions.additionalParticipants
@@ -547,14 +562,13 @@ export function makeEvaluationAgreement({
       evaluationDeadline: terms.evaluationDeadline || null,
       resultExpiry: terms.resultExpiry || null,
       flowDownRequirements: terms.flowDownRequirements ? [...terms.flowDownRequirements] : [],
-      // Phase 11C (#115): EA-level acknowledgments. Both default to false and
-      // are surfaced as visual checkboxes during the request + response flow.
-      // Spec §10.5 documents these as Prototype-only — the platform records
-      // their values but does not enforce confidentiality or attribution
-      // automatically; production would expand this with platform-level
-      // policy hooks.
-      resultConfidentiality: terms.resultConfidentiality ?? false,
-      attribution: terms.attribution ?? false,
+      // Phase 11C.1 architectural correction: removed `resultConfidentiality`
+      // and `attribution` from EA terms. Those fields treated terms as
+      // requester-authored, but in the actual model terms are responder-
+      // authored. The closest the requester gets is *acknowledging* pre-set
+      // terms the Claim owner authored on the Claim itself — see the
+      // top-level `acknowledgmentsAccepted` field above and the `acknowledgments`
+      // array on the Claim artifact.
     },
     incentives: {
       onSatisfactory: incentives.onSatisfactory ?? null,
@@ -1025,6 +1039,20 @@ export function buildV22SharedArtifacts() {
     name: 'Power Regulation Module Assembly',
     description: 'Certified assembly backed by datasheet, test report, and thermal analysis.',
     referencedAssetIds: [aPrmDatasheet.id, aPrmTestReport.id, aPrmThermal.id],
+    // Phase 11C.1: pre-set acknowledgments demonstrate the requester-side
+    // gating UX. Two acks here so the cold-path Step 2 has multiple checkboxes.
+    acknowledgments: [
+      {
+        id: 'ack-claim-prm-assembly-1',
+        title: 'Result confidentiality',
+        description: 'Evaluation results are for internal use only and will not be shared with third parties.',
+      },
+      {
+        id: 'ack-claim-prm-assembly-2',
+        title: 'Attribution',
+        description: 'If results are referenced externally (audits, certifications), MicroCo will be credited.',
+      },
+    ],
     createdDate: '2026-03-01T10:00:00Z',
     amendments: [],
   })
@@ -1056,6 +1084,15 @@ export function buildV22SharedArtifacts() {
     name: 'PRM-3A IC Compliance',
     description: 'Buck-converter IC qualified for PRM-3A — datasheet + radiation qual report.',
     referencedAssetIds: [dPrmIcDatasheet.id, dPrmIcTestReport.id],
+    // Phase 11C.1: single ack on ChipCo's Claim drives the warm-path
+    // EARequestModal gate. (Bob already has the DA → only the EA flow.)
+    acknowledgments: [
+      {
+        id: 'ack-claim-chipco-prm-ic-1',
+        title: 'Result confidentiality',
+        description: 'Evaluation results are for internal use only and will not be shared with third parties.',
+      },
+    ],
     createdDate: '2026-02-26T10:00:00Z',
     amendments: [],
   })
@@ -1708,10 +1745,18 @@ function buildViewForActor(actor, shared) {
   const provisionalAssetIds = new Set()
   for (const pulledId of pulledInClaimIds) {
     if (declinedClaimIds.has(pulledId)) continue
-    const relatedDAs = disclosureAgreements.filter(
-      (d) => d.subject.kind === 'claim' && d.subject.id === pulledId,
+    // Phase 11C.1 fix: surface provisional state when ANY DA on the Claim
+    // (where the actor is grantee) is `type === 'provisional'`. The legacy
+    // `every`-based check required ALL related DAs to be provisional, which
+    // missed cases where the user re-requests against a Claim they already
+    // have a pre-existing active DA on — backlog #134 will gate that case
+    // properly at the UI layer; meanwhile the visual state needs to reflect
+    // the pending request.
+    const provisionalDa = disclosureAgreements.find(
+      (d) => d.subject.kind === 'claim' && d.subject.id === pulledId &&
+             d.type === 'provisional' && d.grantee?.party === party,
     )
-    if (relatedDAs.length > 0 && relatedDAs.every((d) => d.type === 'provisional' || d.status !== 'active')) {
+    if (provisionalDa) {
       provisionalClaimIds.add(pulledId)
     }
   }
@@ -2464,12 +2509,10 @@ export function makeProvisionalAgreementPair({
   claimId,
   requestedRequirementsSetIds = [],
   message = '',
-  // Phase 11C: EA terms submitted by the requester at the EA step of the
-  // cold-path two-step modal. Preserved on the provisional EA so the
-  // responder sees the requester's proposed expiry + acknowledgments.
-  eaExpiry = null,
-  eaResultConfidentiality = false,
-  eaAttribution = false,
+  // Phase 11C.1: ids of the Claim's acknowledgments the requester checked
+  // when submitting. Surfaces on the response modal as a read-only audit
+  // panel and rides through finalize onto the active EA.
+  acknowledgmentsAccepted = [],
 }) {
   const stamp = idSeed || `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
   const daId = `da-prov-${stamp}`
@@ -2496,11 +2539,9 @@ export function makeProvisionalAgreementPair({
     granteeAssetId: requesterAssetId,
     disclosureAgreementId: daId,
     authorizedRequirementsSetIds: requestedRequirementsSetIds,
+    acknowledgmentsAccepted,
     terms: {
       createdDate,
-      evaluationDeadline: eaExpiry,
-      resultConfidentiality: eaResultConfidentiality,
-      attribution: eaAttribution,
     },
     status: 'active',
   })
@@ -2515,7 +2556,10 @@ export function makeProvisionalAgreementPair({
 /**
  * Phase 11C — flip a warm-path provisional EA to active.
  * Returns the updated EA (same id) with `_provisional` cleared and the
- * responder-confirmed terms (defaults to the requester's submitted values).
+ * responder-authored terms applied (only `evaluationDeadline` is responder-
+ * editable today). `acknowledgmentsAccepted` carries through unchanged from
+ * the provisional EA — the responder doesn't mutate the requester's
+ * acknowledgments.
  */
 export function finalizeProvisionalEvaluationAgreement({
   provisionalEa,
@@ -2530,14 +2574,13 @@ export function finalizeProvisionalEvaluationAgreement({
     granteeAssetId: provisionalEa.granteeAssetId,
     disclosureAgreementId: provisionalEa.disclosureAgreementId,
     authorizedRequirementsSetIds: eaTerms?.authorizedRequirementsSetIds ?? provisionalEa.authorizedRequirementsSetIds,
+    acknowledgmentsAccepted: provisionalEa.acknowledgmentsAccepted || [],
     restrictions: provisionalEa.restrictions,
     terms: {
       createdDate: provisionalEa.terms?.createdDate,
       evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
       resultExpiry: provisionalEa.terms?.resultExpiry,
       flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
-      resultConfidentiality: eaTerms?.resultConfidentiality ?? provisionalEa.terms?.resultConfidentiality ?? false,
-      attribution: eaTerms?.attribution ?? provisionalEa.terms?.attribution ?? false,
     },
     incentives: provisionalEa.incentives,
     status: 'active',
@@ -2565,9 +2608,9 @@ export function makeProvisionalEvaluationAgreement({
   existingDisclosureAgreementId,
   requestedRequirementsSetIds = [],
   message = '',
-  expiry = null,
-  resultConfidentiality = false,
-  attribution = false,
+  // Phase 11C.1: ids of the Claim's acknowledgments the requester checked
+  // when submitting the warm-path EA request.
+  acknowledgmentsAccepted = [],
 }) {
   if (!existingDisclosureAgreementId) {
     throw new Error('makeProvisionalEvaluationAgreement: existingDisclosureAgreementId is required')
@@ -2584,12 +2627,8 @@ export function makeProvisionalEvaluationAgreement({
     granteeAssetId: requesterAssetId,
     disclosureAgreementId: existingDisclosureAgreementId,
     authorizedRequirementsSetIds: requestedRequirementsSetIds,
-    terms: {
-      createdDate,
-      evaluationDeadline: expiry,
-      resultConfidentiality,
-      attribution,
-    },
+    acknowledgmentsAccepted,
+    terms: { createdDate },
     status: 'active',
   })
 
@@ -2641,17 +2680,16 @@ export function finalizeProvisionalAgreementPair({
     granteeAssetId: provisionalEa.granteeAssetId,
     disclosureAgreementId: provisionalEa.disclosureAgreementId,
     authorizedRequirementsSetIds: eaTerms?.authorizedRequirementsSetIds ?? provisionalEa.authorizedRequirementsSetIds,
+    // Phase 11C.1: forward the requester's accepted acknowledgments through
+    // finalization. The responder doesn't get to mutate them — they ride
+    // along on the active EA as immutable audit trail.
+    acknowledgmentsAccepted: provisionalEa.acknowledgmentsAccepted || [],
     restrictions: provisionalEa.restrictions,
     terms: {
       createdDate: provisionalEa.terms?.createdDate,
       evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
       resultExpiry: provisionalEa.terms?.resultExpiry,
       flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
-      // Phase 11C (#115): preserve the requester's submitted EA acknowledgments
-      // through finalization so the active EA carries the same values surfaced
-      // to the responder for review.
-      resultConfidentiality: eaTerms?.resultConfidentiality ?? provisionalEa.terms?.resultConfidentiality ?? false,
-      attribution: eaTerms?.attribution ?? provisionalEa.terms?.attribution ?? false,
     },
     incentives: provisionalEa.incentives,
     status: 'active',
@@ -2680,6 +2718,9 @@ export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = 
     name: claim.name,
     description: claim.description,
     referencedAssetIds: Array.from(existing),
+    // Phase 11C.1: preserve existing acknowledgments through Asset
+    // amendments. Editing acknowledgments themselves is a future workstream.
+    acknowledgments: claim.acknowledgments || [],
     createdDate: claim.createdDate,
     amendments: [
       ...(claim.amendments || []),
@@ -2948,6 +2989,9 @@ export function makeClaimCreationArtifacts({
   name,
   description = '',
   referencedAssetIds = [],
+  // Phase 11C.1: optional acknowledgments authored by the Claim creator.
+  // Format: [{ title, description }] — the factory generates per-row ids.
+  acknowledgments = [],
 }) {
   if (!ownerParty) throw new Error('makeClaimCreationArtifacts: ownerParty is required')
   if (!name || !name.trim()) throw new Error('makeClaimCreationArtifacts: name is required')
@@ -2959,6 +3003,17 @@ export function makeClaimCreationArtifacts({
   const claimId = `claim-${partySlug}-${idSeed}`
   const createdDate = new Date().toISOString()
 
+  // Filter out empty rows (no title AND no description) — the modal allows
+  // empty rows to exist mid-edit; we shouldn't persist them. Generate ids
+  // for the remaining rows.
+  const finalAcks = (acknowledgments || [])
+    .filter((a) => (a?.title || '').trim() || (a?.description || '').trim())
+    .map((a, i) => ({
+      id: a.id || `ack-${claimId}-${i + 1}`,
+      title: (a.title || '').trim(),
+      description: (a.description || '').trim(),
+    }))
+
   const claim = makeClaim({
     id: claimId,
     owner: ownerParty,
@@ -2966,6 +3021,7 @@ export function makeClaimCreationArtifacts({
     name: name.trim(),
     description,
     referencedAssetIds,
+    acknowledgments: finalAcks,
     createdDate,
     amendments: [],
   })

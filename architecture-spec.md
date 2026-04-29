@@ -550,7 +550,9 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
 
 ### 10.3 Claim artifact
 
-> **Prototype note — Claim field authority.** Platform-issued: `pin`, `createdDate`, each `amendments[].date`. App-derived / actor-input: `name`, `description`, `referencedAssetIds[]`, `amendments[].added[]`, `amendments[].removed[]`. **Authority:** DPP (Platform-issued fields and amendment chain registration).
+> **Prototype note — Claim field authority.** Platform-issued: `pin`, `createdDate`, each `amendments[].date`. App-derived / actor-input: `name`, `description`, `referencedAssetIds[]`, `acknowledgments[]`, `amendments[].added[]`, `amendments[].removed[]`. **Authority:** DPP (Platform-issued fields and amendment chain registration).
+
+`acknowledgments` is an array of pre-set terms the Claim owner authors when creating (or amending) the Claim. Each entry is `{ id, title, description }`. Surface to requesters as required-checkbox gates: any DA, EA, or combined request flow against this Claim must show the entire `acknowledgments[]` set as checkboxes; the requester must check every box before Submit enables. The ids of the boxes the requester checked are recorded on the resulting EA's `acknowledgmentsAccepted` field (§10.5) as audit trail. Acknowledgments are owner-authored — they're how the Claim owner pre-encodes terms requesters must acknowledge before the agreement-grant ceremony begins.
 
 ```json
 {
@@ -561,6 +563,13 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
   "name": "Power Regulation Module Assembly",
   "description": "Certified assembly backed by datasheet, test report, and thermal analysis.",
   "referencedAssetIds": ["asset-prm-datasheet", "asset-prm-testreport"],
+  "acknowledgments": [
+    {
+      "id": "ack-claim-prm-assembly-1",
+      "title": "Result confidentiality",
+      "description": "Evaluation results are for internal use only and will not be shared with third parties."
+    }
+  ],
   "createdDate": "2026-03-01T10:00:00Z",
   "amendments": [
     {
@@ -622,9 +631,11 @@ Typical subject assignments across DA variants:
 
 The `authorizedRequirementsSetIds` field is **advisory / informational**, not enforced. It records the Requirements Sets the requester suggested when sending the original combined request, so the grantor sees the requester's stated intent during the response flow. Once an Evaluation Agreement exists, the grantee may run **any** Requirements Set from their library against the Claim — the platform does not gate evaluation by this list. (Earlier Round 11 spec drafts implied enforcement; the product decision in Phase 6 was that gating evaluation by an authorized list adds friction without meaningfully improving trust.)
 
-`terms.evaluationDeadline` is the EA's expiry date. The cold-path two-step request modal (and warm-path `EARequestModal`) defaults this to one year from the request submission. The prototype also enforces a demo-only expiry check at evaluation time — `Run Evaluation` refuses to open if the deadline is in the past, with a copy hint pointing the user toward requesting a new agreement (#115). Production will replace this with a platform-level policy check. Passive expiry notifications (`v22-ea-expiring-soon`, `v22-ea-expired`) are deferred (#128).
+`terms.evaluationDeadline` is the EA's expiry date. The responder sets this when accepting (CombinedResponseModal step 3 — defaults to one year from response date). The prototype also enforces a demo-only expiry check at evaluation time — `Run Evaluation` refuses to open if the deadline is in the past, with a copy hint pointing the user toward requesting a new agreement. Production will replace this with a platform-level policy check. Passive expiry notifications (`v22-ea-expiring-soon`, `v22-ea-expired`) are deferred (#133).
 
-`terms.resultConfidentiality` and `terms.attribution` are **acknowledgment booleans** introduced in Phase 11C (#115). They default to `false` and are surfaced as visual checkboxes during the request flow (Step 2 of `CombinedRequestModal` in cold path, single-step in `EARequestModal` for warm path). The grantor sees them read-only at the response modal's EA-Terms step (chips on the EA Terms step + a summary row on Review). The platform records the values on the agreement but does not automatically enforce them — they document the requester's commitments for audit and dispute resolution. Production would expand this with platform-level policy hooks (e.g., flagging Eval Result publication that contradicts a `resultConfidentiality: true` agreement).
+> **Prototype note — Architectural correction (Phase 11C.1).** Earlier Phase 11C drafts placed `resultConfidentiality` and `attribution` as requester-authored booleans on `terms`. That conflated the agreement's terms (responder-authored — the Claim owner sets the conditions of the agreement) with acknowledgments (requester-authored — they accept pre-set commitments before the request goes out). The 11C.1 cleanup moves the acknowledgments off `terms` entirely and replaces them with a top-level `acknowledgmentsAccepted` field that holds the ids of the Claim's pre-set `acknowledgments[]` (§10.3) the requester checked. The agreement's actual terms remain responder-authored.
+
+`acknowledgmentsAccepted` is a top-level array of acknowledgment ids — references to the Claim's `acknowledgments[]` array (see §10.3). Audit trail of what the requester acknowledged when sending the request. Carries through unchanged from provisional EA → active EA on accept; the responder can review but cannot mutate the requester's acknowledgments.
 
 ```json
 {
@@ -636,6 +647,7 @@ The `authorizedRequirementsSetIds` field is **advisory / informational**, not en
   "granteeAssetId": "asset-bob-avionics",
   "disclosureAgreementId": "disclosure-001",
   "authorizedRequirementsSetIds": ["req-mil-prf-55681-v1"],
+  "acknowledgmentsAccepted": ["ack-claim-prm-assembly-1", "ack-claim-prm-assembly-2"],
   "restrictions": {
     "priorEvaluationRequired": null,
     "additionalParticipants": []
@@ -644,9 +656,7 @@ The `authorizedRequirementsSetIds` field is **advisory / informational**, not en
     "createdDate": "2026-03-04T16:42:00Z",
     "evaluationDeadline": "2026-04-04T16:42:00Z",
     "resultExpiry": null,
-    "flowDownRequirements": [],
-    "resultConfidentiality": false,
-    "attribution": false
+    "flowDownRequirements": []
   },
   "incentives": {
     "onSatisfactory": "Certificate of compliance issued to grantee",
@@ -781,10 +791,10 @@ Alice evaluates her own Claim against a Requirements Set without a counterparty.
 When a counterparty already holds an active Disclosure Agreement on a Claim but has no Evaluation Agreement, the warm path lets them propose adding an EA without renegotiating disclosure scope. The DA is unchanged; only the EA is created.
 
 1. **Trigger.** Bob clicks **Request Evaluation Agreement** on the target Claim's Detail Panel footer or canvas action bar (▷ icon). Both surfaces render only when (a) the viewer is non-owner, (b) at least one active DA from the Claim's owner to the viewer exists, and (c) no active EA on this Claim where the viewer is grantee. The Detail Panel additionally surfaces an inline informational strip — "An Evaluation Agreement is required to evaluate this Claim." — above the footer, so the user understands why Run Evaluation isn't shown.
-2. **Modal.** `EARequestModal` opens single-step. Bob selects optional Requirements Sets, sets the EA expiry (defaults to 1 year from today), checks any acknowledgments (result confidentiality / attribution), and adds an optional message. The DA's id is captured into the request as `existingDisclosureAgreementId`.
-3. **Submission.** `makeProvisionalEvaluationAgreement({ existingDisclosureAgreementId, ... })` produces a provisional EA referencing the existing DA. The EA carries `_provisional: true` and `_requestMeta` for round-trip display in the response modal. The DA is **not** mutated — it stays active. Bob's Claim flips to provisional state on his canvas (dashed border + AWAITING RESPONSE badge); the view-builder picks up the provisional EA via a dedicated branch parallel to the cold-path DA-provisional check.
-4. **Notification.** A `v22-request-ea-only` notification is enqueued on the grantor's inbox. Click opens `CombinedResponseModal` in `eaOnlyMode = true` — the disclosure-type + scope steps are hidden, the modal lands at step 3 (EA Terms) with the requester's expiry + acknowledgments rendered for review, and the StepDots indicator shows step 3 of 4. Decline routes to a single decline-reason step (step 4) before Confirm Decline. Same dismiss-on-terminal-action semantics as `v22-request` — closing the modal without resolving leaves the notification in place.
-5. **Accept path.** `finalizeProvisionalEvaluationAgreement({ provisionalEa, eaTerms })` flips the EA to active (clears `_provisional`, applies the responder's confirmed expiry). The grantor's `v22-request-ea-only` notification dismisses; Bob receives a `v22-ea-accepted` notification carrying the Claim's id. Click pans to the now-active Claim on Bob's canvas; the existing `_isNew` reveal animation fires. Bob's Claim Detail Panel footer now shows **Run Evaluation** (an active EA exists).
+2. **Modal.** `EARequestModal` opens single-step. Bob's only required action is acknowledging the Claim's pre-set `acknowledgments[]` (see §10.3) as required checkboxes — Submit is disabled until every box is checked. He may also (optionally) suggest Requirements Sets and write a message. The DA's id is captured into the request as `existingDisclosureAgreementId`. Per the Phase 11C.1 architectural correction the requester does NOT author the EA's terms (those are responder-authored at accept time).
+3. **Submission.** `makeProvisionalEvaluationAgreement({ existingDisclosureAgreementId, acknowledgmentsAccepted, ... })` produces a provisional EA referencing the existing DA. The EA carries `_provisional: true`, `_requestMeta` for round-trip display in the response modal, and `acknowledgmentsAccepted: [id, ...]` (audit trail of what the requester checked). The DA is **not** mutated — it stays active. Bob's Claim flips to provisional state on his canvas (dashed border + AWAITING RESPONSE badge); the view-builder picks up the provisional EA via a dedicated branch parallel to the cold-path DA-provisional check.
+4. **Notification.** A `v22-request-ea-only` notification is enqueued on the grantor's inbox. Click opens `CombinedResponseModal` in `eaOnlyMode = true` — the disclosure-type + scope steps are hidden, the modal lands at step 3 (EA Terms) with the responder-authored expiry input + a read-only "Requester accepted these acknowledgments" panel listing the requester's checked acknowledgments by title + description. The StepDots indicator shows step 3 of 4. Decline routes to a single decline-reason step (step 4) before Confirm Decline. Same dismiss-on-terminal-action semantics as `v22-request`.
+5. **Accept path.** `finalizeProvisionalEvaluationAgreement({ provisionalEa, eaTerms })` flips the EA to active (clears `_provisional`, applies the responder-authored expiry). `acknowledgmentsAccepted` carries through unchanged. The grantor's `v22-request-ea-only` notification dismisses; Bob receives a `v22-ea-accepted` notification carrying the Claim's id. Click pans to the now-active Claim on Bob's canvas; the existing `_isNew` reveal animation fires (Phase 11C.1 W8 wired the recently-accepted hook). Bob's Claim Detail Panel footer now shows **Run Evaluation**. On Dave's side, Bob's Asset (the grantee anchor) materializes with reveal + pan-to (Phase 11C.1 W9).
 6. **Decline path.** Same modal, Decline button with optional reason textarea. The provisional EA is annotated with `_declineMeta`; the Claim transitions from provisional to declined on Bob's canvas (DECLINED badge + red-tinted Detail Panel branch). Bob receives a `v22-ea-declined` notification carrying the reason. Bob can re-request another EA after dismissing the declined Claim.
 
 **Cancel-while-pending.** Bob can cancel his own request from the provisional Claim's Detail Panel footer (Cancel Request CTA, mirrors the cold-path DA-provisional cancel). Cancellation drops the provisional EA from state; no notification fires to the grantor in the demo (deferred — production would cancel the SDP transaction explicitly).
@@ -1318,3 +1328,4 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 - **§10.5 EA expiry — Phase 11C:** documented the demo-only `evaluationDeadline` check at Run Evaluation time (modal refuses to open when the deadline is past). Production replaces with platform-level policy.
 - **§6.3a Dave's view — Phase 11C (new subsection):** Dave (ChipCo) added to ROLES so the warm-path response flow is testable end-to-end. Mechanically identical to Alice (supplier-side view).
 - **CombinedRequestModal two-step — Phase 11C (#113):** cold-path request flow split into Step 1 (Disclosure: PIN + Req Sets + message) and Step 2 (EA: expiry + acknowledgments). Submission produces a provisional DA + EA pair carrying the new EA terms.
+- **Phase 11C.1 architectural correction — terms vs. acknowledgments:** Phase 11C drafted requester-authored `terms.resultConfidentiality` + `terms.attribution` booleans on the EA. The actual model is that terms are responder-authored — the Claim owner sets agreement terms when responding. The requester's role is to acknowledge pre-set commitments the Claim owner authored on the Claim itself. Cleanup: §10.3 Claim schema gained an `acknowledgments[]` array (owner-authored at Claim creation). §10.5 EA schema dropped `terms.resultConfidentiality` + `terms.attribution`; added a top-level `acknowledgmentsAccepted` array (ids referencing the Claim's `acknowledgments[]`). CombinedRequestModal Step 2 + EARequestModal both render the Claim's `acknowledgments[]` as required checkboxes; Submit gates on all-checked. CombinedResponseModal step 3 shows a read-only "Requester accepted these acknowledgments" panel alongside the responder-authored expiry input. §11.6a updated to reflect the new flow.

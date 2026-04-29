@@ -126,10 +126,10 @@ export default function CombinedResponseModal({
       onDecline?.({ reason: declineReason.trim() })
       return
     }
-    // Phase 11C: EA-only mode preserves the requester's submitted EA terms by
-    // default. The grantor reviewed them and accepted as-is — they don't get
-    // to mutate the requester's acknowledgments. Only `expires` is updatable
-    // here (via the ExpiryPicker).
+    // Phase 11C.1: terms are responder-authored. Only `expires` is set here.
+    // Acknowledgments live on the provisional EA's `acknowledgmentsAccepted`
+    // field (carried through finalize unchanged) — the responder reviews
+    // them but doesn't mutate them.
     if (isEaOnly) {
       onAccept?.({
         type: null,
@@ -137,8 +137,6 @@ export default function CombinedResponseModal({
         eaTerms: {
           authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
           expires: computeExpiryIso(),
-          resultConfidentiality: !!request?.proposedEaTerms?.resultConfidentiality,
-          attribution: !!request?.proposedEaTerms?.attribution,
         },
       })
       return
@@ -150,12 +148,6 @@ export default function CombinedResponseModal({
         // §10.5: forward the original requester's suggestions as advisory only.
         authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
         expires: computeExpiryIso(),
-        // Phase 11C: forward the requester's submitted acknowledgments. In
-        // EA-only mode they're carried straight through; in the cold-path
-        // they default to false unless the requester opted in at Step 2 of
-        // CombinedRequestModal.
-        resultConfidentiality: !!request?.proposedEaTerms?.resultConfidentiality,
-        attribution: !!request?.proposedEaTerms?.attribution,
       },
     })
   }
@@ -440,51 +432,61 @@ export default function CombinedResponseModal({
             </>
           )}
 
-          {/* STEP 3 — Agreement terms (accept flows only). Per Phase 6 carry-over #1,
-              Requirements Sets in the EA are advisory and the grantor no longer
-              authorizes them here — only expiry is set. The requester's suggested
-              Req Sets ride along with the EA artifact unchanged.
-              Phase 11C: also surface the requester's submitted EA acknowledgments
-              (result confidentiality + attribution) read-only — the grantor
-              accepts or declines as a whole, can't mutate them. */}
-          {step === 3 && !isDecline && (
-            <>
-              <FieldLabel label={isEaOnly ? 'Evaluation Agreement' : 'Agreement expiry'} />
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                {isEaOnly
-                  ? `${request.requesterParty} is requesting evaluation rights on this Claim. Review their proposed terms below; you may adjust the expiry. Their commitments ride along on the EA.`
-                  : (
-                    <>Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
-                    {request.requestedRequirementsSetIds?.length > 0 && (
-                      <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
-                    )}.</>
-                  )}
-              </div>
-              <ExpiryPicker
-                expiry={expiry}
-                setExpiry={setExpiry}
-                customDate={customExpiry}
-                setCustomDate={setCustomExpiry}
-              />
-              {/* Phase 11C — read-only acknowledgments the requester submitted */}
-              {(request?.proposedEaTerms?.resultConfidentiality || request?.proposedEaTerms?.attribution) && (
-                <>
-                  <FieldLabel label="Requester acknowledgments" />
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
-                    The requester accepted these commitments when they submitted the request. Accepting this agreement records them on the Evaluation Agreement.
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
-                    {request?.proposedEaTerms?.resultConfidentiality && (
-                      <ReadonlyAck label="Result confidentiality" desc="Evaluation results are for internal use only and will not be shared with third parties." />
+          {/* STEP 3 — Agreement terms (accept flows only). Per Phase 11C.1
+              architectural correction, the responder authors `expires` (the
+              only term ahead of pure-platform terms today). The requester's
+              acknowledgments — references to the Claim's pre-set
+              acknowledgments[] — render as a read-only audit panel. */}
+          {step === 3 && !isDecline && (() => {
+            const claimAcks = Array.isArray(request?.claim?.acknowledgments) ? request.claim.acknowledgments : []
+            const acceptedIds = Array.isArray(request?.proposedEaTerms?.acknowledgmentsAccepted)
+              ? request.proposedEaTerms.acknowledgmentsAccepted
+              : []
+            const acceptedAcks = claimAcks.filter((a) => acceptedIds.includes(a.id))
+            return (
+              <>
+                <FieldLabel label="Agreement expiry" />
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+                  {isEaOnly
+                    ? `Set when the Evaluation Agreement expires. ${request.requesterParty} may use this EA to evaluate the Claim with any Requirements Set from their library until then.`
+                    : (
+                      <>Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
+                      {request.requestedRequirementsSetIds?.length > 0 && (
+                        <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
+                      )}.</>
                     )}
-                    {request?.proposedEaTerms?.attribution && (
-                      <ReadonlyAck label="Attribution" desc="If results are referenced externally (audits, certifications), the evaluator will be credited." />
-                    )}
+                </div>
+                <ExpiryPicker
+                  expiry={expiry}
+                  setExpiry={setExpiry}
+                  customDate={customExpiry}
+                  setCustomDate={setCustomExpiry}
+                />
+
+                <FieldLabel label="Requester accepted these acknowledgments" />
+                {acceptedAcks.length === 0 ? (
+                  <div style={{
+                    padding: '12px 14px', borderRadius: 6,
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6,
+                  }}>
+                    No acknowledgments were required for this Claim.
                   </div>
-                </>
-              )}
-            </>
-          )}
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
+                      The requester accepted these pre-set terms when they submitted the request.
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                      {acceptedAcks.map((a) => (
+                        <ReadonlyAck key={a.id} label={a.title || '(Untitled acknowledgment)'} desc={a.description || ''} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )
+          })()}
 
           {/* STEP 4 — Review (accept flows only) */}
           {step === 4 && !isDecline && (
@@ -524,17 +526,21 @@ export default function CombinedResponseModal({
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Agreement expires</div>
                   <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
                 </div>
-                {(request?.proposedEaTerms?.resultConfidentiality || request?.proposedEaTerms?.attribution) && (
-                  <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Acknowledgments</div>
-                    <div style={{ color: 'var(--text-primary)' }}>
-                      {[
-                        request?.proposedEaTerms?.resultConfidentiality && 'Result confidentiality',
-                        request?.proposedEaTerms?.attribution && 'Attribution',
-                      ].filter(Boolean).join(' · ')}
+                {(() => {
+                  // Phase 11C.1: review step shows the count of acknowledgments
+                  // the requester accepted (pre-set terms from the Claim).
+                  const acceptedCount = Array.isArray(request?.proposedEaTerms?.acknowledgmentsAccepted)
+                    ? request.proposedEaTerms.acknowledgmentsAccepted.length
+                    : 0
+                  return (
+                    <div style={{ display: 'flex', gap: 14 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Acknowledgments</div>
+                      <div style={{ color: 'var(--text-primary)' }}>
+                        {acceptedCount === 0 ? 'None required' : `${acceptedCount} accepted`}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
               </div>
             </>
           )}
