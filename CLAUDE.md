@@ -2257,3 +2257,59 @@ Phase 11C.3's `onDone` callback at reveal phase 'done' cleared `v22RecentlyAccep
   - Re-select the Claim: standard active selection, no NEW badge (correct — already seen).
 
 **Status:** [x] Complete.
+
+### Phase 11D completion notes (2026-04-29) — Polish punch-list
+
+Seven backlog items shipped in a single commit (#118, #119, #134, #135, #136, #137, #138). Each is small and surgical; together they close a meaningful chunk of the accumulated polish backlog.
+
+**W1 — #134 PIN-existing-Claim validation.** `CombinedRequestModal` Step 1 PIN resolution gained an `already-disclosed` state. New prop `claimsOnRequesterCanvas` (a `Set<string>` of Claim ids on the active actor's canvas via active DAs) — V2App passes `new Set((v22View?.claims || []).map(c => c.id))`. The resolution memo returns `'already-disclosed'` when the PIN resolves to a Claim in the set; input border turns red, error copy reads "This Claim is already on your network. Use the Detail Panel to take further action." Submit was already gated on `state === 'ok'` so no separate disable needed.
+
+**W2 — #135 Counterparty Asset Detail Panel section gating.** `V22AssetPanel` gates the `Identity > DOT` row, the entire `File` section's metadata fields, and the entire `Registration` section on `isOwner`. For non-owners, the `File` section renders a single "Open Evidence Viewer" button that fires the existing `onExpandAsset(asset)` handler — disclosure grants viewing rights, but the file's metadata fields (filename, size, MIME, hash, URI) and registration timestamp / Parse Result count stay private. Description, Owner row, Agreements section, Parent/Children hierarchy unchanged.
+
+**W3 — #136 Cancel Request action-bar button + handler.** New `cancelRequest` verb in `V22ActionBar`'s CLAIM case — the action-bar branch was previously gated on `!isProvisional && !isDeclined`; restructured to render the Cancel Request button when `isProvisional && !isOwner` (the requester) and fall through to the existing logic otherwise. `handleV22CancelRequest` is now async: resolves the provisional artifacts up front (cold-path DA + paired EA, OR warm-path provisional EA only) so we know what to dismiss on the responder side BEFORE the state mutation; calls `playUnravelAnimation` BEFORE dropping state (mirror of `handleV22DismissDeclined`); drops the artifacts; dismisses the responder's matching `v22-request-*` notification. Wired through the `onV22CardAction('cancelRequest', node)` dispatcher.
+
+**W4 — #137 Cross-role notification dots.** New memo `rolesWithUnreadNotifications` aggregates undismissed notifications across all OTHER roles (active role excluded — its own pending notifications surface via the chrome's notification bell). Two render points:
+- Yellow dot on the user menu chrome trigger button (top-right corner, 6px, with 1.5px ring against `var(--bg-surface)` for legibility against the avatar gradient).
+- Yellow dot on each non-active role row in the SWITCH USER dropdown list (right-aligned, 6px, no ring needed since the row background is consistent).
+
+Both use `var(--accent-amber)`. The aggregator memo reads from `perRoleState` directly and runs in V2App scope, so no prop drilling is needed.
+
+**W5 — #118 Anchor Asset no NEW badge.** `v22DataWithReveal`'s node-mapping pass skips the `_isNew` stamp for Asset reveals where `n.v22Type === 'ASSET' && n.owner === activeRole.party`. Fixes the stale NEW badge that appeared on the requester's anchor Asset after the responder's session set the asset reveal id (Phase 6.5 #4 reveals the pulled-in counterparty Asset on the responder's canvas via `setV22RecentlyAcceptedAssetId(anchorIdForNotif)`; the same id leaks to the requester's session via shared V2App state). The owner-relative-to-active-party predicate cleanly discriminates: counterparty pull-in (owner ≠ active → NEW correct) vs. own pre-existing (owner === active → skip).
+
+Trade-off documented inline: this also skips NEW on freshly-registered Assets and transfer-accepted Assets (both end up owned by the active party). Pan-to + selection still happen via separate `v22PanToClaimId` / `setSel` mechanisms — the user still sees the new Asset highlighted. Per-role reveal-id scoping would preserve NEW on those paths without the cross-session leak; filed as deferred polish (called out in the #118 fix comment + the existing #138 audit note).
+
+**W6 — #119 User-facing terminology audit.** Narrow pass focused on user-facing strings only. `V22RunEvaluationModal` updates:
+- "Evidence in scope (N)" → "Assets in scope (N)"
+- "...The evaluation will run without evidence (self-attestation)." → "...The evaluation will run as a self-attestation."
+- "Select at least one evidence Asset to evaluate." → "Select at least one Asset to evaluate."
+- "(Requirements Set, evidence) combination already has..." → "(Requirements Set, Asset selection) combination already has..."
+- Processing subtitle "across N evidence file(s)" → "across N Asset(s)"
+
+Internal variable names (`evidenceAssets`, `evidenceSelection`, `evidenceUsed`, etc.) kept — V2.2 internal-vs-user-facing boundary respected. "Parse Evidence" canonical action name kept (still the user-facing label for the parse flow). "Open Evidence Viewer" (W2's new button) kept — it's the V2.x canonical action name.
+
+**W7 — #138 NEW badge persistence audit.** Comprehensive scan of all 10 `setV22RecentlyAcceptedClaimId` / `setV22RecentlyAcceptedAssetId` call sites:
+- handleV22RequestSubmit (cold path) — sets on requester's session, drives provisional Claim NEW badge.
+- handleV22Accept (cold-path responder) — sets to claimIdForReveal + anchor (responder side).
+- handleV22EaRequestSubmit (warm path requester) — sets to provisional Claim id.
+- handleV22AcceptEAOnly (warm-path responder) — sets to claimIdForReveal + anchor.
+- handleV22EvaluationSubmit — sets to artifacts.evaluationResult.id (note: variable is misleadingly named for ClaimId but works because the deselect-aware effect at V2App:2207 just compares ids, not types).
+- handleV22AmendClaimSubmit — sets to v22AmendingClaimId.
+- handleV22ParseSubmit — sets to artifacts.parseResult.id (same naming caveat).
+- handleV22CreateClaimSubmit — sets to artifacts.claim.id.
+- Notification-click for amendment / evaluation deep-link — sets to claimIdForPan.
+- Asset registration handler — sets to newly-minted Asset id(s).
+- Transfer-accept handler — sets to transferred Asset id.
+
+No `setTimeout`-based clearing found in any handler. All paths rely on the V2App:2207 deselect-aware effect for cleanup. The Phase 11C.5 decoupling (`v22RecentlyAcceptedClaimId` for `_isNew + _wasProvisional` lifecycle, `v22RevealActiveClaimId` for `_showAsProvisional` lifecycle) holds across all paths. No regressions found beyond the #118 fix already applied in W5.
+
+**W8 — Documentation.** Spec Changelog entry. polish-backlog Update Log entry. CLAUDE.md note (this section). Changelog modal v0.11.5 → v0.11.6 entry. Footer version v0.11.5 → v0.11.6.
+
+**Deviations from task brief:** None material. The W5 #118 implementation follows the brief's Option B literally — owner-relative-to-active-party predicate. The trade-off (no NEW on registration / transfer-accept) is acknowledged inline. Per-role reveal-id scoping (Option A in the brief) is the cleaner long-term fix; deferred to backlog.
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~563 kB main / ~134 kB gzip — +3 kB for the new Cancel Request handler, cross-role notification memo + dot rendering, Detail Panel section gating, and PIN resolution branch).
+- App reloads cleanly; no console errors.
+- Visual end-to-end constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path.
+- Code-path verification confirms all seven workstreams land at the expected lines and integrate with existing handler infrastructure without TDZ / dependency-array gaps.
+
+**Status:** [x] Complete.

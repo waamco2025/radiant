@@ -364,10 +364,30 @@ export default function V2App() {
       // onDone callback over-cleared and dropped the NEW badge / orange
       // tint at ~2.5s instead of letting them persist until deselect.
       const isInRevealWindow = n.id === v22RevealActiveClaimId
+      // Phase 11D #118: skip the NEW badge for Asset reveals where the
+      // Asset is owned by the active party. The cold-path / warm-path
+      // acceptance handlers stamp `v22RecentlyAcceptedAssetId` with the
+      // requester's anchor Asset (e.g., Bob's Avionics Module) so the
+      // grantor's view of the newly-pulled-in counterparty Asset gets a
+      // NEW badge (Phase 6.5 #4). The same id leaks to the requester's
+      // session via shared V2App state — on the requester's view the
+      // anchor is their own pre-existing Asset, and showing NEW there is
+      // a stale signal. Filtering on owner discriminates: counterparty
+      // pull-in (NEW correct) vs. own pre-existing (skip).
+      //
+      // Trade-off acknowledged: this also skips the NEW badge on
+      // freshly-registered Assets and transfer-accepted Assets (both end
+      // up owned by the active party). Those paths still get pan-to and
+      // selection via `v22PanToClaimId` + `setSel`, so the user still
+      // sees the new Asset highlighted — just without the orange tint.
+      // Per-role reveal-id scoping (filed as future polish #138 audit
+      // scope) would preserve NEW on those paths without leaking
+      // cross-session stamps from the acceptance handlers.
+      const skipNewBadge = needsReveal && n.v22Type === 'ASSET' && n.owner === activeRole.party
       if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !isInRevealWindow) return n
       return {
         ...n,
-        ...(needsReveal ? { _isNew: true } : {}),
+        ...(needsReveal && !skipNewBadge ? { _isNew: true } : {}),
         // _wasProvisional rides along with _isNew (drives the
         // notification-click reveal-trigger guard at V2App:3221 + the
         // warm-path equivalent at V2App:3308).
@@ -656,23 +676,76 @@ export default function V2App() {
     }
   }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
-  const handleV22CancelRequest = useCallback((claimId) => {
-    setV22Provisionals((prev) => {
-      const provisionalDa = prev.disclosureAgreements.find(
-        (d) => d.subject.id === claimId && d.type === 'provisional' && d.grantee.party === activeRole.party,
+  // Phase 11D #136: Cancel Request handler — covers cold path (provisional
+  // DA + EA pair) AND warm path (provisional EA only, referencing an
+  // existing active DA). Plays the unravel animation on the Claim node
+  // before dropping state, mirroring the dismiss-declined pattern. Also
+  // dismisses any pending notification on the responder's inbox so they
+  // don't see a request that no longer exists.
+  const handleV22CancelRequest = useCallback(async (claimId) => {
+    if (!claimId) return
+    // Resolve the provisional artifacts up front so we know what to
+    // dismiss on the responder side BEFORE the state mutation.
+    const snapshot = v22Provisionals
+    const provisionalDa = snapshot.disclosureAgreements.find(
+      (d) => d.subject?.id === claimId && d.type === 'provisional' && d.grantee?.party === activeRole.party,
+    )
+    const warmPathProvisionalEa = !provisionalDa
+      ? snapshot.evaluationAgreements.find(
+        (e) => e.claimId === claimId && e._provisional && e.grantee?.party === activeRole.party,
       )
-      if (!provisionalDa) return prev
-      const provisionalEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === provisionalDa.id)
-      return {
-        ...prev,
-        disclosureAgreements: prev.disclosureAgreements.filter((d) => d.id !== provisionalDa.id),
-        evaluationAgreements: provisionalEa
-          ? prev.evaluationAgreements.filter((e) => e.id !== provisionalEa.id)
-          : prev.evaluationAgreements,
-      }
-    })
+      : null
+    const responderParty = provisionalDa
+      ? provisionalDa.grantor.party
+      : warmPathProvisionalEa?.grantor.party || null
+    const responderRole = responderParty ? ROLES.find((r) => r.party === responderParty) : null
+    const notificationIdToDismiss = provisionalDa
+      ? `v22-request-${provisionalDa.id}`
+      : warmPathProvisionalEa
+        ? `v22-request-ea-only-${warmPathProvisionalEa.id}`
+        : null
+
+    // Play unravel animation BEFORE dropping state — same pattern as
+    // handleV22DismissDeclined / handleV22DismissRevoked. setSel(null)
+    // first so the selection border doesn't compete with border erasure.
     setSel(null)
-  }, [activeRole.party])
+    await playUnravelAnimation({
+      nodeId: claimId,
+      canvasRef,
+      setUnravelingNodeId: setV22UnravelingNodeId,
+      waitForPanelClose: true,
+    })
+
+    // Drop the provisional artifacts.
+    setV22Provisionals((prev) => {
+      if (provisionalDa) {
+        const pairedEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === provisionalDa.id)
+        return {
+          ...prev,
+          disclosureAgreements: prev.disclosureAgreements.filter((d) => d.id !== provisionalDa.id),
+          evaluationAgreements: pairedEa
+            ? prev.evaluationAgreements.filter((e) => e.id !== pairedEa.id)
+            : prev.evaluationAgreements,
+        }
+      }
+      if (warmPathProvisionalEa) {
+        return {
+          ...prev,
+          evaluationAgreements: prev.evaluationAgreements.filter((e) => e.id !== warmPathProvisionalEa.id),
+        }
+      }
+      return prev
+    })
+
+    // Dismiss the responder's pending request notification so they don't
+    // see a request that no longer exists.
+    if (responderRole && notificationIdToDismiss) {
+      updateRoleState(responderRole.id, (prev) => ({
+        ...prev,
+        dismissedReqs: [...(prev.dismissedReqs || []), notificationIdToDismiss],
+      }))
+    }
+  }, [activeRole.party, v22Provisionals, updateRoleState])
 
   const handleV22DismissDeclined = useCallback(async (claimId) => {
     if (!claimId) return
@@ -2549,6 +2622,26 @@ export default function V2App() {
   useEffect(() => { nodeMapRef.current = nodeMap }, [nodeMap])
 
   const visibleRequests = pendingRequests.filter(r => !dismissedReqs.includes(r.id))
+
+  // Phase 11D #137: aggregate undismissed notifications across all OTHER
+  // roles. Drives the cross-role notification indicator dots — yellow dot
+  // on the user-menu chrome button + per-role dots in the dropdown row
+  // list. The active role is excluded (its own pending notifications are
+  // already surfaced via the chrome's notification bell).
+  const rolesWithUnreadNotifications = useMemo(() => {
+    const result = new Set()
+    for (const r of ROLES) {
+      if (r.id === roleId) continue
+      const perRole = perRoleState[r.id]
+      if (!perRole) continue
+      const dismissed = new Set(perRole.dismissedReqs || [])
+      const hasUnread = (perRole.addedRequests || []).some(req => !dismissed.has(req.id))
+      if (hasUnread) result.add(r.id)
+    }
+    return result
+  }, [perRoleState, roleId])
+  const anyOtherRoleHasNotifications = rolesWithUnreadNotifications.size > 0
+
   const [bellHover, setBellHover] = useState(false)
   const [glowIntensity, setGlowIntensity] = useState(0) // 0 = no glow, >0 = glow factor
   const [booted, setBooted] = useState(() => {
@@ -3612,6 +3705,7 @@ export default function V2App() {
               style={{
                 ...pillStyle,
                 color: 'var(--text-primary)',
+                position: 'relative',
               }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-hover)' }}
               onMouseLeave={e => { if (!showAcct) e.currentTarget.style.borderColor = 'var(--border)' }}
@@ -3631,6 +3725,24 @@ export default function V2App() {
               }}>{activeRole.user[0]}</div>
               <span style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeRole.user}</span>
               <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>▾</span>
+              {/* Phase 11D #137: cross-role notification indicator. Yellow
+                  dot in the corner when ANY OTHER role has at least one
+                  un-dismissed notification. The 1.5px ring matches the
+                  chrome surface so the dot stays legible against the
+                  avatar gradient. */}
+              {anyOtherRoleHasNotifications && (
+                <span style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--accent-amber)',
+                  boxShadow: '0 0 0 1.5px var(--bg-surface)',
+                  pointerEvents: 'none',
+                }} />
+              )}
             </button>
 
             {/* Account dropdown */}
@@ -3676,6 +3788,9 @@ export default function V2App() {
                   <div style={{ padding: '4px 14px 6px', fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em' }}>SWITCH USER</div>
                   {ROLES.map(r => {
                     const isCurrent = r.id === roleId
+                    // Phase 11D #137: per-role notification dot. Renders for
+                    // non-active roles with un-dismissed notifications.
+                    const hasUnread = rolesWithUnreadNotifications.has(r.id)
                     return (
                       <div
                         key={r.id}
@@ -3709,6 +3824,16 @@ export default function V2App() {
                           <div style={{ fontSize: 9, color: isCurrent ? 'var(--accent-indigo)' : 'var(--text-muted)' }}>{r.party} · {r.role}</div>
                         </div>
                         {isCurrent && <span style={{ fontSize: 8, color: 'var(--accent-indigo)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ACTIVE</span>}
+                        {!isCurrent && hasUnread && (
+                          <span
+                            title="Pending notifications on this role"
+                            style={{
+                              width: 6, height: 6, borderRadius: '50%',
+                              background: 'var(--accent-amber)',
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
                       </div>
                     )
                   })}
@@ -3904,6 +4029,14 @@ export default function V2App() {
               case 'cancelTransfer':
                 if (node.v22Type === 'ASSET' && node.owner === activeRole.party && node._pendingTransfer) {
                   handleV22CancelTransfer(node.id)
+                }
+                return
+              case 'cancelRequest':
+                // Phase 11D #136: cancel a pending DA / EA request from the
+                // canvas action bar. Only valid on a provisional Claim where
+                // the active actor is the requester (non-owner).
+                if (node.v22Type === 'CLAIM' && node.isProvisional && node.owner !== activeRole.party) {
+                  handleV22CancelRequest(node.id)
                 }
                 return
               case 'amendClaim':
@@ -4413,6 +4546,11 @@ export default function V2App() {
             }
             availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
             resolveClaimByPin={(pin) => resolveClaimByPinInShared(pin, v22Provisionals)}
+            // Phase 11D #134: pass the set of Claim ids already on the active
+            // actor's canvas. The modal flags PINs that resolve to one of
+            // these as `already-disclosed` so the user can't fire a duplicate
+            // request when a satisfactory agreement is in place.
+            claimsOnRequesterCanvas={new Set((v22View?.claims || []).map(c => c.id))}
             onSubmit={(payload) => {
               handleV22RequestSubmit(payload)
               setV22AIShopperResult(null)
@@ -5272,7 +5410,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.5 &middot; Changelog
+          v0.11.6 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5319,6 +5457,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.6', date: '2026-04-29', label: 'Phase 11D', items: [
+                  'New: Request Agreement modal now blocks PINs that resolve to a Claim already on your network — the error steers you to the Detail Panel instead of firing a duplicate request',
+                  'Fix: counterparty-pulled Asset Detail Panels no longer leak the file\'s metadata or registration timestamp. You see the Asset name, description, owner, and an "Open Evidence Viewer" button — disclosure is directional',
+                  'New: provisional Claim cards now show a ✕ Cancel Request action-bar button for the requester. Click cancels the pending DA / EA request, plays the unravel animation, and dismisses the responder\'s notification',
+                  'New: yellow notification dot on the user menu chrome button when another role has un-dismissed notifications, plus per-role dots inside the SWITCH USER dropdown — guides the demo through multi-role flows',
+                  'Fix: Bob\'s anchor Asset no longer gets a stale NEW badge after a disclosure is accepted. NEW now fires only when the Asset is genuinely new to your view (counterparty pull-in), not on Assets you already own',
+                  'Polish: Run Evaluation modal renamed "Evidence in scope" → "Assets in scope" and aligned related copy. Internal naming kept; user-facing terminology is now consistent with V2.2 model',
+                ]},
                 { version: '0.11.5', date: '2026-04-29', label: 'Phase 11C.5', items: [
                   'Fix: NEW badge + orange tint on a freshly-accepted Claim now persist until you deselect the node (previously cleared at the end of the reveal animation, ~500ms after completion). The reveal-window provisional render still clears at reveal completion as before, but the "this is new, take a look" treatment hangs around until you move on',
                 ]},

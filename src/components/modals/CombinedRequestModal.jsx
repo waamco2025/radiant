@@ -33,6 +33,10 @@ export default function CombinedRequestModal({
   requesterAsset,        // { id, name, pin } — anchor on the requester's canvas
   availableRequirementsSets = [], // [{ id, name, version }]
   resolveClaimByPin,     // (pin) => { claim, ownerParty } | null
+  // Phase 11D #134: ids of Claims already on the requester's canvas via an
+  // active DA. PIN resolution flags these as `already-disclosed` so the user
+  // can't fire a duplicate request when a satisfactory agreement is in place.
+  claimsOnRequesterCanvas,
   onSubmit,              // ({ claimPin, claim, selectedRequirementsSetIds, message, eaTerms }) => void
   onClose,
   initialPin = '',                // Phase 7 — AI Shopper pre-populates the target PIN
@@ -55,8 +59,15 @@ export default function CombinedRequestModal({
     const lookup = resolveClaimByPin?.(trimmed)
     if (!lookup || !lookup.claim) return { state: 'missing' }
     if (lookup.ownerParty === requesterParty) return { state: 'self' }
+    // Phase 11D #134: a Claim already on the requester's canvas means an
+    // active DA exists — re-requesting would create an orphan. Surface as
+    // `already-disclosed` so Submit is gated and the user is steered to
+    // the Detail Panel.
+    if (claimsOnRequesterCanvas?.has?.(lookup.claim.id)) {
+      return { state: 'already-disclosed', claim: lookup.claim, ownerParty: lookup.ownerParty }
+    }
     return { state: 'ok', claim: lookup.claim, ownerParty: lookup.ownerParty }
-  }, [trimmed, pinShapeOk, resolveClaimByPin, requesterParty])
+  }, [trimmed, pinShapeOk, resolveClaimByPin, requesterParty, claimsOnRequesterCanvas])
 
   const canAdvanceFromStep1 = resolution.state === 'ok' && !!requesterAsset
   const claimAcks = (resolution.state === 'ok' ? resolution.claim?.acknowledgments : null) || []
@@ -157,7 +168,7 @@ export default function CombinedRequestModal({
                   fontFamily: 'var(--font-mono)',
                   color: 'var(--text-primary)',
                   background: 'var(--bg-card)',
-                  border: `1px solid ${resolution.state === 'missing' || resolution.state === 'self' ? 'var(--accent-red)' : 'var(--border)'}`,
+                  border: `1px solid ${['missing', 'self', 'already-disclosed'].includes(resolution.state) ? 'var(--accent-red)' : 'var(--border)'}`,
                   borderRadius: 6,
                   boxSizing: 'border-box',
                   outline: 'none',
@@ -176,6 +187,11 @@ export default function CombinedRequestModal({
                 )}
                 {resolution.state === 'self' && (
                   <div style={{ fontSize: 11, color: 'var(--accent-red)' }}>This Claim is owned by you — no agreement needed.</div>
+                )}
+                {resolution.state === 'already-disclosed' && (
+                  <div style={{ fontSize: 11, color: 'var(--accent-red)' }}>
+                    This Claim is already on your network. Use the Detail Panel to take further action.
+                  </div>
                 )}
               </div>
 

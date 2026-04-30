@@ -921,7 +921,15 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
     case 'CLAIM': {
       const isProvisional = !!node.isProvisional
       const isDeclined = !!(node.isDeclined || node._isDeclined)
-      if (!isProvisional && !isDeclined && onV22CardAction) {
+      // Phase 11D #136: provisional Claims show Cancel Request for the
+      // requester (non-owner) — same intent as the Detail Panel footer's
+      // Cancel Request CTA, surfaced inline so users don't have to open
+      // the panel. Owner side of a provisional Claim isn't applicable
+      // here: the responder doesn't see the provisional Claim on their
+      // canvas; they get the v22-request notification instead.
+      if (isProvisional && !isOwner && onV22CardAction) {
+        buttons.push({ icon: '✕', tooltip: 'Cancel Request', onClick: fire('cancelRequest') })
+      } else if (!isProvisional && !isDeclined && onV22CardAction) {
         if (isOwner) {
           buttons.push({ icon: '✎', tooltip: 'Amend Claim', onClick: fire('amendClaim') })
           buttons.push({ icon: '◆', tooltip: 'Self-Evaluate', onClick: fire('selfEvaluate') })

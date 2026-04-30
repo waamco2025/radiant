@@ -492,10 +492,10 @@ export default function V22RunEvaluationModal({
                 </div>
               )}
 
-              <FieldLabel label={`Evidence in scope (${evidenceAssets.length})`} />
+              <FieldLabel label={`Assets in scope (${evidenceAssets.length})`} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {evidenceAssets.length === 0 ? (
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No Assets in scope. The evaluation will run without evidence (self-attestation).</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No Assets in scope. The evaluation will run as a self-attestation.</div>
                 ) : evidenceAssets.map((a) => {
                   const selected = evidenceSelection.includes(a.id)
                   return (
@@ -535,9 +535,9 @@ export default function V22RunEvaluationModal({
                 {!selectedReqSet
                   ? 'Pick a Requirements Set to continue.'
                   : evidenceSelection.length === 0
-                    ? 'Select at least one evidence Asset to evaluate.'
+                    ? 'Select at least one Asset to evaluate.'
                     : duplicateOfExisting
-                      ? 'This (Requirements Set, evidence) combination already has an Eval Result.'
+                      ? 'This (Requirements Set, Asset selection) combination already has an Eval Result.'
                       : ''}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -570,7 +570,7 @@ export default function V22RunEvaluationModal({
                   Evaluating against {selectedReqSet?.name || 'Requirements Set'}…
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-                  Running {rows.length} requirement{rows.length !== 1 ? 's' : ''} across {evidenceSelection.length} evidence file{evidenceSelection.length !== 1 ? 's' : ''}
+                  Running {rows.length} requirement{rows.length !== 1 ? 's' : ''} across {evidenceSelection.length} Asset{evidenceSelection.length !== 1 ? 's' : ''}
                 </div>
                 <div style={{
                   width: '60%', height: 3, borderRadius: 2,

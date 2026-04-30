@@ -335,6 +335,11 @@ function V22AssetPanel({
           {asset?.description && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>{asset.description}</div>
           )}
+          {/* Phase 11D #135: Identity section gates on isOwner — counterparties
+              who view a pulled-in Asset don't see the file's DOT (canonical
+              identifier of the Asset on the platform). Owner row stays
+              visible since the disclosure already implies the counterparty
+              knows the owner. */}
           <Section title="Identity">
             {/* Phase 9A.4 Gate A: DOT row now sources from the Asset's own
                 structured DOT (spec §2.4 / canon X.1–X.10) — not the
@@ -345,28 +350,70 @@ function V22AssetPanel({
                 Hash + URI keep their existing sourcing (`file.hash` /
                 `file.uri`); `dot.hash` mirrors `file.hash` for Assets. */}
             <Row label="Owner" value={node.owner} />
-            <Row label="DOT" value={asset?.dot?.pin ? <CopyBadge value={asset.dot.pin} truncated /> : '—'} />
+            {isOwner && (
+              <Row label="DOT" value={asset?.dot?.pin ? <CopyBadge value={asset.dot.pin} truncated /> : '—'} />
+            )}
           </Section>
-          <Section
-            title="File"
-            // Phase 11B.1: Expand button surfaces the file viewer directly
-            // from the Asset's own Detail Panel — previously only reachable
-            // from referenced-Asset rows in a Claim panel. Same wiring +
-            // schema as those rows.
-            action={asset && onExpandAsset ? (
-              <ExpandButton onClick={() => onExpandAsset(asset)} title={`Expand ${asset.name || 'Asset'}`} />
-            ) : null}
-          >
-            <Row label="Filename" value={asset?.file?.filename} mono />
-            <Row label="Size" value={formatBytes(asset?.file?.size)} />
-            <Row label="MIME" value={asset?.file?.mimeType} mono />
-            <Row label="Hash" value={asset?.file?.hash ? <CopyBadge value={asset.file.hash} truncated /> : '—'} />
-            <Row label="URI" value={asset?.file?.uri ? <CopyBadge value={asset.file.uri} truncated /> : '—'} />
-          </Section>
-          <Section title="Registration">
-            <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />
-            <Row label="Parse Results" value={parseResultsForAsset.length} />
-          </Section>
+          {/* Phase 11D #135: File metadata is owner-only. Counterparties with
+              an active DA can still open the evidence viewer (the disclosure
+              grants viewing rights), but the file's metadata fields
+              (filename, size, MIME, hash, URI) stay private. */}
+          {isOwner ? (
+            <Section
+              title="File"
+              // Phase 11B.1: Expand button surfaces the file viewer directly
+              // from the Asset's own Detail Panel — previously only reachable
+              // from referenced-Asset rows in a Claim panel. Same wiring +
+              // schema as those rows.
+              action={asset && onExpandAsset ? (
+                <ExpandButton onClick={() => onExpandAsset(asset)} title={`Expand ${asset.name || 'Asset'}`} />
+              ) : null}
+            >
+              <Row label="Filename" value={asset?.file?.filename} mono />
+              <Row label="Size" value={formatBytes(asset?.file?.size)} />
+              <Row label="MIME" value={asset?.file?.mimeType} mono />
+              <Row label="Hash" value={asset?.file?.hash ? <CopyBadge value={asset.file.hash} truncated /> : '—'} />
+              <Row label="URI" value={asset?.file?.uri ? <CopyBadge value={asset.file.uri} truncated /> : '—'} />
+            </Section>
+          ) : (
+            asset && onExpandAsset && (
+              <Section title="File">
+                <button
+                  onClick={() => onExpandAsset(asset)}
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 6,
+                    cursor: 'pointer',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 600,
+                    transition: 'background 120ms, border-color 120ms, color 120ms',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
+                    e.currentTarget.style.borderColor = 'var(--accent-indigo)'
+                    e.currentTarget.style.color = 'var(--accent-indigo)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-card)'
+                    e.currentTarget.style.borderColor = 'var(--border)'
+                    e.currentTarget.style.color = 'var(--text-primary)'
+                  }}
+                >
+                  Open Evidence Viewer
+                </button>
+              </Section>
+            )
+          )}
+          {/* Phase 11D #135: Registration section is owner-only. Counterparties
+              don't see when the Asset was registered or how many Parse Results
+              it has — that's owner-side metadata. */}
+          {isOwner && (
+            <Section title="Registration">
+              <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />
+              <Row label="Parse Results" value={parseResultsForAsset.length} />
+            </Section>
+          )}
           {/* Phase 10.2: Asset hierarchy. Parent shown above Children so the
               tree reads top-down; sections only render when non-empty. */}
           {parentAsset && (
