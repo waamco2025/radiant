@@ -374,7 +374,24 @@ export default function V2App() {
     })
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
-    return { ...v22Data, nodes, nodeMap }
+    // Phase 11C.4 W1: stamp `_showAsProvisional: true` on edges incident to
+    // the recently-accepted Claim so V2Canvas renders them dashed during the
+    // reveal window (V2Canvas already reads this flag at line ~863 — its
+    // `effectiveSdaType` collapses to `'provisional'` when the flag is set,
+    // pulling the dashed line config). The Claim card flips at the reveal
+    // primitive's flipMidpoint; the edge follows the same dashed → solid
+    // visual handoff because the `v22RecentlyAcceptedClaimId` stamp clears
+    // at phase 'done' alongside the node stamp.
+    let edges = v22Data.edges
+    if (v22RecentlyAcceptedClaimId) {
+      const claimId = v22RecentlyAcceptedClaimId
+      edges = v22Data.edges.map((e) => (
+        (e.from === claimId || e.to === claimId)
+          ? { ...e, _showAsProvisional: true }
+          : e
+      ))
+    }
+    return { ...v22Data, nodes, edges, nodeMap }
   }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
@@ -3291,6 +3308,13 @@ export default function V2App() {
                         } else if (req.type === 'v22-ea-accepted' || req.type === 'v22-ea-declined') {
                           // Phase 11C: informational EA-only notifications.
                           // Click pans/selects the target Claim and dismisses.
+                          // Phase 11C.4 W2: extend the cold-path reveal-trigger
+                          // pattern (V2App:3221) to warm-path acceptances. The
+                          // requester's Claim was provisional pre-accept; on
+                          // notification click we want the same flip animation
+                          // that fires for cold-path acceptances. Decline path
+                          // skips reveal — declined Claims stay in declined
+                          // visual state, no flip-to-active to play.
                           ensureParentLayer(() => {
                             updateRoleState(roleId, prev => ({
                               ...prev,
@@ -3300,7 +3324,11 @@ export default function V2App() {
                             const targetNode = claimId ? nodeMap[claimId] : null
                             if (targetNode) {
                               setSel(targetNode.id)
-                              canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                              if (req.type === 'v22-ea-accepted' && targetNode._isNew && targetNode._wasProvisional) {
+                                startReveal(targetNode.id)
+                              } else {
+                                canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                              }
                             }
                           })
                         } else if (req.type === 'v22-amendment') {
@@ -5232,7 +5260,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.3 &middot; Changelog
+          v0.11.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5279,6 +5307,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.4', date: '2026-04-29', label: 'Phase 11C.4', items: [
+                  'Fix: the disclosure edge connecting to a recently-accepted Claim now also animates from provisional (dashed) to active (solid) during the reveal flip, alongside the Claim card. Edges incident to the recently-accepted Claim are stamped with the same provisional flag during the reveal window',
+                  'Fix: warm-path Evaluation Agreement acceptance now triggers the reveal animation. The notification handler had been taking a simple-pan path; extended the cold-path reveal-trigger predicate to the warm-path handler so v22-ea-accepted clicks fire the flip animation when the Claim is freshly accepted',
+                ]},
                 { version: '0.11.3', date: '2026-04-29', label: 'Phase 11C.3', items: [
                   'Fix: the reveal animation that plays when an agreement is accepted now visually flips from provisional → active state (was playing from active → active because the artifact had already finalized). The flip mid-animation hand-off is now visible',
                   'Cleanup: reveal animation logic migrated out of inline V2App.jsx into src/v2/animations/reveal.js, parallel to the existing unravel primitive',

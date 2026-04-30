@@ -2185,3 +2185,39 @@ Per the task brief, the user prefers the EA version's icon. Extracted to `src/co
 - Visual verification of the reveal flip + stamp timing constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path for click-through scenarios. Code-path verification confirms: notification-click → `startReveal(claimId)` → primitive sets `revealAnim` to 'zoom' phase → `v22DataWithReveal` stamps `_showAsProvisional: true` on the matching node (since `v22RecentlyAcceptedClaimId === claimId`) → AssetNode renders dashed/dimmed → at `flipMidpoint` (computed from revealPhase + ~315ms) the predicate flips → at phase 'done' the onDone callback clears `v22RecentlyAcceptedClaimId` → next render drops the stamp → AssetNode renders standard active state.
 
 **Status:** [x] Complete.
+
+### Phase 11C.4 completion notes (2026-04-29) — Edge reveal animation + warm-path notification handler fix
+
+Two bug-fix workstreams + a backlog filing + docs.
+
+**W1 — Edge reveal animation.** V2Canvas already reads `edge._showAsProvisional` (line 863) and renders provisional/dashed via the SDA-type config. Phase 11C.3 stamped `_showAsProvisional` on the recently-accepted Claim node only, leaving incident edges in active state during the reveal flip — the user saw the Claim card transition correctly while the connecting edge stayed solid the entire time, breaking the visual narrative.
+
+Fix: extended `v22DataWithReveal` to map edges. After the node mapping pass, when `v22RecentlyAcceptedClaimId` is set, walk `v22Data.edges` and stamp `_showAsProvisional: true` on edges where `e.from === claimId || e.to === claimId`. The stamp clears automatically at reveal phase 'done' through the same `setV22RecentlyAcceptedClaimId(null)` callback the migrated `playRevealAnimation` primitive fires — no separate timing logic needed for edges.
+
+**W2 — Warm-path notification handler reveal trigger.** Phase 11C.3's reveal-trigger guard at V2App:3221 reads `targetNode._isNew && targetNode._wasProvisional` and routes to `startReveal` for cold-path acceptances. The warm-path `v22-ea-accepted` notification handler at V2App:3308 didn't have the same guard — it always took the simple animated-pan path, so reveal never fired for warm-path acceptances even though the stamp infrastructure was in place.
+
+Fix: extended the same predicate to the warm-path handler:
+```js
+if (req.type === 'v22-ea-accepted' && targetNode._isNew && targetNode._wasProvisional) {
+  startReveal(targetNode.id)
+} else {
+  canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+}
+```
+
+`v22-ea-declined` keeps the simple pan unchanged — declined Claims stay in their declined visual state (red dim), there's no flip-to-active transition to play.
+
+**W3 — Backlog filing.** Filed #137: cross-role notification indicators in user menu. Yellow dots on the chrome user menu button + per-role rows in the expanded list when other roles have undismissed notifications. Out of scope for this phase but tracked for follow-up — improves the multi-role demo flow where the user has to switch between Bob → Dave → Bob → Dave for the warm-path test.
+
+**W4 — Documentation.** Spec Changelog entry (Phase 11C.4). polish-backlog Update Log entry + #137 filed. CLAUDE.md note (this section). Changelog modal v0.11.4 entry; footer v0.11.3 → v0.11.4.
+
+**Deviations from task brief:** None. The W1 edge stamp turned out to be a small map-pass — V2Canvas's edge rendering already supported the `_showAsProvisional` flag, so no canvas-side wiring was needed (verified at V2Canvas.jsx:863-876).
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~560 kB main / ~134 kB gzip).
+- App reloads cleanly; no console errors.
+- Visual end-to-end of the edge reveal flip + warm-path reveal animation constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path. Code-path verification confirms the timeline:
+  - Cold path: Bob clicks acceptance → startReveal fires → v22DataWithReveal stamps Claim AND incident edges with `_showAsProvisional: true` → V2Canvas's edge geometry rebuilds with `effectiveSdaType === 'provisional'` (dashed line) → AssetNode renders Claim as dashed/dimmed → flipMidpoint triggers card flip → reveal phase 'done' → `setV22RecentlyAcceptedClaimId(null)` → next render drops both stamps → edge + node revert to active styling.
+  - Warm path: Dave accepts → `v22-ea-accepted` notification fires to Bob → Bob clicks → handler now checks `_isNew && _wasProvisional` and routes to startReveal for accepted (not declined) → same reveal timeline.
+
+**Status:** [x] Complete.
