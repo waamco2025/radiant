@@ -340,10 +340,18 @@ export default function V2App() {
       const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
       const hasActiveDaWithoutEa = n.v22Type === 'CLAIM' && claimsWithActiveDaWithoutEa.has(n.id)
       const isUnraveling = unravelingId === n.id
+      // Phase 11C.2 W1: stamp `_wasProvisional` ONLY on the recently-accepted
+      // Claim id (not on accompanying Asset reveal ids). The notification-click
+      // handler reads this flag to decide whether to fire `startReveal` (the
+      // V2.1 flip-from-provisional → active animation) instead of the simple
+      // animated pan. The flag was dead infrastructure since the V2.1 → V2.2
+      // migration retreat — the accept reveal animation hasn't fired since.
+      const justFinalizedClaim = needsReveal && n.id === v22RecentlyAcceptedClaimId
       if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling) return n
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
+        ...(justFinalizedClaim ? { _wasProvisional: true } : {}),
         ...(isEndpoint ? {
           _isEdgeEndpoint: true,
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
@@ -4156,6 +4164,14 @@ export default function V2App() {
                     handleOpenRevocationConfirm(ea, 'EA')
                   }}
                   onViewDisclosureAgreement={swapToDisclosure}
+                  // Phase 11C.2 W3: open ExpandedArtifactModal in JSON-only
+                  // mode for the EA artifact. The modal hides the Output tab
+                  // for the 'evaluation-agreement' schema since EAs have no
+                  // file or structured rows that map to it.
+                  onExpand={() => setV22ExpandedArtifact({
+                    artifact: resolved.evaluationAgreement,
+                    schema: 'evaluation-agreement',
+                  })}
                 />
               )}
             </div>
@@ -5225,7 +5241,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.1 &middot; Changelog
+          v0.11.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5272,6 +5288,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.2', date: '2026-04-29', label: 'Phase 11C.2', items: [
+                  'Fix: the reveal animation that plays when an agreement is accepted (provisional Claim flips to active) finally fires. The flag the V2.1-era guard reads was dead infrastructure since the V2.2 retreat — wiring it back in surfaces the existing flip animation on cold-path and warm-path acceptance alike',
+                  'New: Claim Detail Panels now show an Acknowledgments section listing the pre-set terms the Claim owner authored. Visible to all viewers',
+                  'New: Evaluation Agreement Detail Panels gained an Expand button (header) that opens the raw EA JSON in the same modal pattern as Asset / Parse / Eval Result expands',
+                  'Polish: response modal title in EA-only mode now reads "Respond to Evaluation Agreement Request" (was "Respond to EA Request"); decline title spells it out the same way',
+                  'Polish: read-only acknowledgment chips on the response modal turned grey instead of indigo — they read as locked rather than actionable',
+                ]},
                 { version: '0.11.1', date: '2026-04-29', label: 'Phase 11C.1', items: [
                   'Architectural correction: Evaluation Agreement terms are set by the responder (Claim owner), not the requester. Removed the result-confidentiality / attribution checkboxes from the requester-side modals',
                   'New: Claims can carry pre-set acknowledgments (title + description). When you create a Claim, an Acknowledgments section lets you author terms requesters must accept before requesting Disclosure or Evaluation Agreements',

@@ -2092,3 +2092,65 @@ This pairs the cold-path's Phase 6.5 #4 fix exactly. Both bugs (Bob's transition
 - End-to-end UI walkthrough constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — code-path verification + module-load + data-layer probes are the canonical fallback per prior phase precedent.
 
 **Status:** [x] Complete.
+
+### Phase 11C.2 completion notes (2026-04-29) — Reveal animation diagnosis + Claim panel acknowledgments + EA Expand + response modal polish
+
+Five workstreams, single commit.
+
+**W1 — Reveal animation diagnosis + fix.** The V2.1-era reveal-animation guard at V2App.jsx:3221 reads:
+```js
+if (targetNode._isNew && targetNode._wasProvisional) {
+  startReveal(targetNode.id)
+} else {
+  canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+}
+```
+
+Comprehensive grep confirmed `_wasProvisional` was never set anywhere in V2App, AssetNode, V2Canvas, v2_2Data, or any uploaded file. Dead infrastructure since the V2.1 → V2.2 migration retreat — `startReveal` (the flip-from-provisional → active animation) hadn't fired on any acceptance since.
+
+Fix: in `v22DataWithReveal`'s node-decoration map, stamp `_wasProvisional: true` ONLY on the recently-accepted Claim id (`v22RecentlyAcceptedClaimId`), NOT on accompanying Asset reveal ids (those didn't transition from provisional state, they were just newly visible — Phase 6.5 #4 should keep its simple-pan behavior). One-line addition:
+```js
+const justFinalizedClaim = needsReveal && n.id === v22RecentlyAcceptedClaimId
+// ... in the spread:
+...(justFinalizedClaim ? { _wasProvisional: true } : {}),
+```
+
+Cold-path acceptance (Alice accepts Bob's request) and warm-path EA acceptance (Dave accepts Bob's EA-only request) both now fire the existing flip animation when Bob clicks the resulting notification.
+
+**W2 — Acknowledgments on Claim Detail Panel.** New section in `V22ClaimPanel` between Referenced Assets and Evaluation Results:
+- Renders only when `claim.acknowledgments?.length > 0`
+- One card per acknowledgment with bold title + dim description
+- Same visual rhythm as the existing Detail Panel sections (Section header + list of cards on `var(--bg-raised)`)
+- Visible to all viewers — owner sees what they authored; counterparty sees what they agreed to before requesting (cold path) or would need to agree to (warm path)
+
+**W3 — EA Detail Panel Expand button.** Three coordinated changes:
+1. `ExpandedArtifactModal` schema enum extended with `'evaluation-agreement'`. The `TabBar` component gained a `hideOutput` prop; when true the Output tab is hidden entirely (EAs have no file or structured rows that map to it). The modal's `tab` state defaults to `'json'` when `schema === 'evaluation-agreement'`.
+2. `EvaluationAgreementDetailPanel` gained a new `onExpand` prop. New `ExpandIconButton` helper inlined at the top of the file (pattern parity with `V22NodeDetailPanel`'s local `ExpandButton` — same SVG, same hover treatment, same border styling). Rendered in the panel header before the close button.
+3. V2App's EA panel mount wires `onExpand` to `setV22ExpandedArtifact({ artifact, schema: 'evaluation-agreement' })`. The existing modal mount handles the rest.
+
+Output tab content for EA artifacts intentionally deferred — JSON tab is sufficient and the "Document preview not available" placeholder shape from Phase 11B doesn't fit an EA (no file). Future polish item.
+
+**W4 — Response modal title + checkbox styling.** `CombinedResponseModal` `eaOnlyMode` headers updated:
+- Accept: "Respond to EA Request" → **"Respond to Evaluation Agreement Request"**
+- Decline: "Decline Evaluation Agreement" → **"Decline Evaluation Agreement Request"** (consistent with cold path's "Decline Request" pattern)
+
+`ReadonlyAck` chip recoloured from indigo (which read as an actionable, just-checked checkbox) to grey:
+- Background: `color-mix(... var(--accent-indigo) 6%)` → `var(--bg-card)`
+- Border: `color-mix(... var(--accent-indigo) 25%)` → `var(--border)`
+- Checkbox border: `var(--accent-indigo)` → `var(--text-dim)`
+- Checkbox fill: `var(--accent-indigo)` → `var(--text-dim)`
+- Title text: `var(--text-primary)` → `var(--text-secondary)` (slightly dimmer to match "locked" treatment)
+
+The check mark stays so the chip still conveys "this was acknowledged" — but the colour signals "you can't toggle it."
+
+**W5 — Documentation.** Spec Changelog (Phase 11C.2 entry covering all four workstreams). polish-backlog Update Log entry; EA Expand Output tab content noted as deferred polish (no new # filed — bundled with the existing Phase 11B Expand polish backlog). CLAUDE.md Phase 11C.2 note (this section). Changelog modal v0.11.2 entry; footer version v0.11.1 → v0.11.2.
+
+**Deviations from task brief:** None. All five workstreams shipped exactly as described. The W1 fix turned out to be a one-line addition rather than a hunt for a complex regression — confirms the brief's "dead infrastructure" diagnosis.
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~553 kB main / ~131 kB gzip).
+- App reloads cleanly; no new console errors.
+- Data-layer probes from prior phases continue to pass.
+- Visual verification of W1's reveal animation flow constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path for click-through scenarios.
+
+**Status:** [x] Complete.

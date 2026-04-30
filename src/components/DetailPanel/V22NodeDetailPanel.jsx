@@ -909,6 +909,34 @@ function V22ClaimPanel({
               </div>
             )}
           </Section>
+          {/* Phase 11C.2 W2: Acknowledgments section. Visible to all viewers
+              (owner sees what they authored; counterparty sees what they
+              agreed to or would need to agree to before requesting). The
+              section doesn't render when the Claim has no acknowledgments. */}
+          {claim?.acknowledgments?.length > 0 && (
+            <Section title={`Acknowledgments (${claim.acknowledgments.length})`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {claim.acknowledgments.map((ack) => (
+                  <div key={ack.id} style={{
+                    padding: '10px 12px',
+                    background: 'var(--bg-raised)',
+                    borderRadius: 4,
+                    border: '1px solid var(--border-faint)',
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {ack.title || '(Untitled acknowledgment)'}
+                    </div>
+                    {ack.description && (
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                        {ack.description}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
           <Section title={`Evaluation Results (${evaluationResultsForClaim.length})`}>
             {evaluationResultsForClaim.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No evaluations run yet.</div>

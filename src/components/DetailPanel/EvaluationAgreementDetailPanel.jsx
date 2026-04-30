@@ -10,6 +10,47 @@
 import CopyBadge from './shared/CopyBadge'
 import Tooltip from '../Tooltip'
 
+// Phase 11C.2 W3: outward-arrow icon button to open the ExpandedArtifactModal
+// in JSON-only mode for the EA artifact. Pattern parity with V22NodeDetailPanel's
+// local ExpandButton (lines ~108–155 of V22NodeDetailPanel.jsx). Inlined here
+// to avoid a cross-file import for a single use.
+function ExpandIconButton({ onClick, title = 'Expand to view artifact' }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
+      title={title}
+      aria-label={title}
+      style={{
+        background: 'transparent',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '3px 5px',
+        cursor: 'pointer',
+        color: 'var(--text-tertiary)',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 100ms, border-color 100ms, color 100ms',
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
+        e.currentTarget.style.borderColor = 'var(--accent-indigo)'
+        e.currentTarget.style.color = 'var(--accent-indigo)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.borderColor = 'var(--border)'
+        e.currentTarget.style.color = 'var(--text-tertiary)'
+      }}
+    >
+      <svg width={11} height={11} viewBox="0 0 16 16" fill="none">
+        <path d="M6 3 L13 3 L13 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M13 3 L7 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M3 7 L3 13 L9 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+}
+
 function formatDateTime(iso) {
   if (!iso) return '—'
   try {
@@ -62,6 +103,11 @@ export default function EvaluationAgreementDetailPanel({
   onAmend,
   onRevoke, // Phase 9D.1.1 (Fix 4): opens V22RevocationConfirmModal
   onViewDisclosureAgreement,
+  // Phase 11C.2 W3: opens ExpandedArtifactModal in JSON-only mode for the
+  // EA artifact (Output tab is hidden for the 'evaluation-agreement' schema
+  // since the EA has no file or structured rows). Optional — when omitted,
+  // no Expand affordance renders.
+  onExpand,
 }) {
   if (!agreement) return null
 
@@ -99,6 +145,9 @@ export default function EvaluationAgreementDetailPanel({
             letterSpacing: '0.12em', color: 'var(--text-tertiary)', textTransform: 'uppercase',
           }}>Evaluation Agreement</span>
           <div style={{ flex: 1 }} />
+          {onExpand && (
+            <ExpandIconButton onClick={onExpand} title="Expand to view raw EA JSON" />
+          )}
           <button
             onClick={onClose}
             aria-label="Close agreement panel"

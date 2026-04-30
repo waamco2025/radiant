@@ -37,11 +37,13 @@ function formatDateTime(iso) {
   return `${yyyy}-${mm}-${dd} · ${hh}:${min} UTC`
 }
 
-function TabBar({ active, onChange }) {
-  const tabs = [
-    { id: 'output', label: 'Output' },
-    { id: 'json', label: 'JSON' },
-  ]
+function TabBar({ active, onChange, hideOutput = false }) {
+  const tabs = hideOutput
+    ? [{ id: 'json', label: 'JSON' }]
+    : [
+      { id: 'output', label: 'Output' },
+      { id: 'json', label: 'JSON' },
+    ]
   return (
     <div style={{
       display: 'flex', alignItems: 'stretch',
@@ -213,11 +215,16 @@ function ArtifactRow({ row, schema }) {
 
 export default function ExpandedArtifactModal({
   artifact,
-  schema,        // 'asset' | 'parse-output' | 'eval-output'
+  schema,        // 'asset' | 'parse-output' | 'eval-output' | 'evaluation-agreement'
   title,         // optional override; falls back to artifact.name
   onClose,
 }) {
-  const [tab, setTab] = useState('output')
+  // Phase 11C.2 W3: EA schema is JSON-only — its artifact has no file or
+  // structured rows that map cleanly to the Output tab pattern. Hide the
+  // Output tab entirely and default the active tab to 'json' so the
+  // initial render is meaningful.
+  const hideOutput = schema === 'evaluation-agreement'
+  const [tab, setTab] = useState(hideOutput ? 'json' : 'output')
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -225,7 +232,11 @@ export default function ExpandedArtifactModal({
     return () => window.removeEventListener('keydown', handleEsc)
   }, [onClose])
 
-  const headerLabel = schema === 'asset' ? 'ASSET' : schema === 'parse-output' ? 'PARSE RESULT' : schema === 'eval-output' ? 'EVAL RESULT' : 'ARTIFACT'
+  const headerLabel = schema === 'asset' ? 'ASSET'
+    : schema === 'parse-output' ? 'PARSE RESULT'
+    : schema === 'eval-output' ? 'EVAL RESULT'
+    : schema === 'evaluation-agreement' ? 'EVALUATION AGREEMENT'
+    : 'ARTIFACT'
   const displayTitle = title || artifact?.name || artifact?.id || 'Artifact'
 
   let outputBody
@@ -289,7 +300,7 @@ export default function ExpandedArtifactModal({
           >×</span>
         </div>
 
-        <TabBar active={tab} onChange={setTab} />
+        <TabBar active={tab} onChange={setTab} hideOutput={hideOutput} />
 
         {/* Tab content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>

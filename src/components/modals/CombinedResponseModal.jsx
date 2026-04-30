@@ -164,13 +164,16 @@ export default function CombinedResponseModal({
   const canAdvanceFromStep3 = true
   const canSubmitDecline = true // decline reason is optional per spec §11.4
 
-  // Phase 11C: header copy branches on (isDecline, isEaOnly).
+  // Phase 11C.2 W4: header copy branches on (isDecline, isEaOnly). EA-only
+  // titles spell out "Evaluation Agreement Request" rather than the abbreviated
+  // "EA Request" / "Evaluation Agreement" so the responder reads the full
+  // intent without context.
   const header = isDecline
     ? isEaOnly
-      ? { title: 'Decline Evaluation Agreement', subtitle: `Decline ${request.requesterParty}'s Evaluation Agreement request. The provisional EA will be removed.` }
+      ? { title: 'Decline Evaluation Agreement Request', subtitle: `Decline ${request.requesterParty}'s Evaluation Agreement request. The provisional EA will be removed.` }
       : { title: 'Decline Request', subtitle: `Decline ${request.requesterParty}'s request. Both provisional artifacts (Disclosure + Evaluation) will be deleted.` }
     : isEaOnly
-      ? { title: 'Respond to EA Request', subtitle: `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.` }
+      ? { title: 'Respond to Evaluation Agreement Request', subtitle: `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.` }
       : { title: 'Respond to Request', subtitle: `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.` }
 
   return (
@@ -622,22 +625,23 @@ export default function CombinedResponseModal({
 }
 
 // Phase 11C — read-only EA acknowledgment chip surfaced on the response
-// modal's EA Terms step. Visual rhythm matches the cold-path request modal's
-// CheckboxRow but without click affordance — the grantor is reviewing, not
-// editing.
+// modal's EA Terms step. The grantor is reviewing what the requester
+// already accepted; the colour signals "this is locked, you can't change
+// it." Phase 11C.2 W4: switched from indigo (active) to grey (inactive)
+// since indigo read like an actionable checkbox.
 function ReadonlyAck({ label, desc }) {
   return (
     <div style={{
       padding: '10px 14px',
-      background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, var(--border))',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
       borderRadius: 8,
       display: 'flex', alignItems: 'flex-start', gap: 12,
     }}>
       <div style={{
         width: 14, height: 14, borderRadius: 3,
-        border: `1.5px solid var(--accent-indigo)`,
-        background: 'var(--accent-indigo)',
+        border: `1.5px solid var(--text-dim)`,
+        background: 'var(--text-dim)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
         marginTop: 2,
@@ -645,7 +649,7 @@ function ReadonlyAck({ label, desc }) {
         <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 3 }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 3 }}>{label}</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc}</div>
       </div>
     </div>
