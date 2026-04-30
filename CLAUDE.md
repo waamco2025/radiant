@@ -2504,3 +2504,34 @@ Fix: drop both tooltip portal z-indices to 150 — below the panel (200) and bel
 **Deviations from task brief:** None. Both fixes shipped as briefed. The Z-index choice (150) is below all UI overlays at 200+ (Detail Panel + notification dropdown), still well above any canvas content.
 
 **Status:** [x] Complete.
+
+### Phase 11.5 completion notes (2026-04-30) — Dev hygiene pass
+
+Documentation + backlog organization. No code-affecting changes (intentional — task scope was pure cleanup before Phase 11E and Round 13 transition).
+
+**Workstreams:**
+
+- **W1 — `polish-backlog.md` reorganization.** Moved ~70 ✅ Complete / ✅ Verified / ✅ Superseded items into a new `## Completed` section at the bottom of the file, organised by topic sub-section for findability. Topic sections at the top (Visual & Rendering, Edge Interactions, Detail Panels, V1 File Cleanup, Notifications, Data Model & Content, Process Flows, Spec Updates, Future Features, Exploratory) now contain only Open / Partial / Deferred / Investigation items. Status vocabulary standardized to `Open` / `Partial` / `Deferred to Phase X` / `Investigation`. New `Effort` field on every remaining open item: `S` (small, <2h) / `M` (medium, 2–6h) / `L` (large, 6–12h) / `XL` (multi-phase) / `?` (unknown). Phase-queue assignments baked into Status fields where appropriate. **Misfilings rehoused:** #74 (Provenance lineage UI) moved from Process Flows → Detail Panels (it's a Detail Panel surface item). No item triage beyond preserving the existing `#12 → #111 Superseded` link. ID gaps (#84, #92, #109) preserved as historical artifacts.
+
+- **W2 — `architecture-spec.md` audit.** Walked every section. Found Phase 11 work mostly well-documented inline (§6.5 cross-canvas rules, §7.4 notifications, §10.4 grantee-view derivation, §11.5a revocation, §11.6a EA-only request lifecycle, §3.7 layout). Fixes applied in-place:
+  - **§6.5** added a 5th cross-canvas pull-in rule for proof-only Claim DAs (Phase 11D.3 / 11D.4.1) — was missing.
+  - **§7.4** notification table extended with the four transfer notification types (Phase 9A.4 / 9A.5) and the two revocation types (`v22-da-revoked`, `v22-ea-revoked`, Phase 9D / 9D.1.x) — both groups had been omitted from the spec table.
+  - **§14 Implementation Guidelines** — flagged inline as historical (was written during V2.2 migration; references stale `V2_2_ENABLED` flag, V2.1 retention rules, `v2Data.js` filename). Inline note at top of §14 redirects readers to `CLAUDE.md` for current conventions.
+  - New **`## Phase 11 (April 2026)`** summary section at the end of the spec covering all twelve sub-phases at high level — separate from the per-sub-phase Changelog entries above it.
+  - New **`## Sections requiring expansion`** closing block flagging §12, §13, and §15+ as historical-record sections that could use future hygiene without blocking active work.
+
+- **W3 — `ROUND-13-CONTEXT.md` created.** New repo-root file as a setup checklist for the next Claude Code conversation. Lists the canonical foundation files to upload (architecture-spec.md, CLAUDE.md, polish-backlog.md, V2App.jsx, V22NodeDetailPanel.jsx, v2_2Data.js, V2Canvas.jsx, AssetNode.jsx); per-phase additional files; Round 12 closing state summary; phase queues for 11E, 12, 13, 14, 15, and beyond; explicit "what's NOT in the queue" section covering deferred items like #49 (`src/v2/` rename) and #50 (dead handler sweep).
+
+- **W4 — Phase 11 summary in spec Changelog.** Single high-level entry covering all twelve sub-phases, separate from the per-sub-phase entries above. Points readers at `CLAUDE.md` and the inline section bodies for detail.
+
+- **W5 — Documentation finalization.** This note. polish-backlog Update Log entry. Changelog modal v0.11.12 entry. Footer version bumped v0.11.11 → v0.11.12.
+
+**Out of scope (explicitly deferred):**
+- Code refactoring (#49 src/v2 rename, #50 dead handler sweep, #51 V2Canvas prop pruning) — those are substantial code changes for separate phases.
+- Architecture spec content rewrites — only audit + flag, not rewrite.
+- Backlog item triage decisions beyond obvious duplicates — no kills, no merges beyond the existing `#12 → #111`.
+- Phase 11E work (#108 Amend EA modal, #102 reciprocal DA-amendment notifications, #139 edge geometry animation) — queued for Round 13 first phase.
+
+**Runtime verification:** No code changes; documentation-only. Build clean (no broken imports). App boots normally. Phase 11.5 deliverables verified by reading the resulting files top-to-bottom.
+
+**Status:** [x] Complete.

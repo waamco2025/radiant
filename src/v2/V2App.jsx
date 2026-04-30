@@ -5559,7 +5559,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.11 &middot; Changelog
+          v0.11.12 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5606,6 +5606,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.12', date: '2026-04-30', label: 'Phase 11.5', items: [
+                  'Hygiene: polish-backlog reorganized — completed items moved to a "Completed" section at the bottom of the file. Topic sections at the top now show only open / partial / deferred items. Each open item has standardized Status + Effort fields.',
+                  'Hygiene: architecture spec audited — Phase 11 summary entry added; cross-canvas pull-in rule for proof-only added in §6.5; notification table extended with transfer + revocation types in §7.4; §14 staleness flagged inline.',
+                  'New: ROUND-13-CONTEXT.md repo-root file created — setup checklist for the next Claude Code conversation, with phase queues for 11E, 12, 13, 14, 15, and beyond.',
+                ]},
                 { version: '0.11.11', date: '2026-04-30', label: 'Phase 11D.4.1', items: [
                   'Fix: pulled-in proof-only Evaluation Result now hangs off-and-below its source Claim instead of sitting in a fixed column. The connecting edge stays short and doesn\'t cross other canvas nodes.',
                   'Fix: at zoomed-out LOD levels, a selected node\'s pop-up card no longer renders on top of the open Detail Panel during canvas drag. Tooltip portal z-index lowered below the panel.',
