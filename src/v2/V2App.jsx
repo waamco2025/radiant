@@ -5410,7 +5410,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.6 &middot; Changelog
+          v0.11.7 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5457,6 +5457,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.7', date: '2026-04-29', label: 'Phase 11D.1', items: [
+                  'Polish: trimmed the "already on your network" error copy on the Request Agreement modal — second sentence removed',
+                  'Polish: Run Evaluation modal header expands "EA" → "Evaluation Agreement" and the review-stage left panel reads "Assets" instead of "Evidence"',
+                ]},
                 { version: '0.11.6', date: '2026-04-29', label: 'Phase 11D', items: [
                   'New: Request Agreement modal now blocks PINs that resolve to a Claim already on your network — the error steers you to the Detail Panel instead of firing a duplicate request',
                   'Fix: counterparty-pulled Asset Detail Panels no longer leak the file\'s metadata or registration timestamp. You see the Asset name, description, owner, and an "Open Evidence Viewer" button — disclosure is directional',

@@ -2313,3 +2313,30 @@ No `setTimeout`-based clearing found in any handler. All paths rely on the V2App
 - Code-path verification confirms all seven workstreams land at the expected lines and integrate with existing handler infrastructure without TDZ / dependency-array gaps.
 
 **Status:** [x] Complete.
+
+### Phase 11D.1 completion notes (2026-04-29) — Copy fixes (#134 + #119)
+
+Two surgical copy fixes from Phase 11D QA. Single commit.
+
+**W1 — #134 already-disclosed error trim.** The Request Agreement modal's Step 1 PIN error message dropped its second sentence:
+- Before: "This Claim is already on your network. Use the Detail Panel to take further action."
+- After: "This Claim is already on your network."
+
+The second sentence was instructional copy that the user didn't need at the gate.
+
+**W2 — #119 follow-up: V22RunEvaluationModal EA / Evidence strings.** Two user-facing strings that 11D missed:
+- Header subtitle: `Evaluating ${claim.name} under EA ${ea.id}.` → `Evaluating ${claim.name} under Evaluation Agreement ${ea.id}.`
+- Review-stage left panel: `Evidence (${count})` → `Assets (${count})`
+
+Audited the rest of the modal — remaining `evidence` / `Evidence` hits are internal variable names (`evidenceAssets`, `evidenceSelection`, `evidenceUsed`) and code comments, both kept per the W6 user-facing-vs-internal boundary established in 11D. Self-evaluation subtitle ("no Evaluation Agreement required") kept as-is — already correctly named.
+
+**W3 — Documentation.** CLAUDE.md note (this section). Changelog modal v0.11.7 entry. Footer version v0.11.6 → v0.11.7. No spec or polish-backlog update — these are 11D follow-on copy fixes covered by the existing 11D backlog entries (#134 / #119).
+
+**Deviations from task brief:** None. All three workstreams shipped exactly as briefed.
+
+**Runtime verification (preview):**
+- Build clean.
+- App reloads cleanly; no console errors.
+- Visual end-to-end constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path.
+
+**Status:** [x] Complete.

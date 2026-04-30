@@ -358,7 +358,7 @@ export default function V22RunEvaluationModal({
   const headerSubtitle =
     selfEvaluation
       ? `Self-evaluating ${claim?.name || ''} (no Evaluation Agreement required).`
-      : `Evaluating ${claim?.name || ''} under EA ${evaluationAgreement?.id || ''}.`
+      : `Evaluating ${claim?.name || ''} under Evaluation Agreement ${evaluationAgreement?.id || ''}.`
 
   return (
     <Backdrop onClose={onClose}>
@@ -610,7 +610,7 @@ export default function V22RunEvaluationModal({
                 minHeight: 360, maxHeight: 640,
               }}>
                 <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                  <FieldLabel label={`Evidence (${evidenceSelection.length})`} />
+                  <FieldLabel label={`Assets (${evidenceSelection.length})`} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {evidenceAssets.filter(a => evidenceSelection.includes(a.id)).map((a) => (
                       <div key={a.id} style={{

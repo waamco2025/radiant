@@ -190,7 +190,7 @@ export default function CombinedRequestModal({
                 )}
                 {resolution.state === 'already-disclosed' && (
                   <div style={{ fontSize: 11, color: 'var(--accent-red)' }}>
-                    This Claim is already on your network. Use the Detail Panel to take further action.
+                    This Claim is already on your network.
                   </div>
                 )}
               </div>
