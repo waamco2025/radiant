@@ -53,12 +53,8 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 9A.3 preamble — handoff roster.
 - **Context:** Layout is desktop-first; the canvas and Detail Panel both assume ≥1280px. Tablet is a realistic demo surface (iPad landscape ≈ 1024×768). Phone is out of scope. Audit: canvas pan/zoom ergonomics on touch, Detail Panel width on narrower viewports, modal widths, chrome icon spacing.
 
-### 108. Missing Amend Evaluation Agreement modal
-- **Status:** Deferred to Phase 11E
-- **Effort:** L
-- **Source:** Phase 9A.6.2 QA — Andrew noticed no modal exists for amending EAs.
-- **Context:** `AmendDisclosureModal` exists (shipped Phase 6) but the EA-amendment counterpart was apparently not built. User can amend a DA via its edge → Amend affordance, but no equivalent path exists for EAs. Not strictly demo-blocking — users can work around by creating a new EA — but incomplete relative to the DA pattern.
-- **Proposed fix:** Pattern-match `AmendDisclosureModal.jsx` into a new `AmendEvaluationAgreementModal.jsx`. Wire the Amend action from EA edges and from EA Detail Panel footers (matching DA parity).
+<!-- Phase 11E.1: #108 moved to Completed section below. -->
+
 
 ### 110. Edge glow + marching-ants animations (V2.1 restoration)
 - **Status:** Open
@@ -380,6 +376,15 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Context:** Today, when a Claim is disclosed Selectively, the grantee can run an evaluation against the disclosed fields under a paired EA without any explicit permission from the grantor about whether the grantee can later re-disclose the resulting Eval Result via Proof-Only to a third party. The current model defaults to allow — POE DAs flow naturally as a Disclosure type. A future iteration may want to gate this at EA terms time (a `terms.allowProofOnlyRedisclosure` boolean the grantor authors during response, similar to other responder-authored terms per §10.5). Pairs with #115 (terms metadata schema growth) and §11.6a (warm-path EA-only response flow).
 - **Proposed fix:** Add `terms.allowProofOnlyRedisclosure` to EA terms schema (default true to preserve current behavior). Surface as a checkbox in `CombinedResponseModal` step 3 alongside expiry. When false, suppress Proof-Only entries in the grantee's options when they later attempt to share their Eval Result.
 
+### 160. Production: Option C acknowledgment audit semantics for EAs
+- **Status:** Investigation
+- **Effort:** L
+- **Priority:** Future (production data layer)
+- **Source:** Phase 11E.1 scoping — out-of-scope until production data layer is built.
+- **Context:** Phase 11E.1 (#108) shipped Amend EA with **Option B** semantics: acknowledgments live on the underlying Claim, and editing them via Amend EA mutates the Claim directly. The EA's `acknowledgmentsAccepted` audit-trail field preserves what the Evaluator originally accepted, but doesn't carry a snapshot of the acknowledgment text itself. Two known limitations: (1) **Multi-EA implicit propagation** — when a Claim has Evaluation Agreements to multiple grantees, editing acknowledgments via one EA changes effective terms for all grantees, but only the targeted EA's grantee receives a `v22-ea-amendment` notification. (2) **Lineage chaining** — each amendment record stores `termsBefore.evaluationDeadline` for diffing against the *current* EA terms; older amendments don't chain through.
+- **Proposed fix (Option C, production target):** Snapshot acknowledgments per-EA (`acknowledgmentsAtTimeOfRequest: [{ id, title, description }]` separate from the live Claim state). Multi-grantee notification fan-out when any current grantee's snapshot is amended. Chain `termsBefore` through prior amendments so the diff display is correct for older entries. Migration: snapshot the current Claim's acknowledgments onto each existing EA at migration time; subsequent amendments operate on the snapshot.
+- **Architecture spec coverage:** §11.2a documents the full Option B vs Option C shape.
+
 ---
 
 ## Spec Updates
@@ -634,8 +639,11 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 
 ### Detail Panels — completed
 
+### 108. Missing Amend Evaluation Agreement modal
+- **Status:** ✅ Complete (Phase 11E.1). New `AmendEvaluationAgreementModal.jsx` mirrors the AmendDisclosureModal pattern with two amendable surfaces: `terms.evaluationDeadline` and the underlying Claim's `acknowledgments[]`. New factory `makeAmendedEvaluationAgreement` + helper `diffAcknowledgments`. `makeEvaluationAgreement` extended with `amendments[]`. New notification type `v22-ea-amendment` (single-grantee, informational) deep-links to the Claim + opens the EA Detail Panel. EA Detail Panel: new Amendments section between Status and paired-DA navigation; Amend footer button gated to grantor + active + non-revoked. Acknowledgments shipped with **Option B** semantics (acknowledgments live on the Claim — editing mutates the Claim directly while the EA's `acknowledgmentsAccepted` audit trail is preserved). Multi-EA implicit propagation + lineage chaining are documented limitations; Option C (per-EA snapshots, multi-grantee fan-out, chained lineage) deferred to production via #160. See architecture-spec §11.2a for the full shape.
+
 ### 12. Agreement amend actions accessible from node Detail Panels
-- **Status:** ✅ Superseded by #111 (Phase 9C shipped the Agreements section in Detail Panels; Amend on DAs wired from the row, Amend on EAs disabled pending #108).
+- **Status:** ✅ Superseded by #111 (Phase 9C shipped the Agreements section in Detail Panels; Amend on DAs wired from the row, Amend on EAs shipped in Phase 11E.1 #108).
 
 ### 64. Asset DOT / hash / URI click-to-copy badge
 - **Status:** ✅ Complete (Phase 9A.4 preamble). Applied `<CopyBadge value={...} truncated />` treatment to three long identifiers on the Asset Detail Panel: owner DOT, file hash, file URI. Null-value guard handles Assets registered via Phase 9A.3's Create Asset flow where `file.hash` is null pending a real hashing implementation.
@@ -867,3 +875,4 @@ Items from the V2.1 backlog (`radiant-v2-archive.md`) that remain relevant post-
 - 2026-04-30: Phase 11D.4 — layout spacing fix + Referenced Assets count fix.
 - 2026-04-30: Phase 11D.4.1 — Eval Result placement derived from source Claim + AssetNode tooltip z-index fix.
 - 2026-04-30: **Phase 11.5 — Dev hygiene pass.** Reorganized this file: ~70 ✅ Complete / ✅ Verified / ✅ Superseded items moved into a new `## Completed` section at the bottom of the file (preserved verbatim with their Status entries, phase references, and commit hashes). The topic sections above (Visual & Rendering, Edge Interactions, Detail Panels, V1 File Cleanup, Notifications, Data Model & Content, Process Flows, Spec Updates, Future Features, Exploratory) now contain only Open / Partial / Deferred / Investigation items. **Status vocabulary standardized** to one of: `Open`, `Partial`, `Deferred to Phase X`, `Investigation`. **Effort field** added to every remaining open item: `S` / `M` / `L` / `XL` / `?`. **Phase queue assignments** baked into Status fields: Phase 11E (`#108`, `#102`, `#139`); Phase 12 (`#117`, `#105`, `#106`, `#120`, `#121`, `#122`); Phase 13 (`#26`); Phase 14 (`#43`, `#45`, `#46`, `#47`, `#132`); Phase 15 (`#11`, `#48`, `#104`). **Misfilings rehoused:** #74 (Provenance lineage UI) moved from Process Flows → Detail Panels. **No item triage** (no kills, no merges beyond the existing `#12 → #111` superseded). #84, #92, #109 ID gaps left as historical artifacts. Architecture spec audited and Phase 11 summary entry added; `ROUND-13-CONTEXT.md` created at the repo root as a setup checklist for the next conversation.
+- 2026-04-30: **Phase 11E.1 — Amend Evaluation Agreement (#108).** Wired the EA amendment flow end-to-end: new modal `AmendEvaluationAgreementModal.jsx` (expiration via shared `ExpiryPicker` + acknowledgment editor list + amendment note), new factory `makeAmendedEvaluationAgreement` mirroring `makeAmendedDisclosureAgreement` shape, new pure helper `diffAcknowledgments(before, after)`, `makeEvaluationAgreement` extended with `amendments[]`. New notification type `v22-ea-amendment` (single-grantee, informational; deep-links to Claim + opens EA Detail Panel). EA Detail Panel: Amendments section between Status and paired-DA navigation; Amend footer button gated to grantor + active + non-revoked. Acknowledgments shipped with **Option B** semantics — acknowledgments live on the Claim and Amend EA mutates the Claim directly while the EA's `acknowledgmentsAccepted` audit trail is preserved. Multi-EA implicit propagation + lineage chaining are documented limitations; Option C target deferred to production via new backlog item #160. Architecture spec §11.2a (new subsection) + §7.4 (notification table extended) + Changelog entry. #108 moved to Completed; #12 superseded note updated.

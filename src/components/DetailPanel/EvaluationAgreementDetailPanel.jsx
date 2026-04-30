@@ -83,12 +83,17 @@ export default function EvaluationAgreementDetailPanel({
     ? (resolveNodeName?.(agreement.granteeAssetId) || agreement.granteeAssetId)
     : null
 
-  const amendDisabled = !isGrantor || agreement.status !== 'active'
+  // Phase 11E.1: Amend gating — grantor only, must be active + non-revoked.
+  // `isRevoked` is _revokedMeta-driven and orthogonal to `status` so we
+  // check both.
+  const amendDisabled = !isGrantor || isRevoked || agreement.status !== 'active'
   const amendTooltip = !isGrantor
     ? `Only ${agreement.grantor.party} (the grantor) can amend this agreement.`
-    : agreement.status !== 'active'
-      ? `This agreement is ${agreement.status}; amendments are disabled.`
-      : null
+    : isRevoked
+      ? 'This Evaluation Agreement has been revoked; amendments are disabled.'
+      : agreement.status !== 'active'
+        ? `This agreement is ${agreement.status}; amendments are disabled.`
+        : null
 
   return (
     <div style={{
@@ -198,6 +203,60 @@ export default function EvaluationAgreementDetailPanel({
           <Row label="Status" value={agreement.status} />
           <Row label="Paired DA" value={agreement.disclosureAgreementId} mono />
         </Section>
+
+        {/* Phase 11E.1 (#108): Amendments section. Each entry surfaces the
+            evaluationDeadline transition and the acknowledgment delta
+            (added / removed / edited counts), plus the grantor's optional
+            note. Note: for amendments older than the most recent, the
+            "Expiration: before → current" display is not chained through
+            the prior amendment's termsAfter — see architecture-spec
+            §11.2a Option C TODO. */}
+        {Array.isArray(agreement.amendments) && agreement.amendments.length > 0 && (
+          <Section title={`Amendments (${agreement.amendments.length})`}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {agreement.amendments.map((am, i) => {
+                const expiryChanged = am.termsBefore?.evaluationDeadline !== undefined
+                  && am.termsBefore.evaluationDeadline !== agreement.terms?.evaluationDeadline
+                const ackAdded = am.acknowledgmentChanges?.added?.length || 0
+                const ackRemoved = am.acknowledgmentChanges?.removed?.length || 0
+                const ackEdited = am.acknowledgmentChanges?.edited?.length || 0
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '10px 12px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                      {formatDateTime(am.date)}
+                    </div>
+                    {expiryChanged && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                        Expiration: {formatDateTime(am.termsBefore.evaluationDeadline)} → {formatDateTime(agreement.terms?.evaluationDeadline)}
+                      </div>
+                    )}
+                    {(ackAdded > 0 || ackRemoved > 0 || ackEdited > 0) && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                        Acknowledgments:
+                        {ackAdded > 0 && ` +${ackAdded} added`}
+                        {ackRemoved > 0 && ` −${ackRemoved} removed`}
+                        {ackEdited > 0 && ` ~${ackEdited} edited`}
+                      </div>
+                    )}
+                    {am.note && (
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 6, lineHeight: 1.5 }}>
+                        "{am.note}"
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
+        )}
 
         {onViewDisclosureAgreement && (
           <button

@@ -2535,3 +2535,47 @@ Documentation + backlog organization. No code-affecting changes (intentional —
 **Runtime verification:** No code changes; documentation-only. Build clean (no broken imports). App boots normally. Phase 11.5 deliverables verified by reading the resulting files top-to-bottom.
 
 **Status:** [x] Complete.
+
+### Phase 11E.1 completion notes (2026-04-30) — Amend Evaluation Agreement (#108)
+
+First Phase 11E item shipped. EA amendment flow now end-to-end functional with the same architectural posture as DA amendment (unilateral grantor-side action; counterparty's recourse if unhappy is to revoke).
+
+**Architectural anchors (locked decisions):**
+- **Unilateral.** Like DA amendments, EA amendments fire informational notifications. No counterparty acceptance flow.
+- **Amendable fields:** `terms.evaluationDeadline` and the Claim's `acknowledgments[]`.
+- **Option B for acknowledgments.** Editing acknowledgments via Amend EA mutates the underlying Claim's `acknowledgments[]` directly. The EA's `acknowledgmentsAccepted` audit-trail field is NOT modified — it's a historical record of what the Evaluator originally accepted.
+- **Single-grantee notification.** Only the EA's grantee is notified, even if other EAs on the same Claim are implicitly affected by acknowledgment edits. Production (Option C) will need multi-grantee fan-out + per-EA acknowledgment snapshots; documented in `architecture-spec.md` §11.2a.
+
+**Workstreams:**
+
+- **Batch 1 — Data model.** `makeEvaluationAgreement` extended with `amendments = []` parameter (mirrors DA shape). New factory `makeAmendedEvaluationAgreement({ evaluationAgreement, terms, acknowledgmentChanges, note })` returns a new EA with updated `terms.evaluationDeadline` and an appended amendment record carrying `date`, `note`, `termsBefore.evaluationDeadline`, and `acknowledgmentChanges: { added, removed, edited }`. New pure helper `diffAcknowledgments(before, after)` computes the delta. The factory does NOT touch the underlying Claim — V2App's handler stages both updates atomically.
+
+- **Batch 2 — `AmendEvaluationAgreementModal.jsx` (new, ~250 lines).** Pattern matches `AmendDisclosureModal.jsx` structure (Backdrop / Modal / ModalHeader / ModalBody / ModalFooter). Three sections in body: Expiration (uses shared `ExpiryPicker` from ModalShared, pre-fills to `'custom'` with the EA's current deadline; falls back to `'none'` when deadline is null), Acknowledgments (editable cards with title input + description textarea + REMOVE button per row, plus `+ Add acknowledgment` CTA generating ids `ack-${claim.id}-${Date.now().toString(36)}`), and Amendment note textarea. `hasChanges` gating: at least one of expiry-changed OR acks-added/removed/edited. `canSubmit` additionally requires every acknowledgment to have a non-empty title. Footer summary text describes pending changes ("Expiration changed · 1 acknowledgment added · 2 edited" etc.).
+
+- **Batch 3 — V2App wiring.** New state `v22AmendingEaId` parallel to `v22AmendingDaId`. New imports for `AmendEvaluationAgreementModal` + `makeAmendedEvaluationAgreement` + `diffAcknowledgments`. New handler `handleV22AmendEvaluationSubmit({ terms, acknowledgments, note })`: resolves existing EA + paired Claim from merged provisionals; computes acknowledgment delta; builds the amended EA via the factory; atomically writes both the EA and (if acks dirty) the mutated Claim into `v22Provisionals` via a single `setV22Provisionals` updater; pans + reveals the Claim with the existing `_isNew` infrastructure; enqueues a `v22-ea-amendment` notification on the grantee's inbox (single-grantee fan-out). Modal mount inserted after the AmendDisclosureModal mount.
+
+- **Batch 4 — EA Detail Panel.** New Amendments `<Section>` between Status and the paired-DA navigation button. Each amendment card shows: ISO timestamp; "Expiration: <before> → <current>" line when expiry changed; "Acknowledgments: +N added · −N removed · ~N edited" line when acks changed; italic note quote when present. Lineage chaining caveat documented (older entries' "before" diffs against the *current* deadline rather than the deadline at amendment time). Amend footer button gating extended: `amendDisabled = !isGrantor || isRevoked || agreement.status !== 'active'`. New tooltip messaging branches for `isRevoked`.
+
+- **Batch 5 — Architecture spec.** New §11.2a "Evaluation Agreement amendment (Phase 11E.1)" subsection covering full Option B vs Option C semantics, the amendment record shape, the notification flow, and the two documented limitations (multi-EA implicit propagation + lineage chaining). §7.4 notification table extended with `v22-ea-amendment` row. New Changelog entry. The pre-existing "Not yet implemented (backlog #108)" note at end of §11.2 updated to point at §11.2a.
+
+- **Batch 6 — Backlog + CLAUDE.md.** #108 moved from Detail Panels open section → Completed section with full Phase 11E.1 completion summary. New backlog item #160 filed in Exploratory section: "Production: Option C acknowledgment audit semantics for EAs" (Investigation status, L effort, Future priority — covers per-EA snapshots, multi-grantee fan-out, chained lineage, migration plan). #12 superseded note updated to remove the "pending #108" caveat. CLAUDE.md note (this section). Changelog modal v0.11.13 entry. Footer version v0.11.12 → v0.11.13.
+
+**Notification flow (single-grantee):**
+1. Alice opens EA Detail Panel → Amend Evaluation Agreement → modal pre-filled with current deadline + claim acknowledgments.
+2. Submit fires. State mutation: amended EA in provisionals; (if acks dirty) updated Claim in provisionals. `v22-ea-amendment` enqueued on grantee's inbox.
+3. Grantee sees indigo "EA AMENDED" badge + body text "Alice amended the Evaluation Agreement on PRM Assembly Claim."
+4. Click → notification dismisses, canvas pans to Claim, EA Detail Panel opens directly with new Amendments section visible.
+
+**Multi-EA implicit propagation (Option B documented limitation):** Alice has EAs to Bob AND Carol on PRM Claim. Alice amends Bob's EA with an acknowledgment edit. The Claim's `acknowledgments[]` mutates — visible to both Bob and Carol when they view the Claim. Only Bob receives the `v22-ea-amendment` notification. Carol's EA's `acknowledgmentsAccepted` audit trail is preserved (untouched), but the *current* acknowledgments on the Claim that Carol sees are the post-edit version. Production fix is Option C (per-EA snapshots — see #160).
+
+**Deviations from task brief:**
+- ExpiryPicker option ids in the modal use `'1-year'` / `'2-year'` / `'none'` / `'custom'` (the picker's actual emit values) rather than the brief's `'6-months'` / `'1-year'` / `'2-years'` / `'never'` / `'custom'` — the existing ExpiryPicker doesn't expose '6-months' / '2-years' / 'never' as user-clickable options. Initialize to `'custom'` with the EA's current deadline pre-filled; fall back to `'none'` when deadline is null.
+- The brief's W3.7 ordering note ("badgeLabel: branch BEFORE the existing isV22Amendment") was followed — `isV22EaAmendment ? 'EA AMENDED' :` precedes `isV22Amendment ? 'AMENDED' :` in the chain.
+- Body text rendering — the brief said to find `isV22Amendment` body text and add a parallel branch. Inspection showed `isV22Amendment` has no dedicated body text branch (falls through to bare `req.asset?.name`). Added the `isV22EaAmendment` branch as a new fallthrough just above the bare-name fallback so it's at least readable; left the existing `isV22Amendment` fallthrough alone for the same reason.
+
+**Runtime verification (preview):**
+- Build clean (94 modules, ~585 kB main / ~140 kB gzip).
+- App reloads cleanly; no console errors.
+- End-to-end UI walkthrough constrained by the V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse interaction is the verification path. Code-level verification confirms all Batch 1-4 wiring lands at the documented locations and integrates with existing handler infrastructure without TDZ / dependency-array gaps.
+
+**Status:** [x] Complete.

@@ -527,6 +527,11 @@ export function makeEvaluationAgreement({
   restrictions = {},
   terms = {},
   incentives = {},
+  // Phase 11E.1 (#108): mirror DA `amendments[]` so Amend EA can append
+  // entries with `termsBefore.evaluationDeadline` + an `acknowledgmentChanges`
+  // delta for audit. Acknowledgment edits themselves live on the underlying
+  // Claim per the prototype's Option B (see architecture-spec §11.2a).
+  amendments = [],
   status = 'active',
 }) {
   if (!id) throw new Error('makeEvaluationAgreement: id is required')
@@ -574,6 +579,7 @@ export function makeEvaluationAgreement({
       onSatisfactory: incentives.onSatisfactory ?? null,
       onUnsatisfactory: incentives.onUnsatisfactory ?? null,
     },
+    amendments: amendments.map((a) => ({ ...a })),
     status,
   }
 }
@@ -2852,6 +2858,86 @@ export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope,
     ],
     status: da.status,
   })
+}
+
+/**
+ * Phase 11E.1 (#108): Amend an Evaluation Agreement (spec §11.2a). Returns a
+ * new EA with updated `terms.evaluationDeadline` and an appended `amendments[]`
+ * entry. Acknowledgment edits live on the underlying Claim (Option B — see
+ * architecture-spec §11.2a); this factory captures the acknowledgment delta
+ * for audit purposes only.
+ *
+ * The caller MUST mutate the Claim's `acknowledgments[]` separately. This
+ * helper does NOT touch the Claim — keeping concerns separated lets the V2App
+ * handler stage both updates atomically.
+ */
+export function makeAmendedEvaluationAgreement({
+  evaluationAgreement: ea,
+  terms,
+  acknowledgmentChanges = { added: [], removed: [], edited: [] },
+  note = '',
+}) {
+  return makeEvaluationAgreement({
+    id: ea.id,
+    grantor: ea.grantor,
+    grantee: ea.grantee,
+    claimId: ea.claimId,
+    granteeAssetId: ea.granteeAssetId,
+    disclosureAgreementId: ea.disclosureAgreementId,
+    authorizedRequirementsSetIds: ea.authorizedRequirementsSetIds,
+    acknowledgmentsAccepted: ea.acknowledgmentsAccepted,
+    restrictions: ea.restrictions,
+    terms: {
+      ...ea.terms,
+      evaluationDeadline: terms?.evaluationDeadline !== undefined
+        ? terms.evaluationDeadline
+        : ea.terms.evaluationDeadline,
+    },
+    incentives: ea.incentives,
+    amendments: [
+      ...(ea.amendments || []),
+      {
+        date: new Date().toISOString(),
+        note: (note || '').trim(),
+        termsBefore: { evaluationDeadline: ea.terms.evaluationDeadline },
+        acknowledgmentChanges: {
+          added: (acknowledgmentChanges.added || []).map((a) => ({ ...a })),
+          removed: (acknowledgmentChanges.removed || []).map((a) => ({ ...a })),
+          edited: (acknowledgmentChanges.edited || []).map((e) => ({
+            id: e.id,
+            before: { ...e.before },
+            after: { ...e.after },
+          })),
+        },
+      },
+    ],
+    status: ea.status,
+  })
+}
+
+/**
+ * Phase 11E.1 (#108): pure helper for computing the delta between two
+ * acknowledgment arrays. Used by Amend EA flow to capture an audit-trail
+ * delta on the EA while the Claim's own `acknowledgments[]` mutates.
+ */
+export function diffAcknowledgments(before = [], after = []) {
+  const beforeMap = new Map(before.map((a) => [a.id, a]))
+  const afterMap = new Map(after.map((a) => [a.id, a]))
+  const added = after.filter((a) => !beforeMap.has(a.id))
+  const removed = before.filter((a) => !afterMap.has(a.id))
+  const edited = []
+  for (const a of after) {
+    const old = beforeMap.get(a.id)
+    if (!old) continue
+    if (old.title !== a.title || old.description !== a.description) {
+      edited.push({
+        id: a.id,
+        before: { title: old.title, description: old.description },
+        after: { title: a.title, description: a.description },
+      })
+    }
+  }
+  return { added, removed, edited }
 }
 
 /**
