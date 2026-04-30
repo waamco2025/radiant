@@ -2380,3 +2380,52 @@ Closes the Selective half of the Phase 11D.x grantee-view restoration. Proof-onl
 - Parse Result + Eval Result row Expand wiring — modal already supports these schemas (Phase 11B); Asset rows are the priority for Selective, other rows can land in a follow-up.
 
 **Status:** [x] Complete.
+
+### Phase 11D.3 completion notes (2026-04-29) — Proof-only Disclosure: Eval Result materialization on grantee canvas
+
+Closes the Proof-only branch of the Phase 11D.x grantee-view restoration. Phase 11D's three disclosure types (Full, Selective, Proof-only) are now all wired end-to-end on the grantee side.
+
+**Demo seed.** Added `da-alice-dave-prm-proof` (Alice → Dave, subject = PRM Claim, type = 'proofonly', granteeAssetId = ChipCo's PRM-3A IC Datasheet, scope.evaluationResultIds = [Bob's MIL-PRF-55681 Eval Result]). Dave is the natural test grantee — empty parent canvas pre-Phase-11D.3, no DA conflicts. Bob's MIL-PRF result is the natural payload (he evaluated Alice's PRM Claim under their warm-path EA). Re-disclosure semantics — whether Alice can re-disclose Bob's Eval Result — are filed as #141; default-allow today.
+
+**Workstreams (single commit):**
+
+- **W1 — `buildViewForActor` proof-only branch.** Extended `pulledInClaimIds` to also include Claim ids from active proof-only Claim DAs where actor is grantee (no EA gating — proof-only is standalone). Refactored `proofDaEvalResultIds` to handle two DA shapes: `subject.kind === 'evalResult'` (existing proof-of-evaluation flow → Claim owner) and `subject.kind === 'claim' && type === 'proofonly'` (new — disclosed Eval Result ids flow to Claim grantee). New `proofOnlyPulledEvalIds` set tracks the latter separately so the canvas adapter routes placement appropriately. View object surfaces `proofOnlyPulledEvalIds` alongside the existing `pulledInClaimIds` etc.
+
+- **W2 — Edge derivation.** New branch in `deriveAgreementEdges` BEFORE the generic inter-party Claim branch (precedence matters): when `kind === 'claim' && !internal && !toPublic && da.type === 'proofonly'`, emit two edge classes — (a) Claim ↔ granteeAssetId anchor edge (consistent with full/selective behavior so the pulled Claim has a visual home) and (b) one edge per disclosed Eval Result → Claim. All edges carry `da.type === 'proofonly'` so V2Canvas renders them with the existing dotted-green proof-only SDA style. The pre-existing generic claim DA branch is unaffected for full/selective.
+
+- **W3 — Layout column.** New constant `COL_PULLED_EVAL = 2300` (between `COL_PULLED_CLAIM = 2100` and `COL_PULLED_ASSET = 2500`, all on the 100-grid). Effective column variant `COL_PULLED_EVAL_eff` shifts with `assetColShift` like its siblings. The canvas adapter's Eval Result placement loop splits external ERs into:
+  - `erProofOfEval` (counterparty ERs visible via subject=evalResult DAs — actor is Claim owner) → placed at `COL_OWN_EVAL_eff` near the actor's own Eval Results, matching pre-Phase-11D.3 behavior (Carol's audit on Alice's canvas, etc.).
+  - `erProofOnlyPulled` (counterparty ERs from proof-only Claim DAs) → placed at `COL_PULLED_EVAL_eff` on the same row as the source Claim, with `i × ROW_STEP` stacking when multiple ERs target the same Claim.
+  
+  Visual story on Dave's canvas reads "Eval Result (2300) → Claim (2100) → my anchor Asset (2500)" with the Eval Result as the proof payload anchored to the Claim.
+
+- **W4 — V22ClaimPanel Referenced Assets empty state.** New `claimIsProofOnlyOnly` prop. V2App computes `true` when every active grantee DA on this Claim is `type === 'proofonly'`. When set, the section title renders `Referenced Assets (0)` (regardless of `claim.referencedAssetIds.length`) and the body shows italic "No Assets disclosed under this agreement." Owner + selective + full grantees see the standard rendering. Both the standard panel mount and the Phase 11B directory-materialized panel are wired.
+
+- **W5 — Clickable Evaluation Results rows.** New `onSelectEvalResult` prop on V22ClaimPanel. Each row in the Evaluation Results section is now clickable when the prop is wired (it always is from V2App). Click handler: `setSel(er.id)` + `setV22PanToClaimId(er.id)` — pans to the Eval Result on canvas and replaces the Claim panel with the Eval Result panel. Hover treatment uses an indigo-tinted background lerp so the row reads as actionable. Applied for ALL viewers (owner + grantees), not just proof-only — general UX improvement.
+
+- **W6 — V22EvalResultPanel updates.** Section renamed Evaluator → Owner (per the brief: "show Owner only, not the evaluator's name as a separate field"). New "Claim" row in the Owner section, populated from a new `linkedClaimName` prop that V2App resolves from `er.claimId` against the merged dataset. Helps proof-only grantees confirm what the pulled-in Eval Result evaluates. No JSON-tab gating for proof-only Eval Result Expand — proof-only's whole purpose is to surface the evaluation result, so the full Eval Result JSON renders as normal.
+
+- **W7 — Defensive ExpandedArtifactModal proof-only Asset branch.** The Claim panel hides Asset rows under proof-only (W4), so Asset Expand shouldn't trigger. Defensive coverage: `isProofOnlyAsset = schema === 'asset' && disclosureType === 'proofonly'` branches the Output tab to a "Under proof-only disclosure, Asset details are not available." empty state + branches the JSON tab to a bare-identity object (`{ assetId, name, owner, disclosureType: 'proofonly' }`) so file metadata never leaks even in this edge case.
+
+**Edge cases handled:**
+- *Multi-DA on same Claim.* `claimIsProofOnlyOnly` requires EVERY active grantee DA to be proof-only — if the actor has both a proof-only AND a full/selective DA on the same Claim (not seeded today, but architecturally legal), the panel falls through to the regular per-Asset rendering.
+- *Owner viewing own Claim with proof-only DA out to grantees.* The owner sees their own Claim normally; `claimIsProofOnlyOnly` is gated on `!isOwnerViewing`. Phase 11D.3 affects only the grantee side.
+- *Pulled Eval Result with no source Claim on canvas.* The placement loop falls back to `y = 0` if the source Claim isn't found in the node list (defensive — shouldn't happen since W1 pulls the Claim).
+- *Proof-of-evaluation results on Claim owner's canvas.* Carol's `erCarolPrm` on Alice's canvas (subject=evalResult flow) is correctly EXCLUDED from `proofOnlyPulledEvalIds` (only subject=claim+type=proofonly DAs populate it), so it stays at `COL_OWN_EVAL_eff` as before. No regression.
+
+**Runtime verification (browser preview, end-to-end):**
+- Switched to Dave (ChipCo). Canvas shows ChipCo's own Claim + Alice's pulled-in PRM Claim + Bob's pulled-in MIL-PRF-55681 Eval Result. Programmatic edge probe confirms: Claim at (2100, 0), Eval Result at (2300, 0); proof-only edges Claim ↔ ChipCo's PRM-3A IC Datasheet (anchor) and Eval Result → Claim.
+- Selected PRM Claim → Detail Panel shows: Owner: MicroCo, Created: 2026-03-01, **Referenced Assets (0): "No Assets disclosed under this agreement."**, Acknowledgments (2), **Evaluation Results (1): MIL-PRF-55681 Compliance · ACTIVE · by GovCo · 4 satisfactory · 1 unsatisfactory** — clickable.
+- Clicked the Eval Result row → panel pivots to V22EvalResultPanel: Owner: GovCo, **Claim: Power Regulation Module Assembly** (new linked-Claim row), Evaluated: 2026-03-09 · 14:32 UTC, Agreement: ea-bob-prm, Requirements Set + 5 result rows with status badges (4 SAT / 1 UNSAT).
+- Selective + Full + owner views unchanged from Phase 11D.2 (verified via data-layer probe — Bob still sees PRM + Vreg Claims; Alice sees her 3 Claims + 2 Eval Results including Carol's POE result placed correctly at `COL_OWN_EVAL`).
+
+**Spec updates:** §10.4 grantee view subsection extended with the Proof-only branch + new §6 cross-canvas note. Spec Changelog entry. polish-backlog Update Log entry. Changelog modal v0.11.9 entry. Footer version v0.11.8 → v0.11.9.
+
+**Deviations from task brief:** Chose to render the Referenced Assets section with `(0)` + a proof-only-specific empty hint (per the brief's explicit user direction) rather than hiding the section entirely. Eval Result row clickability shipped for ALL viewers (not just proof-only) per the brief's "general UX improvement" note. The section header rename in the Eval Result panel (Evaluator → Owner) was a small interpretation of the brief's "show Owner (only — NOT the evaluator's name as a separate field)"; the existing structure already had a single party row in an "Evaluator" section, but renaming the section to "Owner" reads more cleanly per the brief's terminology.
+
+**Known scope boundaries (not 11D.3 blockers):**
+- EA permission gate for proof-only re-disclosure — backlog #141, default-allow today.
+- Self-evaluation proof-of-evaluation handling — pre-existing, unchanged.
+- Pulled-in Eval Result detail panel does NOT include a "back to source Claim" button — user can navigate via the canvas selection. Future polish if needed.
+
+**Status:** [x] Complete.

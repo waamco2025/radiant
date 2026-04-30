@@ -1473,6 +1473,33 @@ export function buildV22SharedArtifacts() {
     terms: { createdDate: erCarolPrm.evaluationDate },
   })
 
+  // ── Proof-only Claim DA (Phase 11D.3) ────────────────────────────────
+  // Alice → Dave, subject = Alice's PRM Claim, type = 'proofonly'. Discloses
+  // Bob's MIL-PRF-55681 Eval Result to Dave without exposing the underlying
+  // Assets. On Dave's canvas: the Claim is pulled in, the disclosed Eval
+  // Result is pulled in alongside it, and a proof-only-styled edge connects
+  // Eval Result → Claim. The conventional Claim ↔ granteeAssetId anchor edge
+  // also renders so the Claim has a visual home on Dave's canvas.
+  // (Re-disclosure semantics — whether Alice can disclose Bob's Eval Result —
+  // are filed as #141; default-allow today.)
+  const daAliceToDavePrmProof = makeDisclosureAgreement({
+    id: 'da-alice-dave-prm-proof',
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: dave.party, dot: dave.partyDot },
+    subject: { kind: 'claim', id: cPrm.id },
+    granteeAssetId: dPrmIcDatasheet.id,
+    type: 'proofonly',
+    scope: {
+      evaluationResultIds: [erBobPrm.id],
+      includeDerivatives: false,
+    },
+    terms: {
+      createdDate: '2026-03-20T11:15:00Z',
+      expires: '2027-03-20T11:15:00Z',
+      autoRenew: false,
+    },
+  })
+
   // Ownership edges for each Eval Result → evaluator's own Asset (spec §3.5).
   // subject = evalResult; scope.assetIds names the evaluator's anchor Asset.
   // Edge: subject (evalResult) ↔ scope.assetIds[0].
@@ -1517,6 +1544,7 @@ export function buildV22SharedArtifacts() {
     daAlicePublicEmi,
     daProofBobPrm,
     daProofCarolPrm,
+    daAliceToDavePrmProof,
     daOwnEvalBob,
     daOwnEvalCarol,
   ]
@@ -1591,25 +1619,54 @@ function buildViewForActor(actor, shared) {
     if (ea.grantee.party !== party) continue // only pull in as grantee
     pulledInClaimIds.add(ea.claimId)
   }
+  // Phase 11D.3: proof-only Claim DAs also pull the source Claim in for the
+  // grantee, regardless of EA presence — proof-only is a standalone disclosure
+  // type whose payload is the chosen Eval Results, anchored to the Claim.
+  for (const da of disclosureAgreements) {
+    if (da._revokedMeta) continue
+    if (da.subject?.kind !== 'claim') continue
+    if (da.type !== 'proofonly') continue
+    if (da.grantee.party !== party) continue
+    if (da.grantor.party === party) continue
+    pulledInClaimIds.add(da.subject.id)
+  }
   const pulledInClaims = shared.claims.filter(
     (c) => c.owner !== party && pulledInClaimIds.has(c.id),
   )
 
   // Eval Results visible: those the actor owns, plus those with a Proof-of-Evaluation
   // Disclosure Agreement where the actor is the grantee (claim owner seeing
-  // evaluator's result).
+  // evaluator's result), plus those disclosed via a proof-only Claim DA where
+  // the actor is grantee (Phase 11D.3 — Alice → Dave proof-only of Bob's ER).
   const proofDaEvalResultIds = new Set()
+  // Phase 11D.3: track proof-only-pulled Eval Result ids separately so the
+  // canvas adapter can place them in their own column near the pulled Claim
+  // (instead of mixing them in with the actor's own evaluation column, which
+  // is where proof-of-evaluation results live).
+  const proofOnlyPulledEvalIds = new Set()
   for (const da of disclosureAgreements) {
-    if (da.subject.kind !== 'evalResult') continue
     // Phase 9D.1.5: revoked POE DAs (cascade-annotated by 9D.1.4 when their
     // backing EA is revoked) no longer confer ER visibility to the Claim
     // owner. Without this filter, the grantor's `visibleEvaluationResults`
     // kept the grantee's ER even though the access agreement was revoked,
     // so the orphaned ER lingered on the grantor's canvas.
     if (da._revokedMeta) continue
-    // Proof-of-eval: grantee is the claim owner receiving the result.
-    if (da.grantee.party === party && da.grantor.party !== party) {
-      proofDaEvalResultIds.add(da.subject.id)
+    if (da.subject.kind === 'evalResult') {
+      // Proof-of-eval: grantee is the claim owner receiving the result.
+      if (da.grantee.party === party && da.grantor.party !== party) {
+        proofDaEvalResultIds.add(da.subject.id)
+      }
+      continue
+    }
+    // Phase 11D.3: proof-only Claim DA → pull each chosen Eval Result onto
+    // the grantee's canvas alongside the source Claim.
+    if (da.subject.kind === 'claim' && da.type === 'proofonly') {
+      if (da.grantee.party === party && da.grantor.party !== party) {
+        for (const erId of (da.scope?.evaluationResultIds || [])) {
+          proofDaEvalResultIds.add(erId)
+          proofOnlyPulledEvalIds.add(erId)
+        }
+      }
     }
   }
   const visibleEvaluationResults = shared.evaluationResults.filter(
@@ -1850,6 +1907,11 @@ function buildViewForActor(actor, shared) {
     pairedDaIds,
     pulledInClaimIds,
     pulledInAssetIds,
+    // Phase 11D.3: Eval Result ids pulled in via proof-only Claim DAs (the
+    // actor is grantee). Used by `buildV22Canvas` to place these Eval Results
+    // in their own column near the source Claim, separate from the actor's
+    // own evaluation flow + the proof-of-evaluation results.
+    proofOnlyPulledEvalIds,
     provisionalClaimIds,
     provisionalAssetIds,
     declinedClaimIds,
@@ -2103,6 +2165,20 @@ export function deriveAgreementEdges(view) {
       pushEdge(id, RADIANT_NETWORK_ACTOR.id, da)
       continue
     }
+    if (kind === 'claim' && !internal && !toPublic && da.type === 'proofonly') {
+      // Phase 11D.3: proof-only Claim DA. Two edge classes:
+      //   (a) The conventional Claim ↔ granteeAssetId anchor (proof-only
+      //       styled) so the pulled-in Claim has a visual home on the
+      //       grantee's canvas, mirroring full/selective behavior.
+      //   (b) One edge per disclosed Eval Result → Claim, also proof-only
+      //       styled. These edges carry the actual disclosure payload —
+      //       the proof-only relationship is THROUGH the Eval Result.
+      if (da.granteeAssetId) pushEdge(id, da.granteeAssetId, da)
+      for (const erId of (da.scope?.evaluationResultIds || [])) {
+        pushEdge(erId, id, da)
+      }
+      continue
+    }
     if (kind === 'claim' && !internal && !toPublic) {
       // Inter-party Claim disclosure — subject ↔ granteeAssetId.
       if (da.granteeAssetId) pushEdge(id, da.granteeAssetId, da)
@@ -2166,6 +2242,10 @@ const COL_OWN_PARSE = 900
 const COL_OWN_CLAIM = 1300
 const COL_OWN_EVAL = 1700
 const COL_PULLED_CLAIM = 2100
+// Phase 11D.3: proof-only-pulled Eval Results sit between the pulled Claim
+// and the grantee's own anchor Asset, so the visual story reads
+// "Eval Result → Claim → my Asset" with the Eval Result as the proof payload.
+const COL_PULLED_EVAL = 2300
 const COL_PULLED_ASSET = 2500
 const COL_PUBLIC = 2900
 const ROW_STEP = 300                // Phase 10.2.1: was 260; snap to 100-grid
@@ -3177,6 +3257,7 @@ export function buildV22Canvas(view) {
   const COL_OWN_CLAIM_eff = COL_OWN_CLAIM + assetColShift
   const COL_OWN_EVAL_eff = COL_OWN_EVAL + assetColShift
   const COL_PULLED_CLAIM_eff = COL_PULLED_CLAIM + assetColShift
+  const COL_PULLED_EVAL_eff = COL_PULLED_EVAL + assetColShift
   const COL_PULLED_ASSET_eff = COL_PULLED_ASSET + assetColShift
   const COL_PUBLIC_eff = COL_PUBLIC + assetColShift
 
@@ -3315,10 +3396,26 @@ export function buildV22Canvas(view) {
     nodes.push(node)
   })
 
-  // ── Evaluation Results (column 4) ────────────────────────────────────
-  // Owned Eval Results first, then proof-of-eval-visible ones from other parties.
+  // ── Evaluation Results ───────────────────────────────────────────────
+  // Three groupings:
+  //   • erOwn — actor's own Eval Results (own evaluation column).
+  //   • erProofOfEval — counterparty Eval Results visible via proof-of-
+  //     evaluation DAs (subject=evalResult); the actor is the Claim owner
+  //     receiving the proof. These sit alongside the actor's own Eval
+  //     Results because conceptually they evaluate the actor's Claims.
+  //   • erProofOnlyPulled — Phase 11D.3: counterparty Eval Results pulled
+  //     in via proof-only Claim DAs. These belong to a counterparty's
+  //     Claim that's now on the actor's canvas, so they sit in the
+  //     pulled-Eval column near the source Claim, not in the actor's
+  //     own evaluation flow.
+  const proofOnlyPulledEvalIds = view.proofOnlyPulledEvalIds || new Set()
   const erOwn = view.evaluationResults.filter((e) => e.owner === actor.party)
-  const erExternal = view.evaluationResults.filter((e) => e.owner !== actor.party)
+  const erProofOfEval = view.evaluationResults.filter((e) =>
+    e.owner !== actor.party && !proofOnlyPulledEvalIds.has(e.id),
+  )
+  const erProofOnlyPulled = view.evaluationResults.filter((e) =>
+    e.owner !== actor.party && proofOnlyPulledEvalIds.has(e.id),
+  )
   // Phase 10.2.1: replaces the legacy `EVAL_ROW_OFFSET = ROW_STEP / 2`
   // (Phase 6.5 #17) with the standard COL_Y_OFFSET (100 — one full grid
   // step). External Eval Results stack continuously below the owned ones
@@ -3327,8 +3424,21 @@ export function buildV22Canvas(view) {
   erOwn.forEach((er, i) => {
     nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(i) + COL_Y_OFFSET))
   })
-  erExternal.forEach((er, i) => {
+  erProofOfEval.forEach((er, i) => {
     nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET))
+  })
+  // Phase 11D.3: place each proof-only-pulled Eval Result on the same row
+  // as its source Claim (already placed in pulledClaims above), with a small
+  // vertical offset when multiple ERs target the same Claim.
+  const claimNodeById = new Map(nodes.filter((n) => n.v22Type === 'CLAIM').map((n) => [n.id, n]))
+  const erPulledPerClaim = new Map() // claimId → count placed so far (for stacking)
+  erProofOnlyPulled.forEach((er) => {
+    const sourceClaim = claimNodeById.get(er.claimId)
+    const stackIdx = erPulledPerClaim.get(er.claimId) || 0
+    erPulledPerClaim.set(er.claimId, stackIdx + 1)
+    const baseY = sourceClaim ? sourceClaim.y : 0
+    const y = baseY + (stackIdx * ROW_STEP)
+    nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, y))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────

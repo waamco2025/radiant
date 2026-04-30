@@ -247,6 +247,11 @@ export default function ExpandedArtifactModal({
   // Phase 11D.2: detect Selective Asset view (Output tab renders fields, not
   // the file viewer; JSON tab renders the disclosed portion only).
   const isSelectiveAsset = schema === 'asset' && disclosureType === 'selective'
+  // Phase 11D.3: defensive — proof-only Asset Expand should not happen in
+  // practice (the Claim panel hides Asset rows under proof-only). If it
+  // somehow triggers, render an empty-state message instead of leaking the
+  // file viewer.
+  const isProofOnlyAsset = schema === 'asset' && disclosureType === 'proofonly'
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -262,7 +267,29 @@ export default function ExpandedArtifactModal({
   const displayTitle = title || artifact?.name || artifact?.id || 'Artifact'
 
   let outputBody
-  if (schema === 'asset' && isSelectiveAsset) {
+  if (schema === 'asset' && isProofOnlyAsset) {
+    // Phase 11D.3 (defensive): Asset details are not available under proof-
+    // only disclosure. The Claim panel suppresses Asset rows for proof-only
+    // grantees, so this branch shouldn't trigger in practice.
+    outputBody = (
+      <div style={{
+        height: 200,
+        background: 'var(--bg-deep)',
+        border: '2px dashed var(--border)',
+        borderRadius: 6,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--text-dim)',
+        fontSize: 12,
+        textAlign: 'center',
+        padding: 24,
+        fontStyle: 'italic',
+      }}>
+        Under proof-only disclosure, Asset details are not available.
+      </div>
+    )
+  } else if (schema === 'asset' && isSelectiveAsset) {
     // Phase 11D.2: Selective grantee — render the disclosed parsed fields
     // instead of the file viewer. Owner + Full grantees go through the
     // standard AssetEvidenceViewer path below.
@@ -376,7 +403,17 @@ export default function ExpandedArtifactModal({
               wordBreak: 'break-all',
               lineHeight: 1.5,
             }}>{JSON.stringify(
-              isSelectiveAsset
+              isProofOnlyAsset
+                // Phase 11D.3 (defensive): proof-only Asset Expand should
+                // never trigger, but if it does, surface only the bare Asset
+                // identity so file metadata isn't leaked.
+                ? {
+                  assetId: artifact?.id,
+                  name: artifact?.name,
+                  owner: artifact?.owner,
+                  disclosureType: 'proofonly',
+                }
+                : isSelectiveAsset
                 // Phase 11D.2: Selective grantee — only the disclosed portion
                 // is surfaced. The full Asset artifact carries file metadata
                 // (filename / hash / URI / localPath / size / mimeType) that

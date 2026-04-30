@@ -4397,6 +4397,7 @@ export default function V2App() {
           const isOwnerViewing = claim.owner === activeRole.party
           const resolveAsset = (id) => sharedForPanel.assets.find((x) => x.id === id) || null
           let refAssetRows
+          let claimIsProofOnlyOnlyDir = false
           if (isOwnerViewing) {
             refAssetRows = refIds.map(id => {
               const a = resolveAsset(id)
@@ -4414,6 +4415,10 @@ export default function V2App() {
               !d._declineMeta &&
               !d._revokedMeta,
             )
+            // Phase 11D.3: detect proof-only-only viewing on directory-
+            // materialized panel as well.
+            claimIsProofOnlyOnlyDir = activeGranteeDas.length > 0
+              && activeGranteeDas.every((d) => d.type === 'proofonly')
             const inScope = new Set()
             for (const da of activeGranteeDas) {
               if (Array.isArray(da.scope?.assetIds)) {
@@ -4480,6 +4485,7 @@ export default function V2App() {
                 activeParty={activeRole.party}
                 onClose={() => setV22DirectoryMaterializedClaim(null)}
                 referencedAssetNames={refAssetRows}
+                claimIsProofOnlyOnly={claimIsProofOnlyOnlyDir}
                 onExpandAsset={(row) => {
                   // Phase 11D.2: row may be either the legacy raw Asset
                   // artifact (older callers) or an enriched row carrying
@@ -5047,6 +5053,23 @@ export default function V2App() {
           // silently drops them from the rendered list.
           const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const isOwnerViewing = node.v22Type === 'CLAIM' && node.owner === activeRole.party
+          // Phase 11D.3: detect proof-only-only viewing (every active grantee
+          // DA on this Claim is proof-only). Drives the Claim Detail Panel's
+          // empty-state copy on the Referenced Assets section — proof-only
+          // doesn't expose Assets, so the section reads "(0)" + a proof-only-
+          // specific empty hint instead of a generic "No referenced Assets."
+          let claimIsProofOnlyOnly = false
+          if (!isOwnerViewing && node.v22Type === 'CLAIM') {
+            const activeGranteeDasForClaim = (v22View?.disclosureAgreements || []).filter((d) =>
+              d.subject?.id === node.id &&
+              d.grantee?.party === activeRole.party &&
+              d.type !== 'provisional' &&
+              !d._declineMeta &&
+              !d._revokedMeta,
+            )
+            claimIsProofOnlyOnly = activeGranteeDasForClaim.length > 0
+              && activeGranteeDasForClaim.every((d) => d.type === 'proofonly')
+          }
           let referencedAssetNames = []
           if (node.v22Artifact?.referencedAssetIds) {
             const refIds = node.v22Artifact.referencedAssetIds
@@ -5365,6 +5388,16 @@ export default function V2App() {
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
+                claimIsProofOnlyOnly={claimIsProofOnlyOnly}
+                onSelectEvalResult={(er) => {
+                  // Phase 11D.3: pan to the Eval Result node and open its
+                  // Detail Panel (replaces the Claim panel since selection
+                  // changes).
+                  setSel(er.id)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22PanToClaimId(er.id)
+                }}
                 // Phase 11B: open the ExpandedArtifactModal for an Asset row.
                 onExpandAsset={(row) => {
                   // Phase 11D.2: row may be either the legacy raw Asset
@@ -5446,6 +5479,12 @@ export default function V2App() {
                   return !ea
                 })()}
                 onDismissOrphanedEvalResult={() => setV22DismissingEvalResult(node.v22Artifact || null)}
+                // Phase 11D.3: linked Claim name for Eval Result panels.
+                // Resolves the ER's claimId against the merged dataset so
+                // proof-only grantees can see what the ER evaluates.
+                linkedClaimName={node.v22Type === 'EVAL RESULT' && node.v22Artifact?.claimId
+                  ? (sharedForPanel.claims.find((c) => c.id === node.v22Artifact.claimId)?.name || null)
+                  : null}
                 // Phase 9C — Agreements Section (backlog #111)
                 disclosureAgreementsForNode={disclosureAgreementsForNode}
                 evaluationAgreementsForNode={evaluationAgreementsForNode}
@@ -5520,7 +5559,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.8 &middot; Changelog
+          v0.11.9 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5567,6 +5606,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.9', date: '2026-04-29', label: 'Phase 11D.3', items: [
+                  'New: proof-only Disclosure now materializes the chosen Evaluation Results onto the grantee\'s canvas. Each disclosed Eval Result appears as a node next to the source Claim with a proof-only-styled edge connecting them',
+                  'New: under proof-only, the Claim Detail Panel\'s Referenced Assets section reads "(0) — No Assets disclosed under this agreement." Proof-only doesn\'t expose Assets; only the evaluation outcome is shared',
+                  'New: Evaluation Results rows in the Claim Detail Panel are now clickable — click pans to the Eval Result node and opens its Detail Panel. Works for all viewers, not just proof-only',
+                  'Polish: Eval Result Detail Panel section renamed Evaluator → Owner, with a new "Claim" row showing the linked Claim name. Useful for proof-only grantees who want to confirm what the pulled-in Eval Result evaluates',
+                ]},
                 { version: '0.11.8', date: '2026-04-29', label: 'Phase 11D.2', items: [
                   'New: Selective Disclosure grantees now see how many parsed fields each referenced Asset discloses on the Claim Detail Panel — a muted "{N} fields" label sits next to each Asset row\'s Expand button',
                   'New: Expand modal renders a parsed-fields table (label + value + confidence) for Selective grantees instead of the file viewer — the underlying file isn\'t disclosed under Selective, only the fields are',

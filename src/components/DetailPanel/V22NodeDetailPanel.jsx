@@ -640,6 +640,17 @@ function V22ClaimPanel({
   onRequestEvaluationAgreement,
   hasActiveDaWithoutEa = false,
   referencedAssetNames = [],
+  // Phase 11D.3: when the viewer's active disclosure on this Claim is
+  // proof-only (and only proof-only), the Referenced Assets section renders
+  // "(0)" with a proof-only-specific empty hint instead of the generic
+  // "No referenced Assets." copy. Owner + selective + full grantees see
+  // the standard rendering.
+  claimIsProofOnlyOnly = false,
+  // Phase 11D.3: clickable Evaluation Results rows. Click → pan to the
+  // Eval Result node + open its Detail Panel (replaces this Claim panel
+  // since selection changes). Wired for all viewers (owner + grantees) as
+  // a general UX improvement, not just proof-only.
+  onSelectEvalResult,
   // Phase 11B: handler for the Expand button on referenced-Asset rows.
   // Receives the full Asset artifact so the modal can read file metadata
   // + dot lineage. Optional — when omitted, no Expand button renders.
@@ -891,8 +902,10 @@ function V22ClaimPanel({
             <Row label="Party" value={node.owner} />
             <Row label="Created" value={formatDateTime(claim?.createdDate)} />
           </Section>
-          <Section title={`Referenced Assets (${claim?.referencedAssetIds?.length || 0})`}>
-            {referencedAssetNames.length === 0 ? (
+          <Section title={`Referenced Assets (${claimIsProofOnlyOnly ? 0 : (claim?.referencedAssetIds?.length || 0)})`}>
+            {claimIsProofOnlyOnly ? (
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>No Assets disclosed under this agreement.</div>
+            ) : referencedAssetNames.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No referenced Assets.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -969,12 +982,21 @@ function V22ClaimPanel({
                   const isSuper = er.status === 'superseded'
                   const ok = er.results.filter(r => r.status === 'satisfactory').length
                   const bad = er.results.filter(r => r.status === 'unsatisfactory').length
+                  const clickable = !!onSelectEvalResult
                   return (
-                    <div key={er.id} style={{
-                      fontSize: 11, color: isSuper ? 'var(--text-dim)' : 'var(--text-primary)',
-                      padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3,
-                      opacity: isSuper ? 0.6 : 1,
-                    }}>
+                    <div
+                      key={er.id}
+                      onClick={clickable ? () => onSelectEvalResult(er) : undefined}
+                      style={{
+                        fontSize: 11, color: isSuper ? 'var(--text-dim)' : 'var(--text-primary)',
+                        padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3,
+                        opacity: isSuper ? 0.6 : 1,
+                        cursor: clickable ? 'pointer' : 'default',
+                        transition: 'background 100ms',
+                      }}
+                      onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 70%, var(--accent-indigo))' } : undefined}
+                      onMouseLeave={clickable ? (e) => { e.currentTarget.style.background = 'var(--bg-raised)' } : undefined}
+                    >
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontWeight: 600 }}>
                         <span>{er.requirementsSet?.name || er.id}</span>
                         <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)' }}>{isSuper ? 'SUPERSEDED' : 'ACTIVE'}</span>
@@ -1097,6 +1119,11 @@ function V22EvalResultPanel({
   // but leaves the canvas view).
   isOrphaned = false,
   onDismissOrphanedEvalResult,
+  // Phase 11D.3: linked Claim name (resolved via claimId by V2App against
+  // the merged shared dataset). Shown as a row in the Owner section when
+  // available — useful for proof-only grantees who see an Eval Result pulled
+  // in via a proof-only Claim DA and want to confirm what it evaluates.
+  linkedClaimName,
 }) {
   const er = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -1113,8 +1140,12 @@ function V22EvalResultPanel({
       header={<PanelHeader typeLabel="EVAL RESULT" name={node.name} pin={node.pin} onClose={onClose} badge={supersededBadge} />}
       body={
         <>
-          <Section title="Evaluator">
+          {/* Phase 11D.3: section header reads "Owner" (the Eval Result is
+              owned by the evaluator; the panel doesn't carry a separate
+              "Evaluator" + "Owner" pair — they're the same party). */}
+          <Section title="Owner">
             <Row label="Party" value={node.owner} />
+            {linkedClaimName && <Row label="Claim" value={linkedClaimName} />}
             <Row label="Evaluated" value={formatDateTime(er?.evaluationDate)} />
             <Row label="Agreement" value={er?.evaluationAgreementId} mono />
           </Section>
