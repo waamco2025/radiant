@@ -5559,7 +5559,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.10 &middot; Changelog
+          v0.11.11 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5606,6 +5606,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.11', date: '2026-04-30', label: 'Phase 11D.4.1', items: [
+                  'Fix: pulled-in proof-only Evaluation Result now hangs off-and-below its source Claim instead of sitting in a fixed column. The connecting edge stays short and doesn\'t cross other canvas nodes.',
+                  'Fix: at zoomed-out LOD levels, a selected node\'s pop-up card no longer renders on top of the open Detail Panel during canvas drag. Tooltip portal z-index lowered below the panel.',
+                ]},
                 { version: '0.11.10', date: '2026-04-30', label: 'Phase 11D.4', items: [
                   'Fix: pulled-in Evaluation Result nodes (proof-only Disclosure) now sit 400px left of the source Claim instead of 200px right — no more card overlap. The new column shares slot with the actor\'s own Evaluation Results; y separation keeps them from colliding.',
                   'Fix: Claim Detail Panel "Referenced Assets" count now reflects what the viewer can actually see. A Selective grantee whose DA covers 1 of 3 referenced Assets now reads "Referenced Assets (1)" instead of the Claim\'s full "(3)".',

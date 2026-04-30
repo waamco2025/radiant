@@ -1092,7 +1092,13 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
       {showTooltip && createPortal(
         <div style={{
           position: 'fixed',
-          zIndex: 5000,
+          // Phase 11D.4.1 W2: was 5000 — sat above the Detail Panel (zIndex
+          // 200). At dot LOD when a node was selected and the user dragged
+          // the canvas, the portal'd tooltip rendered ON TOP of the open
+          // Detail Panel as the tooltip's screen position drifted into the
+          // panel's footprint. Drop to 150 so it sits below the panel (200)
+          // while still above the canvas itself (no zIndex) and edges.
+          zIndex: 150,
           left: tooltipPos.x,
           top: tooltipPos.y,
           transform: tooltipPos.anchor === 'left'
@@ -1348,7 +1354,9 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
       {showTooltip && createPortal(
         <div style={{
           position: 'fixed',
-          zIndex: 5000,
+          // Phase 11D.4.1 W2: see AssetNodeDot tooltip — same fix at the
+          // mini LOD. Drops portal tooltip below Detail Panel zIndex 200.
+          zIndex: 150,
           left: tooltipPos.x,
           top: tooltipPos.y,
           transform: 'translate(-50%, -50%) scale(0.85)',

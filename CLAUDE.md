@@ -2464,3 +2464,43 @@ For non-owners: count now matches the rendered row count. Selective grantee with
 **Deviations from task brief:** None material. Brief recommended `COL_PULLED_EVAL = 1700` (the LEFT placement) — shipped as recommended, with the y-separation rationale documented inline. Brief flagged W2's bug as upstream filtering in V2App; investigation confirmed the filtering is correct (Phase 11D.2 ships properly filtered rows) and the bug was downstream — the V22ClaimPanel header reads from the raw Claim. Single-line fix in V22ClaimPanel.
 
 **Status:** [x] Complete.
+
+### Phase 11D.4.1 completion notes (2026-04-30) — Proof-only Eval Result placement: derived from source Claim + AssetNode tooltip z-index fix
+
+Two fast-followers from Phase 11D.4 QA. Single commit.
+
+**W1 — Eval Result placement derived from source Claim.** Phase 11D.4 moved `COL_PULLED_EVAL` from 2300 → 1700 to give space from the source Claim. But 1700 sits in the actor's own evaluation column, and on Dave's canvas the proof-only-pulled Eval Result landed inline with Dave's existing ChipCo Claim/Asset traffic (y=0–300). The connecting edge to Alice's PRM Claim crossed unrelated nodes.
+
+Fix: replaced the fixed-column placement with one derived from the source Claim's position:
+
+```
+x = sourceClaim.x + 200
+y = sourceClaim.y + 300 + (stackIdx * COL_Y_OFFSET)
+```
+
+The 200px x-offset reads as "attached to" the Claim without overlapping it (cards are 210px wide; centers are 200px apart so the cards barely touch but don't visually clash). The 300px y-offset puts the Eval Result clearly below the Claim's horizontal traffic lane. On Dave's canvas this resolves to (2300, 300) for Bob's MIL-PRF Eval Result, with Alice's PRM Claim at (2100, 0) — short edge, no crossings.
+
+`COL_PULLED_EVAL` constant retained but only used as a defensive fallback (when the source Claim isn't in the canvas adapter's claim node map — shouldn't happen since Phase 11D.3's W1 pulls the Claim in alongside the disclosed ERs).
+
+**W2 — Z-index fix for AssetNode tooltip portals.** Both `AssetNodeMini` (line ~1351 of AssetNode.jsx) and `AssetNodeDot` (line ~1095) render their card-body via `createPortal(..., document.body)` with `position: fixed, zIndex: 5000`. The Detail Panel in V2App renders at `zIndex: 200`. Result: at mini or dot LOD when a node was selected and the user dragged the canvas, the tooltip's `tooltipPos` moved with the canvas pan and could land within the Detail Panel's footprint — the portal'd tooltip then rendered on top of the open Detail Panel.
+
+Fix: drop both tooltip portal z-indices to 150 — below the panel (200) and below the notification dropdown (200), still above the canvas itself (no z-index) and edges. Modal stack at 10000 still wins over both. The tooltip is informational at LOD levels (it's the only visible UI for the node when zoomed out); rendering it under the open panel is the correct layering.
+
+**Edge cases handled:**
+- *Layer of stacking comparison.* Detail Panel uses `position: absolute` inside the canvas-container flex item, with `zIndex: 200`. Tooltip portal is in `document.body` with `position: fixed, zIndex: 150`. Stacking compares within the body's stacking context — both are top-level positioned descendants. zIndex 200 wins.
+- *Modal vs tooltip.* Modals at zIndex 10000 still cover tooltips. Notification dropdowns at zIndex 200 also cover tooltips. Edge hover menu at zIndex 5900 still wins (it's a separate UI surface, not affected by this change).
+- *Self-referential proof-only ERs.* Hypothetical scenario where one ER targets multiple Claims simultaneously — n/a in current schema (`er.claimId` is single-valued). Stacking is per-DA-per-source-Claim only.
+
+**Verified end-to-end:**
+- Data layer: Dave's canvas — PRM Claim at (2100, 0), Eval Result at (2300, 300). Delta (200, 300). 
+- Alice's POE-visible Eval Results (Bob's at 1700/100, Carol's at 1700/400) and Bob's own ER (1700/100) all preserve their existing positions — no regression.
+- DOM probe at default zoom: PRM Claim card center at (1698, 653), Eval Result card center at (1858, 893). Delta (160, 240) — proportional to world-space (200, 300) at 0.8x zoom. No overlap.
+- Z-index source verification: AssetNode.jsx tooltip portals (line 1095 + 1351) both read `zIndex: 150`. Detail Panel grep confirms `zIndex: 200`. Stacking order is correct.
+
+**Spec updates:** §10.4 Proof-only sub-section text updated to describe source-Claim-derived placement (instead of the fixed-column language from 11D.3/11D.4). Spec Changelog entry covering both W1 and W2.
+
+**Footer + Changelog:** v0.11.10 → v0.11.11. Changelog modal entry added.
+
+**Deviations from task brief:** None. Both fixes shipped as briefed. The Z-index choice (150) is below all UI overlays at 200+ (Detail Panel + notification dropdown), still well above any canvas content.
+
+**Status:** [x] Complete.

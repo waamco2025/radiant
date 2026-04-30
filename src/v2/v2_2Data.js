@@ -3433,18 +3433,33 @@ export function buildV22Canvas(view) {
   erProofOfEval.forEach((er, i) => {
     nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET))
   })
-  // Phase 11D.3: place each proof-only-pulled Eval Result on the same row
-  // as its source Claim (already placed in pulledClaims above), with a small
-  // vertical offset when multiple ERs target the same Claim.
+  // Phase 11D.4.1: place each proof-only-pulled Eval Result derived from
+  // its source Claim's position, NOT at a fixed column. This avoids
+  // collisions with horizontal traffic lanes on the actor's canvas (the
+  // earlier Phase 11D.4 fixed column at COL_OWN_EVAL = 1700 pushed the
+  // node into the actor's own evaluation flow on the grantee canvas, and
+  // the connecting edge crossed unrelated nodes). The Eval Result hangs
+  // off-and-below the source Claim:
+  //   x = sourceClaim.x + 200  (slight offset right; reads as "attached")
+  //   y = sourceClaim.y + 300  (clearly below the Claim's row, leaving
+  //                            the Claim's horizontal traffic lane clean)
+  // Multiple ERs disclosed under one DA stack vertically by COL_Y_OFFSET.
   const claimNodeById = new Map(nodes.filter((n) => n.v22Type === 'CLAIM').map((n) => [n.id, n]))
   const erPulledPerClaim = new Map() // claimId → count placed so far (for stacking)
   erProofOnlyPulled.forEach((er) => {
     const sourceClaim = claimNodeById.get(er.claimId)
     const stackIdx = erPulledPerClaim.get(er.claimId) || 0
     erPulledPerClaim.set(er.claimId, stackIdx + 1)
-    const baseY = sourceClaim ? sourceClaim.y : 0
-    const y = baseY + (stackIdx * ROW_STEP)
-    nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, y))
+    if (!sourceClaim) {
+      // Defensive fallback — source Claim isn't on canvas (shouldn't
+      // happen since W1 of Phase 11D.3 pulls it in). Drop at the far-right
+      // edge of the actor's own evaluation flow.
+      nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, stackIdx * ROW_STEP))
+      return
+    }
+    const x = sourceClaim.x + 200
+    const y = sourceClaim.y + 300 + (stackIdx * COL_Y_OFFSET)
+    nodes.push(evalResultToNode(er, x, y))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────
