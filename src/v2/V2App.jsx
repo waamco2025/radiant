@@ -143,7 +143,14 @@ export default function V2App() {
   const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId|null, claimId, selfEvaluation?, lockedRequirementsSetId?, priorActiveResultId? }
   const [v22AmendingClaimId, setV22AmendingClaimId] = useState(null) // claim id being amended
   const [v22AmendingDaId, setV22AmendingDaId] = useState(null) // disclosure agreement id being amended
-  const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives reveal
+  const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives _isNew + _wasProvisional
+  // Phase 11C.5 W1: separate state var for the reveal-window-only
+  // `_showAsProvisional` stamp on the recently-accepted Claim and its
+  // incident edges. Cleared by `playRevealAnimation`'s onDone callback at
+  // phase 'done' — _decoupled_ from `v22RecentlyAcceptedClaimId` (which is
+  // cleared by the deselect-aware effect at line 2141 so the NEW badge
+  // persists until the user moves selection off the node).
+  const [v22RevealActiveClaimId, setV22RevealActiveClaimId] = useState(null)
   // Phase 9A.6.1 Fix 1: holds null, a single id, or an array of ids. Array
   // form supports multi-file Asset registration where all N new Assets need
   // the NEW badge. Consumers normalise via `toIdArray(...)` below.
@@ -350,19 +357,24 @@ export default function V2App() {
       // animated pan. The flag was dead infrastructure since the V2.1 → V2.2
       // migration retreat — the accept reveal animation hasn't fired since.
       const justFinalizedClaim = needsReveal && n.id === v22RecentlyAcceptedClaimId
-      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling) return n
+      // Phase 11C.5 W1: `_showAsProvisional` is now gated on a separate
+      // `v22RevealActiveClaimId` state so it can clear at reveal phase
+      // 'done' independently of `_isNew + _wasProvisional` (which persist
+      // until the user deselects). Without this decoupling, the 11C.3
+      // onDone callback over-cleared and dropped the NEW badge / orange
+      // tint at ~2.5s instead of letting them persist until deselect.
+      const isInRevealWindow = n.id === v22RevealActiveClaimId
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !isInRevealWindow) return n
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
-        // Phase 11C.3 W1: at notification-click time the artifact has already
-        // finalized (responder's accept fired finalize → `_provisional`
-        // cleared in v22Provisionals). Without this stamp, AssetNode's
-        // `isProvisional` predicate is false and the flip animation plays
-        // from active → active. Stamping `_showAsProvisional: true` forces
-        // AssetNode to render the dashed/dimmed provisional state during
-        // the reveal window; the stamp is cleared at reveal phase 'done' by
-        // setting `v22RecentlyAcceptedClaimId(null)` (see playRevealAnimation).
-        ...(justFinalizedClaim ? { _wasProvisional: true, _showAsProvisional: true } : {}),
+        // _wasProvisional rides along with _isNew (drives the
+        // notification-click reveal-trigger guard at V2App:3221 + the
+        // warm-path equivalent at V2App:3308).
+        ...(justFinalizedClaim ? { _wasProvisional: true } : {}),
+        // _showAsProvisional drives AssetNode's dashed/dimmed render
+        // during the reveal animation window. Cleared at phase 'done'.
+        ...(isInRevealWindow ? { _showAsProvisional: true } : {}),
         ...(isEndpoint ? {
           _isEdgeEndpoint: true,
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
@@ -374,17 +386,17 @@ export default function V2App() {
     })
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
-    // Phase 11C.4 W1: stamp `_showAsProvisional: true` on edges incident to
-    // the recently-accepted Claim so V2Canvas renders them dashed during the
-    // reveal window (V2Canvas already reads this flag at line ~863 — its
-    // `effectiveSdaType` collapses to `'provisional'` when the flag is set,
-    // pulling the dashed line config). The Claim card flips at the reveal
-    // primitive's flipMidpoint; the edge follows the same dashed → solid
-    // visual handoff because the `v22RecentlyAcceptedClaimId` stamp clears
-    // at phase 'done' alongside the node stamp.
+    // Phase 11C.4 W1 + 11C.5 W1: stamp `_showAsProvisional: true` on edges
+    // incident to the recently-accepted Claim so V2Canvas renders them
+    // dashed during the reveal window. V2Canvas already reads this flag at
+    // line ~863 — its `effectiveSdaType` collapses to `'provisional'` when
+    // set, pulling the dashed line config. Gated on `v22RevealActiveClaimId`
+    // (separate from `v22RecentlyAcceptedClaimId`) so the dashed→solid
+    // edge transition happens at reveal phase 'done' regardless of whether
+    // the user has deselected the Claim yet.
     let edges = v22Data.edges
-    if (v22RecentlyAcceptedClaimId) {
-      const claimId = v22RecentlyAcceptedClaimId
+    if (v22RevealActiveClaimId) {
+      const claimId = v22RevealActiveClaimId
       edges = v22Data.edges.map((e) => (
         (e.from === claimId || e.to === claimId)
           ? { ...e, _showAsProvisional: true }
@@ -392,7 +404,7 @@ export default function V2App() {
       ))
     }
     return { ...v22Data, nodes, edges, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -2393,20 +2405,20 @@ export default function V2App() {
   const [reviseContext, setReviseContext] = useState(null)
   const [showChangelog, setShowChangelog] = useState(false)
 
-  // Phase 11C.3 W2/W3: thin wrapper around the migrated reveal primitive.
-  // Two changes versus the V2.1-era inline implementation:
-  //   • Removed the dead V2.1 clearing logic that operated on
-  //     `addedNodes` / `addedEdges` (V2.1 storage path) — V2.2 stores
-  //     provisional state on `_provisional` flags inside `v22Provisionals`,
-  //     so the old code was a no-op.
-  //   • At phase 'done' we clear `v22RecentlyAcceptedClaimId` so
-  //     v22DataWithReveal stops force-stamping `_showAsProvisional` on the
-  //     Claim — the next render shows clean active state.
-  // Acceptance-notification dismissal still happens here at the start of
-  // the reveal so the user doesn't see the notification linger after they
-  // clicked it.
+  // Phase 11C.5 W1: thin wrapper around the migrated reveal primitive.
+  //   • `setV22RevealActiveClaimId(nodeId)` at start drives the
+  //     `_showAsProvisional` stamp on the Claim node + incident edges
+  //     during the reveal window only. Cleared at phase 'done'.
+  //   • `v22RecentlyAcceptedClaimId` was already set by the acceptance
+  //     handler — drives `_isNew + _wasProvisional`. NOT cleared here;
+  //     the deselect-aware effect at line 2141 clears it when the user
+  //     moves selection off the revealed node, so the NEW badge persists
+  //     until the user reads it (Phase 7 carry-over #1 semantics).
+  // Acceptance-notification dismissal happens at the start of the reveal
+  // so the notification doesn't linger after the user clicked it.
   const startReveal = useCallback((nodeId) => {
     const target = nodeMap[nodeId]
+    setV22RevealActiveClaimId(nodeId)
     // Dismiss matching acceptance notification — fires immediately so the
     // notification disappears as the reveal kicks off.
     const targetPin = target?.pin
@@ -2427,11 +2439,11 @@ export default function V2App() {
       targetNode: target ? { x: target.x, y: target.y } : null,
       setRevealAnim,
       onDone: () => {
-        // Phase 11C.3 W2: clear the recently-accepted-claim stamp once the
-        // reveal completes. v22DataWithReveal stops overriding the Claim's
-        // _showAsProvisional flag and the next render shows the artifact's
-        // true active state.
-        setV22RecentlyAcceptedClaimId(null)
+        // Phase 11C.5 W1: clear ONLY the reveal-active stamp; the
+        // recently-accepted-claim stamp stays so the NEW badge + orange
+        // tint persist until the user deselects the node (deselect-aware
+        // effect at line 2141 handles the clear).
+        setV22RevealActiveClaimId(null)
       },
     })
   }, [nodeMap, roleId])
@@ -5260,7 +5272,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.4 &middot; Changelog
+          v0.11.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5307,6 +5319,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.5', date: '2026-04-29', label: 'Phase 11C.5', items: [
+                  'Fix: NEW badge + orange tint on a freshly-accepted Claim now persist until you deselect the node (previously cleared at the end of the reveal animation, ~500ms after completion). The reveal-window provisional render still clears at reveal completion as before, but the "this is new, take a look" treatment hangs around until you move on',
+                ]},
                 { version: '0.11.4', date: '2026-04-29', label: 'Phase 11C.4', items: [
                   'Fix: the disclosure edge connecting to a recently-accepted Claim now also animates from provisional (dashed) to active (solid) during the reveal flip, alongside the Claim card. Edges incident to the recently-accepted Claim are stamped with the same provisional flag during the reveal window',
                   'Fix: warm-path Evaluation Agreement acceptance now triggers the reveal animation. The notification handler had been taking a simple-pan path; extended the cold-path reveal-trigger predicate to the warm-path handler so v22-ea-accepted clicks fire the flip animation when the Claim is freshly accepted',

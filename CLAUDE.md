@@ -2221,3 +2221,39 @@ if (req.type === 'v22-ea-accepted' && targetNode._isNew && targetNode._wasProvis
   - Warm path: Dave accepts → `v22-ea-accepted` notification fires to Bob → Bob clicks → handler now checks `_isNew && _wasProvisional` and routes to startReveal for accepted (not declined) → same reveal timeline.
 
 **Status:** [x] Complete.
+
+### Phase 11C.5 completion notes (2026-04-29) — NEW badge persistence + reveal animation cleanup
+
+Phase 11C.3's `onDone` callback at reveal phase 'done' cleared `v22RecentlyAcceptedClaimId`. The intent was to drop the `_showAsProvisional` stamp so the next render shows clean active state. But that state var ALSO drives `_isNew + _wasProvisional` — clearing it dropped the NEW badge + orange tint along with the provisional render at ~2.5s instead of letting them persist until deselect (Phase 7 carry-over #1 semantics).
+
+**W1 — Decouple the two stamp lifecycles.** Introduced a new state var `v22RevealActiveClaimId` separate from `v22RecentlyAcceptedClaimId`:
+- `v22RecentlyAcceptedClaimId` (existing): drives `_isNew + _wasProvisional`. Cleared by the deselect-aware effect at V2App:2141 when the user moves selection off the revealed node. Unchanged.
+- `v22RevealActiveClaimId` (new): drives `_showAsProvisional` on the Claim node + incident edges during the reveal window only. Cleared by `playRevealAnimation`'s `onDone` callback at phase 'done'.
+
+`v22DataWithReveal` updated:
+- The `_showAsProvisional` stamp on the Claim node moved out of the `justFinalizedClaim` block (which was bundled with `_wasProvisional`) into a separate `isInRevealWindow = n.id === v22RevealActiveClaimId` predicate.
+- The early-return guard at the top of the node-mapping callback now also accounts for `isInRevealWindow`, so a node in the reveal window but not in `flagged` (shouldn't happen in practice but defensively) still gets stamped.
+- The edge stamp at the bottom (Phase 11C.4 W1) is re-gated on `v22RevealActiveClaimId` so the dashed→solid edge transition timing matches the node's `_showAsProvisional` lifecycle.
+- Memo dep array gained `v22RevealActiveClaimId`.
+
+`startReveal` updated: `setV22RevealActiveClaimId(nodeId)` at start (mirroring the existing acceptance-handler `setV22RecentlyAcceptedClaimId(nodeId)` call). The `onDone` callback now only clears the new var. The deselect-aware effect at V2App:2141 stays unchanged — it correctly clears `v22RecentlyAcceptedClaimId` when the user moves selection off the revealed node, which is the proper persistence pattern.
+
+**W2 — Backlog filings.**
+- #138 (NEW badge persistence audit across all node types) — Andrew flagged this as a recurring regression. The audit scope: every handler that sets a reveal id, plus any direct `_isNew` stamping in the canvas adapter. Verify each: stamp set when node first appears, stamp persists until deselect, no other code path clears the reveal id prematurely.
+- #139 (Edge geometry animation during reveal flip) — visual polish enhancement. The current dashed→solid edge transition at flipMidpoint is correct but flat; richer would be an edge-draw animation from anchor toward the Claim during the flip phase. Mirror of the `playEdgeRetract` primitive but in reverse.
+
+**W3 — Documentation.** Spec Changelog entry. polish-backlog Update Log entry + #138 + #139 filed. CLAUDE.md note (this section). Changelog modal v0.11.4 → v0.11.5 entry. Footer version v0.11.4 → v0.11.5.
+
+**Deviations from task brief:** None. All workstreams shipped exactly as briefed. The fix is a small surgical change — one new state var, one decoupled stamp predicate in the memo, one moved `setV22RevealActiveClaimId(nodeId)` call in `startReveal`.
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~560 kB main / ~134 kB gzip).
+- App reloads cleanly; no console errors.
+- Visual end-to-end of the NEW badge persistence + reveal flip lifecycle constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path. Code-path verification confirms the timeline:
+  - t=0 (notification click): handler sets `v22RecentlyAcceptedClaimId` (already done by acceptance handler) + `startReveal` sets `v22RevealActiveClaimId` → both stamps applied → AssetNode renders dashed/dimmed (provisional) with NEW badge + orange tint
+  - t=1100ms (flip phase): AssetNode flipMidpoint switches to active styling (predicate references the reveal phase, not the stamp) → dashed→solid visual handoff
+  - t=2500ms (done phase): `onDone` callback clears `v22RevealActiveClaimId` → next render drops `_showAsProvisional` from Claim + edges → card fully active, but NEW badge + orange tint STILL VISIBLE
+  - User clicks empty canvas (deselect): `prevSelRef.current === claimId, sel === null` → effect at line 2141 clears `v22RecentlyAcceptedClaimId` → next render drops `_isNew + _wasProvisional` → NEW badge + orange tint clear
+  - Re-select the Claim: standard active selection, no NEW badge (correct — already seen).
+
+**Status:** [x] Complete.
