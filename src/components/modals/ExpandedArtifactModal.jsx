@@ -6,13 +6,20 @@
 //   • 'asset'        — Output tab renders AssetEvidenceViewer (file metadata
 //                      header + iframe-based PDF viewer when localPath is set,
 //                      placeholder card otherwise).
+//                      Phase 11D.2: when `disclosureType === 'selective'`, the
+//                      Output tab instead renders the disclosed parsed fields
+//                      as ArtifactRow list (the file itself isn't disclosed).
+//                      The JSON tab also branches: Selective grantees see only
+//                      the disclosed portion (asset id + name + fields), not
+//                      the full Asset artifact (which includes hidden file
+//                      metadata, hash, URI).
 //   • 'parse-output' — Output tab renders the Parse Result's `fields[]` as
 //                      ArtifactRow list (label + value + confidence chip).
 //   • 'eval-output'  — Output tab renders the Eval Result's `results[]` as
 //                      ArtifactRow list (label + value + status badge).
 //
 // JSON tab is universal — `JSON.stringify(artifact, null, 2)` in a scrollable
-// preformatted block.
+// preformatted block (Selective Asset view is the one exception).
 
 import { useState, useEffect } from 'react'
 import { Backdrop } from './ModalShared.jsx'
@@ -217,6 +224,18 @@ export default function ExpandedArtifactModal({
   artifact,
   schema,        // 'asset' | 'parse-output' | 'eval-output' | 'evaluation-agreement'
   title,         // optional override; falls back to artifact.name
+  // Phase 11D.2: when schema='asset', `disclosureType` ('owner' | 'full' |
+  // 'selective' | 'proofonly') controls the Output + JSON tab rendering.
+  // 'selective' switches the Output tab to a parsed-fields table and the JSON
+  // tab to a disclosed-portion-only view (file URI / hash / localPath hidden).
+  // Other schemas ignore this prop.
+  disclosureType,
+  // Phase 11D.2: parsed field rows the Selective grantee can see, resolved
+  // from the active DA's `scope.fieldIds` against the source Asset's Parse
+  // Results. Each row: { id, name, value, confidence, parseResultId,
+  // parseResultName }. Only consumed when schema='asset' and
+  // disclosureType='selective'.
+  disclosedFields,
   onClose,
 }) {
   // Phase 11C.2 W3: EA schema is JSON-only — its artifact has no file or
@@ -225,6 +244,9 @@ export default function ExpandedArtifactModal({
   // initial render is meaningful.
   const hideOutput = schema === 'evaluation-agreement'
   const [tab, setTab] = useState(hideOutput ? 'json' : 'output')
+  // Phase 11D.2: detect Selective Asset view (Output tab renders fields, not
+  // the file viewer; JSON tab renders the disclosed portion only).
+  const isSelectiveAsset = schema === 'asset' && disclosureType === 'selective'
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -240,7 +262,42 @@ export default function ExpandedArtifactModal({
   const displayTitle = title || artifact?.name || artifact?.id || 'Artifact'
 
   let outputBody
-  if (schema === 'asset') {
+  if (schema === 'asset' && isSelectiveAsset) {
+    // Phase 11D.2: Selective grantee — render the disclosed parsed fields
+    // instead of the file viewer. Owner + Full grantees go through the
+    // standard AssetEvidenceViewer path below.
+    const fields = disclosedFields || []
+    outputBody = (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{
+          padding: '12px 14px',
+          background: 'var(--bg-deep)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
+          gap: '6px 16px',
+          fontSize: 11,
+        }}>
+          <span style={{ color: 'var(--text-tertiary)' }}>Asset</span>
+          <span style={{ color: 'var(--text-primary)' }}>{artifact?.name || '—'}</span>
+          <span style={{ color: 'var(--text-tertiary)' }}>Disclosed fields</span>
+          <span style={{ color: 'var(--text-primary)' }}>{fields.length}</span>
+        </div>
+        {fields.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+            No parsed fields are disclosed for this Asset under the active Selective Disclosure Agreement.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {fields.map((f) => (
+              <ArtifactRow key={`${f.parseResultId}::${f.id}`} row={f} schema="parse-output" />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  } else if (schema === 'asset') {
     outputBody = <AssetEvidenceViewer asset={artifact} />
   } else if (schema === 'parse-output') {
     const fields = artifact?.fields || []
@@ -318,7 +375,31 @@ export default function ExpandedArtifactModal({
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
               lineHeight: 1.5,
-            }}>{JSON.stringify(artifact, null, 2)}</pre>
+            }}>{JSON.stringify(
+              isSelectiveAsset
+                // Phase 11D.2: Selective grantee — only the disclosed portion
+                // is surfaced. The full Asset artifact carries file metadata
+                // (filename / hash / URI / localPath / size / mimeType) that
+                // the grantee isn't entitled to see — exposing the full JSON
+                // here would leak it.
+                ? {
+                  assetId: artifact?.id,
+                  name: artifact?.name,
+                  owner: artifact?.owner,
+                  disclosureType: 'selective',
+                  disclosedFields: (disclosedFields || []).map(f => ({
+                    id: f.id,
+                    name: f.name,
+                    value: f.value,
+                    confidence: f.confidence,
+                    parseResultId: f.parseResultId,
+                    parseResultName: f.parseResultName,
+                  })),
+                }
+                : artifact,
+              null,
+              2,
+            )}</pre>
           )}
         </div>
       </div>

@@ -2340,3 +2340,43 @@ Audited the rest of the modal — remaining `evidence` / `Evidence` hits are int
 - Visual end-to-end constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path.
 
 **Status:** [x] Complete.
+
+### Phase 11D.2 completion notes (2026-04-29) — Selective Disclosure: grantee view of Claim's referenced Assets
+
+Closes the Selective half of the Phase 11D.x grantee-view restoration. Proof-only stays scoped for Phase 11D.3.
+
+**Problem.** Phase 11C.1 made acknowledgments authored by the Claim owner; the Selective field-picker (acceptance flow) already worked correctly and produced DAs whose `scope.fieldIds` carry `${parseResultId}::${fieldId}` entries. But the grantee never saw what was disclosed: the Detail Panel's "Referenced Assets" section listed only Assets in scope without any field-level metadata, and the Phase 11B Expand modal always opened the AssetEvidenceViewer (PDF iframe) — surfacing the full file even though Selective doesn't disclose it.
+
+**Workstreams (single commit):**
+
+- **W3 + W1 — Detect DA type, enrich Asset rows, render counts.** V2App's standard panel mount (around V2App.jsx:5010) and the directory-materialized panel (around V2App.jsx:4399) both updated. Non-owner branch now collects `activeGranteeDas` (the active DAs where viewer is grantee), then per-Asset finds the covering DA (handles multi-DA cases — e.g., Selective on Asset X + Full on Asset Y), reads its `type`, and stamps the row with `disclosureType` + (for Selective) `disclosedFieldCount` + `disclosedFields`. Disclosed fields resolve by intersecting `coveringDa.scope.fieldIds` (Set lookup) with each `${pr.id}::${field.id}` for Parse Results derived from that Asset (`pr.sourceAssetId === asset.id`). Owner branch stamps `disclosureType: 'owner'` so the count is suppressed. V22ClaimPanel's Asset row renders a 10px mono `{N} fields` muted text when `n.disclosureType === 'selective'`, between the Asset name and the Expand button. Pluralization handled (`1 field` vs `5 fields`).
+
+- **W2 — ExpandedArtifactModal's Selective branch.** Modal accepts new optional props `disclosureType` + `disclosedFields`. New constant `isSelectiveAsset = schema === 'asset' && disclosureType === 'selective'`. When true:
+  - **Output tab:** renders a header (Asset name + disclosed-field count) above an ArtifactRow list (reusing the existing `'parse-output'` schema's row rendering — label + value + confidence chip). Empty state surfaces an italic "No parsed fields are disclosed for this Asset under the active Selective Disclosure Agreement." Suppresses the file metadata header + iframe entirely.
+  - **JSON tab:** renders `{ assetId, name, owner, disclosureType, disclosedFields }` — disclosed-portion-only. The full Asset artifact (which carries `file.{filename, hash, mimeType, size, uri, localPath}` + `dot` lineage + registration metadata) is NOT exposed. Full + owner views still render the full artifact JSON.
+
+- **`onExpandAsset` signature change.** Previously took the raw Asset artifact (`(asset) => ...`). Now takes the enriched row (`(row) => setV22ExpandedArtifact({ artifact: row.asset, schema: 'asset', disclosureType: row.disclosureType, disclosedFields: row.disclosedFields })`). Defensive branch retains legacy single-arg support so non-row callers (none today, but possible future Asset-direct surfaces) still work. Both V2App call sites updated identically.
+
+**Edge cases handled:**
+- *Multi-DA per Claim/grantee.* Per-Asset DA-matching ensures each Asset gets its own disclosure type (rare but architecturally legal). The brief's simpler "first DA wins" approach would have been wrong for mixed Selective + Full scenarios.
+- *Owner viewing.* Owners see all referenced Assets unconditionally with `disclosureType: 'owner'` — the count rendering only triggers on `'selective'`, so owners see no count and Expand opens the file viewer.
+- *Full Disclosure unchanged.* Full grantees see Asset rows without field counts (their `disclosureType` is `'full'`); Expand still opens the AssetEvidenceViewer with the PDF iframe.
+- *Directory-materialized Claim (Phase 11B).* Same enrichment path applied so the warm-path scenario stays correct (today the only directory-materialized Claim has a Full DA, but the wiring is in place if a Selective directory-disclosed Claim ever appears).
+
+**Runtime verification (browser preview, end-to-end):**
+- *Selective grantee — Bob viewing Alice's PRM Claim.* Detail Panel shows 1 Asset (Power Regulation Module Datasheet) with "5 fields" muted text. Expand opens modal with Output tab listing 5 disclosed fields (Operating voltage 95% / Power dissipation 91% / Temperature range 93% / Radiation tolerance 72% / ITAR classification 88%); JSON tab shows the disclosed-portion-only object — no `file.*` keys.
+- *Full grantee — Bob viewing Voltage Regulator IC Claim.* Asset row shows no field count. Expand opens iframe pointing at `/voltageregulator-datasheet.pdf`.
+- *Owner — Alice viewing her own PRM Claim.* All 3 referenced Assets visible (Datasheet + Test Report + Thermal Analysis), no field counts. Expand on Datasheet opens iframe pointing at `/powerregulationmodule-datasheet.pdf`.
+
+**Spec updates:** §10.4 grew a "Grantee view derivation per disclosure type" subsection codifying Full / Selective / Proof-only (deferred) / owner branches with the exact field-id intersection rule + JSON disclosed-portion shape. Spec Changelog entry added.
+
+**polish-backlog updates:** Update Log entry. New item #141 filed (EA permission gate for proof-only re-disclosure — current model defaults to allow; future polish, Medium priority).
+
+**Deviations from task brief:** Chose Option B (single `'asset'` schema with `disclosureType` prop) over Option A (new `'asset-selective'` schema) per the brief's recommendation. Cleaner data model — same Asset, viewing mode determined by disclosure context. Per-Asset DA matching (vs. single-DA assumption) added unprompted because multi-DA scenarios are architecturally legal and the brief's simplification would have been incorrect for them.
+
+**Known scope boundaries (not 11D.2 blockers):**
+- Proof-only Disclosure — Phase 11D.3.
+- Asset Detail Panel changes — Selective grantees don't have a counterparty Asset Detail Panel surface today (Asset nodes don't appear on grantee canvases); access is through Claim Detail Panel only.
+- Parse Result + Eval Result row Expand wiring — modal already supports these schemas (Phase 11B); Asset rows are the priority for Selective, other rows can land in a follow-up.
+
+**Status:** [x] Complete.

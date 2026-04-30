@@ -4400,23 +4400,59 @@ export default function V2App() {
           if (isOwnerViewing) {
             refAssetRows = refIds.map(id => {
               const a = resolveAsset(id)
-              return a ? { id: a.id, name: a.name, asset: a } : null
+              return a ? { id: a.id, name: a.name, asset: a, disclosureType: 'owner' } : null
             }).filter(Boolean)
           } else {
+            // Phase 11D.2: same per-Asset disclosure type + disclosed-field
+            // enrichment as the standard panel mount, sourced from
+            // sharedForPanel since the directory-materialized claim isn't on
+            // the active actor's parent canvas.
+            const activeGranteeDas = (sharedForPanel.disclosureAgreements || []).filter((d) =>
+              d.subject?.id === claim.id &&
+              d.grantee.party === activeRole.party &&
+              d.type !== 'provisional' &&
+              !d._declineMeta &&
+              !d._revokedMeta,
+            )
             const inScope = new Set()
-            for (const da of (sharedForPanel.disclosureAgreements || [])) {
-              if (da.subject?.id !== claim.id) continue
-              if (da.grantee.party !== activeRole.party) continue
-              if (da.type === 'provisional' || da._declineMeta || da._revokedMeta) continue
+            for (const da of activeGranteeDas) {
               if (Array.isArray(da.scope?.assetIds)) {
                 for (const id of da.scope.assetIds) inScope.add(id)
               }
             }
+            const allParseResults = sharedForPanel.parseResults || []
             refAssetRows = refIds
               .filter(id => inScope.has(id))
               .map(id => {
                 const a = resolveAsset(id)
-                return a ? { id: a.id, name: a.name, asset: a } : null
+                if (!a) return null
+                const coveringDa = activeGranteeDas.find(da =>
+                  Array.isArray(da.scope?.assetIds) && da.scope.assetIds.includes(a.id),
+                ) || null
+                const disclosureType = coveringDa?.type || 'full'
+                const row = { id: a.id, name: a.name, asset: a, disclosureType }
+                if (disclosureType === 'selective') {
+                  const fieldIdSet = new Set(coveringDa?.scope?.fieldIds || [])
+                  const prsForAsset = allParseResults.filter(pr => pr.sourceAssetId === a.id)
+                  const disclosedFields = []
+                  for (const pr of prsForAsset) {
+                    for (const f of (pr.fields || [])) {
+                      if (fieldIdSet.has(`${pr.id}::${f.id}`)) {
+                        disclosedFields.push({
+                          id: f.id,
+                          name: f.name,
+                          value: f.value,
+                          confidence: f.confidence,
+                          parseResultId: pr.id,
+                          parseResultName: pr.templateName || pr.id,
+                        })
+                      }
+                    }
+                  }
+                  row.disclosedFieldCount = disclosedFields.length
+                  row.disclosedFields = disclosedFields
+                }
+                return row
               })
               .filter(Boolean)
           }
@@ -4444,7 +4480,21 @@ export default function V2App() {
                 activeParty={activeRole.party}
                 onClose={() => setV22DirectoryMaterializedClaim(null)}
                 referencedAssetNames={refAssetRows}
-                onExpandAsset={(asset) => setV22ExpandedArtifact({ artifact: asset, schema: 'asset' })}
+                onExpandAsset={(row) => {
+                  // Phase 11D.2: row may be either the legacy raw Asset
+                  // artifact (older callers) or an enriched row carrying
+                  // disclosure context. Branch defensively.
+                  if (row && row.asset) {
+                    setV22ExpandedArtifact({
+                      artifact: row.asset,
+                      schema: 'asset',
+                      disclosureType: row.disclosureType || 'full',
+                      disclosedFields: row.disclosedFields || null,
+                    })
+                  } else {
+                    setV22ExpandedArtifact({ artifact: row, schema: 'asset' })
+                  }
+                }}
                 evaluationResultsForClaim={[]}
                 evaluationAgreementForActor={null}
                 disclosureAgreementsForNode={[]}
@@ -4966,6 +5016,8 @@ export default function V2App() {
           <ExpandedArtifactModal
             artifact={v22ExpandedArtifact.artifact}
             schema={v22ExpandedArtifact.schema}
+            disclosureType={v22ExpandedArtifact.disclosureType}
+            disclosedFields={v22ExpandedArtifact.disclosedFields}
             onClose={() => setV22ExpandedArtifact(null)}
           />
         )}
@@ -5010,25 +5062,69 @@ export default function V2App() {
             if (isOwnerViewing) {
               referencedAssetNames = refIds.map(id => {
                 const a = resolveAsset(id)
-                return a ? { id: a.id, name: a.name, asset: a } : null
+                return a ? { id: a.id, name: a.name, asset: a, disclosureType: 'owner' } : null
               }).filter(Boolean)
             } else {
               // Build the union of in-scope Asset ids across all visible active
               // DAs on this Claim where the active actor is grantee.
+              // Phase 11D.2: also collect each active DA so we can determine
+              // per-Asset disclosure type (Selective vs Full) and resolve the
+              // disclosed parsed fields the grantee can see.
+              const activeGranteeDas = (v22View?.disclosureAgreements || []).filter((d) =>
+                d.subject?.id === node.id &&
+                d.grantee.party === activeRole.party &&
+                d.type !== 'provisional' &&
+                !d._declineMeta &&
+                !d._revokedMeta,
+              )
               const inScope = new Set()
-              for (const da of (v22View?.disclosureAgreements || [])) {
-                if (da.subject?.id !== node.id) continue
-                if (da.grantee.party !== activeRole.party) continue
-                if (da.type === 'provisional' || da._declineMeta) continue
+              for (const da of activeGranteeDas) {
                 if (Array.isArray(da.scope?.assetIds)) {
                   for (const id of da.scope.assetIds) inScope.add(id)
                 }
               }
+              const allParseResults = sharedForPanel.parseResults || []
               referencedAssetNames = refIds
                 .filter(id => inScope.has(id))
                 .map(id => {
                   const a = resolveAsset(id)
-                  return a ? { id: a.id, name: a.name, asset: a } : null
+                  if (!a) return null
+                  // Find the DA that covers this Asset. In practice one DA per
+                  // (Claim, grantee) is active at a time, but per-Asset matching
+                  // handles the multi-DA case correctly (e.g., a Selective DA
+                  // covering Asset X plus a Full DA covering Asset Y).
+                  const coveringDa = activeGranteeDas.find(da =>
+                    Array.isArray(da.scope?.assetIds) && da.scope.assetIds.includes(a.id),
+                  ) || null
+                  const disclosureType = coveringDa?.type || 'full'
+                  const row = { id: a.id, name: a.name, asset: a, disclosureType }
+                  if (disclosureType === 'selective') {
+                    // Phase 11D.2: enumerate disclosed fields. The DA stores
+                    // fieldIds as `${parseResultId}::${fieldId}`. Resolve each
+                    // against the Parse Results derived from this Asset so the
+                    // panel can render a count and the Expand modal can render
+                    // the field rows.
+                    const fieldIdSet = new Set(coveringDa?.scope?.fieldIds || [])
+                    const prsForAsset = allParseResults.filter(pr => pr.sourceAssetId === a.id)
+                    const disclosedFields = []
+                    for (const pr of prsForAsset) {
+                      for (const f of (pr.fields || [])) {
+                        if (fieldIdSet.has(`${pr.id}::${f.id}`)) {
+                          disclosedFields.push({
+                            id: f.id,
+                            name: f.name,
+                            value: f.value,
+                            confidence: f.confidence,
+                            parseResultId: pr.id,
+                            parseResultName: pr.templateName || pr.id,
+                          })
+                        }
+                      }
+                    }
+                    row.disclosedFieldCount = disclosedFields.length
+                    row.disclosedFields = disclosedFields
+                  }
+                  return row
                 })
                 .filter(Boolean)
             }
@@ -5270,7 +5366,21 @@ export default function V2App() {
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
                 // Phase 11B: open the ExpandedArtifactModal for an Asset row.
-                onExpandAsset={(asset) => setV22ExpandedArtifact({ artifact: asset, schema: 'asset' })}
+                onExpandAsset={(row) => {
+                  // Phase 11D.2: row may be either the legacy raw Asset
+                  // artifact (older callers) or an enriched row carrying
+                  // disclosure context. Branch defensively.
+                  if (row && row.asset) {
+                    setV22ExpandedArtifact({
+                      artifact: row.asset,
+                      schema: 'asset',
+                      disclosureType: row.disclosureType || 'full',
+                      disclosedFields: row.disclosedFields || null,
+                    })
+                  } else {
+                    setV22ExpandedArtifact({ artifact: row, schema: 'asset' })
+                  }
+                }}
                 evaluationResultsForClaim={evaluationResultsForClaim}
                 evaluationAgreementForActor={evaluationAgreementForActor && evaluationAgreementForActor.disclosureAgreementId &&
                   (() => {
@@ -5410,7 +5520,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.7 &middot; Changelog
+          v0.11.8 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5457,6 +5567,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.8', date: '2026-04-29', label: 'Phase 11D.2', items: [
+                  'New: Selective Disclosure grantees now see how many parsed fields each referenced Asset discloses on the Claim Detail Panel — a muted "{N} fields" label sits next to each Asset row\'s Expand button',
+                  'New: Expand modal renders a parsed-fields table (label + value + confidence) for Selective grantees instead of the file viewer — the underlying file isn\'t disclosed under Selective, only the fields are',
+                  'Polish: Selective grantees\' JSON tab in the Expand modal shows only the disclosed portion ({ assetId, name, owner, disclosureType, disclosedFields }) — file URI / hash / filename / localPath are no longer exposed in the JSON for fields they aren\'t entitled to see',
+                ]},
                 { version: '0.11.7', date: '2026-04-29', label: 'Phase 11D.1', items: [
                   'Polish: trimmed the "already on your network" error copy on the Request Agreement modal — second sentence removed',
                   'Polish: Run Evaluation modal header expands "EA" → "Evaluation Agreement" and the review-stage left panel reads "Assets" instead of "Evidence"',

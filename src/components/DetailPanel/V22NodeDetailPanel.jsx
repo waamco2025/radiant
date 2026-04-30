@@ -908,11 +908,24 @@ function V22ClaimPanel({
                     borderRadius: 3,
                   }}>
                     <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
-                    {/* Phase 11B: Expand button for Asset rows. Falls back to
-                        ignoring the click when no asset object or handler is
-                        wired (defensive — should always be wired today). */}
+                    {/* Phase 11D.2: Selective grantees see a disclosed-field
+                        count next to each Asset row. The owner sees no count
+                        (they have full access); Full Disclosure grantees
+                        also see no count (no field-level subset to surface). */}
+                    {n.disclosureType === 'selective' && (
+                      <span style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)',
+                        color: 'var(--text-dim)', flexShrink: 0,
+                      }}>
+                        {n.disclosedFieldCount ?? 0} {(n.disclosedFieldCount === 1) ? 'field' : 'fields'}
+                      </span>
+                    )}
+                    {/* Phase 11B / 11D.2: Expand button for Asset rows. The
+                        full row is forwarded so the modal can render a
+                        disclosure-type-aware view (PDF iframe vs. parsed-
+                        fields table). */}
                     {n.asset && onExpandAsset && (
-                      <ExpandButton onClick={() => onExpandAsset(n.asset)} title={`Expand ${n.name}`} />
+                      <ExpandButton onClick={() => onExpandAsset(n)} title={`Expand ${n.name}`} />
                     )}
                   </div>
                 ))}
