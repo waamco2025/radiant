@@ -2242,10 +2242,16 @@ const COL_OWN_PARSE = 900
 const COL_OWN_CLAIM = 1300
 const COL_OWN_EVAL = 1700
 const COL_PULLED_CLAIM = 2100
-// Phase 11D.3: proof-only-pulled Eval Results sit between the pulled Claim
-// and the grantee's own anchor Asset, so the visual story reads
-// "Eval Result → Claim → my Asset" with the Eval Result as the proof payload.
-const COL_PULLED_EVAL = 2300
+// Phase 11D.4: proof-only-pulled Eval Results sit 400px LEFT of the pulled
+// Claim (matching the existing ASSET_COL_GAP convention) — same column as
+// the actor's own Eval Results (`COL_OWN_EVAL = 1700`). Y separation keeps
+// the two from colliding: own evals carry COL_Y_OFFSET (=100) on top of the
+// symmetric distribution; proof-only-pulled evals match the source Claim's
+// y, which is on the centre row (y=0 for the first pulled Claim). This
+// reads as "Eval Result informs the Claim" — directional semantic of
+// proof-only disclosure. Phase 11D.3 placed this at 2300 (200px from the
+// Claim) which produced visible card overlap.
+const COL_PULLED_EVAL = 1700
 const COL_PULLED_ASSET = 2500
 const COL_PUBLIC = 2900
 const ROW_STEP = 300                // Phase 10.2.1: was 260; snap to 100-grid

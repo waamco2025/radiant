@@ -902,7 +902,15 @@ function V22ClaimPanel({
             <Row label="Party" value={node.owner} />
             <Row label="Created" value={formatDateTime(claim?.createdDate)} />
           </Section>
-          <Section title={`Referenced Assets (${claimIsProofOnlyOnly ? 0 : (claim?.referencedAssetIds?.length || 0)})`}>
+          {/* Phase 11D.4 (#bug fix): the count reflects the FILTERED list
+              (`referencedAssetNames.length`), not the Claim's full
+              `referencedAssetIds.length`. Phase 11D.2 added DA-scope filtering
+              to the rows but the section header was still reading the raw
+              count, so a Selective grantee saw "Referenced Assets (3)" when
+              only 1 row was visible. Owners always see the full list (V2App
+              passes all referenced Assets unfiltered for them) so the count
+              still equals the Claim's full size. */}
+          <Section title={`Referenced Assets (${claimIsProofOnlyOnly ? 0 : referencedAssetNames.length})`}>
             {claimIsProofOnlyOnly ? (
               <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>No Assets disclosed under this agreement.</div>
             ) : referencedAssetNames.length === 0 ? (

@@ -5559,7 +5559,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.9 &middot; Changelog
+          v0.11.10 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5606,6 +5606,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.10', date: '2026-04-30', label: 'Phase 11D.4', items: [
+                  'Fix: pulled-in Evaluation Result nodes (proof-only Disclosure) now sit 400px left of the source Claim instead of 200px right — no more card overlap. The new column shares slot with the actor\'s own Evaluation Results; y separation keeps them from colliding.',
+                  'Fix: Claim Detail Panel "Referenced Assets" count now reflects what the viewer can actually see. A Selective grantee whose DA covers 1 of 3 referenced Assets now reads "Referenced Assets (1)" instead of the Claim\'s full "(3)".',
+                ]},
                 { version: '0.11.9', date: '2026-04-29', label: 'Phase 11D.3', items: [
                   'New: proof-only Disclosure now materializes the chosen Evaluation Results onto the grantee\'s canvas. Each disclosed Eval Result appears as a node next to the source Claim with a proof-only-styled edge connecting them',
                   'New: under proof-only, the Claim Detail Panel\'s Referenced Assets section reads "(0) — No Assets disclosed under this agreement." Proof-only doesn\'t expose Assets; only the evaluation outcome is shared',

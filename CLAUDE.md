@@ -2429,3 +2429,38 @@ Closes the Proof-only branch of the Phase 11D.x grantee-view restoration. Phase 
 - Pulled-in Eval Result detail panel does NOT include a "back to source Claim" button — user can navigate via the canvas selection. Future polish if needed.
 
 **Status:** [x] Complete.
+
+### Phase 11D.4 completion notes (2026-04-30) — Layout spacing fix + Referenced Assets count fix
+
+Two surgical fast-followers from Phase 11D.3 QA. Single commit.
+
+**W1 — Layout spacing fix.** Phase 11D.3 placed pulled-in Eval Results at `COL_PULLED_EVAL = 2300` — only 200px from the source Claim at 2100. Cards are 210px wide, so they visibly overlapped (claim card spans ~1995–2205; eval card spans ~2195–2405; overlap of ~10px). Fix: moved `COL_PULLED_EVAL` to 1700 — 400px LEFT of the Claim, matching the existing `ASSET_COL_GAP = 400` convention and reading as "Eval Result informs the Claim from the left". The new column shares slot with `COL_OWN_EVAL = 1700`. Y separation preserves non-overlap by construction:
+- Own evals carry `COL_Y_OFFSET = 100` on top of `symmetricRowY(i)`, so they live at y ∈ {100, 400, -200, ...} — never at y=0.
+- Proof-only-pulled evals match the source Claim's y, which is `symmetricRowY(claimIdx)` for the first pulled Claim — typically y=0.
+
+For Dave specifically: Bob's pulled ER at (1700, 0); no own evals so the column slot is otherwise empty.
+For Alice (regression check): Bob's POE result at (1700, 100), Carol's POE result at (1700, 400) — unchanged, since they were already in this column via the existing `erProofOfEval` path.
+For Bob (regression check): own ER at (1700, 100) — unchanged.
+
+**Alternative considered:** push `COL_PUBLIC` rightward to make room at 2900. Rejected — invasive (touches the public-directory column constant) and the proof-only-informing-Claim semantic is cleaner with the LEFT placement.
+
+**W2 — Referenced Assets count fix.** V22ClaimPanel's section header was reading `claim?.referencedAssetIds?.length || 0` — the Claim's raw count of referenced Assets. But V2App's standard panel mount filters this list per active DA scope (Phase 11D.2), so a Selective grantee whose DA covers 1 of 3 referenced Assets would see "Referenced Assets (3)" with only 1 row beneath. Fix: switch the header count to `referencedAssetNames.length` — the filtered array. The proof-only-only ternary branch (which forces 0) is preserved.
+
+For owners: V2App passes the full list unfiltered, so `referencedAssetNames.length === claim.referencedAssetIds.length`. Owner view stays at "(3)". No change observed.
+
+For non-owners: count now matches the rendered row count. Selective grantee with 1 disclosed Asset reads "(1)". Full grantee reads the disclosed count (≤ Claim's raw count). Proof-only reads "(0)" (pre-existing branch).
+
+**Verified end-to-end (browser preview):**
+- Alice (owner) viewing PRM Claim: "Referenced Assets (3)" + 3 rows.
+- Bob (Selective grantee) viewing PRM Claim: "Referenced Assets (1)" + 1 row (Datasheet).
+- Bob (Full grantee) viewing Voltage Regulator Claim: "Referenced Assets (1)" + 1 row.
+- Dave (Proof-only grantee) viewing PRM Claim: "Referenced Assets (0)" + "No Assets disclosed under this agreement." copy.
+- Layout: Dave's PRM Claim at (2100, 0), Bob's Eval Result at (1700, 0), 400px gap; Bob's Avionics anchor at (2500, 100). All three readable without overlap. ChipCo own Claims at (1300, …) — unchanged.
+
+**Spec updates:** §10.4 Selective sub-section clarifies that the count reflects the disclosed Asset list, not the Claim's full referenced list. New spec Changelog entry covering both fixes.
+
+**Footer + Changelog:** v0.11.9 → v0.11.10. Changelog modal entry added.
+
+**Deviations from task brief:** None material. Brief recommended `COL_PULLED_EVAL = 1700` (the LEFT placement) — shipped as recommended, with the y-separation rationale documented inline. Brief flagged W2's bug as upstream filtering in V2App; investigation confirmed the filtering is correct (Phase 11D.2 ships properly filtered rows) and the bug was downstream — the V22ClaimPanel header reads from the raw Claim. Single-line fix in V22ClaimPanel.
+
+**Status:** [x] Complete.
