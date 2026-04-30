@@ -12,6 +12,7 @@
 
 import { useEffect, useRef } from 'react'
 import CopyBadge from './shared/CopyBadge'
+import ExpandButton from './shared/ExpandButton'
 import Tooltip from '../Tooltip'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
@@ -105,47 +106,9 @@ function Row({ label, value, mono }) {
   )
 }
 
-// Phase 11B: ExpandButton — outward-arrow icon button that opens the
-// ExpandedArtifactModal for the row's artifact. Restored from V2/V2.1's
-// Detail Panel pattern (lost in the V2.2 retreat).
-function ExpandButton({ onClick, title = 'Expand to view artifact' }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick?.() }}
-      title={title}
-      aria-label={title}
-      style={{
-        background: 'transparent',
-        border: '1px solid var(--border)',
-        borderRadius: 4,
-        padding: '3px 5px',
-        cursor: 'pointer',
-        color: 'var(--text-tertiary)',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'background 100ms, border-color 100ms, color 100ms',
-        flexShrink: 0,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
-        e.currentTarget.style.borderColor = 'var(--accent-indigo)'
-        e.currentTarget.style.color = 'var(--accent-indigo)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.borderColor = 'var(--border)'
-        e.currentTarget.style.color = 'var(--text-tertiary)'
-      }}
-    >
-      {/* Outward-arrow icon — diagonal arrow pointing top-right out of a square */}
-      <svg width={11} height={11} viewBox="0 0 16 16" fill="none">
-        <path d="M3 13 L13 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M7 3 H13 V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-      </svg>
-    </button>
-  )
-}
+// Phase 11C.3 W4: ExpandButton extracted to shared/ExpandButton.jsx so the
+// EA Detail Panel can use the same icon + styling without duplicating the
+// component. The local helper used to inline the SVG body — now imported.
 
 // Phase 10.2: small clickable row for Parent / Children sections in the Asset
 // Detail Panel. Renders as `[ASSET]  {name}` — clicking pans/zooms and opens

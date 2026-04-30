@@ -50,6 +50,9 @@ import V22DismissEvalResultModal from '../components/modals/V22DismissEvalResult
 import ExpandedArtifactModal from '../components/modals/ExpandedArtifactModal.jsx'
 // Phase 9D.2 (#124): unravel animation primitive for nodes leaving the canvas.
 import { playUnravelAnimation } from './animations/unravel.js'
+// Phase 11C.3 W3: reveal animation primitive — migrated out of inline
+// V2App.jsx so it parallels the unravel primitive's organization.
+import { playRevealAnimation } from './animations/reveal.js'
 // Phase 9D.1: V22RevocationNoticeModal is no longer mounted — notification
 // click now routes into the Detail Panel. File kept as dead code pending the
 // #50 dead-handler sweep. Import removed to keep the V2App surface clean.
@@ -351,7 +354,15 @@ export default function V2App() {
       return {
         ...n,
         ...(needsReveal ? { _isNew: true } : {}),
-        ...(justFinalizedClaim ? { _wasProvisional: true } : {}),
+        // Phase 11C.3 W1: at notification-click time the artifact has already
+        // finalized (responder's accept fired finalize → `_provisional`
+        // cleared in v22Provisionals). Without this stamp, AssetNode's
+        // `isProvisional` predicate is false and the flip animation plays
+        // from active → active. Stamping `_showAsProvisional: true` forces
+        // AssetNode to render the dashed/dimmed provisional state during
+        // the reveal window; the stamp is cleared at reveal phase 'done' by
+        // setting `v22RecentlyAcceptedClaimId(null)` (see playRevealAnimation).
+        ...(justFinalizedClaim ? { _wasProvisional: true, _showAsProvisional: true } : {}),
         ...(isEndpoint ? {
           _isEdgeEndpoint: true,
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
@@ -2365,56 +2376,23 @@ export default function V2App() {
   const [reviseContext, setReviseContext] = useState(null)
   const [showChangelog, setShowChangelog] = useState(false)
 
-  // Reveal animation state machine for provisional→real card transitions
+  // Phase 11C.3 W2/W3: thin wrapper around the migrated reveal primitive.
+  // Two changes versus the V2.1-era inline implementation:
+  //   • Removed the dead V2.1 clearing logic that operated on
+  //     `addedNodes` / `addedEdges` (V2.1 storage path) — V2.2 stores
+  //     provisional state on `_provisional` flags inside `v22Provisionals`,
+  //     so the old code was a no-op.
+  //   • At phase 'done' we clear `v22RecentlyAcceptedClaimId` so
+  //     v22DataWithReveal stops force-stamping `_showAsProvisional` on the
+  //     Claim — the next render shows clean active state.
+  // Acceptance-notification dismissal still happens here at the start of
+  // the reveal so the user doesn't see the notification linger after they
+  // clicked it.
   const startReveal = useCallback((nodeId) => {
-    setRevealAnim({ nodeId, phase: 'zoom' })
-    // Immediately position camera with panel offsets — cancels any running pan animation
     const target = nodeMap[nodeId]
-    if (target) {
-      const container = document.querySelector('[data-canvas-container]')
-      const z = 1.28
-      const viewportOffsetY = container ? (container.clientHeight * 0.10) / z : 0
-      const horizontalOffsetX = 180 / z
-      canvasRef.current?.panToWithZoom?.(
-        target.x + horizontalOffsetX,
-        target.y + viewportOffsetY,
-        z
-      )
-    }
-    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'border' } : prev), 500)
-    setTimeout(() => {
-      setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'flip' } : prev)
-      // Clear provisional appearance on connected edges and the node itself
-      updateRoleState(roleId, prev => {
-        let newState = { ...prev }
-        let changed = false
-        // Clear edge flags
-        const updatedEdges = prev.addedEdges.map(e => {
-          if ((e.from === nodeId || e.to === nodeId) && e._showAsProvisional) {
-            return { ...e, _showAsProvisional: false }
-          }
-          return e
-        })
-        if (updatedEdges.some((e, i) => e !== prev.addedEdges[i])) {
-          newState.addedEdges = updatedEdges
-          changed = true
-        }
-        // Clear node flag
-        const nodeIdx = prev.addedNodes.findIndex(n => n.id === nodeId && n._showAsProvisional)
-        if (nodeIdx >= 0) {
-          const updatedNodes = [...prev.addedNodes]
-          updatedNodes[nodeIdx] = { ...updatedNodes[nodeIdx], _showAsProvisional: false }
-          newState.addedNodes = updatedNodes
-          changed = true
-        }
-        return changed ? newState : prev
-      })
-    }, 1100)
-    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'badge' } : prev), 1800)
-    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'panel' } : prev), 2000)
-    setTimeout(() => setRevealAnim(prev => prev?.nodeId === nodeId ? { ...prev, phase: 'done' } : prev), 2500)
-    // Dismiss matching acceptance notification
-    const targetPin = nodeMap[nodeId]?.pin
+    // Dismiss matching acceptance notification — fires immediately so the
+    // notification disappears as the reveal kicks off.
+    const targetPin = target?.pin
     if (targetPin) {
       updateRoleState(roleId, prev => {
         const matchReq = (prev.addedRequests || []).find(r =>
@@ -2426,6 +2404,19 @@ export default function V2App() {
         return prev
       })
     }
+    playRevealAnimation({
+      nodeId,
+      canvasRef,
+      targetNode: target ? { x: target.x, y: target.y } : null,
+      setRevealAnim,
+      onDone: () => {
+        // Phase 11C.3 W2: clear the recently-accepted-claim stamp once the
+        // reveal completes. v22DataWithReveal stops overriding the Claim's
+        // _showAsProvisional flag and the next render shows the artifact's
+        // true active state.
+        setV22RecentlyAcceptedClaimId(null)
+      },
+    })
   }, [nodeMap, roleId])
 
   // Pan to pending target after Connect Asset or Disclosure Response modal closes
@@ -5241,7 +5232,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.2 &middot; Changelog
+          v0.11.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5288,6 +5279,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.3', date: '2026-04-29', label: 'Phase 11C.3', items: [
+                  'Fix: the reveal animation that plays when an agreement is accepted now visually flips from provisional → active state (was playing from active → active because the artifact had already finalized). The flip mid-animation hand-off is now visible',
+                  'Cleanup: reveal animation logic migrated out of inline V2App.jsx into src/v2/animations/reveal.js, parallel to the existing unravel primitive',
+                  'Polish: Expand icon button is now a shared component used everywhere — Asset / Parse Result / Eval Result rows on the Claim Detail Panel and the Evaluation Agreement Detail Panel header all show the same two-opposing-corner-arrows icon',
+                ]},
                 { version: '0.11.2', date: '2026-04-29', label: 'Phase 11C.2', items: [
                   'Fix: the reveal animation that plays when an agreement is accepted (provisional Claim flips to active) finally fires. The flag the V2.1-era guard reads was dead infrastructure since the V2.2 retreat — wiring it back in surfaces the existing flip animation on cold-path and warm-path acceptance alike',
                   'New: Claim Detail Panels now show an Acknowledgments section listing the pre-set terms the Claim owner authored. Visible to all viewers',

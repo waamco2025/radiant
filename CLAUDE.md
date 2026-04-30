@@ -2154,3 +2154,34 @@ The check mark stays so the chip still conveys "this was acknowledged" — but t
 - Visual verification of W1's reveal animation flow constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path for click-through scenarios.
 
 **Status:** [x] Complete.
+
+### Phase 11C.3 completion notes (2026-04-29) — Reveal animation timing fix + Expand icon consistency
+
+Five workstreams in a single commit, all driven by Phase 11C.2 QA: the wired `_wasProvisional` flag set the guard correctly but the flip animation still played from active → active rather than provisional → active.
+
+**Diagnosis.** At notification-click time the artifact has already finalized — responder's accept fires `finalize*` → `_provisional` clears in `v22Provisionals`. AssetNode's `isProvisional` predicate (line 370: `!!node.provisional || !!node._showAsProvisional`) returns false because the canvas adapter's `markProvisional` no longer sets either flag for the now-active Claim. The flip animation runs through its phases, but the source state for the flip is already active.
+
+**W1 — Force provisional render via stamp override.** `v22DataWithReveal` now adds `_showAsProvisional: true` alongside `_wasProvisional: true` on the recently-accepted Claim (only — not on Asset reveal ids). AssetNode's existing `showAsProvisional = isProvisional && !isPostFlip && !flipMidpoint` predicate evaluates to true during the reveal window, rendering the dashed/dimmed border. At `flipMidpoint` (~1.4s into the reveal) the visual hand-off happens — AssetNode switches to active styling.
+
+**W2 — Clear stamp at reveal completion + remove V2.1 dead code.** The legacy clearing logic at V2App:2388-2411 operated on `addedNodes` / `addedEdges` — V2.1 storage path. V2.2 stores provisional state on `_provisional` in `v22Provisionals`, so the old code was a no-op. Removed. Replaced with an `onDone` callback at the migrated reveal primitive's phase 'done' (t=2500ms) that clears `v22RecentlyAcceptedClaimId`, which stops `v22DataWithReveal` from stamping the override. Next render shows clean active state.
+
+**W3 — Migrate reveal animation to dedicated file.** New `src/v2/animations/reveal.js` exports `playRevealAnimation({ nodeId, canvasRef, targetNode, setRevealAnim, onDone })`. Mirrors the organization of `src/v2/animations/unravel.js`. `startReveal` in V2App.jsx is now a thin wrapper that resolves the target node from `nodeMap`, fires the acceptance-notification dismissal upfront, and delegates to the primitive. Phase timings preserved exactly: zoom (0) / border (500) / flip (1100) / badge (1800) / panel (2000) / done (2500) ms.
+
+The primitive's setTimeout chain uses a per-phase `prev?.nodeId === nodeId` guard inside each `setRevealAnim` updater so a stale timer from a superseded reveal doesn't clobber a newer reveal targeting a different node.
+
+**W4 — Standardize Expand icon.** Two duplicate definitions previously existed:
+- `V22NodeDetailPanel.jsx::ExpandButton` (Phase 11B) — diagonal arrow pointing top-right.
+- `EvaluationAgreementDetailPanel.jsx::ExpandIconButton` (Phase 11C.2) — two opposing-corner arrows pointing outward.
+
+Per the task brief, the user prefers the EA version's icon. Extracted to `src/components/DetailPanel/shared/ExpandButton.jsx` with the EA's icon path. Both Detail Panel files now import the shared component; local definitions removed. All Asset / Parse Result / Eval Result / EA Detail Panel surfaces now show the same icon.
+
+**W5 — Documentation.** Spec Changelog (Phase 11C.3 entry). polish-backlog Update Log entry. CLAUDE.md note (this section). Changelog modal v0.11.2 → v0.11.3 entry. Footer version v0.11.2 → v0.11.3.
+
+**Deviations from task brief:** None. The W3 migration was offered as optional in the brief; included in this phase per the brief's recommendation since the file was being touched anyway.
+
+**Runtime verification (preview):**
+- Build clean (91 modules, ~560 kB main / ~134 kB gzip — +3 kB for the new reveal.js + ExpandButton.jsx files; net code is smaller after removing the duplicate inline definitions).
+- App reloads cleanly; no console errors.
+- Visual verification of the reveal flip + stamp timing constrained by V2Canvas 3D raycaster DOM-dispatch limitation documented since 9A.6 — manual mouse-drive remains the canonical path for click-through scenarios. Code-path verification confirms: notification-click → `startReveal(claimId)` → primitive sets `revealAnim` to 'zoom' phase → `v22DataWithReveal` stamps `_showAsProvisional: true` on the matching node (since `v22RecentlyAcceptedClaimId === claimId`) → AssetNode renders dashed/dimmed → at `flipMidpoint` (computed from revealPhase + ~315ms) the predicate flips → at phase 'done' the onDone callback clears `v22RecentlyAcceptedClaimId` → next render drops the stamp → AssetNode renders standard active state.
+
+**Status:** [x] Complete.
