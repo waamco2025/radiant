@@ -1405,7 +1405,7 @@ Each entry names the section updated, the phase that surfaced the deviation, and
 
 ## Phase 11 (April 2026)
 
-Major architectural work delivered across twelve sub-phases, summarised here at high level. Per-sub-phase details live in the Changelog above and in `CLAUDE.md`'s Phase log.
+Major architectural work delivered across twelve sub-phases, summarised here at high level. Per-sub-phase details live in the Changelog above and in `CLAUDE-phase-log.md`.
 
 - **11A:** ChipCo + Dave actor seed; Public Directory cluster rebrand from mock `ElectroGrid Ltd` to real `ChipCo` cluster with per-role visibility filter; corner ACTOR card matching parent-layer styling.
 - **11B:** Cluster click → Claim materialization on directory layer (synthetic node via `buildClaimNodeForDirectoryMaterialization`); Detail Panel "Expand" modal restoration (`ExpandedArtifactModal.jsx`); iframe-based Asset evidence viewer; placeholder PDFs for ChipCo + Alice Assets in `/public/`.
@@ -1430,4 +1430,4 @@ The 2026-04-30 hygiene-pass audit walked every section. Substantial expansions d
 - **§13 Phased Implementation Plan** — likewise archive-value. Phase 1–8 details preserved; Phase 9–11 spec coverage lives inline in the section bodies (§3.7, §6.5, §10.4, §11.5a, §11.6a, etc.) and in the Changelog above.
 - **§15+ open questions** — not re-audited this pass. Future hygiene pass could reconcile against shipped reality.
 - **Acknowledgments architecture cross-reference** — §10.3 + §10.5 + §11.6a + Changelog all cover this comprehensively. No expansion stub needed.
-- **Reveal animation primitive** — Phase 11C.3 migrated the primitive to `src/v2/animations/reveal.js` parallel to `unravel.js`. Both are summarised in spec §3 and §11.5a; the per-stage timing details + state-var split (`v22RecentlyAcceptedClaimId` vs `v22RevealActiveClaimId`) live in `CLAUDE.md`'s phase notes, not the spec, by design — the spec describes the architecture, not the React state machine.
+- **Reveal animation primitive** — Phase 11C.3 migrated the primitive to `src/v2/animations/reveal.js` parallel to `unravel.js`. Both are summarised in spec §3 and §11.5a; the per-stage timing details + state-var split (`v22RecentlyAcceptedClaimId` vs `v22RevealActiveClaimId`) live in `CLAUDE-phase-log.md`'s phase notes, not the spec, by design — the spec describes the architecture, not the React state machine.

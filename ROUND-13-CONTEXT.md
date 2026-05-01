@@ -7,9 +7,10 @@ This is a setup checklist for the next Claude Code conversation. It identifies w
 These are the canonical reference files that should be in the foundation upload set when starting a new Round 13 conversation:
 
 1. **architecture-spec.md** — the leading scripture; describes the V2.2 architecture (Phase 11 work integrated; §6.5 cross-canvas pull-in rules, §7.4 notifications, §10.4 grantee view derivation, §11.5a revocation, §11.6a EA-only request lifecycle).
-2. **CLAUDE.md** — codebase conventions (Working Conventions, UX patterns, phase log).
-3. **polish-backlog.md** — open / partial / deferred items only at the top of the file (Phase 11.5 hygiene moved completed items into a `## Completed` section at the bottom). Each open item has standardised `Status` + `Effort` fields.
-4. Latest source files for active development:
+2. **CLAUDE.md** — codebase conventions (Working Conventions, UX patterns, current state-of-the-world). Slim file (~12 KB after the Phase 11.6 split).
+3. **CLAUDE-phase-log.md** — historical per-phase completion notes back through Phase 11E.1. Archive reference; attach only when phase history matters for the current task.
+4. **polish-backlog.md** — open / partial / deferred items only at the top of the file (Phase 11.5 hygiene moved completed items into a `## Completed` section at the bottom). Each open item has standardised `Status` + `Effort` fields.
+5. Latest source files for active development:
    - **src/v2/V2App.jsx** — root state management, panel mounts, handler routing, notification inbox, Changelog modal.
    - **src/components/DetailPanel/V22NodeDetailPanel.jsx** — Detail Panel routing and rendering for V2.2 nodes (Actor / Asset / Claim / Parse Result / Eval Result).
    - **src/v2/v2_2Data.js** — data model factories, view derivation (`buildViewForActor`), edge derivation (`deriveAgreementEdges`), canvas adapter (`buildV22Canvas`).
