@@ -5509,6 +5509,17 @@ export default function V2App() {
             // Close the node Detail Panel so the modal has a clean stage.
             setSel(null)
           }
+          // Phase 11E.1.3 Fix 1: inline AMEND handler for EAs. Mirrors the
+          // EA Detail Panel footer's onAmend (V2App:4477) — same gating
+          // (grantor only) and same setter (`setV22AmendingEaId`). The
+          // panel-close keeps the modal stage clean.
+          const handleAmendEaFromRow = (ea) => {
+            if (ea.grantor.party !== activeRole.party) return
+            if (ea._revokedMeta) return
+            if (ea.status && ea.status !== 'active') return
+            setV22AmendingEaId(ea.id)
+            setSel(null)
+          }
 
           return (
             <div style={{
@@ -5665,6 +5676,10 @@ export default function V2App() {
                 resolveClaimName={resolveClaimName}
                 onAgreementRowClick={handleAgreementRowClick}
                 onAmendDa={handleAmendDaFromRow}
+                // Phase 11E.1.3 Fix 1: inline AMEND on EA rows in the
+                // Agreements section. Same handler the EA Detail Panel
+                // footer fires.
+                onAmendEa={handleAmendEaFromRow}
                 // Phase 9D — Revoke wiring (#112)
                 onRevokeDa={(da) => handleOpenRevocationConfirm(da, 'DA')}
                 onRevokeEa={(ea) => handleOpenRevocationConfirm(ea, 'EA')}
@@ -5732,7 +5747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.15 &middot; Changelog
+          v0.11.16 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5779,6 +5794,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.16', date: '2026-05-01', label: 'Phase 11E.1.3', items: [
+                  'Fix: inline AMEND button on Evaluation Agreement rows in node Detail Panels is now wired. Replaces the stale "coming soon" placeholder with the same three-branch gating used by the EA Detail Panel footer.',
+                  'Polish: refreshed seed-data EA evaluation deadlines from 2026-04-XX to 2028-04-XX so demos no longer show past dates on Active agreements.',
+                ]},
                 { version: '0.11.15', date: '2026-05-01', label: 'Phase 11E.1.2', items: [
                   'Fix: Detail Panel Agreements section now shows the EA\'s actual deadline (was always reading "Never expires" because of a wrong field name). Updates immediately after amend.',
                   'Polish: edge hover tooltip titles ("Selective Disclosure Agreement", "Proof-only Disclosure Agreement") no longer wrap onto two lines with "Agreement" orphaned.',

@@ -254,6 +254,7 @@ function V22ActorPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onAmendEa,
   onRevokeDa,
   onRevokeEa,
 }) {
@@ -284,6 +285,7 @@ function V22ActorPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onAmendEa={onAmendEa}
             onRevokeDa={onRevokeDa}
             onRevokeEa={onRevokeEa}
           />
@@ -318,6 +320,7 @@ function V22AssetPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onAmendEa,
   onRevokeDa,
   onRevokeEa,
 }) {
@@ -448,6 +451,7 @@ function V22AssetPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onAmendEa={onAmendEa}
             onRevokeDa={onRevokeDa}
             onRevokeEa={onRevokeEa}
           />
@@ -689,6 +693,7 @@ function V22ClaimPanel({
   resolveClaimName,
   onAgreementRowClick,
   onAmendDa,
+  onAmendEa,
   onRevokeDa,
   onRevokeEa,
 }) {
@@ -1034,6 +1039,7 @@ function V22ClaimPanel({
             resolveClaimName={resolveClaimName}
             onRowClick={onAgreementRowClick}
             onAmendDa={onAmendDa}
+            onAmendEa={onAmendEa}
             onRevokeDa={onRevokeDa}
             onRevokeEa={onRevokeEa}
           />
@@ -1545,6 +1551,10 @@ function DisclosureAgreementRow({
 
 function EvaluationAgreementRow({
   ea, activeParty, claimName, onRowClick, onRevokeEa,
+  // Phase 11E.1.3 Fix 1: inline AMEND wiring — same handler the EA Detail
+  // Panel footer fires (`setV22AmendingEaId(ea.id)`). Three-branch gating
+  // mirrors EvaluationAgreementDetailPanel.jsx's footer logic.
+  onAmendEa,
   // Phase 9D.1.2 W1: inline revocation block for Cases C/D. Populated when
   // this EA is the one targeted by a v22-ea-revoked notification click.
   // Shape: { revokerParty, revokedDate, reason, cascadedFromDa }. When non-
@@ -1581,9 +1591,25 @@ function EvaluationAgreementRow({
     ? (revokedDate ? `Revoked · ${formatShortDate(revokedDate)}` : 'Revoked')
     : (expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'Never expires')
 
-  // Phase 9D.1.1 (Fix 3): grantee may also revoke EA; Amend stays grantor-
-  // only (placeholder pending #108).
-  const showAmend = isGrantor && !isInternal && !isRevoked
+  // Phase 9D.1.1 (Fix 3): grantee may also revoke EA.
+  // Phase 11E.1.3 Fix 1: AMEND is now live (was placeholder pending #108
+  // through Phase 11E.1; Phase 11E.1.3 wires the inline button to the
+  // same handler the EA Detail Panel footer fires). Three-branch gating
+  // mirrors EvaluationAgreementDetailPanel.jsx's footer:
+  //   • enabled  — isGrantor && active && !isRevoked
+  //   • disabled — !isGrantor → "Only {grantor} can amend…"
+  //   • disabled — isRevoked  → "…has been revoked; amendments are
+  //                              disabled."
+  // (status === 'active' is implied for non-revoked EAs in the current
+  // shipped data model — no other status value reaches this row today,
+  // since revoked EAs land in the Revoked subsection.)
+  const showAmend = !isInternal
+  const amendEnabled = isGrantor && !isRevoked
+  const amendTooltip = !isGrantor
+    ? `Only ${ea.grantor.party} (the grantor) can amend this agreement.`
+    : isRevoked
+      ? 'This Evaluation Agreement has been revoked; amendments are disabled.'
+      : 'Amend the expiration date and acknowledgments on this Evaluation Agreement.'
   const showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked
 
   // Phase 9D.1.2 W1: scroll the row into view when it becomes the expanded-
@@ -1621,7 +1647,12 @@ function EvaluationAgreementRow({
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 52 }}>
         {showAmend ? (
-          <ActionLabel label="Amend" disabled title="Amend Evaluation Agreements coming soon" />
+          <ActionLabel
+            label="Amend"
+            disabled={!amendEnabled}
+            onClick={(amendEnabled && onAmendEa) ? () => onAmendEa(ea) : undefined}
+            title={amendTooltip}
+          />
         ) : <span style={{ height: 14 }} />}
         {/* Phase 9D (#112): Revoke is live for EAs too — opens the Confirm modal. */}
         {showRevoke ? (
@@ -1747,6 +1778,9 @@ function AgreementsSection({
   resolveClaimName,
   onRowClick,
   onAmendDa,
+  // Phase 11E.1.3 Fix 1: inline EA amend handler — same as the EA Detail
+  // Panel footer's onAmend (V2App's `setV22AmendingEaId(ea.id)`).
+  onAmendEa,
   onRevokeDa,
   onRevokeEa,
 }) {
@@ -1795,6 +1829,7 @@ function AgreementsSection({
                 activeParty={activeParty}
                 claimName={resolveClaimName ? resolveClaimName(ea.claimId) : null}
                 onRowClick={onRowClick ? () => onRowClick('evaluation', ea) : undefined}
+                onAmendEa={onAmendEa}
                 onRevokeEa={onRevokeEa}
                 expandedRevokedInfo={expandedRevokedEaId === ea.id ? expandedRevokedEaInfo : null}
                 onDismissExpandedRevokedEa={onDismissExpandedRevokedEa}

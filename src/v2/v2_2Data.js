@@ -1363,7 +1363,7 @@ export function buildV22SharedArtifacts() {
     authorizedRequirementsSetIds: ['req-mil-prf-55681-v1'],
     terms: {
       createdDate: '2026-03-04T16:42:00Z',
-      evaluationDeadline: '2026-04-04T16:42:00Z',
+      evaluationDeadline: '2028-04-04T16:42:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-04 (was already past as of 2026-05-01).
       resultExpiry: null,
       flowDownRequirements: [],
     },
@@ -1382,7 +1382,7 @@ export function buildV22SharedArtifacts() {
     authorizedRequirementsSetIds: ['req-mil-prf-55681-v1'],
     terms: {
       createdDate: '2026-03-04T16:42:00Z',
-      evaluationDeadline: '2026-04-15T16:42:00Z',
+      evaluationDeadline: '2028-04-15T16:42:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-15.
       resultExpiry: null,
       flowDownRequirements: [],
     },
@@ -1398,7 +1398,7 @@ export function buildV22SharedArtifacts() {
     authorizedRequirementsSetIds: ['req-auditco-prm-audit-v1'],
     terms: {
       createdDate: '2026-03-10T10:00:00Z',
-      evaluationDeadline: '2026-04-20T10:00:00Z',
+      evaluationDeadline: '2028-04-20T10:00:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-20.
       resultExpiry: null,
       flowDownRequirements: [],
     },
