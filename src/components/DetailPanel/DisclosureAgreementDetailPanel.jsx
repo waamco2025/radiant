@@ -231,7 +231,7 @@ export default function DisclosureAgreementDetailPanel({
 
         <Section title="Terms">
           <Row label="Created" value={formatDateTime(agreement.terms?.createdDate)} />
-          <Row label="Expires" value={formatDateTime(agreement.terms?.expires)} />
+          <Row label="Expires" value={agreement.terms?.expires ? formatDateTime(agreement.terms.expires) : 'Never expires'} />
           <Row label="Auto-renew" value={agreement.terms?.autoRenew ? 'Yes' : 'No'} />
         </Section>
 

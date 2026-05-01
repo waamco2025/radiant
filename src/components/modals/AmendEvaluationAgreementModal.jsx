@@ -18,7 +18,7 @@ import {
 } from './ModalShared'
 
 function formatDateTime(iso) {
-  if (!iso) return 'No expiry'
+  if (!iso) return 'Never expires'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   const yyyy = d.getUTCFullYear()
@@ -180,12 +180,12 @@ export default function AmendEvaluationAgreementModal({
   // Footer summary copy.
   // Phase 11E.1.1 bonus: explicit before/after for expiration changes
   // (was the bare "Expiration changed"). Reads "Expiration: <before> →
-  // <after>" with YYYY-MM-DD precision; "No expiry" for null on either
-  // side.
+  // <after>" with YYYY-MM-DD precision; "Never expires" for null on
+  // either side (Phase 11E.1.5 Fix 2 — copy unification).
   const summaryParts = []
   if (expiryChanged) {
-    const before = initialDeadline ? toDateOnly(initialDeadline) : 'No expiry'
-    const after = computedIso ? toDateOnly(computedIso) : 'No expiry'
+    const before = initialDeadline ? toDateOnly(initialDeadline) : 'Never expires'
+    const after = computedIso ? toDateOnly(computedIso) : 'Never expires'
     summaryParts.push(`Expiration: ${before} → ${after}`)
   }
   if (acksAdded.length > 0) summaryParts.push(`${acksAdded.length} acknowledgment${acksAdded.length === 1 ? '' : 's'} added`)

@@ -402,7 +402,11 @@ export function expiryLabel(expiry, customDate) {
   // Phase 11E.1.1 Fix 4: compute relative-from-today dates in YYYY-MM-DD
   // form. The static "March 2027" / "March 2028" strings were wrong-month
   // and non-conforming with the codebase's display convention.
-  if (expiry === 'none') return 'No expiry'
+  // Phase 11E.1.5 Fix 2: resolved-state display reads "Never expires" for
+  // copy unification across the app. The picker option title (line ~367)
+  // stays as "No expiry" — that's a verb describing the user's action of
+  // opting out of an expiry, not a status display.
+  if (expiry === 'none') return 'Never expires'
   if (expiry === 'custom') return customDate || 'Not set'
   if (expiry === '1-year') return expiryPresetIso(1)
   if (expiry === '2-year') return expiryPresetIso(2)

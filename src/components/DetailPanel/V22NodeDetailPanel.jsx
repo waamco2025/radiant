@@ -1386,10 +1386,13 @@ function DisclosureAgreementRow({
 
   // Status text + color.
   // Phase 11E.1.4 Fix 2: active rows now show "Expires YYYY-MM-DD" (or
-  // "No expiry") instead of "Active · {creationDate}" — matches the EA-row
-  // pattern, since the row's presence in the active Agreements section
-  // already implies active. Revoked / declined / provisional rows keep
-  // their existing label + color + date.
+  // "Never expires") instead of "Active · {creationDate}" — matches the
+  // EA-row pattern, since the row's presence in the active Agreements
+  // section already implies active. Revoked / declined / provisional rows
+  // keep their existing label + color + date.
+  // Phase 11E.1.5 Fix 2: copy unification — "Never expires" replaces
+  // the original "No expiry" so the no-expiration state reads identically
+  // across DA rows, EA rows, edge tooltips, and amend modals.
   let statusText
   let statusColor = 'var(--text-tertiary)'
   if (isRevoked) {
@@ -1406,7 +1409,7 @@ function DisclosureAgreementRow({
     statusColor = 'var(--accent-amber)'
   } else {
     const expiresIso = da.terms?.expires
-    statusText = expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'No expiry'
+    statusText = expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'Never expires'
   }
 
   // Action visibility gating. Internal + proof-of-eval DAs hide both actions.

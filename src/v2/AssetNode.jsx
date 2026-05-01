@@ -684,15 +684,34 @@ export default function AssetNode({
         <div>
         {/* Row 0: V2.2 type label on its own line above the name (spec §3).
             Phase 9A.1 item 3: horizontal padding tightened to 4px; bottom
-            margin bumped to 8px so name has clear breathing room. */}
-        {node.v22Type && (
-          <div style={{ marginBottom: 8, lineHeight: 1, ...unravelRowStyle(isUnraveling, 0) }}>
-            <span style={{
-              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
-              color: 'var(--text-tertiary)',
-              background: 'var(--bg-raised)',
-            }}>{node.v22Type}</span>
+            margin bumped to 8px so name has clear breathing room.
+            Phase 11E.1.5 Fix 1: REVOKED badge relocated here (was alongside
+            the name in Row 1, where it crowded long node names). REVOKED
+            is a lifecycle-state badge — per CLAUDE.md Code style, state
+            badges render separately from the type label. */}
+        {(node.v22Type || isRevoked) && (
+          <div style={{
+            marginBottom: 8, lineHeight: 1,
+            display: 'flex', alignItems: 'center', gap: 4,
+            ...unravelRowStyle(isUnraveling, 0),
+          }}>
+            {node.v22Type && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
+                color: 'var(--text-tertiary)',
+                background: 'var(--bg-raised)',
+              }}>{node.v22Type}</span>
+            )}
+            {isRevoked && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+                color: 'var(--accent-red)',
+                background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+                flexShrink: 0,
+              }}>REVOKED</span>
+            )}
           </div>
         )}
         {/* Row 1: name + status badges + stack badge.
@@ -752,7 +771,9 @@ export default function AssetNode({
               flexShrink: 0,
             }}>SUPERSEDED</span>
           )}
-          {/* Phase 9D.1.3 Fix 4: REVOKED outranks DECLINED. */}
+          {/* Phase 9D.1.3 Fix 4: REVOKED outranks DECLINED.
+              Phase 11E.1.5 Fix 1: REVOKED moved to Row 0 (header row);
+              precedence preserved via the `!isRevoked` gate here. */}
           {isDeclined && !isRevoked && (
             <span style={{
               fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
@@ -761,15 +782,6 @@ export default function AssetNode({
               background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
               flexShrink: 0,
             }}>DECLINED</span>
-          )}
-          {isRevoked && (
-            <span style={{
-              fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
-              color: 'var(--accent-red)',
-              background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
-              flexShrink: 0,
-            }}>REVOKED</span>
           )}
           {!isAnchor && <StackBadge count={childCount} categoryColor={'var(--accent-amber)'} />}
         </div>

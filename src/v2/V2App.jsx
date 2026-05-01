@@ -5747,7 +5747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.17 &middot; Changelog
+          v0.11.18 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5794,6 +5794,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.18', date: '2026-05-01', label: 'Phase 11E.1.5', items: [
+                  'Fix: REVOKED badge on revoked node cards moved to the type-label header row, so long node names no longer get truncated by the badge.',
+                  'Polish: copy unification — the no-expiration state now reads "Never expires" everywhere (Detail Panels, edge tooltips, amend modals, response review). The Expiry picker option title remains "No expiry" since it labels a user action.',
+                ]},
                 { version: '0.11.17', date: '2026-05-01', label: 'Phase 11E.1.4', items: [
                   'Fix: AMEND button no longer renders on revoked Evaluation Agreement rows in node Detail Panels — matches REVOKE\'s gating and the Disclosure Agreement row pattern.',
                   'Fix: active Disclosure Agreement rows now read "Expires YYYY-MM-DD" (or "No expiry") on the right side, matching the EA-row pattern. The "Active · {creationDate}" label is dropped — the row\'s presence in the active Agreements section already implies active.',

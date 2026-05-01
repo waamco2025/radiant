@@ -183,8 +183,8 @@ export default function EvaluationAgreementDetailPanel({
 
         <Section title="Terms">
           <Row label="Created" value={formatDateTime(agreement.terms?.createdDate)} />
-          <Row label="Evaluation deadline" value={formatDateTime(agreement.terms?.evaluationDeadline)} />
-          <Row label="Result expiry" value={formatDateTime(agreement.terms?.resultExpiry)} />
+          <Row label="Evaluation deadline" value={agreement.terms?.evaluationDeadline ? formatDateTime(agreement.terms.evaluationDeadline) : 'Never expires'} />
+          <Row label="Result expiry" value={agreement.terms?.resultExpiry ? formatDateTime(agreement.terms.resultExpiry) : 'Never expires'} />
           {Array.isArray(agreement.terms?.flowDownRequirements) && agreement.terms.flowDownRequirements.length > 0 && (
             <Row
               label={`Flow-down requirements (${agreement.terms.flowDownRequirements.length})`}
@@ -235,7 +235,7 @@ export default function EvaluationAgreementDetailPanel({
                     </div>
                     {expiryChanged && (
                       <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                        Expiration: {formatDateTime(am.termsBefore.evaluationDeadline)} → {formatDateTime(agreement.terms?.evaluationDeadline)}
+                        Expiration: {am.termsBefore.evaluationDeadline ? formatDateTime(am.termsBefore.evaluationDeadline) : 'Never expires'} → {agreement.terms?.evaluationDeadline ? formatDateTime(agreement.terms.evaluationDeadline) : 'Never expires'}
                       </div>
                     )}
                     {(ackAdded > 0 || ackRemoved > 0 || ackEdited > 0) && (
