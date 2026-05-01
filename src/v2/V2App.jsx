@@ -5732,7 +5732,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.14 &middot; Changelog
+          v0.11.15 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5779,6 +5779,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.15', date: '2026-05-01', label: 'Phase 11E.1.2', items: [
+                  'Fix: Detail Panel Agreements section now shows the EA\'s actual deadline (was always reading "Never expires" because of a wrong field name). Updates immediately after amend.',
+                  'Polish: edge hover tooltip titles ("Selective Disclosure Agreement", "Proof-only Disclosure Agreement") no longer wrap onto two lines with "Agreement" orphaned.',
+                ]},
                 { version: '0.11.14', date: '2026-05-01', label: 'Phase 11E.1.1', items: [
                   'Fix: Amend Evaluation Agreement modal no longer enables Submit before any user input. The dirty-check now compares dates at YYYY-MM-DD precision.',
                   'Fix: edge hover tooltip now shows the EA\'s actual expiration (was always reading "Never expires" because of a wrong field name). Updates propagate live after amendments.',

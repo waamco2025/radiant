@@ -30,7 +30,12 @@ const SDA_TYPE_STYLE = {
   cascade:     { color: '#a78bfa', typeLabel: 'Cascade',     dasharray: '4 3' },
 }
 
-const MENU_WIDTH = 320
+// Phase 11E.1.2 Fix 2: was 320 — too narrow to fit the longest type label
+// ("Proof-only Disclosure Agreement", 31 chars) on one line at 12px/600
+// alongside the SDA illustration + the reserved 80px right padding for
+// the pinned-mode "View →" affordance. Bumped to 380 so all four labels
+// (Full / Selective / Proof-only / Evaluation) render single-line.
+const MENU_WIDTH = 380
 const MENU_OFFSET = 12
 // Phase 9B.1 §2: reserves space for "View →" in pinned state so layout
 // doesn't shift. Phase 9B.2 Fix 4: bumped 48→80px because "View →" was
@@ -227,8 +232,13 @@ export default function EdgeHoverMenu({
             marginBottom: 4,
           }}>
             <SdaEdgeIllustration sdaType={effectiveType} />
+            {/* Phase 11E.1.2 Fix 2: nowrap on the title alone so the long
+                "Selective" / "Proof-only" labels don't orphan "Agreement"
+                onto a second line. The party→party body line below
+                continues to wrap normally on long names. */}
             <span style={{
               fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+              whiteSpace: 'nowrap',
             }}>
               {style.typeLabel} Disclosure Agreement
             </span>
@@ -254,6 +264,7 @@ export default function EdgeHoverMenu({
             <div style={{
               fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
               marginBottom: 4,
+              whiteSpace: 'nowrap',  // Phase 11E.1.2 Fix 2: parity with DA title.
             }}>
               Evaluation Agreement
             </div>

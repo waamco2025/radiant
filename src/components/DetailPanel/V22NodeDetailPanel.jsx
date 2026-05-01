@@ -1564,7 +1564,16 @@ function EvaluationAgreementRow({
   else if (ea.grantee.party === activeParty) counterpartyLabel = `with ${ea.grantor.party}`
   else counterpartyLabel = `${ea.grantor.party} → ${ea.grantee.party}`
 
-  const expiresIso = ea.terms?.resultExpiry || ea.terms?.expires || null
+  // Phase 11E.1.2 Fix 1: read the correct EA schema field. The EA carries
+  // `terms.evaluationDeadline` (spec §10.5) — `resultExpiry` is a separate
+  // concept (when the eval RESULT itself expires post-evaluation), not the
+  // EA's own expiration; `terms.expires` exists only on the DA schema.
+  // Pre-fix the row always rendered "Never expires" and post-amend never
+  // updated. Legacy fallbacks retained for migration safety.
+  const expiresIso = ea.terms?.evaluationDeadline
+    || ea.terms?.resultExpiry
+    || ea.terms?.expires
+    || null
   // Phase 9D.1.1 (Fix 2): revoked EAs show the revocation date beside the
   // Revoked status so the grantee/grantor sees *when* it happened.
   const revokedDate = ea._revokedMeta?.revokedDate
