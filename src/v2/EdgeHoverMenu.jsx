@@ -160,7 +160,18 @@ export default function EdgeHoverMenu({
   const toName = toNode?.name || disclosureAgreement?.grantee?.party || '—'
   const grantorLabel = grantorParty || disclosureAgreement?.grantor?.party
   const granteeLabel = granteeParty || disclosureAgreement?.grantee?.party
-  const expiresIso = evaluationAgreement?.terms?.expires || evaluationAgreement?.expiresDate || null
+  // Phase 11E.1.1 Fix 2: read from the correct field. The EA schema carries
+  // `terms.evaluationDeadline` (spec §10.5); `terms.expires` exists only on
+  // the DA schema. Pre-fix the tooltip always fell back to "Never expires"
+  // for EAs (regardless of any actual deadline) and looked stale post-amend
+  // because it never read the real field. `evaluationAgreement` is resolved
+  // live from the merged view via `pairedEvaluationAgreementId` lookup, so
+  // post-amend the new deadline propagates here automatically once the
+  // field name is correct.
+  const expiresIso = evaluationAgreement?.terms?.evaluationDeadline
+    || evaluationAgreement?.terms?.expires    // legacy fallback
+    || evaluationAgreement?.expiresDate
+    || null
 
   return createPortal(
     <div

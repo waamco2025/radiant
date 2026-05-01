@@ -2154,14 +2154,24 @@ export default function V2App() {
     setOpenAgreement(null)
     setSelectedEdgeId(null)
 
-    // Pan + reveal on the grantor's canvas — reuses the existing _isNew
-    // infrastructure so the Claim card briefly highlights post-amend.
+    // Phase 11E.1.1 Fix 3: pan + select only — do NOT set
+    // `v22RecentlyAcceptedClaimId`. That state is global and would stamp
+    // the NEW badge on every viewer's canvas for as long as it persists,
+    // including counterparty roles (e.g., Carol) who have their own EA on
+    // the same Claim and inherit acknowledgment changes silently per
+    // §11.2a Option B. Stamping NEW for them contradicts the Option B
+    // contract (only the targeted EA grantee receives a notification).
+    // Trade-off: the grantor (Alice) doesn't get an orange tint flash
+    // post-submit either — but she just clicked Amend in a modal and
+    // immediately gets a panel-pan + selection, which is sufficient
+    // visual confirmation without the cross-role bleed. Per-role reveal-
+    // id scoping (the cleaner long-term fix) tracked under existing
+    // backlog #138 audit scope.
     if (claimIdForPan) {
       setSel(claimIdForPan)
       setForcePanelTab(null)
       setForceExpandSda(null)
       setV22PanToClaimId(claimIdForPan)
-      setV22RecentlyAcceptedClaimId(claimIdForPan)
     }
 
     // Notify the EA grantee (single-grantee fan-out per Phase 11E.1 scope —
@@ -5722,7 +5732,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.13 &middot; Changelog
+          v0.11.14 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5769,6 +5779,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.14', date: '2026-05-01', label: 'Phase 11E.1.1', items: [
+                  'Fix: Amend Evaluation Agreement modal no longer enables Submit before any user input. The dirty-check now compares dates at YYYY-MM-DD precision.',
+                  'Fix: edge hover tooltip now shows the EA\'s actual expiration (was always reading "Never expires" because of a wrong field name). Updates propagate live after amendments.',
+                  'Fix: Carol no longer sees a stale NEW badge on Alice\'s Claim when Alice amends Bob\'s EA. Silent acknowledgment inheritance is documented (Option B) but should not trigger UI cues for unaffected counterparties.',
+                  'Polish: ExpiryPicker preset cards now show correct YYYY-MM-DD dates relative to today (e.g. "Expires 2027-05-01") instead of the hard-coded "March 2027 / March 2028".',
+                  'Polish: Amend EA modal header now names the grantee + Claim ("...with GovCo on Claim Voltage Regulator IC..."); footer summary shows explicit "Expiration: <before> → <after>" rather than the bare "Expiration changed".',
+                ]},
                 { version: '0.11.13', date: '2026-04-30', label: 'Phase 11E.1', items: [
                   'New: Amend Evaluation Agreement modal — Claim owners can update an EA\'s expiration date and edit the Claim\'s acknowledgments. Unilateral; the EA grantee is notified and may revoke if they don\'t accept the new terms.',
                   'New: EA Detail Panel grew an Amendments section showing each amendment\'s expiration delta + acknowledgment changes (added / removed / edited counts) + the optional grantor note.',

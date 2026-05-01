@@ -348,10 +348,22 @@ export function DecisionCard({ id, label, desc, color, icon, disabled, active, o
   )
 }
 
+// Phase 11E.1.1 Fix 4: compute a YYYY-MM-DD slice N years from today (UTC)
+// so the preset cards show real dates rather than the hard-coded "March 2027 /
+// March 2028" labels (which were both wrong-month AND non-conforming with
+// the codebase's YYYY-MM-DD display convention).
+function expiryPresetIso(yearsFromNow) {
+  const d = new Date()
+  d.setUTCFullYear(d.getUTCFullYear() + yearsFromNow)
+  return d.toISOString().slice(0, 10)
+}
+
 export function ExpiryPicker({ expiry, setExpiry, customDate, setCustomDate }) {
+  const oneYear = expiryPresetIso(1)
+  const twoYear = expiryPresetIso(2)
   const opts = [
-    { id: '1-year', label: '1 year', desc: 'Expires March 2027' },
-    { id: '2-year', label: '2 years', desc: 'Expires March 2028' },
+    { id: '1-year', label: '1 year', desc: `Expires ${oneYear}` },
+    { id: '2-year', label: '2 years', desc: `Expires ${twoYear}` },
     { id: 'none', label: 'No expiry', desc: 'Active until manually revoked' },
     { id: 'custom', label: 'Custom date', desc: 'Set a specific expiration' },
   ]
@@ -387,10 +399,14 @@ export function ExpiryPicker({ expiry, setExpiry, customDate, setCustomDate }) {
 }
 
 export function expiryLabel(expiry, customDate) {
+  // Phase 11E.1.1 Fix 4: compute relative-from-today dates in YYYY-MM-DD
+  // form. The static "March 2027" / "March 2028" strings were wrong-month
+  // and non-conforming with the codebase's display convention.
   if (expiry === 'none') return 'No expiry'
   if (expiry === 'custom') return customDate || 'Not set'
-  if (expiry === '1-year') return 'March 2027'
-  return 'March 2028'
+  if (expiry === '1-year') return expiryPresetIso(1)
+  if (expiry === '2-year') return expiryPresetIso(2)
+  return expiryPresetIso(1)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

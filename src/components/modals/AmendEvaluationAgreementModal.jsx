@@ -145,7 +145,17 @@ export default function AmendEvaluationAgreementModal({
   // Diff vs initial state — drives footer summary + Submit gating.
   const initialAcks = claim.acknowledgments || []
   const computedIso = computeExpiryIso()
-  const expiryChanged = (initialDeadline ?? null) !== (computedIso ?? null)
+  // Phase 11E.1.1 Fix 1: normalize the expiry comparison to date precision.
+  // The picker can only express day-precision via the date input; comparing
+  // raw ISO strings short-circuits to "different" when the original
+  // evaluationDeadline carries a time component (e.g.
+  // '2026-04-04T16:42:00Z') vs. the picker's pre-fill (which becomes
+  // '2026-04-04T00:00:00Z' after `new Date('2026-04-04').toISOString()`).
+  // Result on modal open: hasChanges erroneously reports true → Submit is
+  // enabled before any user input. Fix: compare YYYY-MM-DD slices for
+  // non-null values, treat both nulls as equal.
+  const toDateOnly = (iso) => (iso ? iso.slice(0, 10) : null)
+  const expiryChanged = toDateOnly(initialDeadline) !== toDateOnly(computedIso)
 
   const acksAdded = acknowledgments.filter(
     (a) => !initialAcks.find((x) => x.id === a.id),
@@ -168,8 +178,16 @@ export default function AmendEvaluationAgreementModal({
   const canSubmit = hasChanges && allAcksValid
 
   // Footer summary copy.
+  // Phase 11E.1.1 bonus: explicit before/after for expiration changes
+  // (was the bare "Expiration changed"). Reads "Expiration: <before> →
+  // <after>" with YYYY-MM-DD precision; "No expiry" for null on either
+  // side.
   const summaryParts = []
-  if (expiryChanged) summaryParts.push('Expiration changed')
+  if (expiryChanged) {
+    const before = initialDeadline ? toDateOnly(initialDeadline) : 'No expiry'
+    const after = computedIso ? toDateOnly(computedIso) : 'No expiry'
+    summaryParts.push(`Expiration: ${before} → ${after}`)
+  }
   if (acksAdded.length > 0) summaryParts.push(`${acksAdded.length} acknowledgment${acksAdded.length === 1 ? '' : 's'} added`)
   if (acksRemoved.length > 0) summaryParts.push(`${acksRemoved.length} removed`)
   if (acksEdited.length > 0) summaryParts.push(`${acksEdited.length} edited`)
@@ -193,7 +211,16 @@ export default function AmendEvaluationAgreementModal({
       <Modal width={680}>
         <ModalHeader
           title="Amend Evaluation Agreement"
-          subtitle={`Update the expiration date and acknowledgments for the Evaluation Agreement to ${agreement.grantee.party}. Changes are unilateral — ${agreement.grantee.party} will be notified and may revoke if they don't accept the new terms.`}
+          subtitle={(
+            // Phase 11E.1.1 Fix 5: weave the grantee party name + the Claim
+            // name into the description prose. Both bolded via <strong>.
+            <>
+              Update the expiration date and acknowledgments for the Evaluation
+              Agreement with <strong>{agreement.grantee.party}</strong> on
+              Claim <strong>{claim.name}</strong>. Changes are unilateral — {agreement.grantee.party} will be notified and may revoke if they don't
+              accept the new terms.
+            </>
+          )}
           onClose={onClose}
         />
         <ModalBody>
