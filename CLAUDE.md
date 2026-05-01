@@ -82,8 +82,8 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 
 ## Current state of the world
 
-- **Footer version:** v0.11.13 (bumped during Phase 11E.1).
-- **Last shipped phase:** Phase 11E.1 — Amend Evaluation Agreement (#108).
+- **Footer version:** v0.11.17 (bumped during Phase 11E.1.4).
+- **Last shipped phase:** Phase 11E.1.4 — Revoked-EA AMEND removal + DA row expiration + response modal titles + Directory backlog filing.
 - **Active phase queue:** Round 13 next-up is the rest of Phase 11E (#102 reciprocal DA-amendment notifications + #139 edge geometry animation), then Phase 12 (Evaluation Enhancements: #117, #105, #106, #120, #121, #122). Full queue lives in `ROUND-13-CONTEXT.md`.
 - **Disclosure types fully wired end-to-end:** Full, Selective, Proof-only — all three branches of grantee view derivation (canvas + edges + Detail Panel + Expand modal) shipped through Phase 11D.
 - **Animation primitives:** `playUnravelAnimation` (Phase 9D.2.x — node leaves canvas) and `playRevealAnimation` (Phase 11C.3 — provisional → active flip). Both live under `src/v2/animations/` and are await-able promises returning at phase 'done'.

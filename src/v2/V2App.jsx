@@ -5747,7 +5747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.16 &middot; Changelog
+          v0.11.17 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5794,6 +5794,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.17', date: '2026-05-01', label: 'Phase 11E.1.4', items: [
+                  'Fix: AMEND button no longer renders on revoked Evaluation Agreement rows in node Detail Panels — matches REVOKE\'s gating and the Disclosure Agreement row pattern.',
+                  'Fix: active Disclosure Agreement rows now read "Expires YYYY-MM-DD" (or "No expiry") on the right side, matching the EA-row pattern. The "Active · {creationDate}" label is dropped — the row\'s presence in the active Agreements section already implies active.',
+                  'Polish: response modal title is now step-aware. Steps 1-2 read "Respond to Disclosure Request"; Step 3 reads "Respond to Evaluation Request"; Step 4 reads "Review your Disclosure + Evaluation Agreement Response" (or "Review your Evaluation Agreement Response" on the warm path).',
+                ]},
                 { version: '0.11.16', date: '2026-05-01', label: 'Phase 11E.1.3', items: [
                   'Fix: inline AMEND button on Evaluation Agreement rows in node Detail Panels is now wired. Replaces the stale "coming soon" placeholder with the same three-branch gating used by the EA Detail Panel footer.',
                   'Polish: refreshed seed-data EA evaluation deadlines from 2026-04-XX to 2028-04-XX so demos no longer show past dates on Active agreements.',

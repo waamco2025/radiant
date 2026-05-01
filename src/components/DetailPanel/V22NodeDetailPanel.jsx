@@ -1384,19 +1384,30 @@ function DisclosureAgreementRow({
   else if (da.grantee.party === activeParty) counterpartyLabel = `with ${da.grantor.party}`
   else counterpartyLabel = `${da.grantor.party} → ${da.grantee.party}`
 
-  // Status label.
-  let statusLabel
+  // Status text + color.
+  // Phase 11E.1.4 Fix 2: active rows now show "Expires YYYY-MM-DD" (or
+  // "No expiry") instead of "Active · {creationDate}" — matches the EA-row
+  // pattern, since the row's presence in the active Agreements section
+  // already implies active. Revoked / declined / provisional rows keep
+  // their existing label + color + date.
+  let statusText
   let statusColor = 'var(--text-tertiary)'
-  if (isRevoked) { statusLabel = 'Revoked'; statusColor = 'var(--accent-red)' }
-  else if (isDeclined) { statusLabel = 'Declined'; statusColor = 'var(--accent-red)' }
-  else if (isProvisional) { statusLabel = 'Provisional'; statusColor = 'var(--accent-amber)' }
-  else { statusLabel = 'Active'; statusColor = 'var(--accent-green)' }
-  // Phase 9D.1.1 (Fix 2): show the revocation date on revoked rows rather
-  // than the DA's original createdDate — that's what the user cares about
-  // once the agreement is terminal.
-  const dateStr = isRevoked
-    ? formatShortDate(da._revokedMeta?.revokedDate)
-    : formatShortDate(da.terms?.createdDate)
+  if (isRevoked) {
+    const dStr = formatShortDate(da._revokedMeta?.revokedDate)
+    statusText = dStr ? `Revoked · ${dStr}` : 'Revoked'
+    statusColor = 'var(--accent-red)'
+  } else if (isDeclined) {
+    const dStr = formatShortDate(da.terms?.createdDate)
+    statusText = dStr ? `Declined · ${dStr}` : 'Declined'
+    statusColor = 'var(--accent-red)'
+  } else if (isProvisional) {
+    const dStr = formatShortDate(da.terms?.createdDate)
+    statusText = dStr ? `Provisional · ${dStr}` : 'Provisional'
+    statusColor = 'var(--accent-amber)'
+  } else {
+    const expiresIso = da.terms?.expires
+    statusText = expiresIso ? `Expires ${formatShortDate(expiresIso)}` : 'No expiry'
+  }
 
   // Action visibility gating. Internal + proof-of-eval DAs hide both actions.
   // Revoked DAs suppress all actions (historical, no operations remain).
@@ -1431,7 +1442,7 @@ function DisclosureAgreementRow({
           {counterpartyLabel}
         </span>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: statusColor, letterSpacing: '0.04em' }}>
-          {statusLabel}{dateStr ? ` · ${dateStr}` : ''}
+          {statusText}
         </span>
       </div>
       {/* Right: actions (stacked) */}
@@ -1594,22 +1605,18 @@ function EvaluationAgreementRow({
   // Phase 9D.1.1 (Fix 3): grantee may also revoke EA.
   // Phase 11E.1.3 Fix 1: AMEND is now live (was placeholder pending #108
   // through Phase 11E.1; Phase 11E.1.3 wires the inline button to the
-  // same handler the EA Detail Panel footer fires). Three-branch gating
-  // mirrors EvaluationAgreementDetailPanel.jsx's footer:
-  //   • enabled  — isGrantor && active && !isRevoked
+  // same handler the EA Detail Panel footer fires).
+  // Phase 11E.1.4 Fix 1: AMEND is hidden entirely on revoked rows — matches
+  // REVOKE's gating and the precedent set by DisclosureAgreementRow
+  // (`actionsHidden = isInternal || isProofOfEval || isRevoked`). The
+  // remaining two-branch gating mirrors EvaluationAgreementDetailPanel.jsx:
+  //   • enabled  — isGrantor && active
   //   • disabled — !isGrantor → "Only {grantor} can amend…"
-  //   • disabled — isRevoked  → "…has been revoked; amendments are
-  //                              disabled."
-  // (status === 'active' is implied for non-revoked EAs in the current
-  // shipped data model — no other status value reaches this row today,
-  // since revoked EAs land in the Revoked subsection.)
-  const showAmend = !isInternal
-  const amendEnabled = isGrantor && !isRevoked
-  const amendTooltip = !isGrantor
-    ? `Only ${ea.grantor.party} (the grantor) can amend this agreement.`
-    : isRevoked
-      ? 'This Evaluation Agreement has been revoked; amendments are disabled.'
-      : 'Amend the expiration date and acknowledgments on this Evaluation Agreement.'
+  const showAmend = !isInternal && !isRevoked
+  const amendEnabled = isGrantor
+  const amendTooltip = isGrantor
+    ? 'Amend the expiration date and acknowledgments on this Evaluation Agreement.'
+    : `Only ${ea.grantor.party} (the grantor) can amend this agreement.`
   const showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked
 
   // Phase 9D.1.2 W1: scroll the row into view when it becomes the expanded-

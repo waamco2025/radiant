@@ -164,17 +164,37 @@ export default function CombinedResponseModal({
   const canAdvanceFromStep3 = true
   const canSubmitDecline = true // decline reason is optional per spec §11.4
 
-  // Phase 11C.2 W4: header copy branches on (isDecline, isEaOnly). EA-only
-  // titles spell out "Evaluation Agreement Request" rather than the abbreviated
-  // "EA Request" / "Evaluation Agreement" so the responder reads the full
-  // intent without context.
+  // Phase 11C.2 W4: header copy branches on (isDecline, isEaOnly).
+  // Phase 11E.1.4 Fix 4: accept-path title is now step-aware so the user
+  // sees that DA and EA are separate artifacts being responded to in
+  // sequence. Decline-path copy is preserved (out of scope this round).
+  //
+  // Cold path (eaOnlyMode = false):
+  //   Step 1-2 (Type / Scope) → "Respond to Disclosure Request"
+  //   Step 3   (EA Terms)     → "Respond to Evaluation Request"
+  //   Step 4   (Review)       → "Review your Disclosure + Evaluation Agreement Response"
+  //
+  // Warm path (eaOnlyMode = true):
+  //   Step 3 (EA Terms) → "Respond to Evaluation Request" (shared with cold)
+  //   Step 4 (Review)   → "Review your Evaluation Agreement Response"
+  let acceptTitle
+  if (step === 4) {
+    acceptTitle = isEaOnly
+      ? 'Review your Evaluation Agreement Response'
+      : 'Review your Disclosure + Evaluation Agreement Response'
+  } else if (isEaOnly || step === 3) {
+    acceptTitle = 'Respond to Evaluation Request'
+  } else {
+    acceptTitle = 'Respond to Disclosure Request'
+  }
+  const acceptSubtitle = isEaOnly
+    ? `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.`
+    : `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.`
   const header = isDecline
     ? isEaOnly
       ? { title: 'Decline Evaluation Agreement Request', subtitle: `Decline ${request.requesterParty}'s Evaluation Agreement request. The provisional EA will be removed.` }
       : { title: 'Decline Request', subtitle: `Decline ${request.requesterParty}'s request. Both provisional artifacts (Disclosure + Evaluation) will be deleted.` }
-    : isEaOnly
-      ? { title: 'Respond to Evaluation Agreement Request', subtitle: `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.` }
-      : { title: 'Respond to Request', subtitle: `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.` }
+    : { title: acceptTitle, subtitle: acceptSubtitle }
 
   return (
     <Backdrop onClose={onClose}>
