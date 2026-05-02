@@ -237,10 +237,59 @@ export default function DisclosureAgreementDetailPanel({
 
         <Section title="Status">
           <Row label="Status" value={agreement.status} />
-          {Array.isArray(agreement.amendments) && agreement.amendments.length > 0 && (
-            <Row label="Amendments" value={`${agreement.amendments.length}`} />
-          )}
         </Section>
+
+        {/* Phase 11E.1.6 Fix 3: Amendments section parity with the EA
+            Detail Panel (Phase 11E.1). Each card shows the amendment
+            timestamp + a "Expiration: before → current" delta line when
+            terms.expires changed + the optional grantor note. Older
+            amendments without a `termsBefore.expires` snapshot were
+            scope-only (pre-Phase-11E.1.6 factory shape); they continue
+            to render their note + scope summary without an expiration
+            line. Lineage chaining caveat from EA's §11.2a Option C TODO
+            applies here too — older entries diff against the *current*
+            expires rather than the value at amendment time. */}
+        {Array.isArray(agreement.amendments) && agreement.amendments.length > 0 && (
+          <Section title={`Amendments (${agreement.amendments.length})`}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {agreement.amendments.map((am, i) => {
+                const expiryChanged = am.termsBefore?.expires !== undefined
+                  && am.termsBefore.expires !== agreement.terms?.expires
+                const scopeChanged = !!am.scopeBefore
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '10px 12px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                      {formatDateTime(am.date)}
+                    </div>
+                    {expiryChanged && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                        Expiration: {am.termsBefore.expires ? formatDateTime(am.termsBefore.expires) : 'Never expires'} → {agreement.terms?.expires ? formatDateTime(agreement.terms.expires) : 'Never expires'}
+                      </div>
+                    )}
+                    {scopeChanged && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                        Scope amended.
+                      </div>
+                    )}
+                    {am.note && (
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 6, lineHeight: 1.5 }}>
+                        "{am.note}"
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
+        )}
 
         {onViewEvaluationAgreement && (
           <button

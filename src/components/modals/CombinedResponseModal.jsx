@@ -47,7 +47,14 @@ export default function CombinedResponseModal({
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [selectedFieldIds, setSelectedFieldIds] = useState([])
   const [selectedEvalResultIds, setSelectedEvalResultIds] = useState([])
-  const [expiry, setExpiry] = useState('1-year')
+  // Phase 11E.1.6 Fix 2: separate DA + EA expiration state. Cold path lets
+  // the responder set both independently — DA in Step 2, EA in Step 3.
+  // Warm path (eaOnlyMode) doesn't render a DA picker; daExpiry stays at
+  // 'none' and is ignored when the submit handler routes to the EA-only
+  // path. Default for both = 'none' ("Never expires") per Andrew's call.
+  const [daExpiry, setDaExpiry] = useState('none')
+  const [daCustomExpiry, setDaCustomExpiry] = useState('')
+  const [expiry, setExpiry] = useState('none')
   const [customExpiry, setCustomExpiry] = useState('')
   const [declineReason, setDeclineReason] = useState('')
 
@@ -79,17 +86,25 @@ export default function CombinedResponseModal({
     setArr(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
   }
 
-  const computeExpiryIso = () => {
+  // Phase 11E.1.6 Fix 1: align switch cases with the picker's actual
+  // emitted ids ('1-year', '2-year', 'none', 'custom'). Pre-fix the switch
+  // handled 'never' / '6-months' / '2-years' — none of which the picker
+  // emits — so clicking "No expiry" (id 'none') silently fell to the
+  // default branch and got coerced to +1 year, despite the UI claiming
+  // "Never expires." `null` is a valid downstream value and renders as
+  // "Never expires" everywhere (Phase 11E.1.5 copy unification).
+  const isoFromPicker = (mode, customDate) => {
     const now = new Date()
-    switch (expiry) {
-      case '6-months': now.setUTCMonth(now.getUTCMonth() + 6); return now.toISOString()
-      case '1-year':   now.setUTCFullYear(now.getUTCFullYear() + 1); return now.toISOString()
-      case '2-years':  now.setUTCFullYear(now.getUTCFullYear() + 2); return now.toISOString()
-      case 'custom':   return customExpiry ? new Date(customExpiry).toISOString() : null
-      case 'never':    return null
-      default:         now.setUTCFullYear(now.getUTCFullYear() + 1); return now.toISOString()
+    switch (mode) {
+      case '1-year': now.setUTCFullYear(now.getUTCFullYear() + 1); return now.toISOString()
+      case '2-year': now.setUTCFullYear(now.getUTCFullYear() + 2); return now.toISOString()
+      case 'custom': return customDate ? new Date(customDate).toISOString() : null
+      case 'none':   return null
+      default:       return null
     }
   }
+  const computeExpiryIso = () => isoFromPicker(expiry, customExpiry)
+  const computeDaExpiryIso = () => isoFromPicker(daExpiry, daCustomExpiry)
 
   const buildScope = () => {
     if (action === 'full') {
@@ -130,6 +145,10 @@ export default function CombinedResponseModal({
     // Acknowledgments live on the provisional EA's `acknowledgmentsAccepted`
     // field (carried through finalize unchanged) — the responder reviews
     // them but doesn't mutate them.
+    // Phase 11E.1.6 Fix 2: warm-path EA-only response carries no DA terms
+    // (the DA already exists). Cold path emits separate `daTerms` and
+    // `eaTerms` so the V2App handler can finalize each artifact's
+    // expiration independently.
     if (isEaOnly) {
       onAccept?.({
         type: null,
@@ -144,6 +163,9 @@ export default function CombinedResponseModal({
     onAccept?.({
       type: action,
       scope: buildScope(),
+      daTerms: {
+        expires: computeDaExpiryIso(),
+      },
       eaTerms: {
         // §10.5: forward the original requester's suggestions as advisory only.
         authorizedRequirementsSetIds: request?.requestedRequirementsSetIds || [],
@@ -256,6 +278,23 @@ export default function CombinedResponseModal({
           {/* STEP 2 — Scope (or decline reason) */}
           {step === 2 && !isDecline && (
             <>
+              {/* Phase 11E.1.6 Fix 2: DA expiration picker (Andrew's
+                  Option A — DA gets its own expiration grantor-set at
+                  response time, mirroring EA). Lives above the scope
+                  picker because the user reads top-to-bottom: when does
+                  the DA expire, then what's in scope. EA expiration stays
+                  on Step 3. Default 'none' ("Never expires") so the
+                  responder consciously opts in to a finite term. */}
+              <FieldLabel label="Disclosure Agreement expiry" />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+                Set when this Disclosure Agreement expires. Until then {request.requesterParty} retains visibility into the items disclosed below per the chosen Disclosure type.
+              </div>
+              <ExpiryPicker
+                expiry={daExpiry}
+                setExpiry={setDaExpiry}
+                customDate={daCustomExpiry}
+                setCustomDate={setDaCustomExpiry}
+              />
               {action === 'full' && (
                 <>
                   <FieldLabel label="Select Assets to disclose" required />
@@ -468,16 +507,16 @@ export default function CombinedResponseModal({
             const acceptedAcks = claimAcks.filter((a) => acceptedIds.includes(a.id))
             return (
               <>
-                <FieldLabel label="Agreement expiry" />
+                <FieldLabel label="Evaluation Agreement expiry" />
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                  {isEaOnly
-                    ? `Set when the Evaluation Agreement expires. ${request.requesterParty} may use this EA to evaluate the Claim with any Requirements Set from their library until then.`
-                    : (
-                      <>Set when the Disclosure + Evaluation Agreements expire. Until then {request.requesterParty} may evaluate this Claim with any Requirements Set from their library
-                      {request.requestedRequirementsSetIds?.length > 0 && (
-                        <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
-                      )}.</>
-                    )}
+                  {/* Phase 11E.1.6 Fix 2: copy is now EA-specific. DA
+                      expiration was moved to Step 2 (cold path) so this
+                      step focuses solely on the EA. Warm path always
+                      lands here as Step 3 with no Step 2 to fall back to. */}
+                  Set when the Evaluation Agreement expires. {request.requesterParty} may use this EA to evaluate the Claim with any Requirements Set from their library until then
+                  {!isEaOnly && request.requestedRequirementsSetIds?.length > 0 && (
+                    <> (they suggested: {request.requestedRequirementsSetIds.map((id) => <code key={id} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', background: 'var(--bg-raised)', borderRadius: 3, margin: '0 3px' }}>{id}</code>)})</>
+                  )}.
                 </div>
                 <ExpiryPicker
                   expiry={expiry}
@@ -545,8 +584,17 @@ export default function CombinedResponseModal({
                     <div style={{ color: 'var(--text-primary)' }}>{selectedEvalResultIds.length}</div>
                   </div>
                 )}
+                {/* Phase 11E.1.6 Fix 2: cold path shows DA + EA expirations
+                    on separate rows. Warm path (no DA in this code path)
+                    shows only the EA row. */}
+                {!isEaOnly && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>DA expires</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(daExpiry, daCustomExpiry)}</div>
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Agreement expires</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>{isEaOnly ? 'Agreement expires' : 'EA expires'}</div>
                   <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
                 </div>
                 {(() => {

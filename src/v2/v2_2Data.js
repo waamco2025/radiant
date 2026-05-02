@@ -2670,7 +2670,12 @@ export function finalizeProvisionalEvaluationAgreement({
     restrictions: provisionalEa.restrictions,
     terms: {
       createdDate: provisionalEa.terms?.createdDate,
-      evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
+      // Phase 11E.1.6 Fix 1: warm-path mirror of cold-path null-respect
+      // semantics. `eaTerms?.expires === null` ("Never expires") must
+      // not be coerced back to the provisional fallback by `??`.
+      evaluationDeadline: eaTerms?.expires !== undefined
+        ? eaTerms.expires
+        : (provisionalEa.terms?.evaluationDeadline ?? null),
       resultExpiry: provisionalEa.terms?.resultExpiry,
       flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
     },
@@ -2743,10 +2748,16 @@ export function makeProvisionalEvaluationAgreement({
  * Returns `{ disclosureAgreement, evaluationAgreement }`, each a new artifact
  * with the updated fields. Callers replace the prior provisionals in the
  * V2App `v22Provisionals` state.
+ *
+ * Phase 11E.1.6 Fix 2: `daTerms.expires` and `eaTerms.expires` are now
+ * separate inputs — the DA and EA each carry their own expiration set
+ * independently in the response modal (CombinedResponseModal Step 2 and
+ * Step 3 respectively). Pre-fix this helper coerced both to
+ * `eaTerms.expires`, conflating two distinct contracts.
  */
 export function finalizeProvisionalAgreementPair({
   provisionalDa, provisionalEa,
-  type, scope, eaTerms,
+  type, scope, daTerms, eaTerms,
 }) {
   const activeDa = makeDisclosureAgreement({
     id: provisionalDa.id,
@@ -2758,7 +2769,9 @@ export function finalizeProvisionalAgreementPair({
     scope: scope || provisionalDa.scope,
     terms: {
       createdDate: provisionalDa.terms?.createdDate,
-      expires: eaTerms?.expires ?? provisionalDa.terms?.expires,
+      expires: daTerms?.expires !== undefined
+        ? daTerms.expires
+        : (provisionalDa.terms?.expires ?? null),
       autoRenew: false,
     },
     amendments: provisionalDa.amendments,
@@ -2779,7 +2792,13 @@ export function finalizeProvisionalAgreementPair({
     restrictions: provisionalEa.restrictions,
     terms: {
       createdDate: provisionalEa.terms?.createdDate,
-      evaluationDeadline: eaTerms?.expires ?? provisionalEa.terms?.evaluationDeadline,
+      // Phase 11E.1.6 Fix 1: distinguish "user explicitly chose null"
+      // (Never expires) from "user supplied no value" (fall back). Pre-fix
+      // the `??` operator coerced an explicit null into the provisional
+      // fallback, silently undoing the user's "Never expires" pick.
+      evaluationDeadline: eaTerms?.expires !== undefined
+        ? eaTerms.expires
+        : (provisionalEa.terms?.evaluationDeadline ?? null),
       resultExpiry: provisionalEa.terms?.resultExpiry,
       flowDownRequirements: provisionalEa.terms?.flowDownRequirements,
     },
@@ -2837,12 +2856,26 @@ export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = 
 }
 
 /**
- * Amend a Disclosure Agreement's scope (spec §11.2). Returns a new DA with the
- * updated scope and an appended `amendments[]` entry. Per §11.2, callers MUST
- * have already enforced "no removal of evaluated evidence" — this helper does
- * not re-validate (the caller knows whether evaluations have been run).
+ * Amend a Disclosure Agreement's scope and/or expiration (spec §11.2).
+ * Returns a new DA with the updated scope + terms.expires and an appended
+ * `amendments[]` entry. Per §11.2, callers MUST have already enforced
+ * "no removal of evaluated evidence" — this helper does not re-validate
+ * (the caller knows whether evaluations have been run).
+ *
+ * Phase 11E.1.6 Fix 3: gained an optional `terms` argument to support
+ * editing `terms.expires` alongside scope (parity with
+ * `makeAmendedEvaluationAgreement` which edits `terms.evaluationDeadline`).
+ * The amendment record now carries `termsBefore.expires` so the DA Detail
+ * Panel can render an "Expiration: before → after" delta line per
+ * amendment, matching the EA panel pattern.
  */
-export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope, note = '' }) {
+export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope, terms, note = '' }) {
+  // `terms?.expires` may legitimately be null ("Never expires"); preserve
+  // null vs. undefined so a deliberate "Never expires" pick during amend
+  // doesn't get silently coerced back to the prior expires.
+  const nextExpires = terms && terms.expires !== undefined
+    ? terms.expires
+    : (da.terms?.expires ?? null)
   return makeDisclosureAgreement({
     id: da.id,
     grantor: da.grantor,
@@ -2850,11 +2883,19 @@ export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope,
     subject: da.subject,
     granteeAssetId: da.granteeAssetId,
     type: da.type,
-    scope,
-    terms: da.terms,
+    scope: scope || da.scope,
+    terms: {
+      ...da.terms,
+      expires: nextExpires,
+    },
     amendments: [
       ...(da.amendments || []),
-      { date: new Date().toISOString(), note: (note || '').trim(), scopeBefore: da.scope },
+      {
+        date: new Date().toISOString(),
+        note: (note || '').trim(),
+        scopeBefore: da.scope,
+        termsBefore: { expires: da.terms?.expires ?? null },
+      },
     ],
     status: da.status,
   })

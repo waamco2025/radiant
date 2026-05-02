@@ -540,7 +540,7 @@ export default function V2App() {
     }
   }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor, enqueueV22NotificationForRequester])
 
-  const handleV22Accept = useCallback(({ type, scope, eaTerms }) => {
+  const handleV22Accept = useCallback(({ type, scope, daTerms, eaTerms }) => {
     if (!v22RespondingTo) return
     const daId = v22RespondingTo.daId
     let claimIdForReveal = null
@@ -554,9 +554,12 @@ export default function V2App() {
       if (!provisionalDa) return prev
       const provisionalEa = prev.evaluationAgreements.find((e) => e.disclosureAgreementId === daId)
       if (!provisionalEa) return prev
+      // Phase 11E.1.6 Fix 2: forward daTerms so the DA's expiration is
+      // independent of the EA's evaluationDeadline. Pre-fix the finalize
+      // helper coerced both to `eaTerms.expires`.
       const finalized = finalizeProvisionalAgreementPair({
         provisionalDa, provisionalEa,
-        type, scope, eaTerms,
+        type, scope, daTerms, eaTerms,
       })
       finalized.disclosureAgreement._requestMeta = provisionalDa._requestMeta
       claimIdForReveal = provisionalDa.subject.id
@@ -2010,7 +2013,7 @@ export default function V2App() {
     }
   }, [activeRole.party, activeRole.partyDot, updateRoleState])
 
-  const handleV22AmendDisclosureSubmit = useCallback(({ scope, note }) => {
+  const handleV22AmendDisclosureSubmit = useCallback(({ scope, terms, note }) => {
     if (!v22AmendingDaId) return
     // Phase 7 carry-over #2: compute notification targets BEFORE the
     // setV22Provisionals updater runs. Previous implementation captured
@@ -2030,7 +2033,11 @@ export default function V2App() {
     const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals).claims.find((c) => c.id === existing.subject.id)
     const claimNameForNotif = sharedClaim?.name || null
     const claimPinForNotif = sharedClaim?.pin || null
-    const amended = makeAmendedDisclosureAgreement({ disclosureAgreement: existing, scope, note })
+    // Phase 11E.1.6 Fix 3: forward `terms.expires` so the factory can
+    // record termsBefore in the amendment record and apply the new
+    // expiration to the resulting DA. Older callers that omitted `terms`
+    // get a no-op on expiration via the factory's default-preserve.
+    const amended = makeAmendedDisclosureAgreement({ disclosureAgreement: existing, scope, terms, note })
 
     setV22Provisionals((prev) => ({
       ...prev,
@@ -5031,6 +5038,7 @@ export default function V2App() {
           return (
             <AmendDisclosureModal
               agreement={da}
+              claim={claim}
               candidateAssets={candidateAssets}
               candidateFields={candidateFields}
               candidateEvalResults={candidateEvalResults}
@@ -5747,7 +5755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.18 &middot; Changelog
+          v0.11.19 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5794,6 +5802,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.19', date: '2026-05-02', label: 'Phase 11E.1.6', items: [
+                  'Fix: "No expiry" picks in the response flow now actually never expire. Pre-fix the picker emitted "none" but the modal\'s switch handled "never", silently coercing the choice to a 1-year expiry. Cold + warm path both verified.',
+                  'New: Disclosure Agreements now have their own expiration in the response flow. Step 2 (Disclosure Scope) gains an Expiration picker above the scope picker — DA and EA expirations are independent. Step 4 review shows both. Default for both = "Never expires."',
+                  'New: Amend Disclosure Agreement modal can now edit expiration alongside scope. Detail Panel amendment cards render a "Expiration: <before> → <after>" delta line, mirroring the EA panel.',
+                  'Polish: Amend DA modal title is now "Amend Disclosure Agreement" (was "Amend Disclosure"); subtitle weaves grantee + Claim name into the prose with bolding, parallel to Amend EA.',
+                ]},
                 { version: '0.11.18', date: '2026-05-01', label: 'Phase 11E.1.5', items: [
                   'Fix: REVOKED badge on revoked node cards moved to the type-label header row, so long node names no longer get truncated by the badge.',
                   'Polish: copy unification — the no-expiration state now reads "Never expires" everywhere (Detail Panels, edge tooltips, amend modals, response review). The Expiry picker option title remains "No expiry" since it labels a user action.',

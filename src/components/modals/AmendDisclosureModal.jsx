@@ -13,9 +13,16 @@
 import { useState } from 'react'
 import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
-  Btn, FieldLabel,
+  Btn, FieldLabel, ExpiryPicker,
 } from './ModalShared'
 import Tooltip from '../Tooltip'
+
+// Phase 11E.1.6 Fix 3: shared "Never expires" / YYYY-MM-DD formatter for
+// the footer summary line. Mirrors AmendEvaluationAgreementModal's helper.
+function formatDateOnly(iso) {
+  if (!iso) return 'Never expires'
+  return iso.slice(0, 10)
+}
 
 function ToggleRow({ id, label, sublabel, selected, locked, onToggle, color }) {
   const cursor = locked ? 'not-allowed' : 'pointer'
@@ -62,13 +69,18 @@ function ToggleRow({ id, label, sublabel, selected, locked, onToggle, color }) {
 
 export default function AmendDisclosureModal({
   agreement,                  // the DA being amended
+  // Phase 11E.1.6 Fix 4: claim is now passed through so the subtitle can
+  // weave the Claim's display name into the prose. The agreement's
+  // subject.id is opaque without a claim lookup; rendering the id as a
+  // bolded token would read worse than the existing "to {grantee}" copy.
+  claim,
   candidateAssets = [],       // [{ id, name, file: { filename } }] — for type=full
   candidateFields = [],       // [{ key, label, parseTemplateName }] — for type=selective; key = `${parseId}::${fieldId}`
   candidateEvalResults = [],  // [{ id, name }] — for type=proofonly
   lockedAssetIds = [],
   lockedFieldIds = [],
   lockedEvalResultIds = [],
-  onSubmit,                   // ({ scope, note }) => void
+  onSubmit,                   // ({ scope, terms, note }) => void
   onClose,
 }) {
   const initialAssetIds = new Set([...(agreement.scope?.assetIds || []), ...lockedAssetIds])
@@ -79,6 +91,15 @@ export default function AmendDisclosureModal({
   const [selectedFieldIds, setSelectedFieldIds] = useState(Array.from(initialFieldIds))
   const [selectedEvalIds, setSelectedEvalIds] = useState(Array.from(initialEvalIds))
   const [note, setNote] = useState('')
+
+  // Phase 11E.1.6 Fix 3: expiration state. Pre-fill picker to 'custom'
+  // with the existing expires when present; 'none' (Never expires) when
+  // the DA has no expiration. Same pattern as AmendEvaluationAgreementModal.
+  const initialExpires = agreement.terms?.expires ?? null
+  const [expiry, setExpiry] = useState(initialExpires ? 'custom' : 'none')
+  const [customExpiry, setCustomExpiry] = useState(
+    initialExpires ? initialExpires.slice(0, 10) : '',
+  )
 
   const lockedAssetSet = new Set(lockedAssetIds)
   const lockedFieldSet = new Set(lockedFieldIds)
@@ -92,6 +113,8 @@ export default function AmendDisclosureModal({
   // Phase 6.5+ #7: only allow submission when the active scope dimension's
   // selection differs (set comparison, order-independent) from the original
   // agreement.scope. No-op amendments are blocked.
+  // Phase 11E.1.6 Fix 3: also allow submission when expiration changed,
+  // even with scope unchanged.
   const setsEqual = (a, b) => {
     if (a.length !== b.length) return false
     const A = new Set(a)
@@ -101,10 +124,34 @@ export default function AmendDisclosureModal({
   const baselineAssetIds = agreement.scope?.assetIds || []
   const baselineFieldIds = agreement.scope?.fieldIds || []
   const baselineEvalIds = agreement.scope?.evaluationResultIds || []
-  const hasChanges =
+  const scopeChanged =
     (agreement.type === 'full' && !setsEqual(selectedAssetIds, baselineAssetIds)) ||
     (agreement.type === 'selective' && !setsEqual(selectedFieldIds, baselineFieldIds)) ||
     (agreement.type === 'proofonly' && !setsEqual(selectedEvalIds, baselineEvalIds))
+
+  // Phase 11E.1.6 Fix 3: compute the would-be next expires (null for
+  // 'none', ISO for '1-year' / '2-year', custom date for 'custom').
+  // Mirrors CombinedResponseModal's `isoFromPicker` so the two flows stay
+  // consistent.
+  const computeNextExpiresIso = () => {
+    const now = new Date()
+    switch (expiry) {
+      case '1-year': now.setUTCFullYear(now.getUTCFullYear() + 1); return now.toISOString()
+      case '2-year': now.setUTCFullYear(now.getUTCFullYear() + 2); return now.toISOString()
+      case 'custom': return customExpiry ? new Date(customExpiry).toISOString() : null
+      case 'none':   return null
+      default:       return initialExpires
+    }
+  }
+  const nextExpiresIso = computeNextExpiresIso()
+  // Compare at YYYY-MM-DD precision — the picker can only express day
+  // resolution via the date input, while the original ISO may carry a
+  // time component (e.g. '2027-03-04T16:42:00Z' vs.
+  // '2027-03-04T00:00:00Z'). Same normalization Phase 11E.1.1 Fix 1
+  // applied to AmendEvaluationAgreementModal.
+  const toDateOnly = (iso) => (iso ? iso.slice(0, 10) : null)
+  const expiryChanged = toDateOnly(initialExpires) !== toDateOnly(nextExpiresIso)
+  const hasChanges = scopeChanged || expiryChanged
 
   const handleSubmit = () => {
     let scope
@@ -133,7 +180,7 @@ export default function AmendDisclosureModal({
       onClose?.()
       return
     }
-    onSubmit?.({ scope, note: note.trim() })
+    onSubmit?.({ scope, terms: { expires: nextExpiresIso }, note: note.trim() })
   }
 
   const accentColor = agreement.type === 'full'
@@ -142,15 +189,43 @@ export default function AmendDisclosureModal({
       ? 'var(--accent-amber)'
       : 'var(--accent-green)'
 
+  // Phase 11E.1.6 Fix 4: parallel structure to AmendEvaluationAgreementModal's
+  // header (Phase 11E.1.1 Fix 5). Title spells out the full artifact name;
+  // subtitle weaves grantee + Claim name into the prose with <strong>.
+  // Falls back gracefully when claim isn't passed (legacy callers).
+  const claimName = claim?.name || agreement.subject?.id
   return (
     <Backdrop onClose={onClose}>
       <Modal width={680}>
         <ModalHeader
-          title="Amend Disclosure"
-          subtitle={`${agreement.type === 'full' ? 'Full' : agreement.type === 'selective' ? 'Selective' : 'Proof-Only'} Disclosure to ${agreement.grantee.party}. Items already evaluated are locked and cannot be removed from scope.`}
+          title="Amend Disclosure Agreement"
+          subtitle={(
+            <>
+              Update the expiration date and scope for the Disclosure
+              Agreement with <strong>{agreement.grantee.party}</strong> on
+              Claim <strong>{claimName}</strong>. Changes are unilateral —
+              {' '}{agreement.grantee.party} will be notified and may
+              revoke if they don't accept the new terms. Items already
+              evaluated are locked and cannot be removed from scope.
+            </>
+          )}
           onClose={onClose}
         />
         <ModalBody>
+          {/* Phase 11E.1.6 Fix 3: Expiration section. Mirrors
+              AmendEvaluationAgreementModal's structure. Pre-fills picker
+              to the current expires (or 'none' if Never expires). */}
+          <FieldLabel label="Expiration" />
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>
+            Current: {formatDateOnly(initialExpires)}
+          </div>
+          <ExpiryPicker
+            expiry={expiry}
+            setExpiry={setExpiry}
+            customDate={customExpiry}
+            setCustomDate={setCustomExpiry}
+          />
+
           {agreement.type === 'full' && (
             <>
               <FieldLabel label={`Assets in scope (${candidateAssets.length})`} required />
@@ -220,13 +295,27 @@ export default function AmendDisclosureModal({
         </ModalBody>
         <ModalFooter>
           <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            {agreement.type === 'full' && `${selectedAssetIds.length} Asset${selectedAssetIds.length !== 1 ? 's' : ''} in scope`}
-            {agreement.type === 'selective' && `${selectedFieldIds.length} field${selectedFieldIds.length !== 1 ? 's' : ''} in scope`}
-            {agreement.type === 'proofonly' && `${selectedEvalIds.length} Eval Result${selectedEvalIds.length !== 1 ? 's' : ''} in scope`}
+            {/* Phase 11E.1.6 Fix 3: surface expiration delta + scope
+                summary together. Mirrors AmendEvaluationAgreementModal's
+                footer copy ("Expiration: <before> → <after> · …"). */}
+            {(() => {
+              const parts = []
+              if (expiryChanged) {
+                parts.push(`Expiration: ${formatDateOnly(initialExpires)} → ${formatDateOnly(nextExpiresIso)}`)
+              }
+              if (agreement.type === 'full') {
+                parts.push(`${selectedAssetIds.length} Asset${selectedAssetIds.length !== 1 ? 's' : ''} in scope`)
+              } else if (agreement.type === 'selective') {
+                parts.push(`${selectedFieldIds.length} field${selectedFieldIds.length !== 1 ? 's' : ''} in scope`)
+              } else if (agreement.type === 'proofonly') {
+                parts.push(`${selectedEvalIds.length} Eval Result${selectedEvalIds.length !== 1 ? 's' : ''} in scope`)
+              }
+              return parts.join(' · ')
+            })()}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn label="Cancel" onClick={onClose} />
-            <Btn label="Amend Disclosure" accent disabled={!hasChanges} onClick={handleSubmit} />
+            <Btn label="Amend Disclosure Agreement" accent disabled={!hasChanges} onClick={handleSubmit} />
           </div>
         </ModalFooter>
       </Modal>
