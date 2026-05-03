@@ -1072,7 +1072,22 @@ function V22ClaimPanel({
                 )}
               </>
             ) : hasEvalAction ? (
-              <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+              // Phase 11.6.1 Fix 3: when the EA has a pending amendment
+              // proposal, the Run Evaluation button is visually disabled
+              // with a tooltip directing the grantee to respond. The
+              // V22RunEvaluationModal would also block submit, but
+              // surfacing the gate at the panel level avoids the dead
+              // click + modal opening at all.
+              evaluationAgreementForActor.status === 'pending-acceptance' ? (
+                <FooterButton
+                  label="Run Evaluation"
+                  accent
+                  disabled
+                  title={`Cannot run evaluation: amendment proposal awaiting your response. Respond in your inbox to continue.`}
+                />
+              ) : (
+                <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+              )
             ) : hasWarmPathAction ? (
               <FooterButton label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
             ) : null}

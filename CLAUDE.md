@@ -82,8 +82,8 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 
 ## Current state of the world
 
-- **Footer version:** v0.11.28 (bumped during Phase 11.6).
-- **Last shipped phase:** Phase 11.6 — Amendment-as-proposal flow (#164) + draw-in smoothness (#165) + Phase 11E retrospective (#166). Phase 11 closed; Phase 12 next.
+- **Footer version:** v0.11.29 (bumped during Phase 11.6.1).
+- **Last shipped phase:** Phase 11.6.1 — Five fixes from Phase 11.6 QA (notification dismissal on accept/reject, EA panel acknowledgments source, Run Evaluation gating during pending-acceptance, Revoke availability during pending-acceptance, current-terms display in both amendment modals).
 - **Active phase queue:** Phase 11 closed (Phase 11E shipped #108 + #102 + #139 across nine sub-phases; Phase 11.6 shipped #164 + #165 + #166). Phase 12 next: Evaluation Enhancements (#117, #105, #106, #120, #121, #122). Then Phase 13 (#26 Cascading Disclosures), Phase 14 (Directory Layer batch — #43, #45, #46, #47, #132, #162, #163), Phase 15 (#11, #48, #104). Phase 11.6 deferred follow-up: #167 (DA amendment-as-proposal model — extension of #164 to disclosure agreements).
 - **Disclosure types fully wired end-to-end:** Full, Selective, Proof-only — all three branches of grantee view derivation (canvas + edges + Detail Panel + Expand modal) shipped through Phase 11D.
 - **Animation primitives:** `playUnravelAnimation` (Phase 9D.2.x — node leaves canvas) and `playRevealAnimation` (Phase 11C.3 — provisional → active flip). Both live under `src/v2/animations/` and are await-able promises returning at phase 'done'.

@@ -59,6 +59,11 @@ function Row({ label, value, mono }) {
 
 export default function EvaluationAgreementDetailPanel({
   agreement,
+  // Phase 11.6.1 Fix 2: live Claim, used to render the current
+  // acknowledgments (which live on the Claim per spec §11.2a Option B —
+  // the EA's `acknowledgmentsAccepted` field is an audit-trail
+  // snapshot from original acceptance time, not the live state).
+  claim,
   resolveNodeName,
   activeParty,
   onClose,
@@ -211,6 +216,41 @@ export default function EvaluationAgreementDetailPanel({
           <Row label="Paired DA" value={agreement.disclosureAgreementId} mono />
         </Section>
 
+        {/* Phase 11.6.1 Fix 2: Acknowledgments section reads from the
+            live Claim (not the EA's `acknowledgmentsAccepted` audit-
+            trail field). When the grantee accepts an amendment proposal
+            that adds/edits/removes an acknowledgment, the V2App handler
+            atomically mutates the Claim's `acknowledgments[]`; this
+            section reflects the result. Pre-amendment EAs render the
+            same section sourced from the Claim's original
+            acknowledgments. */}
+        {claim && Array.isArray(claim.acknowledgments) && claim.acknowledgments.length > 0 && (
+          <Section title={`Acknowledgments (${claim.acknowledgments.length})`}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {claim.acknowledgments.map((ack) => (
+                <div
+                  key={ack.id}
+                  style={{
+                    padding: '10px 12px',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: ack.description ? 4 : 0 }}>
+                    {ack.title || '(untitled)'}
+                  </div>
+                  {ack.description && (
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      {ack.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
         {/* Phase 11E.1 (#108): Amendments section. Each entry surfaces the
             evaluationDeadline transition and the acknowledgment delta
             (added / removed / edited counts), plus the grantor's optional
@@ -321,10 +361,16 @@ export default function EvaluationAgreementDetailPanel({
           </button>
         </Tooltip>
         {/* Phase 9D.1.1 (Fix 4): Revoke EA — either party, non-internal,
-            non-revoked, active. */}
+            non-revoked.
+            Phase 11.6.1 Fix 4: Revoke is also available during
+            `pending-acceptance` per spec §11.2b — revocation is the
+            documented override while a proposal is pending. The EA's
+            pending amendment record stays in `amendments[]` for audit;
+            the EA goes to `revoked` regardless. */}
         {(() => {
           const canRevoke = (isGrantor || isGrantee) && !isInternal
-            && !isRevoked && agreement.status === 'active'
+            && !isRevoked
+            && (agreement.status === 'active' || agreement.status === 'pending-acceptance')
           if (!canRevoke) return null
           return (
             <Tooltip content="Revoke this Evaluation Agreement — removes evaluation rights for both sides. Historical results are preserved." width={280} wrapperStyle={{ flex: 1 }}>

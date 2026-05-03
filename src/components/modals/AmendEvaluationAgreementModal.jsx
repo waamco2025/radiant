@@ -229,10 +229,54 @@ export default function AmendEvaluationAgreementModal({
           onClose={onClose}
         />
         <ModalBody>
-          <FieldLabel label="Expiration" />
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>
-            Current: {formatDateTime(initialDeadline)}
+          {/* Phase 11.6.1 Fix 5: Current terms section above the editable
+              proposal section. Read-only display of the EA's pre-
+              amendment expiration + the Claim's pre-amendment
+              acknowledgments so the grantor sees what they're proposing
+              to change, not just the proposed values. */}
+          <FieldLabel label="Current terms" />
+          <div style={{
+            padding: '12px 14px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            display: 'flex', flexDirection: 'column', gap: 12,
+            marginBottom: 18,
+          }}>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Expiration</div>
+              <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{formatDateTime(initialDeadline)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                Acknowledgments ({(claim.acknowledgments || []).length})
+              </div>
+              {(claim.acknowledgments || []).length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                  No acknowledgments on this Claim.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {(claim.acknowledgments || []).map((ack) => (
+                    <div key={ack.id}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{ack.title || '(untitled)'}</div>
+                      {ack.description && (
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 2 }}>{ack.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+
+          <hr style={{
+            border: 'none',
+            borderTop: '1px solid var(--border)',
+            margin: '0 0 18px',
+          }} />
+
+          <FieldLabel label="Proposed expiration" />
           <ExpiryPicker
             expiry={expiry}
             setExpiry={setExpiry}
@@ -240,7 +284,7 @@ export default function AmendEvaluationAgreementModal({
             setCustomDate={setCustomExpiry}
           />
 
-          <FieldLabel label={`Acknowledgments (${acknowledgments.length})`} />
+          <FieldLabel label={`Proposed acknowledgments (${acknowledgments.length})`} />
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
             Acknowledgments live on the Claim. Edits here update the underlying Claim and apply to all current Evaluation Agreements on it. Only this Agreement's grantee is notified.
           </div>

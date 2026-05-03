@@ -186,10 +186,61 @@ export default function AmendmentResponseModal({
             </div>
           )}
 
-          {/* Acknowledgment changes */}
+          {/* Phase 11.6.1 Fix 5: Current terms section — read-only
+              display of the EA's pre-amendment expiration + the Claim's
+              pre-amendment acknowledgments. Anchors the diff display
+              below in the "before" state so the grantee can compare
+              without scrolling back to the Claim Detail Panel. */}
+          <FieldLabel label="Current terms" />
+          <div style={{
+            padding: '12px 14px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            display: 'flex', flexDirection: 'column', gap: 12,
+            marginBottom: 18,
+          }}>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Expiration</div>
+              <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{formatDateOnly(beforeDeadline)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                Acknowledgments ({(claim.acknowledgments || []).length})
+              </div>
+              {(claim.acknowledgments || []).length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                  No acknowledgments on this Claim.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {(claim.acknowledgments || []).map((ack) => (
+                    <div key={ack.id}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{ack.title || '(untitled)'}</div>
+                      {ack.description && (
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 2 }}>{ack.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <hr style={{
+            border: 'none',
+            borderTop: '1px solid var(--border)',
+            margin: '0 0 18px',
+          }} />
+
+          {/* Proposed amendments — diff display. Section title relabeled
+              from "Acknowledgment changes" so the contrast with "Current
+              terms" above is explicit. */}
+
+          {/* Proposed acknowledgment changes */}
           {allChanges.length > 0 && (
             <>
-              <FieldLabel label={`Acknowledgment changes (${allChanges.length})`} required />
+              <FieldLabel label={`Proposed acknowledgment changes (${allChanges.length})`} required />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
                 Tick each change to confirm you accept it. All boxes must
                 be ticked to accept the proposal.
@@ -253,10 +304,10 @@ export default function AmendmentResponseModal({
             </>
           )}
 
-          {/* Expiration change */}
+          {/* Proposed expiration change */}
           {expiryChanged && (
             <>
-              <FieldLabel label="Expiration change" required />
+              <FieldLabel label="Proposed expiration change" required />
               <div style={{
                 padding: '12px 14px',
                 background: 'var(--bg-card)',

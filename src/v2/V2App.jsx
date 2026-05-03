@@ -2343,6 +2343,14 @@ export default function V2App() {
     })
 
     setV22RespondingToEaAmendment(null)
+    // Phase 11.6.1 Fix 1: dismiss the originating proposal notification
+    // on the grantee's (active role's) inbox. The proposal id is
+    // deterministic so we can target it directly without walking
+    // addedRequests.
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-ea-amendment-proposal-${eaId}-${amendmentId}`],
+    }))
 
     if (
       grantorParty &&
@@ -2365,7 +2373,7 @@ export default function V2App() {
         })
       }
     }
-  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
   // Phase 11.6 (#164): Grantee rejects a pending amendment proposal.
   // EA returns to `active` with terms unchanged; Claim untouched.
@@ -2405,6 +2413,13 @@ export default function V2App() {
     }))
 
     setV22RespondingToEaAmendment(null)
+    // Phase 11.6.1 Fix 1: dismiss the originating proposal notification
+    // on the grantee's (active role's) inbox. Mirrors the accept path —
+    // both terminal responses should clear the inbox entry.
+    updateRoleState(roleId, (prev) => ({
+      ...prev,
+      dismissedReqs: [...(prev.dismissedReqs || []), `v22-ea-amendment-proposal-${eaId}-${amendmentId}`],
+    }))
 
     if (
       grantorParty &&
@@ -2427,7 +2442,7 @@ export default function V2App() {
         })
       }
     }
-  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
 
   // Phase 6.D: self-evaluation entry point. Owner clicks Run Evaluation on
   // their own Claim — no EA required. The eval modal opens in self-eval mode;
@@ -4854,6 +4869,12 @@ export default function V2App() {
               ) : (
                 <EvaluationAgreementDetailPanel
                   agreement={resolved.evaluationAgreement}
+                  // Phase 11.6.1 Fix 2: pass the live Claim so the panel
+                  // can render the current acknowledgments. Per spec
+                  // §11.2a (Phase 11.6 revision), acknowledgments live
+                  // on the Claim; the EA's `acknowledgmentsAccepted` is
+                  // an audit-trail snapshot of the original agreement.
+                  claim={v22View?.claims?.find((c) => c.id === resolved.evaluationAgreement?.claimId) || null}
                   resolveNodeName={resolveNodeName}
                   activeParty={activeRole.party}
                   onClose={close}
@@ -5755,15 +5776,21 @@ export default function V2App() {
           }
           const evaluationResultsForClaim = (v22View?.evaluationResults || []).filter(e => e.claimId === node.id)
           const parseResultsForAsset = (v22View?.parseResults || []).filter(p => p.sourceAssetId === node.id)
-          // EA the active actor can use to evaluate this Claim:
+          // EA the active actor can use to evaluate this Claim.
+          // Phase 11.6.1 Fix 3: include `pending-acceptance` alongside
+          // `active` so the Detail Panel renders Run Evaluation (visually
+          // disabled with a tooltip) instead of falling through to
+          // "Request Evaluation Agreement" — the EA exists, the grantee
+          // just hasn't responded to a pending amendment yet.
+          const isActionableEaStatus = (s) => s === 'active' || s === 'pending-acceptance'
           const evaluationAgreementForActor = (v22View?.evaluationAgreements || []).find(e =>
             e.claimId === node.id &&
             e.grantee.party === activeRole.party &&
-            e.status === 'active' &&
+            isActionableEaStatus(e.status) &&
             !e._provisional &&
             (v22Provisionals.disclosureAgreements.find(d => d.id === e.disclosureAgreementId)?.type !== 'provisional')
           ) || (v22View?.evaluationAgreements || []).find(e =>
-            e.claimId === node.id && e.grantee.party === activeRole.party && e.status === 'active' && !e._provisional
+            e.claimId === node.id && e.grantee.party === activeRole.party && isActionableEaStatus(e.status) && !e._provisional
           )
           // Phase 11C: warm-path detection. Active DA exists + no EA on this
           // Claim where the viewer is grantee → surface the
@@ -6175,7 +6202,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.28 &middot; Changelog
+          v0.11.29 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6222,6 +6249,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.29', date: '2026-05-03', label: 'Phase 11.6.1', items: [
+                  'Fix: amendment proposal notification now clears from the grantee\'s inbox after Accept or Reject (was lingering after a successful response).',
+                  'Fix: EA Detail Panel now displays the Claim\'s current acknowledgments. Post-amendment changes are visible immediately.',
+                  'Fix: Run Evaluation button stays visible during pending-acceptance — visually disabled with a tooltip directing the grantee to respond. Was incorrectly reverting to "Request Evaluation Agreement."',
+                  'Fix: Revoke action available in the EA Detail Panel footer during pending-acceptance — revocation is the documented override per spec §11.2b.',
+                  'Polish: Amend EA modal + Amendment Response modal both now show current terms above proposed amendments with a divider, so the grantor and grantee can compare without scrolling back to the Claim Detail Panel.',
+                ]},
                 { version: '0.11.28', date: '2026-05-03', label: 'Phase 11.6', items: [
                   'New (#164): Evaluation Agreement amendments are now bilateral proposals. The grantor submits a proposal, the grantee accepts or rejects in a new Amendment Response modal with diff display + per-change ticking. While pending, evaluations under the EA are paused and further amendments are blocked.',
                   'Polish (#165): edge draw-in animation is smoother — overlay edges now use 64 curve segments (was 12-32), removing the per-frame "steppy" quantization visible during the 1.2s draw-in.',
