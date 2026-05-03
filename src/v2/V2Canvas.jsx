@@ -2213,6 +2213,121 @@ const V2Canvas = forwardRef(function V2Canvas({
         requestAnimationFrame(tick)
       })
     },
+    // Phase 11E.3 (#139): inverse of playEdgeRetract — edges incident to
+    // `nodeId` are trimmed back to the anchor end on frame 0, then grown
+    // point-by-point along their existing curve until they reach full
+    // length over `durationMs`. Used by the reveal animation: as a
+    // provisional Claim flips to active, the connecting Agreement Edge
+    // animates from anchor → Claim, completing before the card flip
+    // starts.
+    //
+    // Implementation mirrors playEdgeRetract's point-trimming approach:
+    // capture the full geometry once, then per-frame replay an
+    // anchor-side prefix or suffix whose length grows from 2 points to
+    // ptCount over the animation. Material opacity ramps from 0 → base
+    // over the first 30% so the edge "fades in" at the head of the
+    // draw rather than appearing instantly.
+    //
+    // Returns a Promise that resolves when the animation completes.
+    // Resolves immediately when no edges connect to the target node.
+    // Restores full opacity in the resolution branch so the post-anim
+    // edge state matches what V2Canvas's regular render would produce.
+    playEdgeDrawIn: (nodeId, durationMs = 500) => {
+      const group = edgeGroupRef.current
+      if (!group || !nodeId) return Promise.resolve()
+      const targets = []
+      for (const line of group.children) {
+        if (!line?.userData) continue
+        const isFrom = line.userData.from === nodeId
+        const isTo = line.userData.to === nodeId
+        if (!isFrom && !isTo) continue
+        const startArr = line.geometry?.attributes?.instanceStart?.array
+        const endArr = line.geometry?.attributes?.instanceEnd?.array
+        if (!startArr || !endArr) continue
+        const segCount = startArr.length / 3
+        const flat = new Array((segCount + 1) * 3)
+        for (let i = 0; i < segCount; i++) {
+          flat[i * 3] = startArr[i * 3]
+          flat[i * 3 + 1] = startArr[i * 3 + 1]
+          flat[i * 3 + 2] = startArr[i * 3 + 2]
+        }
+        flat[segCount * 3] = endArr[(segCount - 1) * 3]
+        flat[segCount * 3 + 1] = endArr[(segCount - 1) * 3 + 1]
+        flat[segCount * 3 + 2] = endArr[(segCount - 1) * 3 + 2]
+        targets.push({
+          line,
+          original: flat,
+          // drawTowardStart === true means the target node (Claim) is at
+          // the FROM end (index 0); the anchor stays at the END and the
+          // visible curve grows from the anchor backward toward index 0.
+          // Naming mirrors playEdgeRetract.retractFromStart for symmetry.
+          drawTowardStart: isFrom,
+        })
+      }
+      if (targets.length === 0) return Promise.resolve()
+      return new Promise((resolve) => {
+        let startTime = null
+        const tick = (time) => {
+          if (!startTime) startTime = time
+          const elapsed = time - startTime
+          const t = Math.min(1, elapsed / durationMs)
+          const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
+          for (const tgt of targets) {
+            const { line, original, drawTowardStart } = tgt
+            const ptCount = original.length / 3
+            // Inverse of retract: pointsToShow GROWS from 2 → ptCount.
+            const pointsToShow = Math.max(2, Math.ceil(ptCount * eased))
+            const newPositions = new Array(pointsToShow * 3)
+            for (let i = 0; i < pointsToShow; i++) {
+              const sourceIdx = drawTowardStart
+                ? (ptCount - pointsToShow + i)
+                : i
+              newPositions[i * 3] = original[sourceIdx * 3]
+              newPositions[i * 3 + 1] = original[sourceIdx * 3 + 1]
+              newPositions[i * 3 + 2] = original[sourceIdx * 3 + 2]
+            }
+            try {
+              line.geometry.setPositions(newPositions)
+              if (line.material?.dashed) {
+                line.computeLineDistances()
+              }
+            } catch {
+              // Geometry can be disposed mid-anim (layer change). Bail.
+            }
+            // Mirror retract's tail-fade: ramp opacity 0 → base over the
+            // first 30% so the curve doesn't pop in at full intensity.
+            if (line.material) {
+              const opacityFactor = t > 0.3 ? 1 : t / 0.3
+              const baseOpacity = line.material.userData?.baseOpacity
+                ?? (line.material.transparent ? line.material.opacity : 1)
+              if (line.material.userData) {
+                if (line.material.userData.baseOpacity == null) {
+                  line.material.userData.baseOpacity = baseOpacity
+                }
+              }
+              line.material.opacity = baseOpacity * opacityFactor
+              line.material.transparent = true
+            }
+          }
+          dirtyRef.current = true
+          if (t < 1) {
+            requestAnimationFrame(tick)
+          } else {
+            // Restore full opacity at completion so the post-anim edge
+            // state matches what regular V2Canvas render produces.
+            for (const tgt of targets) {
+              const { line } = tgt
+              if (line.material) {
+                const baseOpacity = line.material.userData?.baseOpacity ?? 1
+                line.material.opacity = baseOpacity
+              }
+            }
+            resolve()
+          }
+        }
+        requestAnimationFrame(tick)
+      })
+    },
     // Phase 9B.1 §4: project world coords to VIEWPORT (fixed) coords so the
     // pinned edge tooltip can track its world-space anchor through pan/zoom.
     // `worldToScreen` alone returns canvas-local coords; add the container's

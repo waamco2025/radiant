@@ -54,6 +54,10 @@ import { playUnravelAnimation } from './animations/unravel.js'
 // Phase 11C.3 W3: reveal animation primitive — migrated out of inline
 // V2App.jsx so it parallels the unravel primitive's organization.
 import { playRevealAnimation } from './animations/reveal.js'
+// Phase 11E.3 (#139): edge draw-in primitive — inverse of edge retract,
+// fires before the Claim card flip during reveal so the new typed edge
+// animates from the requester's anchor outward toward the active Claim.
+import { playEdgeDrawIn } from './animations/edgeDrawIn.js'
 // Phase 9D.1: V22RevocationNoticeModal is no longer mounted — notification
 // click now routes into the Detail Panel. File kept as dead code pending the
 // #50 dead-handler sweep. Import removed to keep the V2App surface clean.
@@ -1557,8 +1561,39 @@ export default function V2App() {
 
   // ── Phase 6: Amendment handlers ──────────────────────────────────────
 
-  const handleV22AmendClaimSubmit = useCallback(({ addedAssetIds }) => {
+  const handleV22AmendClaimSubmit = useCallback(({ addedAssetIds, note }) => {
     if (!v22AmendingClaimId) return
+    // Phase 11E.2 (#102): compute notification fan-out targets BEFORE the
+    // setV22Provisionals updater runs, so we can enqueue cross-role
+    // notifications immediately after state mutates. Same pattern as
+    // handleV22AmendDisclosureSubmit (Phase 7 carry-over #2) — capturing
+    // the snapshot avoids race conditions with the deferred updater.
+    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const claimForNotif = merged.claims.find((c) => c.id === v22AmendingClaimId) || null
+    const claimNameForNotif = claimForNotif?.name || null
+    const claimPinForNotif = claimForNotif?.pin || null
+    // "Active counterparty" = grantee on a non-revoked, non-declined,
+    // non-provisional, non-expired DA whose subject is this Claim AND
+    // whose grantee is a real counterparty (not the amender, not Radiant
+    // Network, not internal/self-grant). Self-DAs (claim-ref edges) and
+    // public-directory DAs are excluded.
+    const nowIso = new Date().toISOString()
+    const counterpartyParties = new Set()
+    for (const da of merged.disclosureAgreements) {
+      if (da.subject?.kind !== 'claim') continue
+      if (da.subject.id !== v22AmendingClaimId) continue
+      if (da.type === 'provisional') continue
+      if (da._revokedMeta) continue
+      if (da._declineMeta) continue
+      if (da.terms?.expires && da.terms.expires < nowIso) continue
+      const grantee = da.grantee?.party
+      if (!grantee) continue
+      if (grantee === 'Radiant Network') continue
+      if (grantee === activeRole.party) continue
+      if (grantee === da.grantor?.party) continue
+      counterpartyParties.add(grantee)
+    }
+
     setV22Provisionals((prev) => {
       // Look up the latest version of the claim (could be a prior amendment).
       const existing = prev.claims?.find((c) => c.id === v22AmendingClaimId)
@@ -1584,7 +1619,27 @@ export default function V2App() {
     setV22PanToClaimId(v22AmendingClaimId)
     setV22RecentlyAcceptedClaimId(v22AmendingClaimId)
     // Phase 7 carry-over #1: no timeout; clears on deselection.
-  }, [v22AmendingClaimId])
+
+    // Phase 11E.2 (#102): fire `v22-claim-amendment` to every active-DA
+    // counterparty so they aren't left guessing why their NEW badge
+    // appeared. CLAUDE.md mandates reciprocal notifications for all
+    // party-to-party state changes; pre-fix Claim amendments were a
+    // long-standing gap.
+    for (const counterparty of counterpartyParties) {
+      const counterpartyRole = ROLES.find((r) => r.party === counterparty)
+      if (!counterpartyRole) continue
+      enqueueV22NotificationForRequester(counterpartyRole.id, {
+        id: `v22-claim-amendment-${v22AmendingClaimId}-${counterpartyRole.id}-${Date.now().toString(36)}`,
+        type: 'v22-claim-amendment',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: claimNameForNotif, pin: claimPinForNotif },
+        connectTo: null,
+        v22ClaimId: v22AmendingClaimId,
+        note: (note || '').trim(),
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [v22AmendingClaimId, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
   // Phase 8: V2.2 parse flow — the Asset panel fires this via setV22ParsingAsset.
   // Produces a new Parse Result + an internal Full DA that wires it back to the
@@ -2064,6 +2119,9 @@ export default function V2App() {
     // (grantee) is told the DA's scope changed, with a deep-link to the Claim.
     // Phase 7 carry-over #2: also skip when grantee == active role (internal
     // DA would otherwise notify the amender of their own amendment).
+    // Phase 11E.2 (#102): renamed `v22-amendment` → `v22-da-amendment` so
+    // the type name parallels `v22-ea-amendment` and `v22-claim-amendment`.
+    // Also added `v22ClaimId` for deep-link pan, mirroring the EA pattern.
     if (
       counterpartyParty &&
       counterpartyParty !== 'Radiant Network' &&
@@ -2073,12 +2131,13 @@ export default function V2App() {
       const counterpartyRole = ROLES.find((r) => r.party === counterpartyParty)
       if (counterpartyRole) {
         enqueueV22NotificationForRequester(counterpartyRole.id, {
-          id: `v22-amendment-${v22AmendingDaId}-${Date.now().toString(36)}`,
-          type: 'v22-amendment',
+          id: `v22-da-amendment-${v22AmendingDaId}-${Date.now().toString(36)}`,
+          type: 'v22-da-amendment',
           from: { name: activeRole.party, dot: activeRole.partyDot },
           asset: { name: claimNameForNotif, pin: claimPinForNotif },
           connectTo: null,
           v22DaId: v22AmendingDaId,
+          v22ClaimId: existing.subject?.id || null,
           note: (note || '').trim(),
           date: new Date().toISOString().slice(0, 10),
         })
@@ -2650,6 +2709,15 @@ export default function V2App() {
         setV22RevealActiveClaimId(null)
       },
     })
+    // Phase 11E.3 (#139): edge draw-in animation — fires after the pan
+    // settles (~500ms) and completes before the flip starts (1100ms).
+    // Schedules in parallel with playRevealAnimation; the edge's geometry
+    // mutates while the camera is already framed on the Claim. The
+    // primitive no-ops gracefully when no edges connect to the node
+    // (e.g. orphan reveal during edge-derivation race).
+    setTimeout(() => {
+      playEdgeDrawIn({ nodeId, canvasRef, durationMs: 500 })
+    }, 500)
   }, [nodeMap, roleId])
 
   // Pan to pending target after Connect Asset or Disclosure Response modal closes
@@ -3432,7 +3500,8 @@ export default function V2App() {
                     const isEvaluation = req.type === 'evaluation'
                     const isPublishedStandard = req.type === 'published_standard'
                     const isV22Request = req.type === 'v22-request'
-                    const isV22Amendment = req.type === 'v22-amendment'
+                    // Phase 11E.2 (#102): renamed `v22-amendment` → `v22-da-amendment`.
+                    const isV22DaAmendment = req.type === 'v22-da-amendment'
                     const isV22Evaluation = req.type === 'v22-evaluation'
                     // Phase 11C: warm-path EA-only notifications.
                     const isV22EaRequest = req.type === 'v22-request-ea-only'
@@ -3440,6 +3509,8 @@ export default function V2App() {
                     const isV22EaDeclined = req.type === 'v22-ea-declined'
                     // Phase 11E.1 (#108): EA amendment notifications.
                     const isV22EaAmendment = req.type === 'v22-ea-amendment'
+                    // Phase 11E.2 (#102): Claim amendment fan-out to active-DA counterparties.
+                    const isV22ClaimAmendment = req.type === 'v22-claim-amendment'
                     // Phase 9A.4 Gate C: four new Transferring notification types.
                     const isV22TransferRequest = req.type === 'v22-transfer-request'
                     const isV22TransferAccepted = req.type === 'v22-transfer-accepted'
@@ -3448,8 +3519,11 @@ export default function V2App() {
                     // Phase 9D (#112): revocation notifications.
                     const isV22DaRevoked = req.type === 'v22-da-revoked'
                     const isV22EaRevoked = req.type === 'v22-ea-revoked'
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22Amendment || isV22EaAmendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendment ? 'EA AMENDED' : isV22Amendment ? 'AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendment || isV22ClaimAmendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    // Phase 11E.2 (#102): badge labels distinguish DA / EA /
+                    // CLAIM amendments — pre-rename "AMENDED" alone covered
+                    // DA only and read ambiguously next to the EA badge.
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22ClaimAmendment ? 'CLAIM AMENDED' : isV22EaAmendment ? 'EA AMENDED' : isV22DaAmendment ? 'DA AMENDED' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -3576,17 +3650,44 @@ export default function V2App() {
                               }
                             }
                           })
-                        } else if (req.type === 'v22-amendment') {
-                          // Phase 6 own scope: amendment notifications deep-link
-                          // to the amended Claim on the recipient's canvas.
+                        } else if (req.type === 'v22-da-amendment') {
+                          // Phase 11E.2 (#102): DA amendment notifications now
+                          // deep-link directly to the amended DA's Detail
+                          // Panel (parallel to v22-ea-amendment's EA panel
+                          // routing). Pan to the Claim node first for visual
+                          // context, then open the DA panel via the
+                          // setOpenAgreement direct-id shape that
+                          // V22NodeDetailPanel resolves at line 4413.
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
-                          const targetNode = Object.values(nodeMap).find(n => n.pin === req.asset?.pin)
-                          if (targetNode) {
-                            setSel(targetNode.id)
-                            canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
+                          const claimNode = req.v22ClaimId ? nodeMap[req.v22ClaimId] : null
+                          if (claimNode) {
+                            canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
+                          }
+                          if (req.v22DaId) {
+                            setSelectedEdgeId(null)
+                            setOpenAgreement({
+                              kind: 'disclosure',
+                              disclosureAgreementId: req.v22DaId,
+                            })
+                          }
+                        } else if (req.type === 'v22-claim-amendment') {
+                          // Phase 11E.2 (#102): Claim amendment notifications
+                          // pan to the Claim and open its node Detail Panel.
+                          // Counterparties get fan-out per active-DA grantee
+                          // so each unique recipient has a deep-link entry.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const claimNode = req.v22ClaimId ? nodeMap[req.v22ClaimId] : null
+                          if (claimNode) {
+                            setSel(claimNode.id)
+                            setOpenAgreement(null)
+                            setSelectedEdgeId(null)
+                            canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
                           }
                         } else if (req.type === 'v22-ea-amendment') {
                           // Phase 11E.1 (#108): EA amendment notifications
@@ -3760,8 +3861,12 @@ export default function V2App() {
                                                     : isV22EaDeclined
                                                       ? (req.reason ? `${req.from.name} declined your Evaluation Agreement request — "${req.reason}"` : `${req.from.name} declined your Evaluation Agreement request on ${req.asset?.name || 'a Claim'}.`)
                                                       : isV22EaAmendment
-                                                        ? `${req.from.name} amended the Evaluation Agreement on ${req.asset?.name || 'a Claim'}.`
-                                                        : req.asset?.name || ''
+                                                        ? `${req.from.name} amended the Evaluation Agreement on ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
+                                                        : isV22DaAmendment
+                                                          ? `Disclosure Agreement amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
+                                                          : isV22ClaimAmendment
+                                                            ? `Claim amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
+                                                            : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -5762,7 +5867,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.20 &middot; Changelog
+          v0.11.21 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5809,6 +5914,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.21', date: '2026-05-02', label: 'Phase 11E.2 + 11E.3', items: [
+                  'New (#102): Claim amendments now fire a v22-claim-amendment notification to every counterparty with an active Disclosure Agreement on the affected Claim. Click pans to the Claim and opens its Detail Panel. Badge: CLAIM AMENDED.',
+                  'Polish (#102): Disclosure Agreement amendment notification renamed v22-amendment → v22-da-amendment. Click now deep-links directly to the DA Detail Panel (was pan-only). Badge: DA AMENDED. Body copy reads "Disclosure Agreement amended: <claim>" with optional note suffix.',
+                  'New (#139): edge draw-in animation on reveal. When a provisional Claim flips to active, the connecting Agreement Edge animates from the requester\'s anchor outward toward the Claim, completing before the card flip. Mirrors the unravel ceremony in reverse.',
+                ]},
                 { version: '0.11.20', date: '2026-05-02', label: 'Phase 11E.1.7', items: [
                   'Polish: Step 4 review labels expanded to "Disclosure Agreement expires" / "Evaluation Agreement expires" (was the abbreviated "DA expires" / "EA expires"). Label column widened to keep the value column readable.',
                   'Polish: response modal renders at a fixed 720px height across all four steps so the footer button row stays in the same place as the user advances through the flow.',
