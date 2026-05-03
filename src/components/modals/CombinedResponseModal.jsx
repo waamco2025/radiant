@@ -220,7 +220,13 @@ export default function CombinedResponseModal({
 
   return (
     <Backdrop onClose={onClose}>
-      <Modal width={780}>
+      {/* Phase 11E.1.7 Fix 2: fixed 720px modal height so steps 1-4 (and
+          warm-path 3-4) render at a consistent size — the footer button
+          row no longer jumps as content varies between steps. ModalBody
+          already has `flex: 1, overflow: auto`, so longer steps scroll
+          within the body. Capped to 90vh on small screens via the shared
+          Modal component's height-prop branch. */}
+      <Modal width={780} height={720}>
         <ModalHeader
           title={header.title}
           subtitle={header.subtitle}
@@ -559,42 +565,49 @@ export default function CombinedResponseModal({
                   ? 'Accepting flips the Evaluation Agreement to active. The existing Disclosure Agreement is unaffected.'
                   : 'Accepting creates an active Disclosure Agreement and Evaluation Agreement. Both parties\' canvases will update.'}
               </div>
+              {/* Phase 11E.1.7 Fix 1: label column widened from 130 → 230
+                  to accommodate "DISCLOSURE AGREEMENT EXPIRES" /
+                  "EVALUATION AGREEMENT EXPIRES" without wrapping. Shorter
+                  labels sit in extra column space — the labeled-list
+                  alignment stays consistent across rows. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
                 {!isEaOnly && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Disclosure type</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Disclosure type</div>
                     <div style={{ color: 'var(--text-primary)' }}>{TYPE_DECISIONS.find((d) => d.id === action)?.label}</div>
                   </div>
                 )}
                 {action === 'selective' && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Fields in scope</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Fields in scope</div>
                     <div style={{ color: 'var(--text-primary)' }}>{selectedFieldIds.length}</div>
                   </div>
                 )}
                 {action === 'full' && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Assets in scope</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Assets in scope</div>
                     <div style={{ color: 'var(--text-primary)' }}>{selectedAssetIds.length} of {referencedAssets.length}</div>
                   </div>
                 )}
                 {action === 'proofonly' && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Eval Results shared</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Eval Results shared</div>
                     <div style={{ color: 'var(--text-primary)' }}>{selectedEvalResultIds.length}</div>
                   </div>
                 )}
                 {/* Phase 11E.1.6 Fix 2: cold path shows DA + EA expirations
                     on separate rows. Warm path (no DA in this code path)
-                    shows only the EA row. */}
+                    shows only the EA row.
+                    Phase 11E.1.7 Fix 1: full artifact names (was the
+                    abbreviated "DA EXPIRES" / "EA EXPIRES"). */}
                 {!isEaOnly && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>DA expires</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Disclosure Agreement expires</div>
                     <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(daExpiry, daCustomExpiry)}</div>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>{isEaOnly ? 'Agreement expires' : 'EA expires'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Evaluation Agreement expires</div>
                   <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
                 </div>
                 {(() => {
@@ -605,7 +618,7 @@ export default function CombinedResponseModal({
                     : 0
                   return (
                     <div style={{ display: 'flex', gap: 14 }}>
-                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 130, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Acknowledgments</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Acknowledgments</div>
                       <div style={{ color: 'var(--text-primary)' }}>
                         {acceptedCount === 0 ? 'None required' : `${acceptedCount} accepted`}
                       </div>

@@ -79,10 +79,16 @@ export function Backdrop({ children, onClose }) {
   )
 }
 
-export function Modal({ children, width = 680 }) {
+export function Modal({ children, width = 680, height }) {
+  // Phase 11E.1.7 Fix 2: optional `height` prop — when set, the modal
+  // renders at that pixel height (capped to 90vh on small screens) so
+  // sibling steps in a multi-step flow render at a consistent size and
+  // the footer doesn't jump between steps. Default behavior (no height
+  // prop) is unchanged: modal sizes to its content up to maxHeight 90vh.
   return (
     <div style={{
-      width, maxWidth: '94vw', maxHeight: '90vh',
+      width, maxWidth: '94vw',
+      ...(height ? { height, maxHeight: 'min(90vh, ' + height + 'px)' } : { maxHeight: '90vh' }),
       background: 'var(--bg-surface)',
       border: '1px solid var(--border)',
       borderRadius: 12,

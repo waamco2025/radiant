@@ -3311,9 +3311,16 @@ export default function V2App() {
                   // Layer so the panel doesn't persist over the directory.
                   // Also clear the directory-materialized Claim panel when
                   // closing the layer.
+                  // Phase 11E.1.7 Fix 3: also clear the edge-selection +
+                  // openAgreement state so DA / EA Detail Panels (driven
+                  // by edge clicks, not node selection) don't persist
+                  // over the directory either. Pre-fix only setSel ran,
+                  // leaving the agreement panel visible above the layer.
                   setSel(null)
                   setForcePanelTab(null)
                   setForceExpandSda(null)
+                  setSelectedEdgeId(null)
+                  setOpenAgreement(null)
                   setV22DirectoryOpen((open) => {
                     if (open) setV22DirectoryMaterializedClaim(null)
                     return !open
@@ -5755,7 +5762,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.19 &middot; Changelog
+          v0.11.20 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5802,6 +5809,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.20', date: '2026-05-02', label: 'Phase 11E.1.7', items: [
+                  'Polish: Step 4 review labels expanded to "Disclosure Agreement expires" / "Evaluation Agreement expires" (was the abbreviated "DA expires" / "EA expires"). Label column widened to keep the value column readable.',
+                  'Polish: response modal renders at a fixed 720px height across all four steps so the footer button row stays in the same place as the user advances through the flow.',
+                  'Fix: Detail Panels (node + DA + EA) now close when entering the Radiant Network Directory Layer. Pre-fix the agreement panel persisted on top of the directory.',
+                  'Fix: Amend Disclosure Agreement modal now blocks Submit when scope is empty (e.g. user unchecked the lone Asset). Inline amber italic warning surfaces after deselection brings the count to zero.',
+                ]},
                 { version: '0.11.19', date: '2026-05-02', label: 'Phase 11E.1.6', items: [
                   'Fix: "No expiry" picks in the response flow now actually never expire. Pre-fix the picker emitted "none" but the modal\'s switch handled "never", silently coercing the choice to a 1-year expiry. Cold + warm path both verified.',
                   'New: Disclosure Agreements now have their own expiration in the response flow. Step 2 (Disclosure Scope) gains an Expiration picker above the scope picker — DA and EA expirations are independent. Step 4 review shows both. Default for both = "Never expires."',

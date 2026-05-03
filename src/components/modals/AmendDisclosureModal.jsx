@@ -153,6 +153,32 @@ export default function AmendDisclosureModal({
   const expiryChanged = toDateOnly(initialExpires) !== toDateOnly(nextExpiresIso)
   const hasChanges = scopeChanged || expiryChanged
 
+  // Phase 11E.1.7 Fix 4: Submit is gated on a non-empty scope for the
+  // active type. Pre-fix the user could uncheck the lone Asset (or last
+  // field / eval result), trip `hasChanges`, and submit a DA whose scope
+  // had nothing in it. Spec §11.2 implies non-empty scope (a DA with no
+  // disclosed items isn't a meaningful agreement). The empty-state
+  // amber italic message renders only when the user has interacted to
+  // reach zero — not on initial open of an already-empty DA (which
+  // shouldn't be possible per spec, but the timing rule is the same
+  // either way: only show after deselection brings the count to 0,
+  // which is detectable via baseline > 0 && current === 0).
+  const scopeIsEmpty =
+    (agreement.type === 'full' && selectedAssetIds.length === 0) ||
+    (agreement.type === 'selective' && selectedFieldIds.length === 0) ||
+    (agreement.type === 'proofonly' && selectedEvalIds.length === 0)
+  const baselineWasNonEmpty =
+    (agreement.type === 'full' && baselineAssetIds.length > 0) ||
+    (agreement.type === 'selective' && baselineFieldIds.length > 0) ||
+    (agreement.type === 'proofonly' && baselineEvalIds.length > 0)
+  const showEmptyScopeWarning = scopeIsEmpty && baselineWasNonEmpty
+  const canSubmit = hasChanges && !scopeIsEmpty
+  const emptyScopeMessage = agreement.type === 'full'
+    ? 'At least one Asset must be in scope.'
+    : agreement.type === 'selective'
+      ? 'At least one field must be in scope.'
+      : 'At least one Eval Result must be in scope.'
+
   const handleSubmit = () => {
     let scope
     if (agreement.type === 'full') {
@@ -277,6 +303,18 @@ export default function AmendDisclosureModal({
               </div>
             </>
           )}
+          {/* Phase 11E.1.7 Fix 4: amber italic inline empty-state message
+              (CLAUDE.md UX pattern). Only renders after the user has
+              deselected to zero — initial open with non-empty baseline
+              suppresses the message until interaction. */}
+          {showEmptyScopeWarning && (
+            <div style={{
+              marginTop: -8, marginBottom: 16, fontSize: 11,
+              color: 'var(--accent-amber)', fontStyle: 'italic',
+            }}>
+              {emptyScopeMessage}
+            </div>
+          )}
           <FieldLabel label="Amendment note (optional)" />
           <textarea
             rows={3}
@@ -315,7 +353,7 @@ export default function AmendDisclosureModal({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn label="Cancel" onClick={onClose} />
-            <Btn label="Amend Disclosure Agreement" accent disabled={!hasChanges} onClick={handleSubmit} />
+            <Btn label="Amend Disclosure Agreement" accent disabled={!canSubmit} onClick={handleSubmit} />
           </div>
         </ModalFooter>
       </Modal>
