@@ -164,6 +164,16 @@ export default function V2App() {
   // cleared by the deselect-aware effect at line 2141 so the NEW badge
   // persists until the user moves selection off the node).
   const [v22RevealActiveClaimId, setV22RevealActiveClaimId] = useState(null)
+  // Phase 11E.7: per-role map of pending reveal claim ids. The grantee's
+  // view of an incident Claim + edges should render `_showAsProvisional`
+  // from the moment of acceptance until the grantee clicks the
+  // `acceptance` / `v22-ea-accepted` notification (which fires
+  // `startReveal` and clears the pending entry). Populated by the
+  // acceptance handlers; drained by the notification click handler.
+  // Without this, the Claim renders in active state pre-click and the
+  // reveal animation reads as "regressing then re-reaching active"
+  // rather than a true first-time materialization.
+  const [v22PendingRevealsByRole, setV22PendingRevealsByRole] = useState({})
   // Phase 9A.6.1 Fix 1: holds null, a single id, or an array of ids. Array
   // form supports multi-file Asset registration where all N new Assets need
   // the NEW badge. Consumers normalise via `toIdArray(...)` below.
@@ -285,6 +295,14 @@ export default function V2App() {
       ? v22RecentlyAcceptedAssetId
       : v22RecentlyAcceptedAssetId ? [v22RecentlyAcceptedAssetId] : []
     const flagged = new Set([v22RecentlyAcceptedClaimId, ...assetReveal].filter(Boolean))
+    // Phase 11E.7: pending-reveal claim ids for the active viewer's role.
+    // The `_showAsProvisional` gate applies to (a) the claim currently
+    // mid-reveal animation (`v22RevealActiveClaimId`) OR (b) any claim with
+    // a pending acceptance notification that hasn't been clicked yet —
+    // ensuring the grantee's view stays in provisional state from
+    // acceptance until the notification is clicked. The two gates compose:
+    // either true → stamp applies; both false → stamp clears.
+    const pendingRevealClaimIds = new Set(v22PendingRevealsByRole[roleId] || [])
     // Phase 9A item 5: compute the endpoint set for the currently-selected
     // edge so AssetNode can render a glow on the two connected nodes.
     // Phase 9A.1.5 item 4: also compute which side of each endpoint card
@@ -376,7 +394,14 @@ export default function V2App() {
       // until the user deselects). Without this decoupling, the 11C.3
       // onDone callback over-cleared and dropped the NEW badge / orange
       // tint at ~2.5s instead of letting them persist until deselect.
+      // Phase 11E.7: also stamp `_showAsProvisional` when the active
+      // viewer has a pending acceptance notification for this Claim
+      // (pre-click window). The gate composes with the active-reveal
+      // gate so the stamp persists from acceptance through reveal
+      // completion in one continuous window.
       const isInRevealWindow = n.id === v22RevealActiveClaimId
+      const isInPendingRevealWindow = pendingRevealClaimIds.has(n.id)
+      const showAsProvisional = isInRevealWindow || isInPendingRevealWindow
       // Phase 11D #118: skip the NEW badge for Asset reveals where the
       // Asset is owned by the active party. The cold-path / warm-path
       // acceptance handlers stamp `v22RecentlyAcceptedAssetId` with the
@@ -397,7 +422,7 @@ export default function V2App() {
       // scope) would preserve NEW on those paths without leaking
       // cross-session stamps from the acceptance handlers.
       const skipNewBadge = needsReveal && n.v22Type === 'ASSET' && n.owner === activeRole.party
-      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !isInRevealWindow) return n
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional) return n
       return {
         ...n,
         ...(needsReveal && !skipNewBadge ? { _isNew: true } : {}),
@@ -406,8 +431,9 @@ export default function V2App() {
         // warm-path equivalent at V2App:3308).
         ...(justFinalizedClaim ? { _wasProvisional: true } : {}),
         // _showAsProvisional drives AssetNode's dashed/dimmed render
-        // during the reveal animation window. Cleared at phase 'done'.
-        ...(isInRevealWindow ? { _showAsProvisional: true } : {}),
+        // during the reveal animation window AND from acceptance until
+        // notification-click (Phase 11E.7).
+        ...(showAsProvisional ? { _showAsProvisional: true } : {}),
         ...(isEndpoint ? {
           _isEdgeEndpoint: true,
           _edgeEndpointSide: endpointSideById[n.id] || 'right',
@@ -427,17 +453,25 @@ export default function V2App() {
     // (separate from `v22RecentlyAcceptedClaimId`) so the dashed→solid
     // edge transition happens at reveal phase 'done' regardless of whether
     // the user has deselected the Claim yet.
+    // Phase 11E.7: also stamp edges incident to claims with a pending
+    // acceptance notification so the provisional dashed-grey rendering
+    // persists from acceptance until the grantee clicks the notification.
+    // Both gates compose: union of active-reveal claim ids + pending-
+    // reveal claim ids.
+    const provisionalEdgeClaimIds = new Set([
+      ...(v22RevealActiveClaimId ? [v22RevealActiveClaimId] : []),
+      ...pendingRevealClaimIds,
+    ])
     let edges = v22Data.edges
-    if (v22RevealActiveClaimId) {
-      const claimId = v22RevealActiveClaimId
+    if (provisionalEdgeClaimIds.size > 0) {
       edges = v22Data.edges.map((e) => (
-        (e.from === claimId || e.to === claimId)
+        (provisionalEdgeClaimIds.has(e.from) || provisionalEdgeClaimIds.has(e.to))
           ? { ...e, _showAsProvisional: true }
           : e
       ))
     }
     return { ...v22Data, nodes, edges, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId, v22PendingRevealsByRole, roleId])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -473,6 +507,32 @@ export default function V2App() {
       ...prev,
       [targetRoleId]: updater(prev[targetRoleId] || { ...emptyRoleState }),
     }))
+  }, [])
+
+  // Phase 11E.7: register / drain a pending acceptance reveal for a
+  // given role. `addPendingReveal` is called by the acceptance handlers
+  // (cold path `handleV22Accept`, warm path `handleV22AcceptEAOnly`)
+  // immediately after enqueueing the acceptance notification on the
+  // requester's inbox. `removePendingReveal` is called by the
+  // notification click handler just before `startReveal` fires, so the
+  // pending-reveal stamp gate hands off cleanly to the active-reveal
+  // gate without a one-frame visual gap (React batches both state
+  // updates into the same render cycle).
+  const addPendingReveal = useCallback((targetRoleId, claimId) => {
+    if (!targetRoleId || !claimId) return
+    setV22PendingRevealsByRole(prev => {
+      const cur = prev[targetRoleId] || []
+      if (cur.includes(claimId)) return prev
+      return { ...prev, [targetRoleId]: [...cur, claimId] }
+    })
+  }, [])
+  const removePendingReveal = useCallback((targetRoleId, claimId) => {
+    if (!targetRoleId || !claimId) return
+    setV22PendingRevealsByRole(prev => {
+      const cur = prev[targetRoleId] || []
+      if (!cur.includes(claimId)) return prev
+      return { ...prev, [targetRoleId]: cur.filter(id => id !== claimId) }
+    })
   }, [])
 
   // ── V2.2 Phase 4–5 handlers ───────────────────────────────────────────
@@ -620,9 +680,15 @@ export default function V2App() {
           disclosureType: type,
           date: new Date().toISOString().slice(0, 10),
         })
+        // Phase 11E.7: register the pending reveal on the requester's
+        // role so their view stamps `_showAsProvisional` on the Claim +
+        // incident edges from now until they click the notification.
+        if (claimIdForReveal) {
+          addPendingReveal(requesterRole.id, claimIdForReveal)
+        }
       }
     }
-  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
+  }, [v22RespondingTo, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId, addPendingReveal])
 
   const handleV22Decline = useCallback(({ reason } = {}) => {
     if (!v22RespondingTo) return
@@ -932,9 +998,15 @@ export default function V2App() {
           claimId: claimIdForReveal,
           date: new Date().toISOString().slice(0, 10),
         })
+        // Phase 11E.7: register the pending reveal on the requester's
+        // role — same gate as cold-path acceptance. Cleared by the
+        // notification click handler immediately before startReveal.
+        if (claimIdForReveal) {
+          addPendingReveal(requesterRole.id, claimIdForReveal)
+        }
       }
     }
-  }, [v22RespondingToEaOnly, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId])
+  }, [v22RespondingToEaOnly, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester, updateRoleState, roleId, addPendingReveal])
 
   const handleV22DeclineEAOnly = useCallback(({ reason } = {}) => {
     if (!v22RespondingToEaOnly) return
@@ -3547,6 +3619,15 @@ export default function V2App() {
                               if (targetNode) {
                                 setSel(targetNode.id)
                                 if (targetNode._isNew && targetNode._wasProvisional) {
+                                  // Phase 11E.7: drain the pending-reveal
+                                  // entry BEFORE startReveal sets the
+                                  // active-reveal state, so React batches
+                                  // both updates into the same render —
+                                  // the stamp gate hands off cleanly with
+                                  // no one-frame visual gap between
+                                  // pre-click "still provisional" and
+                                  // animation "still provisional."
+                                  removePendingReveal(roleId, targetNode.id)
                                   // Reveal animation handles its own pan.
                                   startReveal(targetNode.id)
                                 } else {
@@ -3555,6 +3636,15 @@ export default function V2App() {
                                   // node at zoom 0.7, which felt under-panned
                                   // and under-zoomed). Edge framing is a polish
                                   // follow-up.
+                                  // Phase 11E.7: even when the reveal
+                                  // animation doesn't fire (e.g. the
+                                  // grantee already deselected the
+                                  // recently-accepted Claim before
+                                  // clicking the notification, clearing
+                                  // _isNew + _wasProvisional), still drain
+                                  // the pending-reveal stamp so the Claim
+                                  // doesn't stay forever provisional.
+                                  removePendingReveal(roleId, targetNode.id)
                                   canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
                                 }
                               }
@@ -3637,8 +3727,20 @@ export default function V2App() {
                             if (targetNode) {
                               setSel(targetNode.id)
                               if (req.type === 'v22-ea-accepted' && targetNode._isNew && targetNode._wasProvisional) {
+                                // Phase 11E.7: drain the pending-reveal
+                                // stamp before startReveal flips on the
+                                // active-reveal state. Same batched-render
+                                // handoff pattern as the cold-path branch.
+                                removePendingReveal(roleId, targetNode.id)
                                 startReveal(targetNode.id)
                               } else {
+                                // Phase 11E.7: drain regardless when no
+                                // animation will play, otherwise the
+                                // pre-click provisional stamp would persist
+                                // indefinitely on this viewer's view.
+                                if (req.type === 'v22-ea-accepted') {
+                                  removePendingReveal(roleId, targetNode.id)
+                                }
                                 canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
                               }
                             }
@@ -5857,7 +5959,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.24 &middot; Changelog
+          v0.11.25 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5904,6 +6006,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.25', date: '2026-05-03', label: 'Phase 11E.7', items: [
+                  'Fix: grantee provisional rendering. Claims received from acceptance now stay in provisional state on the grantee\'s canvas until the notification is clicked. The reveal animation plays as a true first-time materialization rather than a "regress then re-reach active" sequence.',
+                ]},
                 { version: '0.11.24', date: '2026-05-03', label: 'Phase 11E.6', items: [
                   'Fix: reveal-edge draw-in animation; the typed edge now grows smoothly along the full bezier curve over the provisional edge.',
                 ]},
