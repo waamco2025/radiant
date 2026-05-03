@@ -2318,11 +2318,20 @@ const V2Canvas = forwardRef(function V2Canvas({
       // segment count, then zero `instanceCount` so the line renders as
       // empty on its first frame; playEdgeDrawInById grows it back up
       // over the animation. Mirror of `animateNewEdges` (V2Canvas:1080).
+      // Phase 11E.6 fix: derive segment count directly from curvePoints
+      // rather than reading geometry.instanceCount post-setPositions.
+      // LineGeometry.setPositions does NOT update `instanceCount` —
+      // InstancedBufferGeometry's constructor leaves it at the default
+      // `Infinity`, which silently broke the per-frame ramp in
+      // playEdgeDrawInById (Math.round(0 * Infinity) = NaN; Math.round(t
+      // > 0 * Infinity) = Infinity → no animated draw-in was visible).
+      // For an N-point curve there are N-1 line segments, which is
+      // exactly the value Three.js uses for rendering.
       const geometry = new LineGeometry()
       geometry.setPositions(fullPositions)
       const line = new Line2(geometry, material)
       if (isDashed) line.computeLineDistances()
-      const fullInstanceCount = geometry.instanceCount
+      const fullInstanceCount = curvePoints.length - 1
       geometry.instanceCount = 0
       line.userData = {
         edgeId,

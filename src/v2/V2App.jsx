@@ -5857,7 +5857,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.23 &middot; Changelog
+          v0.11.24 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5904,6 +5904,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.24', date: '2026-05-03', label: 'Phase 11E.6', items: [
+                  'Fix: reveal-edge draw-in animation; the typed edge now grows smoothly along the full bezier curve over the provisional edge.',
+                ]},
                 { version: '0.11.23', date: '2026-05-03', label: 'Phase 11E.5', items: [
                   'Fix: edge draw-in animation now actually animates the curve growth. Pre-fix the typed-style overlay edge appeared as a ~100px stub at the anchor and sat motionless. Switched from per-frame setPositions (which silently throws when the new array exceeds LineGeometry\'s pre-allocated buffer) to per-frame instanceCount, mirroring animateNewEdges.',
                   'Polish: clicking a DA-amendment or EA-amendment notification now also selects the corresponding edge alongside opening the Detail Panel. The amber selection styling on the edge gives the user visual confirmation that the deep-link landed on the right artifact.',
