@@ -1,63 +1,148 @@
-// Phase 11E.3 — Edge draw-in animation primitive (#139).
+// Phase 11E.3 + Phase 11E.4 — Two-edge reveal animation orchestrator (#139).
 //
-// Inverse of `playEdgeRetract` (V2Canvas.jsx). Plays when a previously-
-// provisional Claim flips to active: the Agreement Edge connecting the
-// requester's anchor Asset to the now-active Claim animates from the
-// anchor end outward, completing before the Claim card's flip starts.
-// Mirrors the visual ceremony of unravel's edge retract — but in reverse,
-// for the new-arrival ceremony rather than the departure ceremony.
+// Andrew's spec: when a provisional Claim flips to active, render TWO
+// edges between the requester's anchor Asset and the now-active Claim
+// during the animation window:
 //
-// Sequence inside the reveal flow:
-//   t=0:    `playRevealAnimation` kicks off; camera pans to target.
-//   t=500:  `playEdgeDrawIn` fires (this primitive). Edge geometry trims
-//           to a stub at the anchor end, then grows along the curve to
-//           full length over ~500ms. Material opacity ramps 0 → base in
-//           the first ~30% so the edge fades in at the head of the draw.
-//   t=1100: `playRevealAnimation` flip phase starts — card flips from
-//           dashed-provisional render to typed-active render. The
-//           edge's `_showAsProvisional` stamp clears at flip-midpoint
-//           via the existing reveal infrastructure, so the dashed-grey
-//           edge becomes its final typed style at the visual hand-off.
-//   t=2500: reveal 'done' phase. Stamps cleared. Static state.
+//   1. The canonical (provisional-styled, dashed grey) edge — already in
+//      the V2Canvas edge group via the `_showAsProvisional` stamp on
+//      reveal-incident edges. Stays visible during the draw-in. Fades
+//      out concurrent with the Claim card flip.
+//
+//   2. A new typed-style overlay edge — added to V2Canvas's separate
+//      reveal-overlay group with the **fully-resolved typed style from
+//      frame one** (solid indigo for Full, dashed amber for Selective,
+//      dashed green for Proof-only). Renders ON TOP of the provisional
+//      edge. Geometry animates from a 2-point stub at the FROM (anchor)
+//      end to the full bezier curve over `drawInMs`.
+//
+// Sequence (relative to this orchestrator's start at t=0):
+//
+//   t=0:                   addRevealOverlayEdge — overlay edge appears
+//                          as a stub at the anchor.
+//   t=0 → drawInMs:        playEdgeDrawInById — geometry grows.
+//   t=fadeStartDelayMs:    fadeEdgeOpacityById on the provisional edge,
+//                          0.0 over fadeMs. Fires concurrent with the
+//                          Claim card flip (handed by playRevealAnimation).
+//   t=...+postFlipPauseMs: removeRevealOverlayEdge — overlay cleanup.
+//                          By this point the canonical buildEdges has
+//                          re-rendered the now-active edge with typed
+//                          style (post v22RevealActiveClaimId clear),
+//                          so the overlay's removal is visually
+//                          seamless: the typed canonical edge sits in
+//                          the same world position with the same style.
+//
+// Pre-fix Phase 11E.3 mutated the canonical edge's geometry directly
+// while it was still stamped `_showAsProvisional` — the visual result
+// conflated the two edges and never produced the "supplier reaches out
+// and the typed edge emerges from the provisional" effect Andrew's spec
+// called for. Phase 11E.4 introduced V2Canvas's separate reveal-overlay
+// group + four atomic methods to support the two-edge architecture.
 //
 // Edge cases:
-//   - No edges connect to nodeId (e.g. orphan reveal): primitive resolves
-//     immediately. Caller's await chain proceeds without delay.
-//   - canvasRef not yet attached: returns Promise.resolve() so the reveal
-//     orchestration doesn't block on a missing canvas.
-//   - Geometry rebuild during the animation: the per-frame setPositions
-//     call is wrapped in try/catch; a disposed geometry just bails the
-//     target. The remaining frames continue for other targets.
-//
-// Edge style note: the brief calls for typed edge styling (Full = solid
-// indigo, Selective = dashed amber, Proof-only = dashed green). In V2.2
-// the edge already exists in the group with its final type styling; the
-// `_showAsProvisional` stamp keeps it dashed-grey during the reveal
-// window, then clears at flip-midpoint. The draw-in animates the
-// existing edge's GEOMETRY only — material/style is owned by the V2Canvas
-// edge derivation pipeline, not this primitive. End result reads as the
-// brief's "typed edge draws in" because the dashed-grey provisional
-// edge's geometry grows in, then the style swaps to typed at flip-mid.
+//   - canvasRef not yet attached: every method call is null-checked;
+//     primitive returns without error.
+//   - missing fromNodeId / toNodeId / sdaType: addRevealOverlayEdge
+//     no-ops; the orchestrator's downstream calls find no overlay and
+//     resolve immediately. The reveal animation continues without the
+//     edge ceremony.
+//   - provisionalEdgeId not in canonical group: fadeEdgeOpacityById
+//     no-ops. Reveal completes; the canonical buildEdges re-renders
+//     the typed edge at reveal 'done' regardless.
 
 /**
- * Play the edge draw-in animation for edges incident to `nodeId`.
+ * Orchestrate the two-edge reveal animation.
  *
  * @param {Object} opts
- * @param {string} opts.nodeId       The target node id (the Claim being
- *                                   revealed). Edges where `userData.from`
- *                                   or `userData.to` matches this id are
- *                                   collected and animated.
- * @param {Object} opts.canvasRef    React ref to V2Canvas (must expose
- *                                   `playEdgeDrawIn(nodeId, durationMs)`).
- * @param {number} [opts.durationMs] Animation duration. Defaults to 500ms
- *                                   so the draw-in fits cleanly between
- *                                   the reveal pan (~500ms) and the flip
- *                                   (1100ms).
- * @returns {Promise<void>}          Resolves when the animation completes.
+ * @param {Object} opts.canvasRef          React ref to V2Canvas. Must
+ *                                         expose addRevealOverlayEdge,
+ *                                         playEdgeDrawInById,
+ *                                         fadeEdgeOpacityById,
+ *                                         removeRevealOverlayEdge.
+ * @param {string} opts.provisionalEdgeId  edgeId of the canonical edge
+ *                                         currently rendered with
+ *                                         `_showAsProvisional` stamp.
+ *                                         Used to target the fade-out.
+ * @param {string} opts.fromNodeId         Anchor Asset node id (FROM end
+ *                                         of the bezier curve).
+ * @param {string} opts.toNodeId           Claim node id (TO end).
+ * @param {string} opts.sdaType            Disclosure type that drives the
+ *                                         overlay edge's typed styling:
+ *                                         'full' / 'selective' /
+ *                                         'proofonly' / 'cascade'. The
+ *                                         overlay uses this style from
+ *                                         frame one of its draw-in.
+ * @param {number} [opts.drawInMs=500]     Duration of the geometry
+ *                                         growth animation.
+ * @param {number} [opts.fadeStartDelayMs=600]
+ *                                         Delay (relative to draw-in
+ *                                         start) before the provisional
+ *                                         edge fade begins. Aligned with
+ *                                         the reveal flip phase by
+ *                                         convention.
+ * @param {number} [opts.fadeMs=400]       Duration of the provisional
+ *                                         edge fade-out.
+ * @param {number} [opts.postFlipPauseMs=900]
+ *                                         How long after the fade ends
+ *                                         to wait before removing the
+ *                                         overlay edge. Sized to clear
+ *                                         the reveal phase 'done' tick
+ *                                         (~2500ms total reveal,
+ *                                         ~1000ms past flip end) so the
+ *                                         canonical buildEdges has
+ *                                         re-rendered the typed edge
+ *                                         before the overlay disappears.
+ *
+ * @returns {Promise<void>}                Resolves when the overlay
+ *                                         edge has been removed.
  */
-export function playEdgeDrawIn({ nodeId, canvasRef, durationMs = 500 }) {
-  if (!nodeId) return Promise.resolve()
+export async function playRevealEdgeAnimation({
+  canvasRef,
+  provisionalEdgeId,
+  fromNodeId,
+  toNodeId,
+  sdaType,
+  drawInMs = 500,
+  fadeStartDelayMs = 600,
+  fadeMs = 400,
+  postFlipPauseMs = 900,
+}) {
   const canvas = canvasRef?.current
-  if (!canvas?.playEdgeDrawIn) return Promise.resolve()
-  return canvas.playEdgeDrawIn(nodeId, durationMs)
+  if (!canvas?.addRevealOverlayEdge) return
+  if (!fromNodeId || !toNodeId) return
+
+  const overlayEdgeId = `_reveal-overlay-${provisionalEdgeId || `${fromNodeId}-${toNodeId}`}-${Date.now().toString(36)}`
+
+  canvas.addRevealOverlayEdge({
+    edgeId: overlayEdgeId,
+    fromNodeId,
+    toNodeId,
+    sdaType: sdaType || 'full',
+  })
+
+  const drawInPromise = canvas.playEdgeDrawInById?.(overlayEdgeId, drawInMs)
+    || Promise.resolve()
+
+  // Schedule the provisional fade-out to start at fadeStartDelayMs.
+  // Fire-and-forget — the orchestrator doesn't block on fade completion;
+  // the overall reveal is sized to comfortably outlast it.
+  if (provisionalEdgeId) {
+    setTimeout(() => {
+      canvas.fadeEdgeOpacityById?.(provisionalEdgeId, 0.0, fadeMs)
+    }, fadeStartDelayMs)
+  }
+
+  await drawInPromise
+
+  // Hold the overlay until well after the flip + fade have completed.
+  // Sized so the canonical buildEdges has had time to re-render the
+  // now-active edge with typed style (post-reveal-done) before the
+  // overlay is removed; visually the two edges occupy the same position
+  // with the same style, so cleanup is seamless.
+  const remainingMs = (fadeStartDelayMs + fadeMs + postFlipPauseMs) - drawInMs
+  if (remainingMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remainingMs))
+  }
+
+  canvas.removeRevealOverlayEdge?.(overlayEdgeId)
 }

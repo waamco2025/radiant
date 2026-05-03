@@ -436,6 +436,14 @@ const V2Canvas = forwardRef(function V2Canvas({
   const sceneRef = useRef(null)
   const cameraRef = useRef(null)
   const edgeGroupRef = useRef(null)
+  // Phase 11E.4 (#139 fix): separate group for reveal overlay edges so
+  // they survive `buildEdges`'s `clearGroup(edgeGroupRef.current)` call.
+  // The overlay group renders ON TOP of the canonical edge group during
+  // the reveal window: a typed (final-style) edge draws in over the
+  // dashed-grey provisional edge, the provisional fades during flip,
+  // and the overlay is removed after the canonical edge re-renders
+  // with typed style at reveal phase 'done'.
+  const revealOverlayGroupRef = useRef(null)
   const gridGroupRef = useRef(null)
   const newEdgeAnimTimerRef = useRef(null)
 
@@ -2213,58 +2221,129 @@ const V2Canvas = forwardRef(function V2Canvas({
         requestAnimationFrame(tick)
       })
     },
-    // Phase 11E.3 (#139): inverse of playEdgeRetract — edges incident to
-    // `nodeId` are trimmed back to the anchor end on frame 0, then grown
-    // point-by-point along their existing curve until they reach full
-    // length over `durationMs`. Used by the reveal animation: as a
-    // provisional Claim flips to active, the connecting Agreement Edge
-    // animates from anchor → Claim, completing before the card flip
-    // starts.
+    // Phase 11E.4 (#139 fix): two-edge reveal animation primitives.
     //
-    // Implementation mirrors playEdgeRetract's point-trimming approach:
-    // capture the full geometry once, then per-frame replay an
-    // anchor-side prefix or suffix whose length grows from 2 points to
-    // ptCount over the animation. Material opacity ramps from 0 → base
-    // over the first 30% so the edge "fades in" at the head of the
-    // draw rather than appearing instantly.
+    // The reveal flow needs to render TWO edges between the requester's
+    // anchor Asset and the now-active Claim during the animation window:
+    //   1. The canonical (provisional-styled, dashed grey) edge stays in
+    //      `edgeGroupRef.current` and fades out during the Claim card flip.
+    //   2. A new typed-style overlay edge is added to
+    //      `revealOverlayGroupRef.current`, drawing in from the anchor over
+    //      the geometry curve. The overlay survives `buildEdges`'s
+    //      `clearGroup` calls because it lives in a separate group.
     //
-    // Returns a Promise that resolves when the animation completes.
-    // Resolves immediately when no edges connect to the target node.
-    // Restores full opacity in the resolution branch so the post-anim
-    // edge state matches what V2Canvas's regular render would produce.
-    playEdgeDrawIn: (nodeId, durationMs = 500) => {
-      const group = edgeGroupRef.current
-      if (!group || !nodeId) return Promise.resolve()
-      const targets = []
-      for (const line of group.children) {
-        if (!line?.userData) continue
-        const isFrom = line.userData.from === nodeId
-        const isTo = line.userData.to === nodeId
-        if (!isFrom && !isTo) continue
-        const startArr = line.geometry?.attributes?.instanceStart?.array
-        const endArr = line.geometry?.attributes?.instanceEnd?.array
-        if (!startArr || !endArr) continue
-        const segCount = startArr.length / 3
-        const flat = new Array((segCount + 1) * 3)
-        for (let i = 0; i < segCount; i++) {
-          flat[i * 3] = startArr[i * 3]
-          flat[i * 3 + 1] = startArr[i * 3 + 1]
-          flat[i * 3 + 2] = startArr[i * 3 + 2]
-        }
-        flat[segCount * 3] = endArr[(segCount - 1) * 3]
-        flat[segCount * 3 + 1] = endArr[(segCount - 1) * 3 + 1]
-        flat[segCount * 3 + 2] = endArr[(segCount - 1) * 3 + 2]
-        targets.push({
-          line,
-          original: flat,
-          // drawTowardStart === true means the target node (Claim) is at
-          // the FROM end (index 0); the anchor stays at the END and the
-          // visible curve grows from the anchor backward toward index 0.
-          // Naming mirrors playEdgeRetract.retractFromStart for symmetry.
-          drawTowardStart: isFrom,
-        })
+    // V2Canvas exposes four atomic methods for this orchestration; the
+    // higher-level sequencing lives in `src/v2/animations/edgeDrawIn.js`'s
+    // `playRevealEdgeAnimation` orchestrator (called from V2App's
+    // startReveal). Pre-fix Phase 11E.3 mutated the canonical edge's
+    // geometry directly — the visual result conflated the two edges and
+    // never produced the "typed edge emerges from the provisional" effect
+    // Andrew's spec called for.
+
+    // Build a typed-style overlay edge (Line2) and add it to
+    // revealOverlayGroupRef. Reuses buildEdges's curve-construction logic
+    // inline so styling matches what `effectiveSdaType !== 'provisional'`
+    // would produce in the canonical pipeline. Initial geometry is a
+    // 2-point stub at the FROM end; caller follows up with playEdgeDrawInById
+    // to animate the geometry growth.
+    addRevealOverlayEdge: ({ edgeId, fromNodeId, toNodeId, sdaType }) => {
+      const group = revealOverlayGroupRef.current
+      if (!group || !edgeId || !fromNodeId || !toNodeId) return
+      const layer = layerStackRef.current[layerStackRef.current.length - 1]
+      const layerNodes = layer?.nodes
+      if (!layerNodes) return
+      const fromNode = layerNodes.find((n) => n.id === fromNodeId)
+      const toNode = layerNodes.find((n) => n.id === toNodeId)
+      if (!fromNode || !toNode) return
+      if (!Number.isFinite(fromNode.x) || !Number.isFinite(toNode.x)) return
+      // Already present? Don't double-add.
+      if (group.children.some((c) => c.userData?.edgeId === edgeId)) return
+
+      const halfW = CARD_W / 2
+      const dx = toNode.x - fromNode.x
+      let x1, y1, x2, y2
+      if (dx >= 0) {
+        x1 = fromNode.x + halfW; y1 = fromNode.y
+        x2 = toNode.x - halfW;   y2 = toNode.y
+      } else {
+        x1 = fromNode.x - halfW; y1 = fromNode.y
+        x2 = toNode.x + halfW;   y2 = toNode.y
       }
-      if (targets.length === 0) return Promise.resolve()
+      const p0 = new THREE.Vector3(x1, -y1, 0)
+      const p3 = new THREE.Vector3(x2, -y2, 0)
+      const hDist = Math.abs(x2 - x1)
+      const vDist = Math.abs(y2 - y1)
+      const armLength = Math.max(hDist * 0.4, Math.min(60, vDist * 0.25))
+      const dirX = x2 >= x1 ? 1 : -1
+      const p1 = new THREE.Vector3(x1 + armLength * dirX, -y1, 0)
+      const p2 = new THREE.Vector3(x2 - armLength * dirX, -y2, 0)
+      const curve = new THREE.CubicBezierCurve3(p0, p1, p2, p3)
+      const curvature = vDist / (hDist || 1)
+      const pointCount = curvature < 0.3 ? 12 : curvature < 1.0 ? 20 : 32
+      const curvePoints = curve.getPoints(pointCount)
+      const fullPositions = []
+      curvePoints.forEach((p) => fullPositions.push(p.x, p.y, p.z))
+
+      // Initial stub: keep just the first 2 points at the FROM (anchor)
+      // end. The animation grows points outward toward the TO end.
+      const stubPositions = [
+        fullPositions[0], fullPositions[1], fullPositions[2],
+        fullPositions[3], fullPositions[4], fullPositions[5],
+      ]
+
+      const sdaCfg = SDA_EDGE_CONFIG[sdaType] || SDA_EDGE_CONFIG.full
+      const isDashed = sdaCfg.dash > 0
+      const lineWidth = SDA_EDGE_WIDTH[sdaType] || 2.0
+      const container = containerRef.current
+      const resX = container ? container.clientWidth : window.innerWidth
+      const resY = container ? container.clientHeight : window.innerHeight
+
+      const material = new LineMaterial({
+        color: new THREE.Color(sdaCfg.color),
+        linewidth: lineWidth,
+        opacity: 1.0,
+        transparent: true,
+        depthWrite: false,
+        resolution: new THREE.Vector2(resX, resY),
+        dashed: isDashed,
+        dashSize: sdaCfg.dash,
+        gapSize: sdaCfg.gap,
+        dashScale: 1,
+      })
+      material.userData = { isSolid: !isDashed, baseOpacity: 1.0 }
+
+      const geometry = new LineGeometry()
+      geometry.setPositions(stubPositions)
+      const line = new Line2(geometry, material)
+      if (isDashed) line.computeLineDistances()
+      line.userData = {
+        edgeId,
+        sdaType,
+        from: fromNodeId,
+        to: toNodeId,
+        // Original full-curve positions for the geometry-growth animation.
+        _revealOverlayFullPositions: fullPositions,
+        _isRevealOverlay: true,
+      }
+      group.add(line)
+      dirtyRef.current = true
+    },
+
+    // Animate a specific overlay edge's geometry from its initial 2-point
+    // stub at the FROM end to the full bezier curve over `durationMs`.
+    // Looks up the edge by `userData.edgeId` rather than walking incident
+    // edges by node id (Phase 11E.3 used the latter, which couldn't
+    // distinguish the overlay from the canonical provisional edge).
+    // Inverse of playEdgeRetract: per-frame replays an anchor-side prefix
+    // whose length grows from 2 points to ptCount.
+    playEdgeDrawInById: (edgeId, durationMs = 500) => {
+      const group = revealOverlayGroupRef.current
+      if (!group || !edgeId) return Promise.resolve()
+      const line = group.children.find((c) => c.userData?.edgeId === edgeId)
+      if (!line) return Promise.resolve()
+      const fullPositions = line.userData?._revealOverlayFullPositions
+      if (!fullPositions || fullPositions.length < 6) return Promise.resolve()
+      const ptCount = fullPositions.length / 3
       return new Promise((resolve) => {
         let startTime = null
         const tick = (time) => {
@@ -2272,61 +2351,85 @@ const V2Canvas = forwardRef(function V2Canvas({
           const elapsed = time - startTime
           const t = Math.min(1, elapsed / durationMs)
           const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
-          for (const tgt of targets) {
-            const { line, original, drawTowardStart } = tgt
-            const ptCount = original.length / 3
-            // Inverse of retract: pointsToShow GROWS from 2 → ptCount.
-            const pointsToShow = Math.max(2, Math.ceil(ptCount * eased))
-            const newPositions = new Array(pointsToShow * 3)
-            for (let i = 0; i < pointsToShow; i++) {
-              const sourceIdx = drawTowardStart
-                ? (ptCount - pointsToShow + i)
-                : i
-              newPositions[i * 3] = original[sourceIdx * 3]
-              newPositions[i * 3 + 1] = original[sourceIdx * 3 + 1]
-              newPositions[i * 3 + 2] = original[sourceIdx * 3 + 2]
+          const pointsToShow = Math.max(2, Math.ceil(ptCount * eased))
+          const newPositions = new Array(pointsToShow * 3)
+          for (let i = 0; i < pointsToShow; i++) {
+            // FROM end is at index 0; grow points outward toward TO end.
+            newPositions[i * 3] = fullPositions[i * 3]
+            newPositions[i * 3 + 1] = fullPositions[i * 3 + 1]
+            newPositions[i * 3 + 2] = fullPositions[i * 3 + 2]
+          }
+          try {
+            line.geometry.setPositions(newPositions)
+            if (line.material?.dashed) {
+              line.computeLineDistances()
             }
-            try {
-              line.geometry.setPositions(newPositions)
-              if (line.material?.dashed) {
-                line.computeLineDistances()
-              }
-            } catch {
-              // Geometry can be disposed mid-anim (layer change). Bail.
-            }
-            // Mirror retract's tail-fade: ramp opacity 0 → base over the
-            // first 30% so the curve doesn't pop in at full intensity.
-            if (line.material) {
-              const opacityFactor = t > 0.3 ? 1 : t / 0.3
-              const baseOpacity = line.material.userData?.baseOpacity
-                ?? (line.material.transparent ? line.material.opacity : 1)
-              if (line.material.userData) {
-                if (line.material.userData.baseOpacity == null) {
-                  line.material.userData.baseOpacity = baseOpacity
-                }
-              }
-              line.material.opacity = baseOpacity * opacityFactor
-              line.material.transparent = true
-            }
+          } catch {
+            // Geometry disposed mid-anim. Bail.
           }
           dirtyRef.current = true
           if (t < 1) {
             requestAnimationFrame(tick)
           } else {
-            // Restore full opacity at completion so the post-anim edge
-            // state matches what regular V2Canvas render produces.
-            for (const tgt of targets) {
-              const { line } = tgt
-              if (line.material) {
-                const baseOpacity = line.material.userData?.baseOpacity ?? 1
-                line.material.opacity = baseOpacity
-              }
-            }
             resolve()
           }
         }
         requestAnimationFrame(tick)
       })
+    },
+
+    // Animate the material opacity of the canonical edge with
+    // `userData.edgeId === edgeId` from its current opacity to `toOpacity`
+    // over `durationMs`. Used to fade the dashed-grey provisional edge
+    // out concurrent with the Claim card flip. Operates on
+    // edgeGroupRef.current (canonical edges), NOT the overlay group.
+    fadeEdgeOpacityById: (edgeId, toOpacity = 0, durationMs = 400) => {
+      const group = edgeGroupRef.current
+      if (!group || !edgeId) return Promise.resolve()
+      const line = group.children.find((c) => c.userData?.edgeId === edgeId)
+      if (!line || !line.material) return Promise.resolve()
+      const fromOpacity = line.material.opacity
+      // Capture base opacity if not already captured so a later restyle
+      // doesn't over-write it. baseOpacity preserved here too.
+      if (line.material.userData) {
+        if (line.material.userData.baseOpacity == null) {
+          line.material.userData.baseOpacity = fromOpacity
+        }
+      }
+      line.material.transparent = true
+      return new Promise((resolve) => {
+        let startTime = null
+        const tick = (time) => {
+          if (!startTime) startTime = time
+          const elapsed = time - startTime
+          const t = Math.min(1, elapsed / durationMs)
+          const eased = 1 - Math.pow(1 - t, 3)
+          line.material.opacity = fromOpacity + (toOpacity - fromOpacity) * eased
+          dirtyRef.current = true
+          if (t < 1) {
+            requestAnimationFrame(tick)
+          } else {
+            resolve()
+          }
+        }
+        requestAnimationFrame(tick)
+      })
+    },
+
+    // Remove the overlay edge with `userData.edgeId === edgeId` from
+    // revealOverlayGroupRef. Caller is responsible for sequencing this
+    // AFTER the canonical buildEdges has produced the typed edge (post
+    // reveal phase 'done'), so visual continuity is preserved.
+    removeRevealOverlayEdge: (edgeId) => {
+      const group = revealOverlayGroupRef.current
+      if (!group || !edgeId) return
+      const idx = group.children.findIndex((c) => c.userData?.edgeId === edgeId)
+      if (idx === -1) return
+      const line = group.children[idx]
+      group.remove(line)
+      try { line.geometry?.dispose?.() } catch { /* noop */ }
+      try { line.material?.dispose?.() } catch { /* noop */ }
+      dirtyRef.current = true
     },
     // Phase 9B.1 §4: project world coords to VIEWPORT (fixed) coords so the
     // pinned edge tooltip can track its world-space anchor through pan/zoom.
@@ -2739,6 +2842,16 @@ const V2Canvas = forwardRef(function V2Canvas({
     edgeGroupRef.current = edgeGroup
     scene.add(edgeGroup)
 
+    // Phase 11E.4 (#139 fix): reveal overlay edge group. Added AFTER
+    // edgeGroup so its children render after the canonical edges (z-order
+    // by scene-graph order; LineMaterial's depthWrite is already false so
+    // there's no depth-buffer competition). renderOrder bumped above the
+    // default to be defensive against future scene-graph reorderings.
+    const revealOverlayGroup = new THREE.Group()
+    revealOverlayGroup.renderOrder = 10
+    revealOverlayGroupRef.current = revealOverlayGroup
+    scene.add(revealOverlayGroup)
+
     // Grid group
     const gridGroup = new THREE.Group()
     gridGroupRef.current = gridGroup
@@ -2771,6 +2884,15 @@ const V2Canvas = forwardRef(function V2Canvas({
       // Update LineMaterial resolution on all edge lines
       if (edgeGroupRef.current) {
         edgeGroupRef.current.children.forEach(line => {
+          if (line.material && line.material.resolution) {
+            line.material.resolution.set(w, h)
+          }
+        })
+      }
+      // Phase 11E.4 (#139 fix): same resolution update for reveal-overlay
+      // edges so they don't render at the wrong line-width post-resize.
+      if (revealOverlayGroupRef.current) {
+        revealOverlayGroupRef.current.children.forEach(line => {
           if (line.material && line.material.resolution) {
             line.material.resolution.set(w, h)
           }
