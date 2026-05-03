@@ -370,10 +370,20 @@ export default function V2App() {
     // time (the dismiss flow is serial via modal). The id flows through
     // node._unraveling, which AssetNode reads to apply the CSS keyframe.
     const unravelingId = v22UnravelingNodeId
+    // Phase 11E.8 fix: include reveal-window state in the decoration gate.
+    // Pre-fix the gate only checked `flagged` (recently-accepted ids
+    // cleared on deselect), `endpointSet`, EA-for-actor, active-DA-without-
+    // EA, and unraveling. When the grantee deselected the recently-accepted
+    // Claim before clicking the notification (clearing `flagged`), the
+    // memo's early-return short-circuited and the pending-reveal +
+    // active-reveal edge stamping never ran — incident edges rendered in
+    // their typed (active) styling instead of dashed grey provisional.
     const anyDecoration = flagged.size > 0 || endpointSet.size > 0
       || Object.keys(eaByClaimForActor).length > 0
       || claimsWithActiveDaWithoutEa.size > 0
       || unravelingId != null
+      || pendingRevealClaimIds.size > 0
+      || v22RevealActiveClaimId != null
     if (!anyDecoration) return v22Data
     const nodes = v22Data.nodes.map(n => {
       const needsReveal = flagged.has(n.id)
@@ -2762,12 +2772,19 @@ export default function V2App() {
       const toNodeId = primaryEdge.to
       // Schedule the orchestrator AFTER the reveal pan settles so the
       // user is already framed on the Claim when the typed overlay
-      // begins drawing in. Pan completes at PHASE_BORDER_MS (500ms);
-      // flip starts at PHASE_FLIP_MS (1100ms). drawInMs=500 fits the
-      // 500-1000ms gap; fadeStartDelayMs=600 starts fade at t=1100
-      // (= 500 + 600), aligned to flip; postFlipPauseMs=900 holds the
-      // overlay until ~t=2900, well past reveal phase 'done' (2500ms)
-      // so the canonical typed edge is visible before overlay cleanup.
+      // begins drawing in. Pan completes at PHASE_BORDER_MS (500ms).
+      // Phase 11E.8 Fix 2: drawInMs bumped 500 → 1200 so the curve
+      // growth is perceivable to the eye (500ms was too fast — Andrew
+      // reported the typed edge was completing before the user could
+      // register it). fadeStartDelayMs bumped 600 → 1300 so the
+      // provisional fade starts just after draw-in completes (relative
+      // to the orchestrator's start, that's t=1300; absolute t=1800
+      // from reveal start since the orchestrator is itself scheduled
+      // at +500ms). The reveal flip phase still fires at 1100ms — the
+      // fade-during-flip overlap is preserved. fadeMs (400) and
+      // postFlipPauseMs (900) unchanged: flip duration is the
+      // constraint on fade, and post-flip cleanup buffer needs to
+      // outlast reveal phase 'done' (~2500ms) regardless.
       setTimeout(() => {
         playRevealEdgeAnimation({
           canvasRef,
@@ -2775,8 +2792,8 @@ export default function V2App() {
           fromNodeId,
           toNodeId,
           sdaType: primaryEdge.sdaType || 'full',
-          drawInMs: 500,
-          fadeStartDelayMs: 600,
+          drawInMs: 1200,
+          fadeStartDelayMs: 1300,
           fadeMs: 400,
           postFlipPauseMs: 900,
         })
@@ -5959,7 +5976,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.25 &middot; Changelog
+          v0.11.26 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6006,6 +6023,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.26', date: '2026-05-03', label: 'Phase 11E.8', items: [
+                  'Fix: edge provisional styling on grantee canvas pre-click. Incident edges now correctly render as dashed grey provisional (was rendering with the typed color + dashed pattern, because the v22DataWithReveal early-return guard short-circuited before reveal-window edge stamping could run).',
+                  'Polish: edge draw-in animation slowed from 500ms to 1200ms for visual clarity. The typed edge now visibly grows along the curve at a perceivable pace; fade + flip + cleanup orchestration shifted accordingly.',
+                ]},
                 { version: '0.11.25', date: '2026-05-03', label: 'Phase 11E.7', items: [
                   'Fix: grantee provisional rendering. Claims received from acceptance now stay in provisional state on the grantee\'s canvas until the notification is clicked. The reveal animation plays as a true first-time materialization rather than a "regress then re-reach active" sequence.',
                 ]},
