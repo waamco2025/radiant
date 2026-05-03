@@ -10,7 +10,12 @@ import {
   resolveClaimByPinInShared, makeProvisionalAgreementPair, finalizeProvisionalAgreementPair,
   makeDeclineRecord, makeEvaluationRunArtifacts, findPriorActiveEvaluationResult,
   makeAmendedClaim, makeAmendedDisclosureAgreement,
-  makeAmendedEvaluationAgreement, diffAcknowledgments,
+  // Phase 11.6 (#164): amendment-as-proposal model — superseded the
+  // unilateral `makeAmendedEvaluationAgreement` Phase 11E.1 helper.
+  proposeEvaluationAgreementAmendment,
+  acceptEvaluationAgreementAmendment,
+  rejectEvaluationAgreementAmendment,
+  diffAcknowledgments,
   makeParseRunArtifacts,
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   makeTransferRecord, makeAsset, makeDotObject,
@@ -69,6 +74,8 @@ import { playRevealEdgeAnimation } from './animations/edgeDrawIn.js'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import AmendEvaluationAgreementModal from '../components/modals/AmendEvaluationAgreementModal.jsx'
+// Phase 11.6 (#164): grantee-side response modal for amendment proposals.
+import AmendmentResponseModal from '../components/modals/AmendmentResponseModal.jsx'
 // Phase 10.3: unified Library modal replaces RequirementsLibraryModal +
 // PEPLibraryModal. The two legacy files are retained as embeddable panels
 // (consumed by LibraryModal in `embedded` mode); their default-export
@@ -156,6 +163,11 @@ export default function V2App() {
   // Phase 11E.1 (#108): evaluation agreement id being amended via the new
   // AmendEvaluationAgreementModal flow.
   const [v22AmendingEaId, setV22AmendingEaId] = useState(null)
+  // Phase 11.6 (#164): grantee-side state for the AmendmentResponseModal.
+  // Set when the grantee clicks a `v22-ea-amendment-proposal` notification;
+  // shape: { eaId, amendmentId } | null. Cleared on accept / reject /
+  // close.
+  const [v22RespondingToEaAmendment, setV22RespondingToEaAmendment] = useState(null)
   const [v22RecentlyAcceptedClaimId, setV22RecentlyAcceptedClaimId] = useState(null) // drives _isNew + _wasProvisional
   // Phase 11C.5 W1: separate state var for the reveal-window-only
   // `_showAsProvisional` stamp on the recently-accepted Claim and its
@@ -2187,16 +2199,15 @@ export default function V2App() {
     }
   }, [v22AmendingDaId, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
-  // Phase 11E.1 (#108): Amend Evaluation Agreement.
-  // Unilateral — only the EA grantor (Claim owner) can amend. Updates
-  // `terms.evaluationDeadline` on the EA and (Option B) mutates the
-  // underlying Claim's `acknowledgments[]` directly. The EA's
-  // `acknowledgmentsAccepted` audit trail is preserved (historical record
-  // of what the Evaluator originally accepted at request time). A single
-  // `v22-ea-amendment` notification fires to the EA's grantee. Multi-EA
-  // implicit propagation when a Claim has EAs to multiple grantees is the
-  // documented Option B limitation — see architecture-spec §11.2a.
-  const handleV22AmendEvaluationSubmit = useCallback(({ terms, acknowledgments, note }) => {
+  // Phase 11.6 (#164): Propose an Evaluation Agreement amendment.
+  // Spec §11.2a major revision — replaced the Phase 11E.1 unilateral
+  // Option B model. The grantor submits a proposal; the grantee gets
+  // a `v22-ea-amendment-proposal` notification and chooses to accept
+  // or reject via AmendmentResponseModal. While pending, the EA is
+  // "frozen": no new evaluations under it, no new amendments, only
+  // revocation overrides. Accept applies the proposed terms +
+  // acknowledgments; reject leaves both at their pre-proposal values.
+  const handleV22ProposeEvaluationAmendment = useCallback(({ terms, acknowledgments, note }) => {
     if (!v22AmendingEaId) return
 
     // Resolve existing EA + paired Claim.
@@ -2207,74 +2218,43 @@ export default function V2App() {
     const existingClaim = merged.claims.find((c) => c.id === existingEa.claimId)
     if (!existingClaim) return
 
-    // Compute the acknowledgment delta for the EA audit trail.
+    // Compute the acknowledgment delta for the proposal record (audit
+    // trail + AmendmentResponseModal diff display).
     const acknowledgmentChanges = diffAcknowledgments(
       existingClaim.acknowledgments || [],
       acknowledgments || [],
     )
-    const acksDirty =
-      acknowledgmentChanges.added.length > 0 ||
-      acknowledgmentChanges.removed.length > 0 ||
-      acknowledgmentChanges.edited.length > 0
 
-    // Build the amended EA artifact.
-    const amendedEa = makeAmendedEvaluationAgreement({
+    // Build the proposal: EA flips to `pending-acceptance`, amendment
+    // record carries the proposed snapshot. Claim is NOT mutated.
+    const proposalEa = proposeEvaluationAgreementAmendment({
       evaluationAgreement: existingEa,
       terms,
+      acknowledgments,
       acknowledgmentChanges,
-      note,
+      proposalMessage: note,
     })
+    const newAmendment = proposalEa.amendments[proposalEa.amendments.length - 1]
 
-    // Resolve notification metadata before the state update so the closure
-    // doesn't capture stale data (same pattern as the DA-amend handler).
+    // Resolve notification metadata before the state update.
     const granteeParty = existingEa.grantee.party
     const claimNameForNotif = existingClaim.name || null
     const claimPinForNotif = existingClaim.pin || null
     const claimIdForPan = existingClaim.id
 
-    // Stage updates atomically.
-    setV22Provisionals((prev) => {
-      const next = {
-        ...prev,
-        evaluationAgreements: [
-          ...(prev.evaluationAgreements || []).filter((e) => e.id !== amendedEa.id),
-          amendedEa,
-        ],
-      }
-      if (acksDirty) {
-        const updatedClaim = {
-          ...existingClaim,
-          acknowledgments: acknowledgments.map((a) => ({
-            id: a.id,
-            title: a.title,
-            description: a.description,
-          })),
-        }
-        next.claims = [
-          ...((prev.claims || []).filter((c) => c.id !== updatedClaim.id)),
-          updatedClaim,
-        ]
-      }
-      return next
-    })
+    // Stage updates atomically — only the EA changes, never the Claim.
+    setV22Provisionals((prev) => ({
+      ...prev,
+      evaluationAgreements: [
+        ...(prev.evaluationAgreements || []).filter((e) => e.id !== proposalEa.id),
+        proposalEa,
+      ],
+    }))
 
     setV22AmendingEaId(null)
     setOpenAgreement(null)
     setSelectedEdgeId(null)
 
-    // Phase 11E.1.1 Fix 3: pan + select only — do NOT set
-    // `v22RecentlyAcceptedClaimId`. That state is global and would stamp
-    // the NEW badge on every viewer's canvas for as long as it persists,
-    // including counterparty roles (e.g., Carol) who have their own EA on
-    // the same Claim and inherit acknowledgment changes silently per
-    // §11.2a Option B. Stamping NEW for them contradicts the Option B
-    // contract (only the targeted EA grantee receives a notification).
-    // Trade-off: the grantor (Alice) doesn't get an orange tint flash
-    // post-submit either — but she just clicked Amend in a modal and
-    // immediately gets a panel-pan + selection, which is sufficient
-    // visual confirmation without the cross-role bleed. Per-role reveal-
-    // id scoping (the cleaner long-term fix) tracked under existing
-    // backlog #138 audit scope.
     if (claimIdForPan) {
       setSel(claimIdForPan)
       setForcePanelTab(null)
@@ -2282,8 +2262,10 @@ export default function V2App() {
       setV22PanToClaimId(claimIdForPan)
     }
 
-    // Notify the EA grantee (single-grantee fan-out per Phase 11E.1 scope —
-    // see architecture-spec §11.2a Option C TODO for the multi-EA case).
+    // Notify the EA grantee with the proposal notification. Same pre-
+    // click pending-reveal treatment as acceptance notifications
+    // (Phase 11E.7) so the EA edge stamps as provisional on the
+    // grantee's view from proposal until they click the notification.
     if (
       granteeParty &&
       granteeParty !== 'Radiant Network' &&
@@ -2292,19 +2274,160 @@ export default function V2App() {
       const granteeRole = ROLES.find((r) => r.party === granteeParty)
       if (granteeRole) {
         enqueueV22NotificationForRequester(granteeRole.id, {
-          id: `v22-ea-amendment-${v22AmendingEaId}-${Date.now().toString(36)}`,
-          type: 'v22-ea-amendment',
+          id: `v22-ea-amendment-proposal-${v22AmendingEaId}-${newAmendment.id}`,
+          type: 'v22-ea-amendment-proposal',
           from: { name: activeRole.party, dot: activeRole.partyDot },
           asset: { name: claimNameForNotif, pin: claimPinForNotif },
           connectTo: null,
           v22EaId: v22AmendingEaId,
+          v22AmendmentId: newAmendment.id,
           v22ClaimId: claimIdForPan,
-          note: (note || '').trim(),
+          proposalMessage: (note || '').trim(),
           date: new Date().toISOString().slice(0, 10),
         })
       }
     }
   }, [v22AmendingEaId, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  // Phase 11.6 (#164): Grantee accepts a pending amendment proposal.
+  // EA returns to `active` with proposed terms applied; Claim's
+  // acknowledgments mutate to match the proposal snapshot. Grantor
+  // gets `v22-ea-amendment-accepted` notification.
+  const handleV22AmendmentAccept = useCallback(({ eaId, amendmentId, responseMessage = '' }) => {
+    if (!eaId || !amendmentId) return
+    const seededEa = buildV22SharedArtifacts().evaluationAgreements.find((e) => e.id === eaId)
+    const existingEa = v22Provisionals.evaluationAgreements?.find((e) => e.id === eaId) || seededEa
+    if (!existingEa) return
+    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const existingClaim = merged.claims.find((c) => c.id === existingEa.claimId)
+    if (!existingClaim) return
+
+    let acceptedEa, proposedAcks
+    try {
+      const result = acceptEvaluationAgreementAmendment({
+        evaluationAgreement: existingEa,
+        amendmentId,
+        responseMessage,
+      })
+      acceptedEa = result.evaluationAgreement
+      proposedAcks = result.proposedAcknowledgments
+    } catch (err) {
+      // Amendment not pending (already responded, race) — silently no-op.
+      console.warn('[Phase11.6] amendment accept failed:', err.message)
+      return
+    }
+
+    const grantorParty = existingEa.grantor.party
+    const claimNameForNotif = existingClaim.name || null
+    const claimPinForNotif = existingClaim.pin || null
+    const claimIdForPan = existingClaim.id
+
+    setV22Provisionals((prev) => {
+      const updatedClaim = {
+        ...existingClaim,
+        acknowledgments: proposedAcks.map((a) => ({
+          id: a.id, title: a.title, description: a.description,
+        })),
+      }
+      return {
+        ...prev,
+        evaluationAgreements: [
+          ...(prev.evaluationAgreements || []).filter((e) => e.id !== acceptedEa.id),
+          acceptedEa,
+        ],
+        claims: [
+          ...((prev.claims || []).filter((c) => c.id !== updatedClaim.id)),
+          updatedClaim,
+        ],
+      }
+    })
+
+    setV22RespondingToEaAmendment(null)
+
+    if (
+      grantorParty &&
+      grantorParty !== 'Radiant Network' &&
+      grantorParty !== activeRole.party
+    ) {
+      const grantorRole = ROLES.find((r) => r.party === grantorParty)
+      if (grantorRole) {
+        enqueueV22NotificationForRequester(grantorRole.id, {
+          id: `v22-ea-amendment-accepted-${eaId}-${amendmentId}`,
+          type: 'v22-ea-amendment-accepted',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: null,
+          v22EaId: eaId,
+          v22AmendmentId: amendmentId,
+          v22ClaimId: claimIdForPan,
+          responseMessage: (responseMessage || '').trim(),
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
+
+  // Phase 11.6 (#164): Grantee rejects a pending amendment proposal.
+  // EA returns to `active` with terms unchanged; Claim untouched.
+  // Grantor gets `v22-ea-amendment-rejected` notification.
+  const handleV22AmendmentReject = useCallback(({ eaId, amendmentId, responseMessage = '' }) => {
+    if (!eaId || !amendmentId) return
+    const seededEa = buildV22SharedArtifacts().evaluationAgreements.find((e) => e.id === eaId)
+    const existingEa = v22Provisionals.evaluationAgreements?.find((e) => e.id === eaId) || seededEa
+    if (!existingEa) return
+    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const existingClaim = merged.claims.find((c) => c.id === existingEa.claimId)
+    if (!existingClaim) return
+
+    let rejectedEa
+    try {
+      rejectedEa = rejectEvaluationAgreementAmendment({
+        evaluationAgreement: existingEa,
+        amendmentId,
+        responseMessage,
+      })
+    } catch (err) {
+      console.warn('[Phase11.6] amendment reject failed:', err.message)
+      return
+    }
+
+    const grantorParty = existingEa.grantor.party
+    const claimNameForNotif = existingClaim.name || null
+    const claimPinForNotif = existingClaim.pin || null
+    const claimIdForPan = existingClaim.id
+
+    setV22Provisionals((prev) => ({
+      ...prev,
+      evaluationAgreements: [
+        ...(prev.evaluationAgreements || []).filter((e) => e.id !== rejectedEa.id),
+        rejectedEa,
+      ],
+    }))
+
+    setV22RespondingToEaAmendment(null)
+
+    if (
+      grantorParty &&
+      grantorParty !== 'Radiant Network' &&
+      grantorParty !== activeRole.party
+    ) {
+      const grantorRole = ROLES.find((r) => r.party === grantorParty)
+      if (grantorRole) {
+        enqueueV22NotificationForRequester(grantorRole.id, {
+          id: `v22-ea-amendment-rejected-${eaId}-${amendmentId}`,
+          type: 'v22-ea-amendment-rejected',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: claimNameForNotif, pin: claimPinForNotif },
+          connectTo: null,
+          v22EaId: eaId,
+          v22AmendmentId: amendmentId,
+          v22ClaimId: claimIdForPan,
+          responseMessage: (responseMessage || '').trim(),
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
   // Phase 6.D: self-evaluation entry point. Owner clicks Run Evaluation on
   // their own Claim — no EA required. The eval modal opens in self-eval mode;
@@ -3595,8 +3718,11 @@ export default function V2App() {
                     const isV22EaRequest = req.type === 'v22-request-ea-only'
                     const isV22EaAccepted = req.type === 'v22-ea-accepted'
                     const isV22EaDeclined = req.type === 'v22-ea-declined'
-                    // Phase 11E.1 (#108): EA amendment notifications.
-                    const isV22EaAmendment = req.type === 'v22-ea-amendment'
+                    // Phase 11.6 (#164): EA amendment-as-proposal notifications.
+                    // Replaced the Phase 11E.1 informational `v22-ea-amendment` type.
+                    const isV22EaAmendmentProposal = req.type === 'v22-ea-amendment-proposal'
+                    const isV22EaAmendmentAccepted = req.type === 'v22-ea-amendment-accepted'
+                    const isV22EaAmendmentRejected = req.type === 'v22-ea-amendment-rejected'
                     // Phase 9A.4 Gate C: four new Transferring notification types.
                     const isV22TransferRequest = req.type === 'v22-transfer-request'
                     const isV22TransferAccepted = req.type === 'v22-transfer-accepted'
@@ -3605,14 +3731,23 @@ export default function V2App() {
                     // Phase 9D (#112): revocation notifications.
                     const isV22DaRevoked = req.type === 'v22-da-revoked'
                     const isV22EaRevoked = req.type === 'v22-ea-revoked'
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendment || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    // Phase 11.6 (#164): amendment-proposal accept/reject get
+                    // their own colors — green for accepted, red for rejected
+                    // — to match the actionable consequence (vs. the
+                    // generic indigo "informational amendment" badges).
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
                     // artifact was amended. Replaces the prior split
                     // `EA AMENDED` / `DA AMENDED` (Phase 11E.2 introduced
                     // those two; the unified label deprecates both).
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendment || isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
+                    // Phase 11.6 (#164): EA amendment-proposal triplet has
+                    // its own labels — the proposal carries actionable
+                    // consequences (accept/reject), distinct from the
+                    // informational AMENDMENT category used for DA
+                    // amendments and the rolled-back unilateral EA model.
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -3799,17 +3934,33 @@ export default function V2App() {
                               disclosureAgreementId: req.v22DaId,
                             })
                           }
-                        } else if (req.type === 'v22-ea-amendment') {
-                          // Phase 11E.1 (#108): EA amendment notifications
-                          // deep-link directly to the affected EA's Detail
-                          // Panel. Pan to the Claim node first for visual
-                          // context.
-                          // Phase 11E.5 Fix 2: also select the canonical
-                          // agreement edge for the amended EA so the user
-                          // sees the amber selection styling on the edge.
-                          // Edge id resolves via
-                          // `pairedEvaluationAgreementId === req.v22EaId`
-                          // (v2_2Data.deriveAgreementEdges line 2104).
+                        } else if (req.type === 'v22-ea-amendment-proposal') {
+                          // Phase 11.6 (#164): grantee clicked an amendment
+                          // proposal notification. Open AmendmentResponseModal
+                          // with the EA + amendment id; the modal handles
+                          // accept/reject. Notification is NOT auto-dismissed
+                          // — same persistence semantics as v22-request /
+                          // v22-request-ea-only (it stays in the inbox until
+                          // the grantee submits a terminal action). Pan to
+                          // the Claim node for visual context, but don't
+                          // open the EA Detail Panel — the modal is the
+                          // foreground UI.
+                          const claimNode = req.v22ClaimId ? nodeMap[req.v22ClaimId] : null
+                          if (claimNode) {
+                            canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
+                          }
+                          if (req.v22EaId && req.v22AmendmentId) {
+                            setV22RespondingToEaAmendment({
+                              eaId: req.v22EaId,
+                              amendmentId: req.v22AmendmentId,
+                            })
+                          }
+                        } else if (req.type === 'v22-ea-amendment-accepted' || req.type === 'v22-ea-amendment-rejected') {
+                          // Phase 11.6 (#164): grantor clicked the response
+                          // notification. Pan to Claim + open EA Detail
+                          // Panel + select EA edge (mirrors Phase 11E.9
+                          // pattern). Auto-dismiss on click since the
+                          // outcome is terminal.
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
@@ -3978,11 +4129,15 @@ export default function V2App() {
                                                     ? `${req.from.name} accepted your Evaluation Agreement request on ${req.asset?.name || 'a Claim'}.`
                                                     : isV22EaDeclined
                                                       ? (req.reason ? `${req.from.name} declined your Evaluation Agreement request — "${req.reason}"` : `${req.from.name} declined your Evaluation Agreement request on ${req.asset?.name || 'a Claim'}.`)
-                                                      : isV22EaAmendment
-                                                        ? `${req.from.name} amended the Evaluation Agreement on ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
-                                                        : isV22DaAmendment
-                                                          ? `Disclosure Agreement amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
-                                                          : req.asset?.name || ''
+                                                      : isV22EaAmendmentProposal
+                                                        ? `${req.from.name} proposed an amendment to the Evaluation Agreement on Claim ${req.asset?.name || 'a Claim'}.${req.proposalMessage ? ` "${req.proposalMessage}"` : ''}`
+                                                        : isV22EaAmendmentAccepted
+                                                          ? `${req.from.name} accepted your amendment proposal on Claim ${req.asset?.name || 'a Claim'}.${req.responseMessage ? ` "${req.responseMessage}"` : ''}`
+                                                          : isV22EaAmendmentRejected
+                                                            ? `${req.from.name} rejected your amendment proposal on Claim ${req.asset?.name || 'a Claim'}.${req.responseMessage ? ` "${req.responseMessage}"` : ''}`
+                                                            : isV22DaAmendment
+                                                              ? `Disclosure Agreement amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
+                                                              : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -5279,7 +5434,10 @@ export default function V2App() {
           )
         })()}
 
-        {/* Phase 11E.1 (#108): Amend Evaluation Agreement modal. */}
+        {/* Phase 11E.1 (#108) → Phase 11.6 (#164) amendment-as-proposal:
+            grantor-side modal that submits a proposal (not a unilateral
+            mutation). On submit, EA flips to `pending-acceptance` and
+            grantee gets a v22-ea-amendment-proposal notification. */}
         {v22AmendingEaId && (() => {
           const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const ea = merged.evaluationAgreements.find((e) => e.id === v22AmendingEaId)
@@ -5290,8 +5448,42 @@ export default function V2App() {
             <AmendEvaluationAgreementModal
               agreement={ea}
               claim={claim}
-              onSubmit={handleV22AmendEvaluationSubmit}
+              onSubmit={handleV22ProposeEvaluationAmendment}
               onClose={() => setV22AmendingEaId(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 11.6 (#164): grantee-side AmendmentResponseModal. Opens
+            when the grantee clicks a v22-ea-amendment-proposal
+            notification. Diff-displays acknowledgment changes + expiration
+            change. Accept gates on every change being explicitly ticked;
+            reject is always available. Both fire response notifications
+            back to the grantor and flip the EA back to `active`. */}
+        {v22RespondingToEaAmendment && (() => {
+          const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const ea = merged.evaluationAgreements.find((e) => e.id === v22RespondingToEaAmendment.eaId)
+          if (!ea) return null
+          const claim = merged.claims.find((c) => c.id === ea.claimId)
+          if (!claim) return null
+          const amendment = (ea.amendments || []).find((a) => a.id === v22RespondingToEaAmendment.amendmentId)
+          if (!amendment) return null
+          return (
+            <AmendmentResponseModal
+              agreement={ea}
+              claim={claim}
+              amendment={amendment}
+              onAccept={({ responseMessage }) => handleV22AmendmentAccept({
+                eaId: ea.id,
+                amendmentId: amendment.id,
+                responseMessage,
+              })}
+              onReject={({ responseMessage }) => handleV22AmendmentReject({
+                eaId: ea.id,
+                amendmentId: amendment.id,
+                responseMessage,
+              })}
+              onClose={() => setV22RespondingToEaAmendment(null)}
             />
           )
         })()}
@@ -5983,7 +6175,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.27 &middot; Changelog
+          v0.11.28 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6030,6 +6222,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.28', date: '2026-05-03', label: 'Phase 11.6', items: [
+                  'New (#164): Evaluation Agreement amendments are now bilateral proposals. The grantor submits a proposal, the grantee accepts or rejects in a new Amendment Response modal with diff display + per-change ticking. While pending, evaluations under the EA are paused and further amendments are blocked.',
+                  'Polish (#165): edge draw-in animation is smoother — overlay edges now use 64 curve segments (was 12-32), removing the per-frame "steppy" quantization visible during the 1.2s draw-in.',
+                  'Phase 11 retrospective: closed out Phase 11E (#108 + #102 + #139) and Phase 11.6 (#164 + #165). Phase 12 next.',
+                ]},
                 { version: '0.11.27', date: '2026-05-03', label: 'Phase 11E.9', items: [
                   'Fix: reveal-edge draw-in animation now grows from the requester\'s anchor Asset toward the Claim ("supplier reaches out"), not the reverse.',
                   'Fix: pre-click incident edges now correctly render in dashed grey provisional styling. The runtime restyle pass was overwriting the provisional treatment with the typed color on selection / hover / zoom / edge-list changes.',

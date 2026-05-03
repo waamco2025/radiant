@@ -2864,7 +2864,7 @@ export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = 
  *
  * Phase 11E.1.6 Fix 3: gained an optional `terms` argument to support
  * editing `terms.expires` alongside scope (parity with
- * `makeAmendedEvaluationAgreement` which edits `terms.evaluationDeadline`).
+ * `proposeEvaluationAgreementAmendment` which edits `terms.evaluationDeadline`).
  * The amendment record now carries `termsBefore.expires` so the DA Detail
  * Panel can render an "Expiration: before → after" delta line per
  * amendment, matching the EA panel pattern.
@@ -2902,22 +2902,39 @@ export function makeAmendedDisclosureAgreement({ disclosureAgreement: da, scope,
 }
 
 /**
- * Phase 11E.1 (#108): Amend an Evaluation Agreement (spec §11.2a). Returns a
- * new EA with updated `terms.evaluationDeadline` and an appended `amendments[]`
- * entry. Acknowledgment edits live on the underlying Claim (Option B — see
- * architecture-spec §11.2a); this factory captures the acknowledgment delta
- * for audit purposes only.
+ * Phase 11.6 (#164): Propose an amendment to an Evaluation Agreement
+ * (spec §11.2a, amendment-as-proposal model). Returns a new EA with
+ * `status: 'pending-acceptance'` and an appended `amendments[]` entry
+ * with `status: 'pending'`. Pending amendments carry both the proposed
+ * acknowledgments + the proposed `terms.evaluationDeadline` as
+ * snapshots; the live Claim and the EA's terms stay AT THEIR PRE-
+ * AMENDMENT VALUES until the grantee accepts.
  *
- * The caller MUST mutate the Claim's `acknowledgments[]` separately. This
- * helper does NOT touch the Claim — keeping concerns separated lets the V2App
- * handler stage both updates atomically.
+ * On accept (`acceptEvaluationAgreementAmendment`): the EA flips back
+ * to `status: 'active'`, the Claim's acknowledgments mutate to match
+ * the proposal's snapshot, and the amendment record is marked
+ * `status: 'accepted'`.
+ *
+ * On reject (`rejectEvaluationAgreementAmendment`): the EA flips back
+ * to `status: 'active'`, the Claim is untouched, and the amendment
+ * record is marked `status: 'rejected'`.
+ *
+ * Spec §11.2a major revision (Phase 11.6): supersedes the Phase 11E.1
+ * Option B unilateral-amendment model. The grantor cannot mutate the
+ * grantee's accepted commitments without explicit consent — required
+ * to close the post-acceptance acknowledgment-injection exploit.
  */
-export function makeAmendedEvaluationAgreement({
+export function proposeEvaluationAgreementAmendment({
   evaluationAgreement: ea,
   terms,
+  acknowledgments,
   acknowledgmentChanges = { added: [], removed: [], edited: [] },
-  note = '',
+  proposalMessage = '',
 }) {
+  const proposalId = `am-${ea.id}-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 3).toString(36)}`
+  const proposedDeadline = terms?.evaluationDeadline !== undefined
+    ? terms.evaluationDeadline
+    : ea.terms?.evaluationDeadline
   return makeEvaluationAgreement({
     id: ea.id,
     grantor: ea.grantor,
@@ -2928,19 +2945,30 @@ export function makeAmendedEvaluationAgreement({
     authorizedRequirementsSetIds: ea.authorizedRequirementsSetIds,
     acknowledgmentsAccepted: ea.acknowledgmentsAccepted,
     restrictions: ea.restrictions,
-    terms: {
-      ...ea.terms,
-      evaluationDeadline: terms?.evaluationDeadline !== undefined
-        ? terms.evaluationDeadline
-        : ea.terms.evaluationDeadline,
-    },
+    // Pre-amendment terms preserved on the EA itself; the proposal's
+    // proposed deadline lives on the amendment record's `proposed.evaluationDeadline`.
+    terms: { ...ea.terms },
     incentives: ea.incentives,
     amendments: [
       ...(ea.amendments || []),
       {
+        id: proposalId,
+        status: 'pending',
         date: new Date().toISOString(),
-        note: (note || '').trim(),
-        termsBefore: { evaluationDeadline: ea.terms.evaluationDeadline },
+        proposalMessage: (proposalMessage || '').trim(),
+        responseMessage: null,
+        responseDate: null,
+        // Pre-amendment snapshot for diffing in the response modal.
+        termsBefore: { evaluationDeadline: ea.terms?.evaluationDeadline ?? null },
+        // Proposed snapshot — the values that will be applied on accept.
+        proposed: {
+          evaluationDeadline: proposedDeadline ?? null,
+          acknowledgments: (acknowledgments || []).map((a) => ({
+            id: a.id,
+            title: a.title,
+            description: a.description,
+          })),
+        },
         acknowledgmentChanges: {
           added: (acknowledgmentChanges.added || []).map((a) => ({ ...a })),
           removed: (acknowledgmentChanges.removed || []).map((a) => ({ ...a })),
@@ -2952,7 +2980,98 @@ export function makeAmendedEvaluationAgreement({
         },
       },
     ],
-    status: ea.status,
+    status: 'pending-acceptance',
+  })
+}
+
+/**
+ * Phase 11.6 (#164): Grantee accepts a pending amendment proposal.
+ * The EA flips back to `status: 'active'` with the proposed
+ * `terms.evaluationDeadline` applied, and the matching amendment
+ * record is marked `status: 'accepted'`. Caller is responsible for
+ * mutating the Claim's `acknowledgments[]` separately (the helper
+ * returns the proposal's `proposed.acknowledgments` snapshot so the
+ * caller can stage that mutation atomically).
+ */
+export function acceptEvaluationAgreementAmendment({
+  evaluationAgreement: ea,
+  amendmentId,
+  responseMessage = '',
+}) {
+  const amendment = (ea.amendments || []).find((a) => a.id === amendmentId)
+  if (!amendment) {
+    throw new Error(`acceptEvaluationAgreementAmendment: amendment ${amendmentId} not found on EA ${ea.id}`)
+  }
+  if (amendment.status !== 'pending') {
+    throw new Error(`acceptEvaluationAgreementAmendment: amendment ${amendmentId} is ${amendment.status}, expected pending`)
+  }
+  const proposedDeadline = amendment.proposed?.evaluationDeadline ?? null
+  const proposedAcks = (amendment.proposed?.acknowledgments || []).map((a) => ({
+    id: a.id, title: a.title, description: a.description,
+  }))
+  const updatedAmendments = (ea.amendments || []).map((a) => (
+    a.id === amendmentId
+      ? { ...a, status: 'accepted', responseMessage: (responseMessage || '').trim(), responseDate: new Date().toISOString() }
+      : a
+  ))
+  return {
+    evaluationAgreement: makeEvaluationAgreement({
+      id: ea.id,
+      grantor: ea.grantor,
+      grantee: ea.grantee,
+      claimId: ea.claimId,
+      granteeAssetId: ea.granteeAssetId,
+      disclosureAgreementId: ea.disclosureAgreementId,
+      authorizedRequirementsSetIds: ea.authorizedRequirementsSetIds,
+      acknowledgmentsAccepted: ea.acknowledgmentsAccepted,
+      restrictions: ea.restrictions,
+      terms: { ...ea.terms, evaluationDeadline: proposedDeadline },
+      incentives: ea.incentives,
+      amendments: updatedAmendments,
+      status: 'active',
+    }),
+    proposedAcknowledgments: proposedAcks,
+  }
+}
+
+/**
+ * Phase 11.6 (#164): Grantee rejects a pending amendment proposal.
+ * The EA flips back to `status: 'active'` with terms UNCHANGED, the
+ * Claim is untouched, and the matching amendment record is marked
+ * `status: 'rejected'`. Audit trail of the proposed values is
+ * preserved on the amendment record.
+ */
+export function rejectEvaluationAgreementAmendment({
+  evaluationAgreement: ea,
+  amendmentId,
+  responseMessage = '',
+}) {
+  const amendment = (ea.amendments || []).find((a) => a.id === amendmentId)
+  if (!amendment) {
+    throw new Error(`rejectEvaluationAgreementAmendment: amendment ${amendmentId} not found on EA ${ea.id}`)
+  }
+  if (amendment.status !== 'pending') {
+    throw new Error(`rejectEvaluationAgreementAmendment: amendment ${amendmentId} is ${amendment.status}, expected pending`)
+  }
+  const updatedAmendments = (ea.amendments || []).map((a) => (
+    a.id === amendmentId
+      ? { ...a, status: 'rejected', responseMessage: (responseMessage || '').trim(), responseDate: new Date().toISOString() }
+      : a
+  ))
+  return makeEvaluationAgreement({
+    id: ea.id,
+    grantor: ea.grantor,
+    grantee: ea.grantee,
+    claimId: ea.claimId,
+    granteeAssetId: ea.granteeAssetId,
+    disclosureAgreementId: ea.disclosureAgreementId,
+    authorizedRequirementsSetIds: ea.authorizedRequirementsSetIds,
+    acknowledgmentsAccepted: ea.acknowledgmentsAccepted,
+    restrictions: ea.restrictions,
+    terms: { ...ea.terms },
+    incentives: ea.incentives,
+    amendments: updatedAmendments,
+    status: 'active',
   })
 }
 

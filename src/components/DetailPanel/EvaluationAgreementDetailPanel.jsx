@@ -86,14 +86,21 @@ export default function EvaluationAgreementDetailPanel({
   // Phase 11E.1: Amend gating — grantor only, must be active + non-revoked.
   // `isRevoked` is _revokedMeta-driven and orthogonal to `status` so we
   // check both.
+  // Phase 11.6 (#164): pending-acceptance branch. While a prior
+  // proposal is awaiting the grantee's response, the grantor cannot
+  // submit a new one (single proposal in flight). Revoke is the only
+  // override during this state — see spec §11.2b.
+  const isPendingAcceptance = agreement.status === 'pending-acceptance'
   const amendDisabled = !isGrantor || isRevoked || agreement.status !== 'active'
   const amendTooltip = !isGrantor
     ? `Only ${agreement.grantor.party} (the grantor) can amend this agreement.`
     : isRevoked
       ? 'This Evaluation Agreement has been revoked; amendments are disabled.'
-      : agreement.status !== 'active'
-        ? `This agreement is ${agreement.status}; amendments are disabled.`
-        : null
+      : isPendingAcceptance
+        ? `Cannot amend: prior amendment proposal awaiting ${agreement.grantee.party}'s response.`
+        : agreement.status !== 'active'
+          ? `This agreement is ${agreement.status}; amendments are disabled.`
+          : null
 
   return (
     <div style={{

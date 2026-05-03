@@ -1615,11 +1615,17 @@ function EvaluationAgreementRow({
   // remaining two-branch gating mirrors EvaluationAgreementDetailPanel.jsx:
   //   • enabled  — isGrantor && active
   //   • disabled — !isGrantor → "Only {grantor} can amend…"
+  // Phase 11.6 (#164): also disable AMEND while a prior proposal is
+  // awaiting the grantee's response (status === 'pending-acceptance').
+  // Mirrors the Detail Panel footer gating; spec §11.2b.
+  const isPendingAcceptance = ea.status === 'pending-acceptance'
   const showAmend = !isInternal && !isRevoked
-  const amendEnabled = isGrantor
-  const amendTooltip = isGrantor
-    ? 'Amend the expiration date and acknowledgments on this Evaluation Agreement.'
-    : `Only ${ea.grantor.party} (the grantor) can amend this agreement.`
+  const amendEnabled = isGrantor && !isPendingAcceptance
+  const amendTooltip = !isGrantor
+    ? `Only ${ea.grantor.party} (the grantor) can amend this agreement.`
+    : isPendingAcceptance
+      ? `Cannot amend: prior amendment proposal awaiting ${ea.grantee.party}'s response.`
+      : 'Amend the expiration date and acknowledgments on this Evaluation Agreement.'
   const showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked
 
   // Phase 9D.1.2 W1: scroll the row into view when it becomes the expanded-

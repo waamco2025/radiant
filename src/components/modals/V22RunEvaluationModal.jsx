@@ -331,7 +331,14 @@ export default function V22RunEvaluationModal({
   // Phase 6.5+ #8: require at least one evidence Asset to be selected.
   // Phase 6.5+ #6: also block submission when the (Req Set, evidence) combo
   // exactly duplicates an existing result.
-  const canSubmit = !!selectedReqSet && rows.length > 0 && evidenceSelection.length > 0 && !duplicateOfExisting
+  // Phase 11.6 (#164): block submission while the EA has a pending
+  // amendment proposal (status === 'pending-acceptance'). The grantee
+  // hasn't yet responded to the grantor's proposal — running an
+  // evaluation under uncertain terms would leak proposed terms into
+  // the resulting Eval Result. Spec §11.2b: revoke is the only
+  // override during pending-acceptance.
+  const eaPendingAcceptance = evaluationAgreement?.status === 'pending-acceptance'
+  const canSubmit = !!selectedReqSet && rows.length > 0 && evidenceSelection.length > 0 && !duplicateOfExisting && !eaPendingAcceptance
 
   const handleSubmit = () => {
     if (!canSubmit) return
@@ -530,15 +537,19 @@ export default function V22RunEvaluationModal({
             </ModalBody>
             <ModalFooter>
               {/* Phase 6.5+ #8: surface the disabled reason so the user knows
-                  why "Run Evaluation" is greyed out. */}
+                  why "Run Evaluation" is greyed out.
+                  Phase 11.6 (#164): pending-acceptance branch. Wins over
+                  other gates since it's the most actionable. */}
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                {!selectedReqSet
-                  ? 'Pick a Requirements Set to continue.'
-                  : evidenceSelection.length === 0
-                    ? 'Select at least one Asset to evaluate.'
-                    : duplicateOfExisting
-                      ? 'This (Requirements Set, Asset selection) combination already has an Eval Result.'
-                      : ''}
+                {eaPendingAcceptance
+                  ? `Cannot run evaluation: this Evaluation Agreement has a pending amendment proposal. Wait for ${evaluationAgreement?.grantor?.party || 'the grantor'}'s response, or respond to the proposal in your inbox.`
+                  : !selectedReqSet
+                    ? 'Pick a Requirements Set to continue.'
+                    : evidenceSelection.length === 0
+                      ? 'Select at least one Asset to evaluate.'
+                      : duplicateOfExisting
+                        ? 'This (Requirements Set, Asset selection) combination already has an Eval Result.'
+                        : ''}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn label="Cancel" onClick={onClose} />

@@ -2295,9 +2295,16 @@ const V2Canvas = forwardRef(function V2Canvas({
       const p1 = new THREE.Vector3(x1 + armLength * dirX, -y1, 0)
       const p2 = new THREE.Vector3(x2 - armLength * dirX, -y2, 0)
       const curve = new THREE.CubicBezierCurve3(p0, p1, p2, p3)
-      const curvature = vDist / (hDist || 1)
-      const pointCount = curvature < 0.3 ? 12 : curvature < 1.0 ? 20 : 32
-      const curvePoints = curve.getPoints(pointCount)
+      // Phase 11.6 (#165): force `pointCount = 64` for reveal overlay
+      // edges so per-frame `instanceCount` increments produce a smaller
+      // visual delta. Canonical `buildEdges` uses 12/20/32 based on
+      // curvature; that resolution is fine for a static rendered curve
+      // but reads as quantized when ramped frame-by-frame over the
+      // 1.2s draw-in window. 64 segments at ~60fps gives ~1 segment per
+      // frame even on the shortest visible curves — smooth enough.
+      // Geometry cost is bounded (one overlay edge per reveal, ~2s
+      // lifetime), so the trade-off is negligible.
+      const curvePoints = curve.getPoints(64)
       const fullPositions = []
       curvePoints.forEach((p) => fullPositions.push(p.x, p.y, p.z))
 

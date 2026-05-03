@@ -213,12 +213,17 @@ export default function AmendEvaluationAgreementModal({
           title="Amend Evaluation Agreement"
           subtitle={(
             // Phase 11E.1.1 Fix 5: weave the grantee party name + the Claim
-            // name into the description prose. Both bolded via <strong>.
+            // name into the description prose.
+            // Phase 11.6 (#164): copy updated for the amendment-as-proposal
+            // model. The grantor proposes; the grantee accepts or rejects
+            // via AmendmentResponseModal. While pending, evaluations on
+            // this Claim under this EA are paused.
             <>
-              Update the expiration date and acknowledgments for the Evaluation
-              Agreement with <strong>{agreement.grantee.party}</strong> on
-              Claim <strong>{claim.name}</strong>. Changes are unilateral — {agreement.grantee.party} will be notified and may revoke if they don't
-              accept the new terms.
+              Propose changes to the expiration date and acknowledgments for
+              the Evaluation Agreement with <strong>{agreement.grantee.party}</strong> on
+              Claim <strong>{claim.name}</strong>. {agreement.grantee.party} will
+              be notified and may accept or reject your proposal. While
+              pending, evaluations on this Claim are paused until {agreement.grantee.party} responds.
             </>
           )}
           onClose={onClose}
@@ -281,7 +286,10 @@ export default function AmendEvaluationAgreementModal({
             + Add acknowledgment
           </button>
 
-          <FieldLabel label="Amendment note (optional)" />
+          {/* Phase 11.6 (#164): renamed "Amendment note" → "Proposal
+              message" since the grantee now reads it as part of the
+              proposal review, not just an audit trail. */}
+          <FieldLabel label="Proposal message (optional)" />
           <textarea
             rows={3}
             value={note}
@@ -308,7 +316,7 @@ export default function AmendEvaluationAgreementModal({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn label="Cancel" onClick={onClose} />
-            <Btn label="Amend Evaluation Agreement" accent disabled={!canSubmit} onClick={handleSubmit} />
+            <Btn label="Submit Amendment Proposal" accent disabled={!canSubmit} onClick={handleSubmit} />
           </div>
         </ModalFooter>
       </Modal>
