@@ -3651,6 +3651,12 @@ export default function V2App() {
                           // context, then open the DA panel via the
                           // setOpenAgreement direct-id shape that
                           // V22NodeDetailPanel resolves at line 4413.
+                          // Phase 11E.5 Fix 2: also select the canonical
+                          // agreement edge for the amended DA so the user
+                          // sees the amber selection styling on the edge
+                          // alongside the open Detail Panel. Edge id resolves
+                          // via `disclosureAgreementId === req.v22DaId`
+                          // (v2_2Data.deriveAgreementEdges line 2103).
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
@@ -3660,7 +3666,8 @@ export default function V2App() {
                             canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
                           }
                           if (req.v22DaId) {
-                            setSelectedEdgeId(null)
+                            const matchingEdge = (v22Data?.edges || []).find((e) => e.disclosureAgreementId === req.v22DaId)
+                            setSelectedEdgeId(matchingEdge?.id || null)
                             setOpenAgreement({
                               kind: 'disclosure',
                               disclosureAgreementId: req.v22DaId,
@@ -3671,6 +3678,12 @@ export default function V2App() {
                           // deep-link directly to the affected EA's Detail
                           // Panel. Pan to the Claim node first for visual
                           // context.
+                          // Phase 11E.5 Fix 2: also select the canonical
+                          // agreement edge for the amended EA so the user
+                          // sees the amber selection styling on the edge.
+                          // Edge id resolves via
+                          // `pairedEvaluationAgreementId === req.v22EaId`
+                          // (v2_2Data.deriveAgreementEdges line 2104).
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
@@ -3680,6 +3693,8 @@ export default function V2App() {
                             canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
                           }
                           if (req.v22EaId) {
+                            const matchingEdge = (v22Data?.edges || []).find((e) => e.pairedEvaluationAgreementId === req.v22EaId)
+                            setSelectedEdgeId(matchingEdge?.id || null)
                             setOpenAgreement({
                               kind: 'evaluation',
                               evaluationAgreementId: req.v22EaId,
@@ -5842,7 +5857,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.22 &middot; Changelog
+          v0.11.23 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -5889,6 +5904,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.23', date: '2026-05-03', label: 'Phase 11E.5', items: [
+                  'Fix: edge draw-in animation now actually animates the curve growth. Pre-fix the typed-style overlay edge appeared as a ~100px stub at the anchor and sat motionless. Switched from per-frame setPositions (which silently throws when the new array exceeds LineGeometry\'s pre-allocated buffer) to per-frame instanceCount, mirroring animateNewEdges.',
+                  'Polish: clicking a DA-amendment or EA-amendment notification now also selects the corresponding edge alongside opening the Detail Panel. The amber selection styling on the edge gives the user visual confirmation that the deep-link landed on the right artifact.',
+                ]},
                 { version: '0.11.22', date: '2026-05-02', label: 'Phase 11E.4', items: [
                   'Rollback: removed the v22-claim-amendment notification type added in Phase 11E.2 — counterparties only learn of new Claim content via Disclosure Agreement amendment, never via the Claim amendment itself. The v22-da-amendment side of Phase 11E.2 is preserved.',
                   'Polish: amendment notifications (DA + EA) now share a unified AMENDMENT badge — the badge is a category tag, the body copy already specifies which artifact was amended. Replaces the prior split DA AMENDED / EA AMENDED.',

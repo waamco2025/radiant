@@ -2243,9 +2243,15 @@ const V2Canvas = forwardRef(function V2Canvas({
     // Build a typed-style overlay edge (Line2) and add it to
     // revealOverlayGroupRef. Reuses buildEdges's curve-construction logic
     // inline so styling matches what `effectiveSdaType !== 'provisional'`
-    // would produce in the canonical pipeline. Initial geometry is a
-    // 2-point stub at the FROM end; caller follows up with playEdgeDrawInById
-    // to animate the geometry growth.
+    // would produce in the canonical pipeline. Geometry is initialized
+    // with the FULL bezier curve and `instanceCount` is then zeroed —
+    // playEdgeDrawInById grows the line frame-by-frame by raising
+    // instanceCount, mirroring `animateNewEdges`'s pattern. Pre-fix
+    // (Phase 11E.4) used a 2-point stub seed + `setPositions` per frame,
+    // but `LineGeometry` allocates its `instanceStart` / `instanceEnd`
+    // InstancedBufferAttributes at the size of the initial position array
+    // — subsequent setPositions calls with longer arrays exceeded the
+    // allocation and threw silently, freezing the geometry at the stub.
     addRevealOverlayEdge: ({ edgeId, fromNodeId, toNodeId, sdaType }) => {
       const group = revealOverlayGroupRef.current
       if (!group || !edgeId || !fromNodeId || !toNodeId) return
@@ -2284,13 +2290,6 @@ const V2Canvas = forwardRef(function V2Canvas({
       const fullPositions = []
       curvePoints.forEach((p) => fullPositions.push(p.x, p.y, p.z))
 
-      // Initial stub: keep just the first 2 points at the FROM (anchor)
-      // end. The animation grows points outward toward the TO end.
-      const stubPositions = [
-        fullPositions[0], fullPositions[1], fullPositions[2],
-        fullPositions[3], fullPositions[4], fullPositions[5],
-      ]
-
       const sdaCfg = SDA_EDGE_CONFIG[sdaType] || SDA_EDGE_CONFIG.full
       const isDashed = sdaCfg.dash > 0
       const lineWidth = SDA_EDGE_WIDTH[sdaType] || 2.0
@@ -2312,38 +2311,54 @@ const V2Canvas = forwardRef(function V2Canvas({
       })
       material.userData = { isSolid: !isDashed, baseOpacity: 1.0 }
 
+      // Phase 11E.5 Fix 1: initialize with the FULL bezier curve so
+      // LineGeometry allocates its instanceStart / instanceEnd buffers
+      // at full size. computeLineDistances() runs once at full geometry
+      // (still required for dashed materials). Capture the resulting
+      // segment count, then zero `instanceCount` so the line renders as
+      // empty on its first frame; playEdgeDrawInById grows it back up
+      // over the animation. Mirror of `animateNewEdges` (V2Canvas:1080).
       const geometry = new LineGeometry()
-      geometry.setPositions(stubPositions)
+      geometry.setPositions(fullPositions)
       const line = new Line2(geometry, material)
       if (isDashed) line.computeLineDistances()
+      const fullInstanceCount = geometry.instanceCount
+      geometry.instanceCount = 0
       line.userData = {
         edgeId,
         sdaType,
         from: fromNodeId,
         to: toNodeId,
-        // Original full-curve positions for the geometry-growth animation.
-        _revealOverlayFullPositions: fullPositions,
+        // Snapshot of the full segment count for the per-frame
+        // instanceCount ramp in playEdgeDrawInById.
+        _fullInstanceCount: fullInstanceCount,
         _isRevealOverlay: true,
       }
       group.add(line)
       dirtyRef.current = true
     },
 
-    // Animate a specific overlay edge's geometry from its initial 2-point
-    // stub at the FROM end to the full bezier curve over `durationMs`.
-    // Looks up the edge by `userData.edgeId` rather than walking incident
-    // edges by node id (Phase 11E.3 used the latter, which couldn't
-    // distinguish the overlay from the canonical provisional edge).
-    // Inverse of playEdgeRetract: per-frame replays an anchor-side prefix
-    // whose length grows from 2 points to ptCount.
+    // Animate a specific overlay edge's geometry from zero-length at the
+    // FROM end to the full bezier curve over `durationMs` by raising
+    // `geometry.instanceCount` per frame. Mirrors the existing
+    // `animateNewEdges` pattern (V2Canvas:1080) so it stays within the
+    // pre-allocated InstancedBufferAttribute buffer set at construction
+    // time by addRevealOverlayEdge.
+    //
+    // Phase 11E.5 Fix 1: replaces the prior per-frame `setPositions`
+    // mutation. LineGeometry's instanceStart / instanceEnd buffers are
+    // sized at first setPositions; subsequent setPositions with a longer
+    // array silently throws inside Three.js (caught and swallowed by
+    // this method's try/catch in 11E.4), freezing the visible curve at
+    // its initial 2-point stub. instanceCount manipulation is the
+    // canonical pattern Three.js exposes for partial line rendering.
     playEdgeDrawInById: (edgeId, durationMs = 500) => {
       const group = revealOverlayGroupRef.current
       if (!group || !edgeId) return Promise.resolve()
       const line = group.children.find((c) => c.userData?.edgeId === edgeId)
-      if (!line) return Promise.resolve()
-      const fullPositions = line.userData?._revealOverlayFullPositions
-      if (!fullPositions || fullPositions.length < 6) return Promise.resolve()
-      const ptCount = fullPositions.length / 3
+      if (!line || !line.geometry) return Promise.resolve()
+      const fullCount = line.userData?._fullInstanceCount
+      if (typeof fullCount !== 'number' || fullCount <= 0) return Promise.resolve()
       return new Promise((resolve) => {
         let startTime = null
         const tick = (time) => {
@@ -2351,26 +2366,15 @@ const V2Canvas = forwardRef(function V2Canvas({
           const elapsed = time - startTime
           const t = Math.min(1, elapsed / durationMs)
           const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
-          const pointsToShow = Math.max(2, Math.ceil(ptCount * eased))
-          const newPositions = new Array(pointsToShow * 3)
-          for (let i = 0; i < pointsToShow; i++) {
-            // FROM end is at index 0; grow points outward toward TO end.
-            newPositions[i * 3] = fullPositions[i * 3]
-            newPositions[i * 3 + 1] = fullPositions[i * 3 + 1]
-            newPositions[i * 3 + 2] = fullPositions[i * 3 + 2]
-          }
-          try {
-            line.geometry.setPositions(newPositions)
-            if (line.material?.dashed) {
-              line.computeLineDistances()
-            }
-          } catch {
-            // Geometry disposed mid-anim. Bail.
+          if (line.geometry) {
+            line.geometry.instanceCount = Math.round(eased * fullCount)
           }
           dirtyRef.current = true
           if (t < 1) {
             requestAnimationFrame(tick)
           } else {
+            // Snap to full count at completion to avoid rounding drift.
+            if (line.geometry) line.geometry.instanceCount = fullCount
             resolve()
           }
         }
