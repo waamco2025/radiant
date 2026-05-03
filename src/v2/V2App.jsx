@@ -2768,8 +2768,15 @@ export default function V2App() {
     ))
     const primaryEdge = incidentEdges[0]
     if (primaryEdge) {
-      const fromNodeId = primaryEdge.from
-      const toNodeId = primaryEdge.to
+      // Phase 11E.9 Fix 1: swap the orchestrator's from/to so the typed
+      // overlay edge animates from the requester's anchor Asset toward
+      // the Claim ("supplier reaches out to pull in the Claim"), not
+      // the reverse. `deriveAgreementEdges` (v2_2Data.js:2190) sets
+      // `edge.from = claimId, edge.to = anchorAssetId` — the canonical
+      // edge convention is downstream-stable, so the swap stays
+      // confined to this call site rather than touching edge derivation.
+      const fromNodeId = primaryEdge.to    // anchor Asset (animation FROM)
+      const toNodeId = primaryEdge.from    // Claim (animation TO)
       // Schedule the orchestrator AFTER the reveal pan settles so the
       // user is already framed on the Claim when the typed overlay
       // begins drawing in. Pan completes at PHASE_BORDER_MS (500ms).
@@ -5976,7 +5983,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.26 &middot; Changelog
+          v0.11.27 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6023,6 +6030,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.27', date: '2026-05-03', label: 'Phase 11E.9', items: [
+                  'Fix: reveal-edge draw-in animation now grows from the requester\'s anchor Asset toward the Claim ("supplier reaches out"), not the reverse.',
+                  'Fix: pre-click incident edges now correctly render in dashed grey provisional styling. The runtime restyle pass was overwriting the provisional treatment with the typed color on selection / hover / zoom / edge-list changes.',
+                ]},
                 { version: '0.11.26', date: '2026-05-03', label: 'Phase 11E.8', items: [
                   'Fix: edge provisional styling on grantee canvas pre-click. Incident edges now correctly render as dashed grey provisional (was rendering with the typed color + dashed pattern, because the v22DataWithReveal early-return guard short-circuited before reveal-window edge stamping could run).',
                   'Polish: edge draw-in animation slowed from 500ms to 1200ms for visual clarity. The typed edge now visibly grows along the curve at a perceivable pace; fade + flip + cleanup orchestration shifted accordingly.',

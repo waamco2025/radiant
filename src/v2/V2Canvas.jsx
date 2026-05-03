@@ -976,6 +976,17 @@ const V2Canvas = forwardRef(function V2Canvas({
         // restyle re-reads color from SDA_EDGE_CONFIG and overwrites the
         // red set in this same buildEdges call.
         isRevoked: !!edge.isRevoked,
+        // Phase 11E.9 Fix 2: same precedent — carry the provisional-stamp
+        // flag onto userData so applyEdgeStylingRef can collapse
+        // effectiveSdaType to 'provisional' on restyle. Pre-fix the
+        // restyle pass read line.userData.sdaType (the typed sdaType set
+        // unconditionally above) and overwrote the dashed-grey provisional
+        // treatment with the typed color whenever any of its triggers
+        // fired (selectedEdgeId / hoveredEdge / currentLayer.edges /
+        // zoom). The initial `buildEdges` already collapses the rendered
+        // sdaCfg via `effectiveSdaType` (line ~871), so the bug only
+        // manifested after the first restyle.
+        showAsProvisional: !!edge._showAsProvisional,
       }
       group.add(line)
     })
@@ -3188,7 +3199,15 @@ const V2Canvas = forwardRef(function V2Canvas({
     group.children.forEach((line) => {
       const mat = line.material
       if (!mat) return
-      const effectiveSdaType = line.userData?.sdaType || 'full'
+      // Phase 11E.9 Fix 2: collapse to 'provisional' when the edge carries
+      // the showAsProvisional flag — same precedent as the initial
+      // buildEdges effectiveSdaType resolution at line ~871. Without this,
+      // the restyle re-reads the typed sdaType from userData and overwrites
+      // the dashed-grey provisional treatment whenever a downstream trigger
+      // fires (selection / hover / zoom / edge-list change).
+      const effectiveSdaType = line.userData?.showAsProvisional
+        ? 'provisional'
+        : (line.userData?.sdaType || 'full')
       const cfg = SDA_EDGE_CONFIG[effectiveSdaType] || SDA_EDGE_CONFIG.full
       const isSelected = !!selId && line.userData?.edgeId === selId
       // Phase 9B §1: hover brightening — weaker version of selection's 65%
