@@ -6202,7 +6202,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.29 &middot; Changelog
+          v0.11.30 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6249,6 +6249,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.30', date: '2026-05-03', label: 'Phase 11.7', items: [
+                  'Documentation hygiene pass: phase log brought current through Phase 11.6.1; spec body audited and synced; backlog Update Log verified.',
+                ]},
                 { version: '0.11.29', date: '2026-05-03', label: 'Phase 11.6.1', items: [
                   'Fix: amendment proposal notification now clears from the grantee\'s inbox after Accept or Reject (was lingering after a successful response).',
                   'Fix: EA Detail Panel now displays the Claim\'s current acknowledgments. Post-amendment changes are visible immediately.',
