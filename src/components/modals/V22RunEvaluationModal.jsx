@@ -206,54 +206,77 @@ export default function V22RunEvaluationModal({
   isOwnerView = false,
   // Phase 12.2 (#117): name lookup for diff banner asset references.
   assetNameLookup = {},
+  // Phase 12.3 (Bug A + Pivot 1): public RS pool for the checkbox picker.
+  // Deduped against `availableRequirementsSets` at composition time —
+  // when the same RS id is reachable through both pools, the
+  // owner-authored entry wins (provenance: 'own' badge).
+  publicRequirementSets = [],
 }) {
   // EA `authorizedRequirementsSetIds` is advisory per spec §10.5 (Phase 6
   // product decision). Show ALL Req Sets from the evaluator's library; the EA
   // suggestions are surfaced inline as a chip on each suggested set.
   const suggestedSetIds = new Set(evaluationAgreement?.authorizedRequirementsSetIds || [])
 
-  // Phase 12.2 (#121): primary RS (the one whose review rows are visible
-  // in step 2). Multi-RS additions go into `additionalReqSetIds` — they
-  // contribute Eval Results to the batch but don't surface review rows
-  // (their rows use AI confidence + status verbatim per Phase 9A item 9).
-  const [selectedReqSetId, setSelectedReqSetId] = useState(
-    lockedRequirementsSetId || availableRequirementsSets[0]?.id || null,
-  )
-  const [additionalReqSetIds, setAdditionalReqSetIds] = useState([])
-  const toggleAdditionalReqSet = (rsId) => {
-    if (rsId === selectedReqSetId) return
-    setAdditionalReqSetIds((prev) => prev.includes(rsId) ? prev.filter((x) => x !== rsId) : [...prev, rsId])
-  }
-  // Phase 9A item 6: when the Re-Evaluate flow passes a locked Req Set id
-  // that isn't in the current actor's library (e.g., the Req Set lives on
-  // the other party's side, or library ids drifted), synthesize a minimal
-  // selectedReqSet from the prior result so the modal can still operate.
-  const librarySelectedReqSet = availableRequirementsSets.find((rs) => rs.id === selectedReqSetId) || null
-  const selectedReqSet = librarySelectedReqSet
-    || (lockedRequirementsSetId
-      && priorActiveResult
-      && priorActiveResult.requirementsSet?.id === lockedRequirementsSetId
-      ? {
-          id: priorActiveResult.requirementsSet.id,
-          name: priorActiveResult.requirementsSet.name,
-          version: priorActiveResult.requirementsSet.version ?? 1,
-          requirements: (priorActiveResult.results || []).map((r) => ({
-            id: r.requirementId,
-            label: r.label,
-            description: r.description,
-          })),
-        }
-      : null)
+  // Phase 12.3 (Bug A): dedupe RS pool at composition time. Owner-authored
+  // entries win on duplicate id (so the row's provenance badge reads
+  // "Authored by you" rather than "Public" when the same RS is in both
+  // pools). The `_provenance` flag is consumed only for badge rendering;
+  // submit semantics treat all selected RSes uniformly.
+  const dedupedRsPool = useMemo(() => {
+    const map = new Map()
+    for (const rs of availableRequirementsSets) {
+      if (!map.has(rs.id)) map.set(rs.id, { ...rs, _provenance: 'own' })
+    }
+    for (const rs of publicRequirementSets) {
+      if (!map.has(rs.id)) map.set(rs.id, { ...rs, _provenance: 'public' })
+    }
+    return Array.from(map.values())
+  }, [availableRequirementsSets, publicRequirementSets])
 
-  // Initial rows: prior result (re-eval) takes precedence; otherwise pull from
-  // the req set's `requirements` (V2.1 demo data shape) or `claims` (legacy).
-  const initialRows = useMemo(() => {
-    if (priorActiveResult && priorActiveResult.requirementsSet?.id === selectedReqSetId) {
-      // Phase 9A item 8 sub-2: supersede / re-evaluate pre-populates every
-      // row from the prior result — value, status, AND confidence (not a
-      // hard-coded 0.9). Saves the user re-entering unchanged data.
-      // Phase 9A item 10: `_aiOriginalValue` snapshots the prior value so
-      // the Human-Edited pencil can fire if the user subsequently edits.
+  // Phase 12.3 (Pivot 1): checkbox multi-select replacing the prior
+  // primary/additional split. Empty by default — user must check ≥1 RS to
+  // proceed. Locked Re-Evaluate flow auto-checks the locked RS on mount.
+  // Order is preserved as the order Bob checked the rows.
+  const [selectedReqSetIds, setSelectedReqSetIds] = useState(() =>
+    lockedRequirementsSetId ? [lockedRequirementsSetId] : []
+  )
+  const toggleSelectedReqSet = (rsId) => {
+    if (lockedRequirementsSetId && rsId !== lockedRequirementsSetId) return
+    setSelectedReqSetIds((prev) => prev.includes(rsId) ? prev.filter((x) => x !== rsId) : [...prev, rsId])
+  }
+
+  // Resolve a selected RS id to a full RS object (with requirements / claims
+  // payload). Re-Evaluate flow synthesizes from `priorActiveResult` if the
+  // locked id isn't in the active library.
+  const resolveRsObject = (rsId) => {
+    const fromLib = dedupedRsPool.find((rs) => rs.id === rsId)
+      || availableRequirementsSets.find((rs) => rs.id === rsId)
+      || publicRequirementSets.find((rs) => rs.id === rsId)
+    if (fromLib) return fromLib
+    if (lockedRequirementsSetId === rsId
+      && priorActiveResult
+      && priorActiveResult.requirementsSet?.id === rsId) {
+      return {
+        id: priorActiveResult.requirementsSet.id,
+        name: priorActiveResult.requirementsSet.name,
+        version: priorActiveResult.requirementsSet.version ?? 1,
+        requirements: (priorActiveResult.results || []).map((r) => ({
+          id: r.requirementId,
+          label: r.label,
+          description: r.description,
+        })),
+      }
+    }
+    return null
+  }
+
+  // Build initial rows for an RS — re-eval pre-populates from the prior
+  // result, fresh evaluation pre-populates from the RS definition's AI
+  // values (Phase 9A.1 item 9) with `_aiOriginalValue` snapshotted for
+  // the human-edited pencil icon (Phase 9A item 10).
+  const buildRowsForRs = (rs) => {
+    if (!rs) return []
+    if (priorActiveResult && priorActiveResult.requirementsSet?.id === rs.id) {
       return priorActiveResult.results.map((r) => ({
         requirementId: r.requirementId,
         label: r.label,
@@ -263,34 +286,52 @@ export default function V22RunEvaluationModal({
         _aiOriginalValue: r.value,
       }))
     }
-    const defs = selectedReqSet?.requirements || selectedReqSet?.claims || []
-    if (defs.length > 0) {
-      // Phase 9A.1 item 9: pre-populate each row from the Req Set
-      // definition's `aiValue` + `aiConfidence`. If the definition happens
-      // not to carry an AI value (legacy data or published standards), fall
-      // back to an empty value with null confidence so the row still renders.
-      // `_aiOriginalValue` snapshots the AI's extraction so the Phase 9A
-      // item 10 pencil icon fires whenever the user edits.
-      return defs.map((c) => {
-        const aiValue = c.aiValue ?? ''
-        return {
-          requirementId: c.id || c.requirementId || c.label,
-          label: c.label || c.requirement || c.name,
-          description: c.description || c.criterion,
-          value: aiValue,
-          confidence: typeof c.aiConfidence === 'number' ? c.aiConfidence : null,
-          // Status defaults to 'satisfactory' when an AI value is present
-          // (the AI tentatively agrees), 'missing' when no value exists.
-          // The user cycles via chevrons if they disagree.
-          status: aiValue ? 'satisfactory' : 'missing',
-          _aiOriginalValue: aiValue,
-        }
-      })
-    }
-    return []
-  }, [selectedReqSet, selectedReqSetId, priorActiveResult])
+    const defs = rs.requirements || rs.claims || []
+    return defs.map((c) => {
+      const aiValue = c.aiValue ?? ''
+      return {
+        requirementId: c.id || c.requirementId || c.label,
+        label: c.label || c.requirement || c.name,
+        description: c.description || c.criterion,
+        value: aiValue,
+        confidence: typeof c.aiConfidence === 'number' ? c.aiConfidence : null,
+        status: aiValue ? 'satisfactory' : 'missing',
+        _aiOriginalValue: aiValue,
+      }
+    })
+  }
 
-  const [rows, setRows] = useState(initialRows)
+  // Phase 12.3 (Pivot 2): rows tracked per RS. `rowsByRsId[rsId]` is the
+  // editable row array for that RS. Sync against `selectedReqSetIds` —
+  // newly-checked RSes get fresh rows; unchecked RSes drop their entries
+  // (deselecting + re-selecting forfeits prior edits, which matches the
+  // existing single-RS behavior of resetting on RS change).
+  const [rowsByRsId, setRowsByRsId] = useState(() => {
+    if (!selectedReqSetIds.length) return {}
+    const out = {}
+    for (const rsId of selectedReqSetIds) {
+      const rs = resolveRsObject(rsId)
+      if (rs) out[rsId] = buildRowsForRs(rs)
+    }
+    return out
+  })
+  const lastSelectionKeyRef = useState({ key: selectedReqSetIds.join('|') })[0]
+  const currentSelectionKey = selectedReqSetIds.join('|')
+  if (lastSelectionKeyRef.key !== currentSelectionKey) {
+    lastSelectionKeyRef.key = currentSelectionKey
+    setRowsByRsId((prev) => {
+      const next = {}
+      for (const rsId of selectedReqSetIds) {
+        if (prev[rsId]) {
+          next[rsId] = prev[rsId]
+        } else {
+          const rs = resolveRsObject(rsId)
+          next[rsId] = rs ? buildRowsForRs(rs) : []
+        }
+      }
+      return next
+    })
+  }
   // Phase 12.2 (#106): evidence is no longer user-selected; the snapshot
   // lives in `evidenceUsedSnapshot` (computed below from `evidenceAssets`).
   // The legacy `evidenceSelection` state is retained as a no-op placeholder
@@ -303,123 +344,100 @@ export default function V22RunEvaluationModal({
   //   step 2: review rows (split-panel)
   const [step, setStep] = useState(0)
 
-  // Reset rows when selectedReqSetId changes
-  const lastReqSetIdRef = useState({ value: selectedReqSetId })[0]
-  if (lastReqSetIdRef.value !== selectedReqSetId) {
-    lastReqSetIdRef.value = selectedReqSetId
-    setRows(initialRows)
-  }
-
   const handleRunEvaluation = () => {
-    // canSubmit captures: selected req set + non-zero rows + non-zero evidence
-    // + not a duplicate (Phase 6.5+ #6 + #8).
     if (!canSubmit) return
     setStep(1)
     setTimeout(() => setStep(2), 1500)
   }
 
-  // Phase 9A item 8 sub-1: cycle accepts a direction (+1 for next, -1 for
-  // previous) so chevrons on both sides of the status chip can step it.
-  const cycleStatus = (idx, direction = 1) => {
-    setRows((prev) => prev.map((r, i) => (
-      i === idx ? { ...r, status: cycleNextStatus(r.status, direction) } : r
-    )))
+  // Phase 12.3 (Pivot 2): per-RS row mutators. `cycleStatus(rsId, idx, dir)`
+  // and `updateValue(rsId, idx, value)` replace the prior single-RS shape.
+  const cycleStatus = (rsId, idx, direction = 1) => {
+    setRowsByRsId((prev) => {
+      const rsRows = prev[rsId] || []
+      return {
+        ...prev,
+        [rsId]: rsRows.map((r, i) => (i === idx ? { ...r, status: cycleNextStatus(r.status, direction) } : r)),
+      }
+    })
   }
 
-  const updateValue = (idx, value) => {
-    // Phase 8.5 Bug 4: human entry must not alter the AI's original confidence.
-    // Previously this set `confidence: r.confidence || 0.85`, which bumped any
-    // empty-confidence row to "High · 85%" the instant the user typed —
-    // muddling human edits with the AI's own analysis. Confidence now stays
-    // whatever the AI produced (or 0 if the row started empty). A future
-    // polish item may surface a separate "human-validated" indicator.
-    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value } : r)))
+  const updateValue = (rsId, idx, value) => {
+    setRowsByRsId((prev) => {
+      const rsRows = prev[rsId] || []
+      return {
+        ...prev,
+        [rsId]: rsRows.map((r, i) => (i === idx ? { ...r, value } : r)),
+      }
+    })
   }
 
   // Phase 12.2 (#106): evidence is no longer selectable. The snapshot is
   // the full set of in-scope Assets at evaluation time.
   const evidenceUsedSnapshot = useMemo(() => evidenceAssets.map((a) => a.id), [evidenceAssets])
 
-  // Phase 6.5+ #6 (rescoped Phase 12.2): duplicate detection now keys on
-  // (Req Set, current evidence snapshot) — there's no user-selectable
-  // evidence set anymore, but the snapshot is still the canonical input
-  // for "is this run a duplicate of an existing result." Compare against
-  // the primary selected RS only — multi-RS batches don't reuse the
-  // duplicate-block UX (the UX matches the spec's §11 supersession path).
+  // Phase 12.3 (Pivot 1): duplicate detection keys on each selected RS's id
+  // + the current evidence snapshot. Solo selection (1 RS) keeps the §11
+  // supersession-style block. Multi-RS batches skip the block — running
+  // the same evidence against multiple RSes is the explicit feature.
   const sameSet = (a, b) => {
     if (a.length !== b.length) return false
     const A = new Set(a)
     for (const x of b) if (!A.has(x)) return false
     return true
   }
-  const duplicateOfExisting = selectedReqSet && additionalReqSetIds.length === 0
+  const duplicateOfExisting = selectedReqSetIds.length === 1
     ? existingEvalResults.find((er) =>
-        er.requirementsSet?.id === selectedReqSet.id
+        er.requirementsSet?.id === selectedReqSetIds[0]
         && sameSet(er.evidenceUsed || [], evidenceUsedSnapshot)
       )
     : null
 
-  // Phase 12.2 (#106 + #105): submit gates simplified. No evidence-count
-  // gate — empty-evidence Claims block submit via the empty-state copy
-  // path (rendered above) which short-circuits the modal.
+  // Phase 12.3: submit gated on at-least-one RS checked + non-empty evidence
+  // + EA not pending-acceptance + not a single-RS duplicate. No "primary RS"
+  // concept anymore.
   const eaPendingAcceptance = evaluationAgreement?.status === 'pending-acceptance'
   const hasEvidence = evidenceUsedSnapshot.length > 0
-  const canSubmit = !!selectedReqSet && rows.length > 0 && hasEvidence && !duplicateOfExisting && !eaPendingAcceptance
+  const hasAnyRsSelected = selectedReqSetIds.length > 0
+  const canSubmit = hasAnyRsSelected && hasEvidence && !duplicateOfExisting && !eaPendingAcceptance
 
   const handleSubmit = () => {
     if (!canSubmit) return
-    // Phase 12.2 (#121): build per-RS results. Primary RS uses the
-    // human-edited rows. Additional RS use AI confidence + status
-    // verbatim (no separate review surface this phase).
+    // Phase 12.3 (Pivot 2): build per-RS results from `rowsByRsId`. Each
+    // selected RS contributes one Eval Result; submit-with-defaults works
+    // because each RS's rows carry AI-suggested values out of the box.
     const perRsResults = []
-    perRsResults.push({
-      requirementsSet: { id: selectedReqSet.id, name: selectedReqSet.name, version: selectedReqSet.version ?? 1 },
-      rows: rows.map((r) => ({
+    for (const rsId of selectedReqSetIds) {
+      const rs = resolveRsObject(rsId)
+      if (!rs) continue
+      const rsRows = (rowsByRsId[rsId] || []).map((r) => ({
         requirementId: r.requirementId,
         label: r.label,
         value: r.value,
         status: r.status,
         confidence: r.confidence,
         _aiOriginalValue: r._aiOriginalValue,
-      })),
-    })
-    for (const rsId of additionalReqSetIds) {
-      const rs = availableRequirementsSets.find((x) => x.id === rsId)
-      if (!rs) continue
-      const defs = rs.requirements || rs.claims || []
-      const rsRows = defs.map((c) => {
-        const aiValue = c.aiValue ?? ''
-        return {
-          requirementId: c.id || c.requirementId || c.label,
-          label: c.label || c.requirement || c.name,
-          value: aiValue,
-          status: aiValue ? 'satisfactory' : 'missing',
-          confidence: typeof c.aiConfidence === 'number' ? c.aiConfidence : null,
-          _aiOriginalValue: aiValue,
-        }
-      })
+      }))
       perRsResults.push({
         requirementsSet: { id: rs.id, name: rs.name, version: rs.version ?? 1 },
         rows: rsRows,
       })
     }
-    // Generate batch id — V2App's orchestrator stamps each Eval Result.
+    if (perRsResults.length === 0) return
     const batchId = `batch-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
     onSubmit?.({
       batchId,
       perRsResults,
       evidenceUsed: [...evidenceUsedSnapshot],
-      // Backwards compat: solo single-RS callers can read these top-level
-      // fields if they don't want to walk perRsResults.
       requirementsSet: perRsResults[0].requirementsSet,
       rows: perRsResults[0].rows,
-      // Phase 12.2 (#117): re-run audit fields plumbed by the orchestrator.
       priorEvalResultId: priorActiveResult?.id || null,
       evidenceDiff: evidenceDiff || null,
     })
   }
 
-  const supersedeNotice = priorActiveResult && priorActiveResult.requirementsSet?.id === selectedReqSetId
+  const supersedeNotice = priorActiveResult
+    && selectedReqSetIds.includes(priorActiveResult.requirementsSet?.id)
 
   const headerSubtitle =
     selfEvaluation
@@ -438,119 +456,114 @@ export default function V22RunEvaluationModal({
               step={1} totalSteps={3} onClose={onClose}
             />
             <ModalBody>
-              <FieldLabel label="Requirements Set" required />
-              {lockedRequirementsSetId ? (
-                // Phase 9A item 6: Re-Evaluate flow locks the Req Set to the
-                // one the prior Eval Result used. Show as a read-only card
-                // with a brief explainer; the user can still pick new
-                // evidence below and re-run.
-                <>
-                  <div style={{
-                    padding: 14, borderRadius: 6, marginBottom: 8,
-                    background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
-                    border: '1px solid var(--accent-indigo)',
-                    display: 'flex', alignItems: 'center', gap: 10, cursor: 'not-allowed',
-                  }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {selectedReqSet?.name || lockedRequirementsSetId}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                        {lockedRequirementsSetId} · v{selectedReqSet?.version ?? 1}
-                      </div>
-                    </div>
-                    <span style={{
-                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                      padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
-                      color: 'var(--accent-indigo)',
-                      background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
-                    }}>LOCKED</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: 16, fontStyle: 'italic' }}>
-                    To change Requirements Set, start a new evaluation from the Claim.
-                  </div>
-                </>
-              ) : availableRequirementsSets.length === 0 ? (
+              {/* Phase 12.3 (Pivot 1): checkbox multi-select. The label
+                  hint reads "(check 1 or more)" so the multi behavior is
+                  obvious. Locked Re-Evaluate flow auto-checks the locked
+                  RS and disables every other row. */}
+              <FieldLabel label={`Requirements Sets (${selectedReqSetIds.length} checked)`} required />
+              {dedupedRsPool.length === 0 ? (
                 <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--accent-amber)', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', marginBottom: 16 }}>
                   No Requirements Sets in your library. Add one before running an evaluation.
                 </div>
               ) : (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16,
-                  // Phase 9A.6 Gate C (#91): scroll container for the
-                  // Requirements Sets picker — matches the Parse Template
-                  // picker treatment, per the CLAUDE.md picker convention.
                   maxHeight: 300, overflowY: 'auto',
                   paddingRight: 2,
                 }}>
-                  {availableRequirementsSets.map((rs) => {
-                    // Phase 12.2 (#121): primary (radio-like) + additional
-                    // (multi-select) selection. Click on the primary's row
-                    // sets it as primary; click the +/− chip to toggle as
-                    // a batch sibling. Primary RS drives the visible review
-                    // rows; additional RS use AI values verbatim.
-                    const isPrimary = selectedReqSetId === rs.id
-                    const isAdditional = additionalReqSetIds.includes(rs.id)
+                  {dedupedRsPool.map((rs) => {
+                    const isChecked = selectedReqSetIds.includes(rs.id)
+                    const lockedOther = !!lockedRequirementsSetId && lockedRequirementsSetId !== rs.id
+                    const lockedThis = lockedRequirementsSetId === rs.id
+                    const disabled = lockedOther
+                    const provenanceLabel = rs._provenance === 'own' ? 'Authored by you'
+                      : rs._provenance === 'public' ? 'Public' : null
                     const suggested = suggestedSetIds.has(rs.id)
                     return (
                       <div
                         key={rs.id}
+                        onClick={() => { if (!disabled) toggleSelectedReqSet(rs.id) }}
+                        role="checkbox"
+                        aria-checked={isChecked}
+                        aria-disabled={disabled}
+                        tabIndex={disabled ? -1 : 0}
+                        onKeyDown={(e) => {
+                          if (disabled) return
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            toggleSelectedReqSet(rs.id)
+                          }
+                        }}
                         style={{
                           padding: '10px 14px', borderRadius: 6,
-                          background: isPrimary ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
-                          border: `1px solid ${isPrimary ? 'var(--accent-indigo)' : isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 50%, transparent)' : 'var(--border)'}`,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          background: isChecked ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)' : 'var(--bg-card)',
+                          border: `1px solid ${isChecked ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                          opacity: disabled ? 0.5 : 1,
                           transition: 'all 120ms',
                           display: 'flex', alignItems: 'center', gap: 10,
                         }}
                       >
-                        <div
-                          onClick={() => {
-                            if (isAdditional) {
-                              // Promoting an additional RS to primary — drop
-                              // it from the additional list to keep state
-                              // mutually exclusive.
-                              setAdditionalReqSetIds((prev) => prev.filter((x) => x !== rs.id))
-                            }
-                            setSelectedReqSetId(rs.id)
-                          }}
-                          style={{ flex: 1, cursor: 'pointer' }}
-                        >
-                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{rs.name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{rs.id} · v{rs.version ?? 1}</div>
+                        <div style={{
+                          width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                          border: `1.5px solid ${isChecked ? 'var(--accent-indigo)' : 'var(--border-hover)'}`,
+                          background: isChecked ? 'var(--accent-indigo)' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {isChecked && <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                         </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{
+                              fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>{rs.name}</span>
+                            <span style={{
+                              fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+                              flexShrink: 0,
+                            }}>v{rs.version ?? 1}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {rs.id}
+                          </div>
+                        </div>
+                        {provenanceLabel && (
+                          <span style={{
+                            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '1px 5px', borderRadius: 3, letterSpacing: '0.1em',
+                            color: 'var(--text-dim)',
+                            background: 'var(--bg-deep)',
+                            border: '1px solid var(--border-faint)',
+                            flexShrink: 0,
+                            textTransform: 'uppercase',
+                          }}>{provenanceLabel}</span>
+                        )}
                         {suggested && (
                           <span style={{
                             fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                             padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
                             color: 'var(--accent-amber)',
                             background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                            flexShrink: 0,
                           }}>SUGGESTED</span>
                         )}
-                        {isPrimary ? (
+                        {lockedThis && (
                           <span style={{
                             fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                             padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
                             color: 'var(--accent-indigo)',
                             background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
-                          }}>PRIMARY</span>
-                        ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleAdditionalReqSet(rs.id) }}
-                            title={isAdditional ? 'Drop from this batch' : 'Also evaluate against this Requirements Set (creates a sibling Eval Result)'}
-                            style={{
-                              padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
-                              border: `1px solid ${isAdditional ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                              background: isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : 'transparent',
-                              color: isAdditional ? 'var(--accent-indigo)' : 'var(--text-dim)',
-                              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                              letterSpacing: '0.04em',
-                              flexShrink: 0,
-                            }}
-                          >{isAdditional ? '✓ BATCH' : '+ BATCH'}</button>
+                            flexShrink: 0,
+                          }}>LOCKED</span>
                         )}
                       </div>
                     )
                   })}
+                </div>
+              )}
+              {lockedRequirementsSetId && (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: 16, fontStyle: 'italic' }}>
+                  This is a re-evaluation. To pick a different Requirements Set, start a new evaluation from the Claim.
                 </div>
               )}
 
@@ -661,14 +674,14 @@ export default function V22RunEvaluationModal({
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                 {eaPendingAcceptance
                   ? `Cannot run evaluation: this Evaluation Agreement has a pending amendment proposal. Wait for ${evaluationAgreement?.grantor?.party || 'the grantor'}'s response, or respond to the proposal in your inbox.`
-                  : !selectedReqSet
-                    ? 'Pick a Requirements Set to continue.'
+                  : !hasAnyRsSelected
+                    ? 'Check at least one Requirements Set to continue.'
                     : !hasEvidence
                       ? (isOwnerView ? 'Add evidence to this Claim before evaluating.' : 'Ask the Claim owner to add evidence before evaluating.')
                       : duplicateOfExisting
                         ? 'This (Requirements Set, evidence) combination already has an Eval Result.'
-                        : additionalReqSetIds.length > 0
-                          ? `Will produce ${1 + additionalReqSetIds.length} Eval Results sharing a batch id.`
+                        : selectedReqSetIds.length > 1
+                          ? `Will produce ${selectedReqSetIds.length} Eval Results sharing a batch id.`
                           : ''}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -697,12 +710,25 @@ export default function V22RunEvaluationModal({
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '0 auto 28px' }}>
                   <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.3} />
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  Evaluating against {selectedReqSet?.name || 'Requirements Set'}…
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-                  Running {rows.length} requirement{rows.length !== 1 ? 's' : ''} across {evidenceSelection.length} Asset{evidenceSelection.length !== 1 ? 's' : ''}
-                </div>
+                {(() => {
+                  // Phase 12.3: aggregate counts across selected RSes for
+                  // the processing-stage copy.
+                  const totalRows = selectedReqSetIds.reduce((acc, rsId) => acc + (rowsByRsId[rsId]?.length || 0), 0)
+                  const firstRs = selectedReqSetIds.length > 0 ? resolveRsObject(selectedReqSetIds[0]) : null
+                  const headerLabel = selectedReqSetIds.length === 1
+                    ? (firstRs?.name || 'Requirements Set')
+                    : `${selectedReqSetIds.length} Requirements Sets`
+                  return (
+                    <>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                        Evaluating against {headerLabel}…
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                        Running {totalRows} requirement{totalRows !== 1 ? 's' : ''} across {evidenceSelection.length} Asset{evidenceSelection.length !== 1 ? 's' : ''}
+                      </div>
+                    </>
+                  )
+                })()}
                 <div style={{
                   width: '60%', height: 3, borderRadius: 2,
                   background: 'var(--border)', margin: '24px auto 0',
@@ -771,43 +797,102 @@ export default function V22RunEvaluationModal({
                     ))}
                   </div>
                 </div>
-                <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                  <FieldLabel label={`Requirement Rows (${rows.length})`} />
+                {/* Phase 12.3 (Pivot 2): grouped requirement rows per
+                    selected RS. Sections render in check order. Each
+                    section shows the RS's name + version header band, then
+                    the per-requirement rows. Submit-with-defaults works
+                    because each row carries AI-suggested values out of
+                    the box; the user can curate or skip directly to
+                    Submit. */}
+                <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {(() => {
+                    // Aggregate counts across all selected RSes for the
+                    // footer SAT/UNSAT/MISSING/N/A summary.
+                    const allRows = []
+                    for (const rsId of selectedReqSetIds) {
+                      for (const r of (rowsByRsId[rsId] || [])) allRows.push(r)
+                    }
+                    return null
+                  })()}
                   <div style={{
-                    border: '1px solid var(--border)', borderRadius: 8,
                     flex: 1, minHeight: 0, overflowY: 'auto',
+                    display: 'flex', flexDirection: 'column', gap: 14,
                   }}>
-                    {rows.map((r, i) => (
-                      <ReviewRow
-                        key={r.requirementId}
-                        label={r.label}
-                        description={r.description}
-                        value={r.value}
-                        onValueChange={(v) => updateValue(i, v)}
-                        confidence={r.confidence}
-                        status={r.status}
-                        onStatusCycle={(dir) => cycleStatus(i, dir)}
-                        humanEdited={r._aiOriginalValue != null && r.value !== r._aiOriginalValue}
-                      />
-                    ))}
+                    {selectedReqSetIds.map((rsId) => {
+                      const rs = resolveRsObject(rsId)
+                      const rsRows = rowsByRsId[rsId] || []
+                      return (
+                        <div key={rsId} style={{
+                          border: '1px solid var(--border)', borderRadius: 8,
+                          background: 'var(--bg-card)',
+                          overflow: 'hidden',
+                        }}>
+                          {/* Section header band */}
+                          <div style={{
+                            padding: '8px 12px',
+                            background: 'color-mix(in srgb, var(--accent-indigo) 6%, transparent)',
+                            borderBottom: '1px solid var(--border-faint)',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                          }}>
+                            <span style={{
+                              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              padding: '1px 5px', borderRadius: 3, letterSpacing: '0.06em',
+                              color: 'var(--accent-indigo)',
+                              background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                            }}>REQUIREMENTS SET</span>
+                            <span style={{
+                              fontSize: 12, color: 'var(--text-primary)', fontWeight: 700,
+                              flex: 1, minWidth: 0,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>{rs?.name || rsId}</span>
+                            <span style={{
+                              fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                            }}>v{rs?.version ?? 1} · {rsRows.length} requirement{rsRows.length === 1 ? '' : 's'}</span>
+                          </div>
+                          <div>
+                            {rsRows.map((r, i) => (
+                              <ReviewRow
+                                key={`${rsId}-${r.requirementId}`}
+                                label={r.label}
+                                description={r.description}
+                                value={r.value}
+                                onValueChange={(v) => updateValue(rsId, i, v)}
+                                confidence={r.confidence}
+                                status={r.status}
+                                onStatusCycle={(dir) => cycleStatus(rsId, i, dir)}
+                                humanEdited={r._aiOriginalValue != null && r.value !== r._aiOriginalValue}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
             </ModalBody>
             <ModalFooter>
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                {rows.length > 0 && (
-                  <>
-                    {rows.filter(r => r.status === 'satisfactory').length} SAT ·{' '}
-                    {rows.filter(r => r.status === 'unsatisfactory').length} UNSAT ·{' '}
-                    {rows.filter(r => r.status === 'missing').length} MISSING ·{' '}
-                    {rows.filter(r => r.status === 'na').length} N/A
-                  </>
-                )}
+                {(() => {
+                  const allRows = []
+                  for (const rsId of selectedReqSetIds) {
+                    for (const r of (rowsByRsId[rsId] || [])) allRows.push(r)
+                  }
+                  if (allRows.length === 0) return ''
+                  return (
+                    <>
+                      {allRows.filter(r => r.status === 'satisfactory').length} SAT ·{' '}
+                      {allRows.filter(r => r.status === 'unsatisfactory').length} UNSAT ·{' '}
+                      {allRows.filter(r => r.status === 'missing').length} MISSING ·{' '}
+                      {allRows.filter(r => r.status === 'na').length} N/A
+                      {selectedReqSetIds.length > 1 ? ` · across ${selectedReqSetIds.length} Requirements Sets` : ''}
+                    </>
+                  )
+                })()}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn label="Back" onClick={() => setStep(0)} />
-                <Btn label="Save Evaluation Result" accent disabled={!canSubmit} onClick={handleSubmit} />
+                <Btn label={selectedReqSetIds.length > 1 ? `Save ${selectedReqSetIds.length} Eval Results` : 'Save Evaluation Result'} accent disabled={!canSubmit} onClick={handleSubmit} />
               </div>
             </ModalFooter>
           </>

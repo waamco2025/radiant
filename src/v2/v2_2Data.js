@@ -410,6 +410,36 @@ export function makeClaim({
   }
 }
 
+// Phase 12.3 (Bug B): single source of truth for "what Assets does this
+// Claim currently reference?" Filters out entries with `removedDate` set
+// and resolves `supersededBy` chains to their latest active head. Pass an
+// `allAssets` array (typically the merged shared dataset's `assets`) and
+// receive Asset objects (not just ids). Returns `[]` for malformed claims.
+//
+// Consumers should prefer this helper over reading `claim.referencedAssetIds`
+// directly when (a) they need full Asset objects and (b) they want the
+// chain-resolution semantics. The primitive `referencedAssetIds[]` IS
+// already the active set after `makeAmendedClaim` runs (the factory
+// derives it from `assetReferences[].filter(r => !r.removedDate &&
+// !r.supersededBy)`), so most existing call sites that read just the ids
+// already get correct behavior — but a stale DA scope (`da.scope.assetIds`)
+// or any other ids-from-elsewhere computation can leak removed entries.
+// Filing #170 to consolidate the dual-shape model in a follow-up phase.
+export function getInScopeAssets(claim, allAssets = []) {
+  if (!claim) return []
+  // Use the chain when present (Phase 12.2+); fall back to the primitive
+  // list for pre-12.2 claims that haven't been amended yet.
+  if (Array.isArray(claim.assetReferences) && claim.assetReferences.length > 0) {
+    return claim.assetReferences
+      .filter((r) => !r.removedDate && !r.supersededBy)
+      .map((r) => allAssets.find((a) => a.id === r.assetId))
+      .filter(Boolean)
+  }
+  return (claim.referencedAssetIds || [])
+    .map((id) => allAssets.find((a) => a.id === id))
+    .filter(Boolean)
+}
+
 // Phase 12.2 (#122): walk the Claim-internal Asset supersession chain and
 // return the latest version's id. Mirrors `getLatestRSVersion` (Phase 12.1).
 // Returns the input id when no supersession exists or the entry isn't on
@@ -2441,7 +2471,17 @@ export function deriveAgreementEdges(view) {
     }
     if (kind === 'claim' && internal && hasScopeAssets) {
       // Claim → referenced Asset (one edge per (claim, asset) pair).
-      for (const aid of da.scope.assetIds) pushEdge(id, aid, da)
+      // Phase 12.3 (Bug B): intersect against the Claim's current
+      // `referencedAssetIds[]` (the active in-scope set per Phase 12.2's
+      // `assetReferences[]` chain). Removed/superseded entries persist in
+      // `da.scope.assetIds` for audit, but the edges should not draw on
+      // canvas — the Asset is no longer logically referenced.
+      const subjectClaim = view.claims.find((c) => c.id === id)
+      const activeAssetIds = new Set(subjectClaim?.referencedAssetIds || [])
+      for (const aid of da.scope.assetIds) {
+        if (subjectClaim && !activeAssetIds.has(aid)) continue
+        pushEdge(id, aid, da)
+      }
       continue
     }
     if (kind === 'claim' && toPublic) {

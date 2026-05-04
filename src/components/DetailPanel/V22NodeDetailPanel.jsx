@@ -1480,7 +1480,47 @@ function V22EvalResultPanel({
           )}
           {isSuperseded && er?.supersededBy && (
             <Section title="Supersession">
-              <Row label="Superseded by" value={er.supersededBy} mono />
+              {/* Phase 12.3 (Bug C): the Supersession list item is now
+                  clickable — same row-click pattern as the Sibling
+                  Evaluations section above. Click navigates to the
+                  successor Eval Result's Detail Panel. Falls back to the
+                  legacy read-only Row when no `onSelectSiblingEvalResult`
+                  handler is wired (defensive). */}
+              {onSelectSiblingEvalResult ? (() => {
+                const successorId = er.supersededBy
+                const successor = (siblingEvalResults || []).find((s) => s.id === successorId)
+                  || { id: successorId, name: successorId, status: 'active' }
+                const sucStatus = successor.status === 'superseded'
+                  ? { label: 'SUPERSEDED', color: 'var(--text-dim)' }
+                  : successor.status === 'outdated'
+                    ? { label: 'OUTDATED', color: 'var(--accent-amber)' }
+                    : { label: 'ACTIVE', color: 'var(--accent-green)' }
+                return (
+                  <div
+                    onClick={() => onSelectSiblingEvalResult(successor)}
+                    style={{
+                      padding: '6px 8px', borderRadius: 3,
+                      background: 'var(--bg-raised)',
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      transition: 'background 100ms',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 70%, var(--accent-indigo))' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-raised)' }}
+                  >
+                    <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {successor.name}
+                    </span>
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: sucStatus.color, padding: '1px 5px', borderRadius: 3,
+                      background: `color-mix(in srgb, ${sucStatus.color} 12%, transparent)`,
+                    }}>{sucStatus.label}</span>
+                  </div>
+                )
+              })() : (
+                <Row label="Superseded by" value={er.supersededBy} mono />
+              )}
             </Section>
           )}
           {isOwner && isOrphaned && !isSuperseded && (

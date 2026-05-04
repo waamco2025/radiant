@@ -5544,9 +5544,17 @@ export default function V2App() {
           // Evidence assets: for inter-party, the DA's scope.assetIds; for
           // self-eval, all of the Claim's referenced Assets.
           const da = ea ? v22View?.disclosureAgreements.find(d => d.id === ea.disclosureAgreementId) : null
-          const scopeAssetIds = isSelf
+          // Phase 12.3 (Bug B): intersect `da.scope.assetIds` against the
+          // Claim's current active `referencedAssetIds[]`. The DA scope
+          // isn't auto-amended when Alice removes an Asset from her Claim,
+          // so without this filter Bob would see removed Assets as
+          // available evidence. The active set is already derived correctly
+          // by `makeAmendedClaim` (Phase 12.2's `nextActiveAssetIds`).
+          const activeReferencedSet = new Set(claim.referencedAssetIds || [])
+          const rawScopeIds = isSelf
             ? (claim.referencedAssetIds || [])
             : (da?.scope?.assetIds || claim.referencedAssetIds || [])
+          const scopeAssetIds = rawScopeIds.filter((id) => activeReferencedSet.has(id))
           // Phase 6.5 #5 (Option A): the in-scope Assets are legitimately
           // disclosed under this Agreement, but they aren't pulled onto Bob's
           // main canvas (counterparty Assets stay private per spec §6.4). For
@@ -5586,6 +5594,19 @@ export default function V2App() {
                 version: rs.version ?? 1,
                 requirements: rs.requirements || [],
                 claims: rs.claims || [],
+              }))}
+              // Phase 12.3 (Bug A + Pivot 1): public RS pool surfaces in
+              // the checkbox picker too. The modal dedupes against the
+              // owner-authored pool above; same id wins on the
+              // owner-authored side (provenance: 'own' badge).
+              publicRequirementSets={visiblePublishedSets.map((rs) => ({
+                id: rs.id,
+                name: rs.name,
+                version: rs.version ?? 1,
+                requirements: rs.requirements || [],
+                claims: rs.claims || [],
+                _publishedBy: rs._publishedBy,
+                _publishedDate: rs._publishedDate,
               }))}
               priorActiveResult={
                 // Phase 9A item 6: when Re-Evaluate is launched from an Eval
@@ -6636,17 +6657,38 @@ export default function V2App() {
                   ? (sharedForPanel.claims.find((c) => c.id === node.v22Artifact.claimId)?.name || null)
                   : null}
                 // Phase 12.2 (#121): sibling Eval Results in the same batch.
+                // Phase 12.3 (Bug C): also include the supersession successor
+                // when this Eval Result is superseded — the V22EvalResultPanel's
+                // Supersession section uses the same lookup to render a
+                // clickable row, and the successor may live outside this
+                // batch (re-runs typically generate a new batchId).
                 siblingEvalResults={(() => {
                   if (node.v22Type !== 'EVAL RESULT') return []
                   const er = node.v22Artifact
-                  if (!er?.batchId) return []
                   const all = (sharedForPanel.evaluationResults || [])
-                  return all.filter((s) => s.batchId === er.batchId && s.id !== er.id)
-                    .map((s) => ({
-                      id: s.id,
-                      name: s.requirementsSet?.name || s.id,
-                      status: s.status,
-                    }))
+                  const out = []
+                  if (er?.batchId) {
+                    for (const s of all) {
+                      if (s.batchId === er.batchId && s.id !== er.id) {
+                        out.push({
+                          id: s.id,
+                          name: s.requirementsSet?.name || s.id,
+                          status: s.status,
+                        })
+                      }
+                    }
+                  }
+                  if (er?.supersededBy && !out.some((x) => x.id === er.supersededBy)) {
+                    const successor = all.find((s) => s.id === er.supersededBy)
+                    if (successor) {
+                      out.push({
+                        id: successor.id,
+                        name: successor.requirementsSet?.name || successor.id,
+                        status: successor.status,
+                      })
+                    }
+                  }
+                  return out
                 })()}
                 onSelectSiblingEvalResult={(s) => {
                   setSel(s.id)
@@ -6747,7 +6789,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.12.2 &middot; Changelog
+          v0.12.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6794,6 +6836,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.12.3', date: '2026-05-04', label: 'Phase 12.3', items: [
+                  'New: Run Evaluation Requirements Set picker is now a checkbox multi-select. The "+ BATCH" chip mechanism is gone — every checked Set is treated equally; submit produces one Eval Result per checked Set, all sharing a batch id.',
+                  'New: Review stage shows grouped requirement rows per selected Requirements Set, in the order you checked them. Submit-with-defaults works — AI-suggested values flow through unchanged for any Set you don\'t curate.',
+                  'New: Public Requirements Sets are now visible in the Run Evaluation picker alongside your authored sets. Where the same Set is reachable via both, "Authored by you" wins.',
+                  'Fix: Removing an Asset from a Claim now correctly clears the Asset → Claim disclosure edge from the netgraph and removes the Asset from any subsequent Run Evaluation\'s available evidence.',
+                  'Fix: The "Superseded by" entry in a superseded Eval Result\'s Detail Panel is now clickable — jumps to the successor Eval Result.',
+                  'Fix: Run Evaluation Requirements Set picker no longer renders duplicate entries when a Set is reachable through both your authored pool and the public pool.',
+                ]},
                 { version: '0.12.2', date: '2026-05-04', label: 'Phase 12.2', items: [
                   'New (#106): Run Evaluation modal opens directly to a review-rows surface — no Asset picker step. Evidence is auto-snapshot at submit time from all in-scope Assets on the Claim.',
                   'New (#121): Multi-Requirements-Set evaluation. Pick a primary RS for review + add additional RS via the "+ BATCH" chip; submit produces N Eval Results sharing a batchId. Sibling Eval Results section in the Detail Panel surfaces batch members.',
