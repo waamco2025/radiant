@@ -614,6 +614,28 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
 
 **Detail Panel rendering:** `V22ClaimPanel` renders a "Referenced Standards" section after Referenced Assets and before Acknowledgments. Each row shows the RS name (clickable → opens Library at the originally-referenced version), a provenance badge ("Authored by you" / "Public"), an optional "Newer version available" pill when the referenced version is not the latest in its lineage, and the `addedDate` in muted small text. Empty state omits the section entirely.
 
+### 10.3b Asset versioning chain on a Claim (Phase 12.2 #122)
+
+Phase 12.2 introduced Claim-internal Asset versioning to support evidence amendment without compromising prior evaluations' audit trail. The model is parallel to §10.3a's RS supersession (version-pinned + chain-walked) but scoped to a Claim's reference list rather than a Library artifact.
+
+**Field shape:** `assetReferences: [{ assetId, supersededBy, addedDate, removedDate }]`. The active `referencedAssetIds[]` (primitive string array) stays the read-side surface for the 42+ existing consumers — `assetReferences[]` is the audit chain that AmendClaim, OUTDATED detection, and re-run diff helpers walk. `referencedAssetIds[]` is derived from `assetReferences[]` as the entries with `removedDate === null && supersededBy === null` (the active heads).
+
+**AmendClaim affordances** (owner only):
+- **Replace:** opens a successor picker (Asset pool: owner's own Assets not already on the Claim). Selection stamps `supersededBy` on the existing entry and appends a fresh entry for the replacement (`supersededBy: null, addedDate: now, removedDate: null`). The Asset node itself is NEVER modified.
+- **Remove:** stamps `removedDate: now` on the existing entry without successor.
+- Both produce identical OUTDATED signals on prior Eval Results referencing the affected Asset.
+
+**OUTDATED Eval Result lifecycle:**
+- New `status` value `'outdated'` alongside existing `'active'` and `'superseded'`.
+- `isEvalResultStale(evalResult, claim)` walks `evidenceUsed` against the post-amendment chain; returns true if any used Asset has been superseded or removed.
+- AmendClaim submit walks all Eval Results on the Claim, calls the helper, flips newly-stale ones to `'outdated'`, and enqueues a `v22-eval-result-stale` notification (single-grantee, informational) on the evaluator's inbox.
+- Notification click pans to the Eval Result and dismisses the row; OUTDATED status persists until re-run.
+- Re-run produces a new active Eval Result (via #117's flow); the prior OUTDATED result transitions to `'superseded'` — supersession outranks outdated.
+
+**Visual treatment:**
+- AssetNode renders an amber `OUTDATED` badge in Row 0 (same row as REVOKED) + dashed amber card border. Distinguished from PROVISIONAL (dashed grey) and REVOKED (solid red).
+- Eval Result Detail Panel renders an "Out of date" notice section near the top with re-run guidance. Cross-referenced from the standard Re-Run Evaluation footer button.
+
 ### 10.4 Disclosure Agreement artifact
 
 > **Prototype note — Disclosure Agreement field authority.** Platform-issued: agreement `id`, `terms.createdDate`, `terms.expires` (once set; validity enforced Platform-side), `status`, each `amendments[]` entry's metadata. App-derived / actor-input: `grantor`, `grantee`, `subject`, `granteeAssetId`, `type`, `scope`, `terms.autoRenew`. In production, the agreement itself is provisioned by SDP, signed by both parties, and stored bilaterally with Platform-verified cryptographic consent records. The `status` field transitions (`active` → `expired`, `active` → `revoked`, `pending` → `active`, etc.) are managed by SDP as lifecycle state changes. **Authority:** SDP (provisioning, lifecycle state, status transitions, bilateral consent recording); DPP (agreement artifact registration).
@@ -1451,6 +1473,11 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§10.3 / §10.3b — Phase 12.2 (#122):** Claim-internal Asset versioning via `assetReferences[]` supersession chain (parallel to the active `referencedAssetIds[]` primitive list). Asset nodes immutable. AmendClaim Option A drop semantics (Replace + Remove). New OUTDATED Eval Result status with amber-dashed visual treatment + persistence-until-rerun behavior. New `v22-eval-result-stale` notification type (single-grantee, informational, dismiss does NOT clear OUTDATED). New helpers `getLatestAssetVersion`, `isEvalResultStale`.
+- **§10.6 — Phase 12.2 (#106):** Run Evaluation modal becomes review-rows-only at open; Asset picker dropped. `evidenceUsed` snapshots all in-scope Assets at evaluation time.
+- **§10.6 — Phase 12.2 (#121):** Multi-RS evaluation support; N Eval Results share a `batchId`; backwards-compatible solo evaluations carry `batchId: null`. New `priorEvalResultId` + `evidenceDiff` audit fields.
+- **§10.6 — Phase 12.2 (#117):** Re-run diff readout (banner in modal + section in Detail Panel); `evidenceDiff` stamped on new Eval Result; `priorEvalResultId` links chain. New helper `computeEvidenceDiff`.
+- **§13 — Phase 12.2 (#105):** Run Evaluation modal empty-evidence copy split by role (owner vs. evaluator).
 - **§10.3 / §10.3a — Phase 12.1:** Claims gain non-binding `referencedRequirementsSets[]` field; informational only, no evaluation coupling. Inline supersession-update affordance scoped to this section only. Adds + removes go through AmendClaim as cascade-skip amendments (no Eval Result staleness, no notifications).
 - **§2.3 Proof-Only disclosure — Phase 6:** added the rule that Proof-Only disclosure requires at least one existing Eval Result on the Claim at response time; response modal lists existing Eval Results and blocks with an informational message when none exist.
 - **§3 Node type labels + state badges — Phase 3 / Phase 6 / Phase 6.5+:** codified the multi-line layout (type label above name) and documented `PROVISIONAL` / `DECLINED` / `SUPERSEDED` as separate inline badges (not suffixes on `v22Type`), with `DECLINED` outranking `PROVISIONAL`.

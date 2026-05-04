@@ -25,14 +25,23 @@ export default function AmendClaimModal({
   activeParty,                 // Phase 9A.3 Gate B — required when `onNestedAssetCreated` is passed
   credits = Infinity,          // Phase 9A.6 Gate A (#65) — forwarded to nested Register-new-Asset
   creditsPerAsset = 0,
-  claim,                       // { id, name, description, referencedAssetIds, referencedRequirementsSets }
+  claim,                       // { id, name, description, referencedAssetIds, referencedRequirementsSets, assetReferences }
   candidateAssets = [],        // [{ id, name, file: { filename } }] — Assets owned by the active actor that aren't already referenced
   alreadyReferencedAssets = [], // [{ id, name, file: { filename } }] — for the read-only "already referenced" panel
   // Phase 12.1 (#120): RS pools + lookup for surfacing existing references.
   ownRequirementSets = [],
   publicRequirementSets = [],
   rsLookup = {},               // { [rsId]: { name, version, _publishedBy, ... } } — used to render existing-reference rows
-  onSubmit,                    // ({ addedAssetIds, addedRequirementsSetIds, removedRequirementsSetIds }) => void
+  // Phase 12.2 (#122): set of evaluated Asset ids (Assets referenced by at
+  // least one Eval Result on this Claim). Used to gate the Replace/Remove
+  // affordances — non-evaluated rows can also be removed but the brief
+  // says the two-affordance pattern only applies to evaluated rows.
+  evaluatedAssetIds = [],
+  // Phase 12.2 (#122): replacement candidate pool — Assets owned by the
+  // active actor that aren't already on the Claim. Used for the Replace
+  // sub-picker. Same shape as `candidateAssets` (a superset).
+  replacementCandidates = null,
+  onSubmit,                    // ({ addedAssetIds, addedRequirementsSetIds, removedRequirementsSetIds, removedAssetIds, supersededAssets }) => void
   onClose,
   // Phase 9A.3 Gate B / backlog #34 — inline "Register new Asset…" CTA. When
   // passed, the modal renders the CTA and opens V22CreateAssetModal nested.
@@ -61,8 +70,44 @@ export default function AmendClaimModal({
     setRemovedRsIds((prev) => prev.includes(rsId) ? prev.filter((x) => x !== rsId) : [...prev, rsId])
   }
 
-  // Submit is enabled when ANY of the three diff buckets has content.
-  const canSubmit = selected.length > 0 || addedRsIds.length > 0 || removedRsIds.length > 0
+  // Phase 12.2 (#122): Asset edits — supersede + drop. `supersededAssets`
+  // is a list of `{ from, to }` pairs (Replace selections); `removedAssetIds`
+  // is the bare-id drop set. `replacingFromAssetId` tracks which row is
+  // currently in the Replace picker.
+  const [supersededAssets, setSupersededAssets] = useState([])
+  const [removedAssetIds, setRemovedAssetIds] = useState([])
+  const [replacingFromAssetId, setReplacingFromAssetId] = useState(null)
+  const evaluatedSet = new Set(evaluatedAssetIds)
+  const replacementPool = (replacementCandidates || candidateAssets)
+    .filter((a) => a.id !== replacingFromAssetId)
+  const toggleRemoveAsset = (assetId) => {
+    setRemovedAssetIds((prev) => prev.includes(assetId) ? prev.filter((x) => x !== assetId) : [...prev, assetId])
+    // Removing an Asset cancels any in-flight supersession on the same id.
+    setSupersededAssets((prev) => prev.filter((s) => s.from !== assetId))
+  }
+  const applyReplace = (toAssetId) => {
+    if (!replacingFromAssetId || !toAssetId) return
+    setSupersededAssets((prev) => {
+      const without = prev.filter((s) => s.from !== replacingFromAssetId)
+      return [...without, { from: replacingFromAssetId, to: toAssetId }]
+    })
+    // Replacing cancels any drop on the same id.
+    setRemovedAssetIds((prev) => prev.filter((x) => x !== replacingFromAssetId))
+    setReplacingFromAssetId(null)
+  }
+  const cancelReplace = (fromAssetId) => {
+    setSupersededAssets((prev) => prev.filter((s) => s.from !== fromAssetId))
+  }
+  const cancelRemove = (assetId) => {
+    setRemovedAssetIds((prev) => prev.filter((x) => x !== assetId))
+  }
+
+  // Submit is enabled when ANY of the diff buckets has content.
+  const canSubmit = selected.length > 0
+    || addedRsIds.length > 0
+    || removedRsIds.length > 0
+    || supersededAssets.length > 0
+    || removedAssetIds.length > 0
 
   const handleNestedAssetComplete = (payload) => {
     setShowNestedRegister(false)
@@ -91,46 +136,124 @@ export default function AmendClaimModal({
           onClose={onClose}
         />
         <ModalBody>
-          {/* Phase 6.5 #9: read-only Asset cards (matched style with the
-              selectable list below) instead of a code-reference text box. */}
+          {/* Phase 12.2 (#122): per-Asset action affordances. Evaluated rows
+              get Replace + Remove buttons. Both produce the OUTDATED signal
+              on prior Eval Results. Non-evaluated rows still render with
+              the existing tooltip-disabled treatment (no action surface
+              this phase — keeps scope tight). */}
           <FieldLabel label={`Already referenced (${alreadyReferencedAssets.length})`} />
-          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 16 }}>
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 16 }}>
             {alreadyReferencedAssets.length === 0 ? (
               <div style={{ padding: 14, fontSize: 11, color: 'var(--text-dim)' }}>
                 No Assets currently referenced.
               </div>
-            ) : alreadyReferencedAssets.map((a) => (
-              <Tooltip
-                key={a.id}
-                content="Already referenced — cannot deselect (Asset removal is not supported in V2.2)."
-                width={300}
-                wrapperStyle={{ display: 'block' }}
-              >
-              <div
-                style={{
-                  padding: '10px 14px',
-                  background: 'color-mix(in srgb, var(--text-dim) 5%, transparent)',
-                  borderBottom: '1px solid var(--border-faint)',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  cursor: 'not-allowed',
-                  opacity: 0.85,
-                }}
-              >
-                <div style={{
-                  width: 14, height: 14, borderRadius: 3,
-                  border: '1.5px solid var(--text-dim)',
-                  background: 'var(--text-dim)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>
+            ) : alreadyReferencedAssets.map((a) => {
+              const isEvaluated = evaluatedSet.has(a.id)
+              const isRemoving = removedAssetIds.includes(a.id)
+              const supersedeEntry = supersededAssets.find((s) => s.from === a.id)
+              const replacement = supersedeEntry
+                ? (replacementPool.find((x) => x.id === supersedeEntry.to)
+                  || alreadyReferencedAssets.find((x) => x.id === supersedeEntry.to)
+                  || candidateAssets.find((x) => x.id === supersedeEntry.to))
+                : null
+              const dimmed = isRemoving || !!supersedeEntry
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    padding: '10px 14px',
+                    background: isRemoving
+                      ? 'color-mix(in srgb, var(--accent-red) 6%, transparent)'
+                      : supersedeEntry
+                        ? 'color-mix(in srgb, var(--accent-amber) 5%, transparent)'
+                        : 'color-mix(in srgb, var(--text-dim) 5%, transparent)',
+                    borderBottom: '1px solid var(--border-faint)',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    opacity: dimmed ? 0.85 : 1,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600,
+                      textDecoration: dimmed ? 'line-through' : 'none',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {a.name}
+                      {isEvaluated && (
+                        <span style={{
+                          marginLeft: 6, fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          letterSpacing: '0.1em', padding: '1px 5px', borderRadius: 3,
+                          color: 'var(--accent-indigo)',
+                          background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                          border: '1px solid color-mix(in srgb, var(--accent-indigo) 30%, transparent)',
+                          textDecoration: 'none',
+                        }}>EVALUATED</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a.file?.filename || a.id}</div>
+                    {supersedeEntry && replacement && (
+                      <div style={{ fontSize: 10, color: 'var(--accent-amber)', marginTop: 4 }}>
+                        → Replacing with <strong style={{ color: 'var(--text-primary)' }}>{replacement.name || replacement.id}</strong>
+                      </div>
+                    )}
+                  </div>
+                  {/* Action affordances. Evaluated + non-evaluated both get
+                      Replace / Remove this phase to keep the surface uniform. */}
+                  {!isRemoving && !supersedeEntry && (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button
+                        onClick={() => setReplacingFromAssetId(a.id)}
+                        title={isEvaluated ? 'Replace with a newer version (records as supersession; flips referencing Eval Results to OUTDATED).' : 'Replace this Asset reference with another you own.'}
+                        style={{
+                          padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                          border: '1px solid var(--border)', background: 'transparent',
+                          color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                          fontWeight: 600, letterSpacing: '0.04em',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-amber)'; e.currentTarget.style.borderColor = 'var(--accent-amber)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                      >Replace</button>
+                      <button
+                        onClick={() => toggleRemoveAsset(a.id)}
+                        title={isEvaluated ? 'Drop this Asset reference (flips referencing Eval Results to OUTDATED).' : 'Drop this Asset reference.'}
+                        style={{
+                          padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                          border: '1px solid var(--border)', background: 'transparent',
+                          color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                          fontWeight: 600, letterSpacing: '0.04em',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-red)'; e.currentTarget.style.borderColor = 'var(--accent-red)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                      >Remove</button>
+                    </div>
+                  )}
+                  {isRemoving && (
+                    <button
+                      onClick={() => cancelRemove(a.id)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                        border: '1px solid var(--accent-amber)',
+                        background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                        color: 'var(--accent-amber)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                        fontWeight: 600, letterSpacing: '0.04em', flexShrink: 0,
+                      }}
+                    >Undo</button>
+                  )}
+                  {supersedeEntry && (
+                    <button
+                      onClick={() => cancelReplace(a.id)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                        border: '1px solid var(--accent-amber)',
+                        background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                        color: 'var(--accent-amber)', fontSize: 10, fontFamily: 'var(--font-mono)',
+                        fontWeight: 600, letterSpacing: '0.04em', flexShrink: 0,
+                      }}
+                    >Undo</button>
+                  )}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>{a.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a.file?.filename || a.id}</div>
-                </div>
-              </div>
-              </Tooltip>
-            ))}
+              )
+            })}
           </div>
           {/* Phase 12.1 (#120): Asset section is no longer "required" in
               isolation — submit is gated on at-least-one of (Asset add,
@@ -362,7 +485,7 @@ export default function AmendClaimModal({
         </ModalBody>
         <ModalFooter>
           <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            {selected.length} Asset{selected.length !== 1 ? 's' : ''} · {addedRsIds.length} added · {removedRsIds.length} removed standard{(addedRsIds.length + removedRsIds.length) !== 1 ? 's' : ''}
+            {selected.length} added · {supersededAssets.length} replaced · {removedAssetIds.length} removed · {addedRsIds.length}/{removedRsIds.length} standards
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn label="Cancel" onClick={onClose} />
@@ -374,6 +497,9 @@ export default function AmendClaimModal({
                 addedAssetIds: [...selected],
                 addedRequirementsSetIds: [...addedRsIds],
                 removedRequirementsSetIds: [...removedRsIds],
+                // Phase 12.2 (#122): Asset supersession + drop diff buckets.
+                supersededAssets: supersededAssets.map((s) => ({ from: s.from, to: s.to })),
+                removedAssetIds: [...removedAssetIds],
               })}
             />
           </div>
@@ -388,6 +514,52 @@ export default function AmendClaimModal({
         onClose={() => setShowNestedRegister(false)}
         onComplete={handleNestedAssetComplete}
       />
+    )}
+    {/* Phase 12.2 (#122): Replace-Asset picker overlay. Sibling Backdrop
+        sitting above the parent so the user can pick the replacement
+        without losing the rest of the AmendClaim diff state. */}
+    {replacingFromAssetId && (
+      <Backdrop onClose={() => setReplacingFromAssetId(null)}>
+        <Modal width={520}>
+          <ModalHeader
+            title="Replace Asset reference"
+            subtitle="Pick a replacement Asset you own. The original Asset stays in the Claim's history; referencing Eval Results will flip to OUTDATED."
+            onClose={() => setReplacingFromAssetId(null)}
+          />
+          <ModalBody>
+            {replacementPool.length === 0 ? (
+              <div style={{ padding: 14, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                No replacement candidates available. Register a new Asset first, or close this picker and use Remove instead.
+              </div>
+            ) : (
+              <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                {replacementPool.map((a, i) => (
+                  <div
+                    key={a.id}
+                    onClick={() => applyReplace(a.id)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer',
+                      borderBottom: i < replacementPool.length - 1 ? '1px solid var(--border-faint)' : 'none',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      transition: 'background 100ms',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-amber) 8%, transparent)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{a.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a.file?.filename || a.id}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ModalBody>
+          <ModalFooter>
+            <Btn label="Cancel" onClick={() => setReplacingFromAssetId(null)} />
+          </ModalFooter>
+        </Modal>
+      </Backdrop>
     )}
     </>
   )

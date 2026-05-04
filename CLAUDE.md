@@ -2,7 +2,7 @@
 
 Vite + React 19 single-page app. No TypeScript. All styling is inline JSX + CSS variables from `index.css`.
 
-For historical phase notes (every per-phase completion entry from Phase 1 through Phase 12.1), see [`CLAUDE-phase-log.md`](./CLAUDE-phase-log.md). For the architectural model, see [`architecture-spec.md`](./architecture-spec.md). For the open / partial / deferred work queue, see [`polish-backlog.md`](./polish-backlog.md). For the next-conversation foundation upload checklist, see [`ROUND-13-CONTEXT.md`](./ROUND-13-CONTEXT.md).
+For historical phase notes (every per-phase completion entry from Phase 1 through Phase 12.2), see [`CLAUDE-phase-log.md`](./CLAUDE-phase-log.md). For the architectural model, see [`architecture-spec.md`](./architecture-spec.md). For the open / partial / deferred work queue, see [`polish-backlog.md`](./polish-backlog.md). For the next-conversation foundation upload checklist, see [`ROUND-13-CONTEXT.md`](./ROUND-13-CONTEXT.md).
 
 **Commands:**
 - `npm run dev` — development server
@@ -82,9 +82,9 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 
 ## Current state of the world
 
-- **Footer version:** v0.12.1 (bumped during Phase 12.1).
-- **Last shipped phase:** Phase 12.1 — Reference Published Requirements Sets on a Claim (#120): non-binding `referencedRequirementsSets[]` field on Claims; informational only, no evaluation coupling, no notifications; create / amend / inline-supersession-update flows.
-- **Active phase queue:** Remaining Phase 12: Evaluation Enhancements (#117, #105, #106, #121, #122). Then Phase 13 (#26 Cascading Disclosures), Phase 14 (Directory Layer batch — #43, #45, #46, #47, #132, #162, #163), Phase 15 (#11, #48, #104). Phase 11.6 deferred follow-up: #167 (DA amendment-as-proposal model — extension of #164 to disclosure agreements).
+- **Footer version:** v0.12.2 (bumped during Phase 12.2).
+- **Last shipped phase:** Phase 12.2 — Evaluation Architecture Cluster (#106 + #117 + #121 + #122 + #105) + backlog hygiene + new item filings (#168 PoE, #169 Badges).
+- **Active phase queue:** Phase 12.1 shipped (#120, commit 5bf5b75, footer v0.12.1). Phase 12.2 shipped (#106 + #117 + #121 + #122 + #105 + backlog hygiene + new item filings (#168 PoE, #169 Badges), footer v0.12.2). **Phase 13+ priority order (boundaries TBD, strict ordering):** (1) PoE nodes #168 → (2) Badges #169 → (3) Directory Layer #43, #45, #47, #132, #162, #163 → (4) AI Shopper #47 (overlaps), #123 → (5) Cascading Disclosures #26 → (6) Detail Panel UI cleanup #58, #104, #116, #161+ → (7) Netgraph cleanup #4, #130 → (8) Search/aggregate #27 → (9) Network Event Log #30. Phase 11.6 deferred follow-up: #167 (DA amendment-as-proposal model — extension of #164).
 - **Disclosure types fully wired end-to-end:** Full, Selective, Proof-only — all three branches of grantee view derivation (canvas + edges + Detail Panel + Expand modal) shipped through Phase 11D.
 - **Animation primitives:** `playUnravelAnimation` (Phase 9D.2.x — node leaves canvas) and `playRevealAnimation` (Phase 11C.3 — provisional → active flip). Both live under `src/v2/animations/` and are await-able promises returning at phase 'done'.
 - **Layout grid:** all node X / Y / column / hierarchy-shift constants are multiples of 100 (Phase 10.2.1 grid alignment); `symmetricRowY(i)` helper distributes rows alternately around y=0; per-column `COL_Y_OFFSET = 100` separates adjacent column traffic lanes.
@@ -95,7 +95,7 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 
 ## Phase log
 
-The full per-phase completion log lives in [`CLAUDE-phase-log.md`](./CLAUDE-phase-log.md). It contains every phase note from Phase 1 (V2.2 data model foundation, 2026-04-17) through Phase 12.1 (Referenced Standards on a Claim, 2026-05-04), in chronological order.
+The full per-phase completion log lives in [`CLAUDE-phase-log.md`](./CLAUDE-phase-log.md). It contains every phase note from Phase 1 (V2.2 data model foundation, 2026-04-17) through Phase 12.2 (Evaluation Architecture Cluster, 2026-05-04), in chronological order.
 
 The original V2.2 migration ran in eight phases:
 

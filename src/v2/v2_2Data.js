@@ -321,6 +321,18 @@ export function makeClaim({
   acknowledgments = [],
   // Phase 12.1 (#120): non-binding "Referenced Standards" metadata.
   referencedRequirementsSets = [],
+  // Phase 12.2 (#122): Claim-internal Asset versioning chain. Parallel to
+  // `referencedAssetIds[]` (which stays the EFFECTIVE active set, primitive
+  // strings) — `assetReferences[]` carries the audit chain incl. removed
+  // and superseded entries:
+  //   { assetId, supersededBy, addedDate, removedDate }
+  // - `supersededBy`: id of the replacement Asset (null until "Replace")
+  // - `removedDate`: ISO timestamp when the entry was dropped (null until
+  //   "Remove"); the Asset node itself is NEVER modified.
+  // The factory derives this array from `referencedAssetIds[]` if not
+  // provided so seed Claims and pre-12.2 callers migrate cleanly with
+  // `supersededBy: null, removedDate: null` defaults.
+  assetReferences = null,
   createdDate,
   amendments = [],
   dot,   // optional structured DOT; derived below if absent
@@ -361,6 +373,22 @@ export function makeClaim({
       requirementsSetId: r.requirementsSetId,
       addedDate: r.addedDate,
     })),
+    // Phase 12.2 (#122): Asset versioning chain. Defaults to one entry per
+    // `referencedAssetIds[]` Asset with all supersession fields null when
+    // not explicitly passed in (covers seed data + pre-12.2 callers).
+    assetReferences: assetReferences
+      ? assetReferences.map((r) => ({
+          assetId: r.assetId,
+          supersededBy: r.supersededBy ?? null,
+          addedDate: r.addedDate ?? createdDate ?? null,
+          removedDate: r.removedDate ?? null,
+        }))
+      : referencedAssetIds.map((assetId) => ({
+          assetId,
+          supersededBy: null,
+          addedDate: createdDate ?? null,
+          removedDate: null,
+        })),
     createdDate,
     amendments: amendments.map((a) => ({
       date: a.date,
@@ -372,9 +400,110 @@ export function makeClaim({
       // fields; supersession updates produce one entry in each.
       addedRequirementsSetIds: [...(a.addedRequirementsSetIds || [])],
       removedRequirementsSetIds: [...(a.removedRequirementsSetIds || [])],
+      // Phase 12.2 (#122): Asset supersession diff arrays. `supersededAssets`
+      // entries have `{ from, to }` shape; `removedAssetIds` entries are
+      // bare ids dropped without successor. Empty by default.
+      supersededAssets: (a.supersededAssets || []).map((s) => ({ from: s.from, to: s.to })),
+      removedAssetIds: [...(a.removedAssetIds || [])],
     })),
     dot: claimDot,
   }
+}
+
+// Phase 12.2 (#122): walk the Claim-internal Asset supersession chain and
+// return the latest version's id. Mirrors `getLatestRSVersion` (Phase 12.1).
+// Returns the input id when no supersession exists or the entry isn't on
+// the Claim's chain (defensive). The chain is a linked list — each entry's
+// `supersededBy` points to the next version (or null if this is the head).
+export function getLatestAssetVersion(assetId, claim) {
+  if (!assetId || !claim?.assetReferences) return assetId
+  const byId = new Map()
+  for (const r of claim.assetReferences) byId.set(r.assetId, r)
+  let current = assetId
+  const seen = new Set()
+  while (true) {
+    if (seen.has(current)) return current   // cycle guard
+    seen.add(current)
+    const entry = byId.get(current)
+    if (!entry || !entry.supersededBy) return current
+    current = entry.supersededBy
+  }
+}
+
+// Phase 12.2 (#122): determine whether an Eval Result has gone OUTDATED
+// against the current state of its source Claim. Returns true when any
+// `evidenceUsed` Asset has been superseded OR removed on the Claim since
+// the evaluation. Used at AmendClaim submit to flip Eval Result status
+// and enqueue `v22-eval-result-stale` notifications.
+//
+// `claim` is the post-amendment Claim. Comparing `evidenceUsed` (snapshot
+// from the evaluation moment) against the post-amendment chain captures
+// both supersessions (entry has non-null supersededBy that wasn't there
+// before) and removals (entry has non-null removedDate).
+export function isEvalResultStale(evalResult, claim) {
+  if (!evalResult || !claim?.assetReferences) return false
+  if (evalResult.status === 'superseded') return false   // already terminal
+  const usedIds = new Set(evalResult.evidenceUsed || [])
+  if (usedIds.size === 0) return false   // self-attestation evals don't go stale on Asset changes
+  for (const ref of claim.assetReferences) {
+    if (!usedIds.has(ref.assetId)) continue
+    if (ref.removedDate) return true
+    if (ref.supersededBy) return true
+  }
+  return false
+}
+
+// Phase 12.2 (#117): compute the diff between a prior Eval Result's
+// `evidenceUsed` snapshot and the current Claim's effective in-scope set.
+// Used by the Run Evaluation modal banner and the new Eval Result Detail
+// Panel "Changes from prior evaluation" section. Returns:
+//   {
+//     added: [assetId, ...],          // in current set, not in prior
+//     removed: [assetId, ...],        // in prior, not in current; not via supersession
+//     superseded: [{ from, to }, ...],// in prior; chain now points to a different head
+//     carried: [assetId, ...],        // in both prior and current, unchanged
+//   }
+// `current` is the Claim's effective active set: assetReferences entries
+// without `removedDate` AND not superseded (i.e. the chain heads).
+export function computeEvidenceDiff(priorEvalResult, claim) {
+  if (!priorEvalResult || !claim?.assetReferences) {
+    return { added: [], removed: [], superseded: [], carried: [] }
+  }
+  const priorIds = new Set(priorEvalResult.evidenceUsed || [])
+  const refsById = new Map()
+  for (const r of claim.assetReferences) refsById.set(r.assetId, r)
+  // Compute the current effective active set: walk each entry; an entry is
+  // active iff it has no removedDate AND no supersededBy (the chain HEADS).
+  // (Superseded entries' supersededBy points DOWN the chain to the new
+  // active version; the active versions have supersededBy === null.)
+  const currentActive = new Set()
+  for (const r of claim.assetReferences) {
+    if (r.removedDate) continue
+    if (r.supersededBy) continue
+    currentActive.add(r.assetId)
+  }
+  const added = []
+  const removed = []
+  const superseded = []
+  const carried = []
+  // Each prior id falls into one of: carried (still active),
+  // superseded (chain head moved), removed (dropped without successor).
+  for (const pid of priorIds) {
+    if (currentActive.has(pid)) { carried.push(pid); continue }
+    const head = getLatestAssetVersion(pid, claim)
+    if (head !== pid && currentActive.has(head)) {
+      superseded.push({ from: pid, to: head })
+      continue
+    }
+    // Prior id is gone from the active set and has no live successor.
+    removed.push(pid)
+  }
+  // Anything in currentActive not represented above is freshly added.
+  const seenInDiff = new Set([...carried, ...superseded.map((s) => s.to)])
+  for (const aid of currentActive) {
+    if (!priorIds.has(aid) && !seenInDiff.has(aid)) added.push(aid)
+  }
+  return { added, removed, superseded, carried }
 }
 
 // Phase 12.1 (#120): helper that walks the RS supersession chain and
@@ -656,6 +785,17 @@ export function makeEvaluationResult({
   evaluationDate,
   status = 'active',
   supersededBy = null,
+  // Phase 12.2 (#121): batch id grouping sibling Eval Results from the
+  // same Run Evaluation invocation. Null for solo evaluations and for
+  // pre-12.2 seed Eval Results (backwards compatibility — the Detail
+  // Panel "Sibling Evaluations" section is omitted when batchId is null).
+  batchId = null,
+  // Phase 12.2 (#117): re-run audit metadata. `priorEvalResultId` links
+  // to the Eval Result this run replaces; `evidenceDiff` captures the
+  // delta between prior + current evidence snapshots. Both null on first
+  // evaluation; populated on every re-run by V2App's submit handler.
+  priorEvalResultId = null,
+  evidenceDiff = null,
   dot,   // optional structured DOT; derived below if absent
 }) {
   if (!id) throw new Error('makeEvaluationResult: id is required')
@@ -707,8 +847,18 @@ export function makeEvaluationResult({
     })),
     evidenceUsed: [...evidenceUsed],
     evaluationDate,
-    status, // 'active' | 'superseded'
+    status, // Phase 12.2: 'active' | 'superseded' | 'outdated'
     supersededBy,
+    batchId,
+    priorEvalResultId,
+    evidenceDiff: evidenceDiff
+      ? {
+          added: [...(evidenceDiff.added || [])],
+          removed: [...(evidenceDiff.removed || [])],
+          superseded: (evidenceDiff.superseded || []).map((s) => ({ from: s.from, to: s.to })),
+          carried: [...(evidenceDiff.carried || [])],
+        }
+      : null,
     dot: evalDot,
   }
 }
@@ -1485,6 +1635,11 @@ export function buildV22SharedArtifacts() {
   const evaluationAgreements = [eaBobOnPrm, eaBobOnVreg, eaCarolOnPrm]
 
   // ── Evaluation Results ────────────────────────────────────────────────
+  // Phase 12.2 (#121): retroactively pair erBobPrm with a sibling Eval
+  // Result (System Integration) sharing batchId 'batch-seed-bob-prm-001'.
+  // Bob ran both RS in the same Run Evaluation invocation against the
+  // PRM Assembly Claim; the Detail Panel "Sibling Evaluations" section
+  // surfaces them together on first load.
   const erBobPrm = makeEvaluationResult({
     id: 'eval-bob-prm-001',
     owner: bob.party,
@@ -1508,6 +1663,31 @@ export function buildV22SharedArtifacts() {
     evaluationDate: '2026-03-09T14:32:00Z',
     status: 'active',
     supersededBy: null,
+    batchId: 'batch-seed-bob-prm-001',
+  })
+  const erBobPrmSysInt = makeEvaluationResult({
+    id: 'eval-bob-prm-002',
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    evaluationAgreementId: eaBobOnPrm.id,
+    claimId: cPrm.id,
+    granteeAssetId: bAvionics.id,
+    requirementsSet: {
+      id: 'reqset-system-integration-v1',
+      name: 'System Integration Requirements',
+      version: 1,
+    },
+    results: [
+      { requirementId: 'req-011', label: 'Package type', value: 'CQFP-128 (ceramic quad flat pack)', status: 'satisfactory' },
+      { requirementId: 'req-012', label: 'Lead count', value: '128 pins', status: 'satisfactory' },
+      { requirementId: 'req-013', label: 'Interface voltage', value: '3.3V LVCMOS', status: 'satisfactory' },
+      { requirementId: 'req-014', label: 'Compatible with Sentinel-4 bus?', value: 'Yes', status: 'satisfactory' },
+    ],
+    evidenceUsed: [aPrmDatasheet.id],
+    evaluationDate: '2026-03-09T14:33:00Z',
+    status: 'active',
+    supersededBy: null,
+    batchId: 'batch-seed-bob-prm-001',
   })
   const erCarolPrm = makeEvaluationResult({
     id: 'eval-carol-prm-001',
@@ -1531,7 +1711,7 @@ export function buildV22SharedArtifacts() {
     status: 'active',
     supersededBy: null,
   })
-  const evaluationResults = [erBobPrm, erCarolPrm]
+  const evaluationResults = [erBobPrm, erBobPrmSysInt, erCarolPrm]
 
   // Proof-of-Evaluation Disclosure Agreements (Eval Result → Claim owner).
   // subject = evalResult; edge derivation resolves the Claim via the Eval Result's claimId.
@@ -1543,6 +1723,17 @@ export function buildV22SharedArtifacts() {
     claimOwnerDot: alice.partyDot,
     evaluationResultId: erBobPrm.id,
     terms: { createdDate: erBobPrm.evaluationDate },
+  })
+  // Phase 12.2 (#121): proof DA for the sibling Eval Result so Alice's
+  // canvas pulls in both batch members.
+  const daProofBobPrmSysInt = makeProofOfEvalDisclosureAgreement({
+    id: 'da-proof-bob-prm-sysint',
+    evaluator: bob.party,
+    evaluatorDot: bob.partyDot,
+    claimOwner: alice.party,
+    claimOwnerDot: alice.partyDot,
+    evaluationResultId: erBobPrmSysInt.id,
+    terms: { createdDate: erBobPrmSysInt.evaluationDate },
   })
   const daProofCarolPrm = makeProofOfEvalDisclosureAgreement({
     id: 'da-proof-carol-prm',
@@ -1594,6 +1785,16 @@ export function buildV22SharedArtifacts() {
     },
     terms: { createdDate: erBobPrm.evaluationDate },
   })
+  const daOwnEvalBobSysInt = makeInternalDisclosureAgreement({
+    id: `da-own-${erBobPrmSysInt.id}`,
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    subject: { kind: 'evalResult', id: erBobPrmSysInt.id },
+    scope: {
+      assetIds: [bAvionics.id],
+    },
+    terms: { createdDate: erBobPrmSysInt.evaluationDate },
+  })
   const daOwnEvalCarol = makeInternalDisclosureAgreement({
     id: `da-own-${erCarolPrm.id}`,
     owner: carol.party,
@@ -1624,9 +1825,11 @@ export function buildV22SharedArtifacts() {
     daAlicePublicVreg,
     daAlicePublicEmi,
     daProofBobPrm,
+    daProofBobPrmSysInt,
     daProofCarolPrm,
     daAliceToDavePrmProof,
     daOwnEvalBob,
+    daOwnEvalBobSysInt,
     daOwnEvalCarol,
   ]
 
@@ -2905,15 +3108,66 @@ export function makeAmendedClaim({
   removedAssetIds = [],
   addedRequirementsSetIds = [],
   removedRequirementsSetIds = [],
+  // Phase 12.2 (#122): Asset supersession edits. Each entry replaces an
+  // evaluated Asset with a successor without removing the original from
+  // the audit chain. Shape: [{ from: oldAssetId, to: newAssetId }, ...].
+  // Both Replace and Remove flow through this same factory; the difference
+  // is the entry shape (Replace produces a `supersededAssets` entry,
+  // Remove appends to `removedAssetIds`).
+  supersededAssets = [],
 }) {
-  const existing = new Set(claim.referencedAssetIds)
-  for (const id of removedAssetIds) existing.delete(id)
-  for (const id of addedAssetIds) existing.add(id)
+  const amendmentDate = new Date().toISOString()
+
+  // Phase 12.2: rebuild the assetReferences chain. Start from existing,
+  // apply removals (stamp removedDate), apply supersessions (stamp the
+  // old entry's supersededBy + add a new entry for the replacement),
+  // apply additions (append fresh entries).
+  const removedAssetSet = new Set(removedAssetIds)
+  const supersedeMap = new Map()
+  for (const s of supersededAssets) supersedeMap.set(s.from, s.to)
+
+  const existingRefs = (claim.assetReferences || claim.referencedAssetIds.map((aid) => ({
+    assetId: aid, supersededBy: null, addedDate: claim.createdDate, removedDate: null,
+  }))).map((r) => ({ ...r }))   // shallow clone
+
+  // Apply Remove: stamp removedDate on matching active entries.
+  for (const ref of existingRefs) {
+    if (removedAssetSet.has(ref.assetId) && !ref.removedDate && !ref.supersededBy) {
+      ref.removedDate = amendmentDate
+    }
+  }
+  // Apply Supersede: stamp supersededBy on matching active entries.
+  // The new (replacement) entry is appended below.
+  for (const ref of existingRefs) {
+    const to = supersedeMap.get(ref.assetId)
+    if (to && !ref.removedDate && !ref.supersededBy) {
+      ref.supersededBy = to
+    }
+  }
+  // Append entries for Supersede targets (the new active heads).
+  for (const { from, to } of supersededAssets) {
+    if (!existingRefs.some((r) => r.assetId === to)) {
+      existingRefs.push({ assetId: to, supersededBy: null, addedDate: amendmentDate, removedDate: null })
+    }
+  }
+  // Apply Add: append fresh entries for newly-added Assets that aren't
+  // already represented as active heads.
+  for (const aid of addedAssetIds) {
+    const existingActive = existingRefs.find((r) => r.assetId === aid && !r.removedDate && !r.supersededBy)
+    if (!existingActive) {
+      existingRefs.push({ assetId: aid, supersededBy: null, addedDate: amendmentDate, removedDate: null })
+    }
+  }
+
+  // Derive the effective `referencedAssetIds` from the post-amend chain:
+  // active entries are those without removedDate AND without supersededBy.
+  const nextActiveAssetIds = existingRefs
+    .filter((r) => !r.removedDate && !r.supersededBy)
+    .map((r) => r.assetId)
 
   // Phase 12.1: re-derive the Referenced Standards array. Removed entries
   // are dropped; added entries get a freshly stamped `addedDate`. Preserve
   // existing entries' `addedDate` (don't reset on every amendment).
-  const amendmentDate = new Date().toISOString()
   const removedRsSet = new Set(removedRequirementsSetIds)
   const carryRs = (claim.referencedRequirementsSets || [])
     .filter((r) => !removedRsSet.has(r.requirementsSetId))
@@ -2929,11 +3183,12 @@ export function makeAmendedClaim({
     ownerDot: claim.ownerDot,
     name: claim.name,
     description: claim.description,
-    referencedAssetIds: Array.from(existing),
+    referencedAssetIds: nextActiveAssetIds,
     // Phase 11C.1: preserve existing acknowledgments through Asset
     // amendments. Editing acknowledgments themselves is a future workstream.
     acknowledgments: claim.acknowledgments || [],
     referencedRequirementsSets: nextRs,
+    assetReferences: existingRefs,
     createdDate: claim.createdDate,
     amendments: [
       ...(claim.amendments || []),
@@ -2943,10 +3198,19 @@ export function makeAmendedClaim({
         removed: [...removedAssetIds],
         addedRequirementsSetIds: [...addedRequirementsSetIds],
         removedRequirementsSetIds: [...removedRequirementsSetIds],
+        supersededAssets: supersededAssets.map((s) => ({ from: s.from, to: s.to })),
+        removedAssetIds: [...removedAssetIds],
       },
     ],
   })
-  const newClaimRefEdges = addedAssetIds.map((assetId) =>
+  // Phase 12.2: Supersede targets also need internal claim-ref DA edges
+  // (they're new Asset references on the Claim). Mirror the existing-add
+  // path so canvas edges render for the new heads.
+  const allNewlyAddedAssetIds = [
+    ...addedAssetIds,
+    ...supersededAssets.map((s) => s.to).filter((aid) => !addedAssetIds.includes(aid)),
+  ]
+  const newClaimRefEdges = allNewlyAddedAssetIds.map((assetId) =>
     makeInternalDisclosureAgreement({
       id: `da-ref-${claim.id}-${assetId}`,
       owner: claim.owner,
@@ -3471,6 +3735,9 @@ export function makeClaimCreationArtifacts({
     referencedAssetIds,
     acknowledgments: finalAcks,
     referencedRequirementsSets,
+    // Phase 12.2 (#122): factory derives assetReferences from
+    // referencedAssetIds when not explicitly passed; explicit pass-through
+    // here is unnecessary but documented as the migration path.
     createdDate,
     amendments: [],
   })

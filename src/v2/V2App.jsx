@@ -31,6 +31,12 @@ import {
   // Phase 12.1 (#120): RS supersession lookup for the Claim Detail Panel
   // "Newer version available" pill.
   getLatestRSVersion,
+  // Phase 12.2 (#117 + #122): Asset versioning helpers used by the
+  // AmendClaim handler (OUTDATED detection) and the Run Evaluation modal
+  // (re-run diff banner / Detail Panel section).
+  isEvalResultStale,
+  getLatestAssetVersion,
+  computeEvidenceDiff,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -1583,15 +1589,19 @@ export default function V2App() {
     setSelectedEdgeId(null)
   }, [])
 
-  const handleV22EvaluationSubmit = useCallback(({ requirementsSet, rows, evidenceUsed }) => {
+  // Phase 12.2 (#106 + #117 + #121): orchestrate a (possibly multi-RS)
+  // evaluation submit. The modal hands back either the legacy single-RS
+  // shape (`requirementsSet`, `rows`) for backwards compat, or the new
+  // batch shape (`perRsResults`, `batchId`). Both paths flow through
+  // `makeEvaluationRunArtifacts` per-RS; batch members share `batchId`.
+  // The first run also stamps `priorEvalResultId` + `evidenceDiff` per #117
+  // for re-run audit trail.
+  const handleV22EvaluationSubmit = useCallback((payload) => {
     if (!v22EvalContext) return
     const { evaluationAgreementId, claimId, selfEvaluation } = v22EvalContext
     const claim = v22View?.claims.find((c) => c.id === claimId)
     let ea
     if (selfEvaluation) {
-      // Phase 6.D: synthesise a lightweight EA-like object so the artifact
-      // factory has a stable id to thread through. The proof DA + ownership DA
-      // it produces are both internal (Alice → Alice).
       const firstAsset = claim?.referencedAssetIds?.[0] || null
       ea = {
         id: `self-eval-${claimId}`,
@@ -1604,69 +1614,94 @@ export default function V2App() {
       ea = v22View?.evaluationAgreements.find((e) => e.id === evaluationAgreementId)
       if (!ea) return
     }
-    const prior = findPriorActiveEvaluationResult({
-      claimId, requirementsSetId: requirementsSet.id,
-      shared: buildV22SharedArtifacts(), provisionals: v22Provisionals,
-    })
-    const artifacts = makeEvaluationRunArtifacts({
-      evaluatorParty: ea.grantee.party,
-      evaluatorDot: activeRole.partyDot,
-      claimOwnerParty: ea.grantor.party,
-      evaluationAgreement: ea,
-      granteeAssetId: ea.granteeAssetId,
-      requirementsSet,
-      rows,
-      evidenceUsed,
-      priorActiveResult: prior,
-    })
+    // Normalize input: legacy single-RS callers expand to a one-entry
+    // batch; new callers pass `perRsResults` directly.
+    const perRsResults = payload.perRsResults && payload.perRsResults.length > 0
+      ? payload.perRsResults
+      : [{
+          requirementsSet: payload.requirementsSet,
+          rows: payload.rows,
+        }]
+    const batchId = payload.batchId || null
+    const evidenceUsed = payload.evidenceUsed || []
+    const evidenceDiff = payload.evidenceDiff || null
+    const priorEvalResultId = payload.priorEvalResultId || null
+
+    const allArtifactSets = []
+    for (const { requirementsSet, rows } of perRsResults) {
+      const prior = findPriorActiveEvaluationResult({
+        claimId, requirementsSetId: requirementsSet.id,
+        shared: buildV22SharedArtifacts(), provisionals: v22Provisionals,
+      })
+      const artifacts = makeEvaluationRunArtifacts({
+        evaluatorParty: ea.grantee.party,
+        evaluatorDot: activeRole.partyDot,
+        claimOwnerParty: ea.grantor.party,
+        evaluationAgreement: ea,
+        granteeAssetId: ea.granteeAssetId,
+        requirementsSet,
+        rows,
+        evidenceUsed,
+        priorActiveResult: prior,
+      })
+      // Phase 12.2: stamp batchId + re-run audit fields on the new Eval
+      // Result. Each batch member gets the same batchId; only the primary
+      // RS gets the priorEvalResultId/evidenceDiff (additional batch
+      // members are first-time evaluations, not re-runs).
+      const isPrimary = artifacts.evaluationResult.requirementsSet?.id === perRsResults[0].requirementsSet.id
+      artifacts.evaluationResult = {
+        ...artifacts.evaluationResult,
+        batchId,
+        priorEvalResultId: isPrimary ? priorEvalResultId : null,
+        evidenceDiff: isPrimary ? evidenceDiff : null,
+      }
+      allArtifactSets.push(artifacts)
+    }
+
     setV22Provisionals((prev) => {
-      const newEvalResults = [...prev.evaluationResults, artifacts.evaluationResult]
-      if (artifacts.supersededPriorResult) {
-        const idx = newEvalResults.findIndex((e) => e.id === artifacts.supersededPriorResult.id)
-        if (idx >= 0) newEvalResults[idx] = artifacts.supersededPriorResult
-        else newEvalResults.push(artifacts.supersededPriorResult)
+      let newEvalResults = [...prev.evaluationResults]
+      const newDas = []
+      for (const artifacts of allArtifactSets) {
+        newEvalResults.push(artifacts.evaluationResult)
+        if (artifacts.supersededPriorResult) {
+          const idx = newEvalResults.findIndex((e) => e.id === artifacts.supersededPriorResult.id)
+          if (idx >= 0) newEvalResults[idx] = artifacts.supersededPriorResult
+          else newEvalResults.push(artifacts.supersededPriorResult)
+        }
+        newDas.push(artifacts.proofDisclosureAgreement, artifacts.ownershipDisclosureAgreement)
       }
       return {
         ...prev,
-        disclosureAgreements: [
-          ...prev.disclosureAgreements,
-          artifacts.proofDisclosureAgreement,
-          artifacts.ownershipDisclosureAgreement,
-        ],
+        disclosureAgreements: [...prev.disclosureAgreements, ...newDas],
         evaluationResults: newEvalResults,
       }
     })
     setV22EvalContext(null)
-    // Phase 6.5+ #5: explicitly select the new Eval Result BEFORE setting the
-    // pan target. Otherwise V2Canvas's selection-pan effect (which observes
-    // `sel`) keeps holding the pre-modal Claim selection and re-pans to the
-    // Claim after the external pan completes. Also drop the pre-modal sel
-    // (could be the Claim) so we don't fight V2Canvas's selection-pan during
-    // the externalPanRef lockout window.
-    setSel(artifacts.evaluationResult.id)
+    // Pan to the FIRST (primary) new Eval Result.
+    const primaryNewER = allArtifactSets[0].evaluationResult
+    setSel(primaryNewER.id)
     setForcePanelTab(null)
     setForceExpandSda(null)
-    setV22PanToClaimId(artifacts.evaluationResult.id)
-    setV22RecentlyAcceptedClaimId(artifacts.evaluationResult.id)
-    // Phase 7 carry-over #1: no timeout; clears on deselection.
-    // Phase 6.5 #6: notify the Claim owner that an evaluation completed
-    // (skip self-eval, where evaluator === claim owner).
+    setV22PanToClaimId(primaryNewER.id)
+    setV22RecentlyAcceptedClaimId(primaryNewER.id)
+    // Notify the Claim owner — once per RS submitted (each Eval Result
+    // is a distinct artifact the owner may want to inspect).
     if (!selfEvaluation) {
       const claimOwnerRole = ROLES.find((r) => r.party === ea.grantor.party)
-      // Phase 9A.6.2.1 #103 fix: merge provisionals for user-created Claim
-      // name/pin resolution on eval-completed notification.
       const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals).claims.find((c) => c.id === claimId)
       if (claimOwnerRole && sharedClaim) {
-        enqueueV22NotificationForRequester(claimOwnerRole.id, {
-          id: `v22-evaluation-${artifacts.evaluationResult.id}`,
-          type: 'v22-evaluation',
-          from: { name: activeRole.party, dot: activeRole.partyDot },
-          asset: { name: sharedClaim.name, pin: sharedClaim.pin },
-          v22EvalResultId: artifacts.evaluationResult.id,
-          supersedesPriorResultId: artifacts.supersededPriorResult?.id || null,
-          requirementsSetName: requirementsSet.name,
-          date: new Date().toISOString().slice(0, 10),
-        })
+        for (const artifacts of allArtifactSets) {
+          enqueueV22NotificationForRequester(claimOwnerRole.id, {
+            id: `v22-evaluation-${artifacts.evaluationResult.id}`,
+            type: 'v22-evaluation',
+            from: { name: activeRole.party, dot: activeRole.partyDot },
+            asset: { name: sharedClaim.name, pin: sharedClaim.pin },
+            v22EvalResultId: artifacts.evaluationResult.id,
+            supersedesPriorResultId: artifacts.supersededPriorResult?.id || null,
+            requirementsSetName: artifacts.evaluationResult.requirementsSet?.name,
+            date: new Date().toISOString().slice(0, 10),
+          })
+        }
       }
     }
   }, [v22EvalContext, v22View, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
@@ -1677,6 +1712,9 @@ export default function V2App() {
     addedAssetIds = [],
     addedRequirementsSetIds = [],
     removedRequirementsSetIds = [],
+    // Phase 12.2 (#122): Asset supersession + drop diff buckets.
+    supersededAssets = [],
+    removedAssetIds = [],
   }) => {
     if (!v22AmendingClaimId) return
     // Phase 11E.4: rolled back the Phase 11E.2 `v22-claim-amendment`
@@ -1689,8 +1727,14 @@ export default function V2App() {
     //
     // Phase 12.1 (#120): RS edits are also cascade-skip — they DO NOT
     // mark Eval Results stale and DO NOT generate notifications. The
-    // amendment record carries the RS diff for audit only. Same path
-    // as the Asset add (no notification fan-out lives in this handler).
+    // amendment record carries the RS diff for audit only.
+    //
+    // Phase 12.2 (#122): Asset supersession + drop edits DO generate the
+    // `v22-eval-result-stale` notification on each evaluator whose Eval
+    // Result newly becomes OUTDATED. The notification is informational —
+    // single-grantee, click deep-links to the Eval Result. Eval Result
+    // status flips to 'outdated' synchronously here.
+    let staleNotifyTargets = []   // captured during the setV22Provisionals updater
     setV22Provisionals((prev) => {
       // Look up the latest version of the claim (could be a prior amendment).
       const existing = prev.claims?.find((c) => c.id === v22AmendingClaimId)
@@ -1701,13 +1745,65 @@ export default function V2App() {
         addedAssetIds,
         addedRequirementsSetIds,
         removedRequirementsSetIds,
+        supersededAssets,
+        removedAssetIds,
       })
+      // Phase 12.2 (#122): walk every Eval Result on this Claim and flip
+      // newly-OUTDATED ones. Capture each transition for notification.
+      const sharedForStaleCheck = mergeProvisionals(buildV22SharedArtifacts(), prev)
+      const allEvalResults = [...(sharedForStaleCheck.evaluationResults || []), ...(prev.evaluationResults || [])]
+      const evalResultsById = new Map()
+      for (const er of allEvalResults) evalResultsById.set(er.id, er)
+      const updatedEvalResults = []
+      for (const er of evalResultsById.values()) {
+        if (er.claimId !== amended.id) continue
+        if (er.status === 'superseded' || er.status === 'outdated') continue
+        if (isEvalResultStale(er, amended)) {
+          updatedEvalResults.push({ ...er, status: 'outdated' })
+          staleNotifyTargets.push(er)
+        }
+      }
+      const nextProvisionalEvalResults = (prev.evaluationResults || []).map((er) => {
+        const flipped = updatedEvalResults.find((u) => u.id === er.id)
+        return flipped || er
+      })
+      // Eval Results in the seed (sharedForStaleCheck only) that newly
+      // flipped need to be added to provisionals so their status persists.
+      for (const flipped of updatedEvalResults) {
+        if (!(prev.evaluationResults || []).some((er) => er.id === flipped.id)) {
+          nextProvisionalEvalResults.push(flipped)
+        }
+      }
       return {
         ...prev,
         claims: [...(prev.claims || []).filter((c) => c.id !== amended.id), amended],
         disclosureAgreements: [...prev.disclosureAgreements, ...newClaimRefEdges],
+        evaluationResults: nextProvisionalEvalResults,
       }
     })
+    // Fire OUTDATED notifications outside the state updater (need access
+    // to ROLES + updateRoleState). Each evaluator gets a single-grantee
+    // informational `v22-eval-result-stale` on their inbox.
+    for (const er of staleNotifyTargets) {
+      const evaluatorRole = ROLES.find((r) => r.party === er.owner)
+      if (!evaluatorRole) continue
+      const notifId = `v22-eval-result-stale-${er.id}-${Date.now().toString(36)}`
+      updateRoleState(evaluatorRole.id, (prevR) => ({
+        ...prevR,
+        addedRequests: [
+          ...(prevR.addedRequests || []),
+          {
+            id: notifId,
+            type: 'v22-eval-result-stale',
+            evalResultId: er.id,
+            claimId: er.claimId,
+            evalResultName: er.requirementsSet?.name || er.id,
+            from: { name: activeRole.party, dot: activeRole.partyDot },
+            date: new Date().toISOString().slice(0, 10),
+          },
+        ],
+      }))
+    }
     setV22AmendingClaimId(null)
     // Phase 6.5+ #5: select + pan to the amended Claim before triggering the
     // pan effect, so V2Canvas's selection-pan settles on the correct target
@@ -3823,11 +3919,17 @@ export default function V2App() {
                     // Phase 9D (#112): revocation notifications.
                     const isV22DaRevoked = req.type === 'v22-da-revoked'
                     const isV22EaRevoked = req.type === 'v22-ea-revoked'
+                    // Phase 12.2 (#122): stale-eval-result notification —
+                    // sent to the evaluator when an Asset they used in an
+                    // Eval Result is superseded or removed on the source
+                    // Claim. Click pans to the Eval Result; informational
+                    // only (the OUTDATED badge stays until re-run).
+                    const isV22EvalResultStale = req.type === 'v22-eval-result-stale'
                     // Phase 11.6 (#164): amendment-proposal accept/reject get
                     // their own colors — green for accepted, red for rejected
                     // — to match the actionable consequence (vs. the
                     // generic indigo "informational amendment" badges).
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
@@ -3839,7 +3941,7 @@ export default function V2App() {
                     // consequences (accept/reject), distinct from the
                     // informational AMENDMENT category used for DA
                     // amendments and the rolled-back unilateral EA model.
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : 'REQUEST'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -4080,6 +4182,24 @@ export default function V2App() {
                             setSel(targetNode.id)
                             canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.0, 500)
                           }
+                        } else if (req.type === 'v22-eval-result-stale') {
+                          // Phase 12.2 (#122): pan to the OUTDATED Eval
+                          // Result + open its Detail Panel. Click dismisses
+                          // the notification row, but the OUTDATED status
+                          // on the Eval Result persists until re-run.
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
+                            const targetNode = req.evalResultId ? nodeMap[req.evalResultId] : null
+                            if (targetNode) {
+                              setSel(targetNode.id)
+                              setForcePanelTab(null)
+                              setForceExpandSda(null)
+                              canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                            }
+                          })
                         } else if (req.type === 'v22-transfer-request') {
                           // Phase 9A.5 Gate B (#77): notification is the entry
                           // point; the decision happens in V22TransferResponseModal
@@ -4229,7 +4349,9 @@ export default function V2App() {
                                                             ? `${req.from.name} rejected your amendment proposal on Claim ${req.asset?.name || 'a Claim'}.${req.responseMessage ? ` "${req.responseMessage}"` : ''}`
                                                             : isV22DaAmendment
                                                               ? `Disclosure Agreement amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
-                                                              : req.asset?.name || ''
+                                                              : isV22EvalResultStale
+                                                                ? `${req.from?.name || 'The Claim owner'} amended evidence on a Claim — your Evaluation Result "${req.evalResultName || req.evalResultId}" is now out of date.`
+                                                                : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -5492,6 +5614,26 @@ export default function V2App() {
               selfEvaluation={isSelf}
               onSubmit={handleV22EvaluationSubmit}
               onClose={() => setV22EvalContext(null)}
+              // Phase 12.2 (#117): pre-compute evidence diff against the
+              // prior result for the modal's banner.
+              evidenceDiff={(() => {
+                const prior = v22EvalContext.priorActiveResultId
+                  ? (v22View?.evaluationResults || []).find((er) => er.id === v22EvalContext.priorActiveResultId) || null
+                  : null
+                if (!prior) return null
+                return computeEvidenceDiff(prior, claim)
+              })()}
+              // Phase 12.2 (#105): role context drives the empty-evidence
+              // copy split.
+              isOwnerView={claim?.owner === activeRole.party}
+              // Phase 12.2 (#117): asset names for the diff banner.
+              assetNameLookup={(() => {
+                const lookup = {}
+                for (const a of (v22View?.assets || [])) {
+                  lookup[a.id] = { name: a.name, id: a.id }
+                }
+                return lookup
+              })()}
             />
           )
         })()}
@@ -5520,6 +5662,23 @@ export default function V2App() {
           for (const rs of publishedRequirementSets) {
             if (!rsLookup[rs.id]) rsLookup[rs.id] = rs
           }
+          // Phase 12.2 (#122): determine which Assets on this Claim are
+          // referenced by at least one non-superseded Eval Result. The
+          // Replace/Remove affordances apply to all already-referenced
+          // rows uniformly, but the EVALUATED tag highlights the rows
+          // where the affordance carries OUTDATED-state consequences.
+          const evalResultsForClaim = (v22View?.evaluationResults || [])
+            .filter((er) => er.claimId === claim.id && er.status !== 'superseded')
+          const evaluatedSet = new Set()
+          for (const er of evalResultsForClaim) {
+            for (const aid of (er.evidenceUsed || [])) evaluatedSet.add(aid)
+          }
+          // Replacement candidate pool: all of owner's Assets that aren't
+          // already on the Claim's active reference list.
+          const ownActiveOnClaim = new Set(claim.referencedAssetIds || [])
+          const replacementCandidates = (v22View?.assets || [])
+            .filter((a) => ownedAssetIds.has(a.id) && !ownActiveOnClaim.has(a.id))
+            .map((a) => ({ id: a.id, name: a.name, file: a.file }))
           return (
             <AmendClaimModal
               activeParty={activeRole.party}
@@ -5534,6 +5693,8 @@ export default function V2App() {
               ownRequirementSets={requirementSets}
               publicRequirementSets={visiblePublishedSets}
               rsLookup={rsLookup}
+              evaluatedAssetIds={Array.from(evaluatedSet)}
+              replacementCandidates={replacementCandidates}
             />
           )
         })()}
@@ -6474,6 +6635,40 @@ export default function V2App() {
                 linkedClaimName={node.v22Type === 'EVAL RESULT' && node.v22Artifact?.claimId
                   ? (sharedForPanel.claims.find((c) => c.id === node.v22Artifact.claimId)?.name || null)
                   : null}
+                // Phase 12.2 (#121): sibling Eval Results in the same batch.
+                siblingEvalResults={(() => {
+                  if (node.v22Type !== 'EVAL RESULT') return []
+                  const er = node.v22Artifact
+                  if (!er?.batchId) return []
+                  const all = (sharedForPanel.evaluationResults || [])
+                  return all.filter((s) => s.batchId === er.batchId && s.id !== er.id)
+                    .map((s) => ({
+                      id: s.id,
+                      name: s.requirementsSet?.name || s.id,
+                      status: s.status,
+                    }))
+                })()}
+                onSelectSiblingEvalResult={(s) => {
+                  setSel(s.id)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22PanToClaimId(s.id)
+                }}
+                // Phase 12.2 (#117): asset-name lookup for the diff section.
+                assetNameLookup={(() => {
+                  if (node.v22Type !== 'EVAL RESULT' || !node.v22Artifact?.evidenceDiff) return {}
+                  const lookup = {}
+                  for (const a of (sharedForPanel.assets || [])) {
+                    lookup[a.id] = { name: a.name, id: a.id }
+                  }
+                  return lookup
+                })()}
+                onSelectDiffAsset={(assetId) => {
+                  setSel(assetId)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22PanToClaimId(assetId)
+                }}
                 // Phase 9C — Agreements Section (backlog #111)
                 disclosureAgreementsForNode={disclosureAgreementsForNode}
                 evaluationAgreementsForNode={evaluationAgreementsForNode}
@@ -6552,7 +6747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.12.1 &middot; Changelog
+          v0.12.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6599,6 +6794,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.12.2', date: '2026-05-04', label: 'Phase 12.2', items: [
+                  'New (#106): Run Evaluation modal opens directly to a review-rows surface — no Asset picker step. Evidence is auto-snapshot at submit time from all in-scope Assets on the Claim.',
+                  'New (#121): Multi-Requirements-Set evaluation. Pick a primary RS for review + add additional RS via the "+ BATCH" chip; submit produces N Eval Results sharing a batchId. Sibling Eval Results section in the Detail Panel surfaces batch members.',
+                  'New (#117): Re-run diff readout. Banner above review rows summarizes the change vs. the prior Eval Result (+N / −M / S superseded / K carried over). Detail Panel "Changes from prior evaluation" section persists the diff in audit trail.',
+                  'New (#122): Claim-internal Asset versioning. Amend Claim grew Replace + Remove affordances on each evaluated Asset row. New OUTDATED Eval Result status with amber-dashed visual treatment + new v22-eval-result-stale notification fired to the evaluator on AmendClaim submit. Asset nodes themselves stay immutable — supersession lives on the Claim\'s reference chain.',
+                  'New (#105): Run Evaluation empty-state copy split — owner sees "Add evidence to self-evaluate"; non-owner sees "Ask the owner of this Claim to add evidence to evaluate."',
+                  'Demo data: Bob\'s PRM Eval Result now ships in a 2-RS batch with a sibling System Integration evaluation — the Sibling Evaluations section is visible on Alice\'s canvas on first load.',
+                  'Backlog hygiene: 6 items moved to Completed; 4 items moved to a new Removed section; #72 (Transferring) rescoped to PoE-only; #168 (PoE node type) + #169 (Badges) filed as Phase 13+ priorities.',
+                ]},
                 { version: '0.12.1', date: '2026-05-04', label: 'Phase 12.1', items: [
                   'New (#120): Claims gain a non-binding "Referenced Standards" field. Owner can declare which Requirements Sets a Claim is built to satisfy at create time, edit them via Amend Claim, or update a single reference to the latest version inline. Strictly informational — does not couple to evaluation, does not auto-suggest in Run Evaluation, does not generate notifications.',
                   'New: Claim Detail Panel "Referenced Standards" section with provenance badges ("Authored by you" / "Public") and a "Newer version available" pill that opens an inline confirmation modal for owners and renders as informational text only for non-owners.',

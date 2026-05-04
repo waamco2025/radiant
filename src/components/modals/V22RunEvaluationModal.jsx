@@ -184,7 +184,12 @@ export default function V22RunEvaluationModal({
   // Used to detect exact duplicates of (Req Set, evidence selection).
   existingEvalResults = [],   // [{ id, pin, requirementsSet: { id, name }, evidenceUsed: [...] }]
   onJumpToExistingEvalResult, // (evalResultId) => void — closes modal + pans
-  onSubmit,               // ({ requirementsSet, rows, evidenceUsed }) => void
+  // Phase 12.2 (#106 + #121): submit shape extended for multi-RS batch.
+  //   { batchId, perRsResults: [{ requirementsSet, rows }], evidenceUsed,
+  //     priorEvalResultId, evidenceDiff } => void
+  // Solo evaluations send a single-entry perRsResults array; the orchestrator
+  // (V2App.handleV22EvaluationSubmit) generates N Eval Results sharing batchId.
+  onSubmit,
   onClose,
   // Self-evaluation flow (spec §13 Phase 6) skips the EA gate; pass `selfEvaluation`
   // to render an "Owner self-evaluation" header context instead of the EA id.
@@ -193,15 +198,32 @@ export default function V22RunEvaluationModal({
   // the Req Set picker is replaced by a read-only card showing the locked
   // Req Set, and the user proceeds directly to scope / review.
   lockedRequirementsSetId = null,
+  // Phase 12.2 (#117): pre-computed evidence diff vs. priorActiveResult.
+  // V2App computes via `computeEvidenceDiff` against the current Claim
+  // and passes it through. Renders as a banner above the review rows.
+  evidenceDiff = null,
+  // Phase 12.2 (#105): role context for the empty-state copy split.
+  isOwnerView = false,
+  // Phase 12.2 (#117): name lookup for diff banner asset references.
+  assetNameLookup = {},
 }) {
   // EA `authorizedRequirementsSetIds` is advisory per spec §10.5 (Phase 6
   // product decision). Show ALL Req Sets from the evaluator's library; the EA
   // suggestions are surfaced inline as a chip on each suggested set.
   const suggestedSetIds = new Set(evaluationAgreement?.authorizedRequirementsSetIds || [])
 
+  // Phase 12.2 (#121): primary RS (the one whose review rows are visible
+  // in step 2). Multi-RS additions go into `additionalReqSetIds` — they
+  // contribute Eval Results to the batch but don't surface review rows
+  // (their rows use AI confidence + status verbatim per Phase 9A item 9).
   const [selectedReqSetId, setSelectedReqSetId] = useState(
     lockedRequirementsSetId || availableRequirementsSets[0]?.id || null,
   )
+  const [additionalReqSetIds, setAdditionalReqSetIds] = useState([])
+  const toggleAdditionalReqSet = (rsId) => {
+    if (rsId === selectedReqSetId) return
+    setAdditionalReqSetIds((prev) => prev.includes(rsId) ? prev.filter((x) => x !== rsId) : [...prev, rsId])
+  }
   // Phase 9A item 6: when the Re-Evaluate flow passes a locked Req Set id
   // that isn't in the current actor's library (e.g., the Req Set lives on
   // the other party's side, or library ids drifted), synthesize a minimal
@@ -269,7 +291,12 @@ export default function V22RunEvaluationModal({
   }, [selectedReqSet, selectedReqSetId, priorActiveResult])
 
   const [rows, setRows] = useState(initialRows)
-  const [evidenceSelection, setEvidenceSelection] = useState(() => evidenceAssets.map((a) => a.id))
+  // Phase 12.2 (#106): evidence is no longer user-selected; the snapshot
+  // lives in `evidenceUsedSnapshot` (computed below from `evidenceAssets`).
+  // The legacy `evidenceSelection` state is retained as a no-op placeholder
+  // to keep the original processing-stage copy referencing the asset count
+  // working unchanged — the array always equals all in-scope Assets.
+  const evidenceSelection = useMemo(() => evidenceAssets.map((a) => a.id), [evidenceAssets])
   // Phase 6.5 #2: multi-stage flow matching ParseEvidenceModal —
   //   step 0: select Req Set + scope
   //   step 1: processing (PrimeRadiant + progress bar, 1.5s)
@@ -309,54 +336,86 @@ export default function V22RunEvaluationModal({
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value } : r)))
   }
 
-  const toggleEvidence = (id) => {
-    setEvidenceSelection((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
+  // Phase 12.2 (#106): evidence is no longer selectable. The snapshot is
+  // the full set of in-scope Assets at evaluation time.
+  const evidenceUsedSnapshot = useMemo(() => evidenceAssets.map((a) => a.id), [evidenceAssets])
 
-  // Phase 6.5+ #6: detect an exact (Req Set, evidence selection) duplicate of
-  // an existing Eval Result. Set comparison is order-independent.
+  // Phase 6.5+ #6 (rescoped Phase 12.2): duplicate detection now keys on
+  // (Req Set, current evidence snapshot) — there's no user-selectable
+  // evidence set anymore, but the snapshot is still the canonical input
+  // for "is this run a duplicate of an existing result." Compare against
+  // the primary selected RS only — multi-RS batches don't reuse the
+  // duplicate-block UX (the UX matches the spec's §11 supersession path).
   const sameSet = (a, b) => {
     if (a.length !== b.length) return false
     const A = new Set(a)
     for (const x of b) if (!A.has(x)) return false
     return true
   }
-  const duplicateOfExisting = selectedReqSet
+  const duplicateOfExisting = selectedReqSet && additionalReqSetIds.length === 0
     ? existingEvalResults.find((er) =>
         er.requirementsSet?.id === selectedReqSet.id
-        && sameSet(er.evidenceUsed || [], evidenceSelection)
+        && sameSet(er.evidenceUsed || [], evidenceUsedSnapshot)
       )
     : null
 
-  // Phase 6.5+ #8: require at least one evidence Asset to be selected.
-  // Phase 6.5+ #6: also block submission when the (Req Set, evidence) combo
-  // exactly duplicates an existing result.
-  // Phase 11.6 (#164): block submission while the EA has a pending
-  // amendment proposal (status === 'pending-acceptance'). The grantee
-  // hasn't yet responded to the grantor's proposal — running an
-  // evaluation under uncertain terms would leak proposed terms into
-  // the resulting Eval Result. Spec §11.2b: revoke is the only
-  // override during pending-acceptance.
+  // Phase 12.2 (#106 + #105): submit gates simplified. No evidence-count
+  // gate — empty-evidence Claims block submit via the empty-state copy
+  // path (rendered above) which short-circuits the modal.
   const eaPendingAcceptance = evaluationAgreement?.status === 'pending-acceptance'
-  const canSubmit = !!selectedReqSet && rows.length > 0 && evidenceSelection.length > 0 && !duplicateOfExisting && !eaPendingAcceptance
+  const hasEvidence = evidenceUsedSnapshot.length > 0
+  const canSubmit = !!selectedReqSet && rows.length > 0 && hasEvidence && !duplicateOfExisting && !eaPendingAcceptance
 
   const handleSubmit = () => {
     if (!canSubmit) return
-    onSubmit?.({
+    // Phase 12.2 (#121): build per-RS results. Primary RS uses the
+    // human-edited rows. Additional RS use AI confidence + status
+    // verbatim (no separate review surface this phase).
+    const perRsResults = []
+    perRsResults.push({
       requirementsSet: { id: selectedReqSet.id, name: selectedReqSet.name, version: selectedReqSet.version ?? 1 },
       rows: rows.map((r) => ({
         requirementId: r.requirementId,
         label: r.label,
         value: r.value,
         status: r.status,
-        // Phase 9A item 8 sub-3: persist AI confidence with each row so the
-        // Eval Result Detail Panel can render the same chip later. Phase 9A
-        // item 10: persist the AI's original value so the pencil icon can
-        // reappear in rendered Eval Result panels when a human edited.
         confidence: r.confidence,
         _aiOriginalValue: r._aiOriginalValue,
       })),
-      evidenceUsed: [...evidenceSelection],
+    })
+    for (const rsId of additionalReqSetIds) {
+      const rs = availableRequirementsSets.find((x) => x.id === rsId)
+      if (!rs) continue
+      const defs = rs.requirements || rs.claims || []
+      const rsRows = defs.map((c) => {
+        const aiValue = c.aiValue ?? ''
+        return {
+          requirementId: c.id || c.requirementId || c.label,
+          label: c.label || c.requirement || c.name,
+          value: aiValue,
+          status: aiValue ? 'satisfactory' : 'missing',
+          confidence: typeof c.aiConfidence === 'number' ? c.aiConfidence : null,
+          _aiOriginalValue: aiValue,
+        }
+      })
+      perRsResults.push({
+        requirementsSet: { id: rs.id, name: rs.name, version: rs.version ?? 1 },
+        rows: rsRows,
+      })
+    }
+    // Generate batch id — V2App's orchestrator stamps each Eval Result.
+    const batchId = `batch-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
+    onSubmit?.({
+      batchId,
+      perRsResults,
+      evidenceUsed: [...evidenceUsedSnapshot],
+      // Backwards compat: solo single-RS callers can read these top-level
+      // fields if they don't want to walk perRsResults.
+      requirementsSet: perRsResults[0].requirementsSet,
+      rows: perRsResults[0].rows,
+      // Phase 12.2 (#117): re-run audit fields plumbed by the orchestrator.
+      priorEvalResultId: priorActiveResult?.id || null,
+      evidenceDiff: evidenceDiff || null,
     })
   }
 
@@ -425,21 +484,37 @@ export default function V22RunEvaluationModal({
                   paddingRight: 2,
                 }}>
                   {availableRequirementsSets.map((rs) => {
-                    const selected = selectedReqSetId === rs.id
+                    // Phase 12.2 (#121): primary (radio-like) + additional
+                    // (multi-select) selection. Click on the primary's row
+                    // sets it as primary; click the +/− chip to toggle as
+                    // a batch sibling. Primary RS drives the visible review
+                    // rows; additional RS use AI values verbatim.
+                    const isPrimary = selectedReqSetId === rs.id
+                    const isAdditional = additionalReqSetIds.includes(rs.id)
                     const suggested = suggestedSetIds.has(rs.id)
                     return (
                       <div
                         key={rs.id}
-                        onClick={() => setSelectedReqSetId(rs.id)}
                         style={{
-                          padding: '10px 14px', borderRadius: 6, cursor: 'pointer',
-                          background: selected ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : 'var(--bg-card)',
-                          border: `1px solid ${selected ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                          padding: '10px 14px', borderRadius: 6,
+                          background: isPrimary ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)' : 'var(--bg-card)',
+                          border: `1px solid ${isPrimary ? 'var(--accent-indigo)' : isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 50%, transparent)' : 'var(--border)'}`,
                           transition: 'all 120ms',
                           display: 'flex', alignItems: 'center', gap: 10,
                         }}
                       >
-                        <div style={{ flex: 1 }}>
+                        <div
+                          onClick={() => {
+                            if (isAdditional) {
+                              // Promoting an additional RS to primary — drop
+                              // it from the additional list to keep state
+                              // mutually exclusive.
+                              setAdditionalReqSetIds((prev) => prev.filter((x) => x !== rs.id))
+                            }
+                            setSelectedReqSetId(rs.id)
+                          }}
+                          style={{ flex: 1, cursor: 'pointer' }}
+                        >
                           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{rs.name}</div>
                           <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{rs.id} · v{rs.version ?? 1}</div>
                         </div>
@@ -450,6 +525,28 @@ export default function V22RunEvaluationModal({
                             color: 'var(--accent-amber)',
                             background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
                           }}>SUGGESTED</span>
+                        )}
+                        {isPrimary ? (
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+                            color: 'var(--accent-indigo)',
+                            background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                          }}>PRIMARY</span>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleAdditionalReqSet(rs.id) }}
+                            title={isAdditional ? 'Drop from this batch' : 'Also evaluate against this Requirements Set (creates a sibling Eval Result)'}
+                            style={{
+                              padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                              border: `1px solid ${isAdditional ? 'var(--accent-indigo)' : 'var(--border)'}`,
+                              background: isAdditional ? 'color-mix(in srgb, var(--accent-indigo) 12%, transparent)' : 'transparent',
+                              color: isAdditional ? 'var(--accent-indigo)' : 'var(--text-dim)',
+                              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                              letterSpacing: '0.04em',
+                              flexShrink: 0,
+                            }}
+                          >{isAdditional ? '✓ BATCH' : '+ BATCH'}</button>
                         )}
                       </div>
                     )
@@ -499,31 +596,52 @@ export default function V22RunEvaluationModal({
                 </div>
               )}
 
-              <FieldLabel label={`Assets in scope (${evidenceAssets.length})`} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {evidenceAssets.length === 0 ? (
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No Assets in scope. The evaluation will run as a self-attestation.</div>
-                ) : evidenceAssets.map((a) => {
-                  const selected = evidenceSelection.includes(a.id)
-                  return (
-                    <div
-                      key={a.id}
-                      onClick={() => toggleEvidence(a.id)}
-                      style={{
-                        padding: '8px 10px', borderRadius: 4, cursor: 'pointer',
-                        background: selected ? 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)' : 'var(--bg-card)',
-                        border: `1px solid ${selected ? 'var(--accent-indigo)' : 'var(--border)'}`,
-                        display: 'flex', gap: 8, alignItems: 'center',
-                      }}
-                    >
-                      <div style={{
-                        width: 12, height: 12, borderRadius: 2,
-                        border: `1.5px solid ${selected ? 'var(--accent-indigo)' : 'var(--border-hover)'}`,
-                        background: selected ? 'var(--accent-indigo)' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                      }}>
-                        {selected && <span style={{ color: 'var(--bg-deep)', fontSize: 8, fontWeight: 900 }}>✓</span>}
-                      </div>
+              {/* Phase 12.2 (#106): Asset picker dropped. Evidence is the
+                  snapshot of all in-scope Assets at submit time, computed
+                  from `evidenceAssets`. The summary below replaces the
+                  former picker — read-only acknowledgment. */}
+              {/* Phase 12.2 (#117): re-run diff banner. Surfaces when
+                  V2App passes a non-empty `evidenceDiff`. */}
+              {evidenceDiff && (evidenceDiff.added.length + evidenceDiff.removed.length + evidenceDiff.superseded.length > 0) && (
+                <div style={{
+                  marginTop: 14, marginBottom: 8,
+                  padding: '12px 14px', borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--accent-amber) 7%, transparent)',
+                  border: '1px dashed color-mix(in srgb, var(--accent-amber) 40%, transparent)',
+                  fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5,
+                }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-amber)', letterSpacing: '0.08em', marginBottom: 6 }}>
+                    CHANGES SINCE LAST EVALUATION
+                  </div>
+                  +{evidenceDiff.added.length} Asset{evidenceDiff.added.length === 1 ? '' : 's'} · −{evidenceDiff.removed.length} Asset{evidenceDiff.removed.length === 1 ? '' : 's'} · {evidenceDiff.superseded.length} superseded · {evidenceDiff.carried.length} carried over.
+                  {priorActiveResult && (
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>
+                      Prior result: {priorActiveResult.requirementsSet?.name || priorActiveResult.id}
+                    </div>
+                  )}
+                </div>
+              )}
+              <FieldLabel label={`Assets in scope (${evidenceAssets.length}) — auto-snapshot at submit`} />
+              {evidenceAssets.length === 0 ? (
+                /* Phase 12.2 (#105): empty-evidence copy split by role. */
+                <div style={{
+                  padding: 14, borderRadius: 8, marginTop: 4,
+                  border: '1px dashed color-mix(in srgb, var(--accent-amber) 35%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent-amber) 5%, transparent)',
+                  fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+                }}>
+                  {isOwnerView
+                    ? 'There is no evidence associated with this Claim. Add evidence to self-evaluate.'
+                    : 'There is no evidence associated with this Claim. Ask the owner of this Claim to add evidence to evaluate.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  {evidenceAssets.map((a) => (
+                    <div key={a.id} style={{
+                      padding: '8px 10px', borderRadius: 4,
+                      background: 'var(--bg-card)', border: '1px solid var(--border)',
+                      display: 'flex', gap: 8, alignItems: 'center',
+                    }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600 }}>{a.name}</div>
                         <div style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
@@ -531,9 +649,9 @@ export default function V22RunEvaluationModal({
                         </div>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
             </ModalBody>
             <ModalFooter>
               {/* Phase 6.5+ #8: surface the disabled reason so the user knows
@@ -545,11 +663,13 @@ export default function V22RunEvaluationModal({
                   ? `Cannot run evaluation: this Evaluation Agreement has a pending amendment proposal. Wait for ${evaluationAgreement?.grantor?.party || 'the grantor'}'s response, or respond to the proposal in your inbox.`
                   : !selectedReqSet
                     ? 'Pick a Requirements Set to continue.'
-                    : evidenceSelection.length === 0
-                      ? 'Select at least one Asset to evaluate.'
+                    : !hasEvidence
+                      ? (isOwnerView ? 'Add evidence to this Claim before evaluating.' : 'Ask the Claim owner to add evidence before evaluating.')
                       : duplicateOfExisting
-                        ? 'This (Requirements Set, Asset selection) combination already has an Eval Result.'
-                        : ''}
+                        ? 'This (Requirements Set, evidence) combination already has an Eval Result.'
+                        : additionalReqSetIds.length > 0
+                          ? `Will produce ${1 + additionalReqSetIds.length} Eval Results sharing a batch id.`
+                          : ''}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn label="Cancel" onClick={onClose} />
@@ -621,9 +741,24 @@ export default function V22RunEvaluationModal({
                 minHeight: 360, maxHeight: 640,
               }}>
                 <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                  <FieldLabel label={`Assets (${evidenceSelection.length})`} />
+                  <FieldLabel label={`Assets (${evidenceUsedSnapshot.length})`} />
+                  {/* Phase 12.2 (#117): repeat the diff banner here too, so the
+                      reviewer sees the change context next to the rows. */}
+                  {evidenceDiff && (evidenceDiff.added.length + evidenceDiff.removed.length + evidenceDiff.superseded.length > 0) && (
+                    <div style={{
+                      marginBottom: 10, padding: '8px 10px', borderRadius: 6,
+                      background: 'color-mix(in srgb, var(--accent-amber) 7%, transparent)',
+                      border: '1px dashed color-mix(in srgb, var(--accent-amber) 40%, transparent)',
+                      fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.4,
+                    }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-amber)', letterSpacing: '0.06em', marginBottom: 4 }}>
+                        Δ EVIDENCE
+                      </div>
+                      +{evidenceDiff.added.length} / −{evidenceDiff.removed.length} / {evidenceDiff.superseded.length} superseded
+                    </div>
+                  )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {evidenceAssets.filter(a => evidenceSelection.includes(a.id)).map((a) => (
+                    {evidenceAssets.map((a) => (
                       <div key={a.id} style={{
                         padding: '8px 10px', borderRadius: 4,
                         background: 'var(--bg-card)', border: '1px solid var(--border)',

@@ -579,10 +579,15 @@ export default function AssetNode({
           // so React's style reconciler doesn't flag a shorthand/longhand mix
           // while transitioning `border-color`.
           borderWidth: 1,
-          borderStyle: showAsProvisional ? 'dashed' : 'solid',
+          // Phase 12.2 (#122): OUTDATED Eval Results render with a dashed
+          // amber border to read "needs attention" without reading "broken."
+          // Distinct from PROVISIONAL (dashed grey) and REVOKED (solid red).
+          borderStyle: (showAsProvisional || (node.isEvaluation && node.status === 'outdated')) ? 'dashed' : 'solid',
           // Phase 9D.2.1 Fix 3: while unraveling, hide the card's own border
           // so only the SVG overlay (Stage 2 erasure) reads.
-          borderColor: isUnraveling ? 'transparent' : borderColor,
+          borderColor: isUnraveling
+            ? 'transparent'
+            : (node.isEvaluation && node.status === 'outdated' ? 'var(--accent-amber)' : borderColor),
           // Phase 9D.1.3 Fix 5: opaque for revoked; 0.6 only for still-
           // provisional (non-revoked, non-declined) cards.
           opacity: (showAsProvisional && !isRevoked) ? 0.6 : 1,
@@ -711,6 +716,20 @@ export default function AssetNode({
                 background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
                 flexShrink: 0,
               }}>REVOKED</span>
+            )}
+            {/* Phase 12.2 (#122): OUTDATED badge — Eval Result whose
+                evidenceUsed has changed since the evaluation. Amber to read
+                "needs attention" without reading "broken." Persists until
+                re-run; dismissing the notification doesn't clear it. */}
+            {node.isEvaluation && node.status === 'outdated' && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em',
+                color: 'var(--accent-amber)',
+                background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+                border: '1px dashed color-mix(in srgb, var(--accent-amber) 50%, transparent)',
+                flexShrink: 0,
+              }}>OUTDATED</span>
             )}
           </div>
         )}

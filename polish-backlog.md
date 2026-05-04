@@ -23,12 +23,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Context:** Alice's canvas is crowded with Assets, Parse Results, Claims, and Eval Results all on the parent layer. Nodes overlap in edge paths; edge crossings are frequent.
 - **Proposed fix:** Evaluate orthogonal edge routing, edge bundling, or tighter node clustering by relationship. May require V2Canvas refactor.
 
-### 46. Corner-node morph on Directory entry/exit
-- **Status:** Deferred to Phase 14
-- **Effort:** M
-- **Source:** Spec §8.1 — unimplemented in Phase 7
-- **Context:** Spec calls for the Radiant Network chrome button to morph mid-animation into the Directory Layer's corner anchor node (and vice versa on exit). Currently the two are visually distinct: the chrome icon stays in place, and the corner anchor fades in via the clip-path wipe. A continuous transform (translate + scale + shape interpolation) would sell the "one animation, not two" principle more convincingly.
-
 ### 56. Keyboard accessibility
 - **Status:** Open
 - **Effort:** M
@@ -44,13 +38,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 <!-- Phase 11E.1: #108 moved to Completed section below. -->
 
 
-### 110. Edge glow + marching-ants animations (V2.1 restoration)
-- **Status:** Open
-- **Effort:** M
-- **Source:** Phase 9B deviation — these effects existed in V2.1 but don't exist in V2.2.
-- **Context:** V2.1 had two persistent edge animations: a glow effect on Full Disclosure edges, and marching-ants (animated dashed line) on Selective, Proof-only, and Provisional edges. Both effects were lost during V2.2 migration cleanup. Both should persist through selection state (additive brightening on top, not replacing). Reference V2.1 backups for original implementation.
-- **Proposed fix:** Port the V2.1 edge-animation logic to V2Canvas.jsx. Glow likely a Three.js shader or post-processing effect; marching-ants is a stroke-dashoffset animation. Ensure both additively compose with selection brightening (+1.5px stroke, 65% white blend from 9A.1) and with Phase 9B's 30% hover brightening.
-
 ---
 
 ## Edge Interactions
@@ -61,13 +48,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 3 open question
 - **Context:** If user selects an edge then triggers a layer change (dive/surface), the highlight resets because material mutation doesn't survive rebuild.
 - **Proposed fix:** Re-apply selected-edge material in the effect that handles layer changes. Low-priority given V2.2's empty child layer — matters more if we later reuse child layer.
-
-### 9. Richer provisional → active transition
-- **Status:** Open
-- **Effort:** M
-- **Source:** Phase 4 deviation #3
-- **Context:** Current transition reuses V2.1's `_isNew` 900ms reveal. Phase 11C.3–11C.5 wired the flip-from-provisional → active card animation back; pairs with #139 for the edge geometry animation that should accompany it.
-- **Proposed fix:** Dashed-to-solid edge morph animation. May share primitive with the unravel `playEdgeRetract` (inverse: edge draws from anchor toward target instead of trimming back).
 
 ### 35. Edge-draw animation for new Amend Claim references
 - **Status:** Open
@@ -162,12 +142,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 4 open question #4
 - **Context:** Basic accept/decline notifications shipped in Phase 5; further refinements (amendment notifications via #102, proof-of-evaluation notifications, etc.) tracked separately.
 
-### 16. Deep-linking from notifications
-- **Status:** Open
-- **Effort:** S
-- **Source:** Phase 4 open question #4
-- **Context:** Click on a notification should pan/select/open the relevant artifact. Several variants shipped through Phase 5–11 (acceptance, decline, amendment, EA-only request); a final audit + cleanup pass would fold any remaining gaps.
-
 ---
 
 ## Data Model & Content
@@ -178,20 +152,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Andrew's client feedback post-spec-review
 - **Context:** Client analysis confirmed the architecture model holds, but noted deviations from their canon terminology. No structural changes required — just naming drift to reconcile.
 - **Proposed fix:** After V2.2 stabilizes, update nomenclature (artifact names, field names, UI labels) to match client canon. Then update the architecture spec markdown to reflect the shipped reality. Client re-runs their analysis.
-
-### 18. Third-actor Carol demo data expansion
-- **Status:** Open
-- **Effort:** S
-- **Source:** Spec §7.3 (Story 3)
-- **Context:** Carol's demo data currently covers only the AuditCo PRM audit scenario. Stories that walk through Carol disclosing her Eval Result to Bob may need richer seeded data.
-- **Proposed fix:** Seed Carol with additional audit Claims and the full Story 3 flow (Carol → Bob proof-only disclosure).
-
-### 19. Published standards data
-- **Status:** Open
-- **Effort:** S
-- **Source:** Spec §17.1 (future direction), Phase 6 self-evaluation flow
-- **Context:** Alice's self-evaluation story requires published Requirements Sets from external actors (OSHA, NIST, ISO). These exist in V2.1 demo data but need verification that they're reachable in V2.2.
-- **Proposed fix:** Verify published standards are accessible from the Library modal in V2.2 mode. Add if missing.
 
 ### 36. Option B — view builder pulls disclosed Assets onto grantee canvas
 - **Status:** Open
@@ -225,18 +185,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 9A.5 planning — deferred due to missing architectural decision.
 - **Context:** Parse Results today are parent-layer nodes without a DOT (only Assets, Claims, and Eval Results carry `dot` per spec §2.6). Open questions: (a) should Parse Results also have DOTs (would make them first-class identity-anchored artifacts, enabling Parse Result transfer + provenance lineage)? (b) should Parse Results live on a child layer under their source Asset rather than the parent layer (they're always derived, never standalone)? Both questions blocked on client decision — DOT semantics touch canon X.1–X.10 and layer placement touches the canvas density story.
 
-### 114. Umbrella Disclosure concept + second seller role with pre-existing DA to Bob
-- **Status:** Partial (Phase 11A seeded ChipCo + warm-path DA; full umbrella semantics + Asset-hierarchy interaction still scoping)
-- **Effort:** M
-- **Priority:** High (enables #113's two-flow contrast — already shipped in 11C as the warm-path EA-only flow)
-- **Source:** Andrew planning conversation post-9C — modeling realistic procurement relationships.
-- **Context:** Real procurement doesn't ad-hoc request disclosure on every transaction. Mature buyer-supplier relationships have framework agreements covering visibility broadly, with specific actions exercised under those frameworks. The platform supports this via "umbrella" Disclosure Agreements at the Radiant Network layer — a standing DA from a seller to a buyer covering the seller's entire published catalog. Set up administratively (out-of-app, like a master service agreement at onboarding); not a UX flow within Radiant. Phase 11A added Dave/ChipCo as the second seller actor with a pre-existing DA to Bob; Phase 11C exercised the warm-path EA flow against it.
-- **Remaining work:**
-  - Full umbrella semantics — does it cover an entire catalog dynamically (auto-extend to new published Claims), or a static enumerated list?
-  - Visual treatment at Directory layer — pairs with #132 (umbrella DA edge visualization on directory layer).
-  - Cascade through Asset hierarchy — if a new Asset is added to a parent Program covered by an umbrella, does the umbrella auto-extend? Worth resolving as part of #131's design conversation.
-- **Depends on:** Pairs with #132. Touches the Public Directory Cloud work (#43, #45).
-
 ### 115. Evaluation Agreement terms checkboxes + metadata schema
 - **Status:** Partial (Phase 11C shipped two acknowledgments + expiry; remaining terms list deferred for Andrew's ideation pass)
 - **Effort:** M
@@ -269,11 +217,12 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 9A.3 preamble — handoff roster.
 - **Context:** Each flow has happy-path error messaging but edge cases aren't systematically reviewed: PIN not found, self-PIN rejection, clipboard API failure, localStorage quota exceeded, network-offline (currently unused but will matter once a real backend arrives), modal cancelled mid-submit, role-switch during an open modal, decline/cancel from a revealed notification. Walk each V2.2 flow and surface where the failure mode is silent or ambiguous.
 
-### 72. Extend Transferring to Claims and Eval Results
-- **Status:** Open
+### 72. Extend Transferring to Proofs of Evaluation (PoEs)
+- **Status:** Open (scope narrowed Phase 12.2)
 - **Effort:** M
-- **Source:** Phase 9A.4 — Assets-only scope limitation.
-- **Context:** Canon X.5 applies uniformly across data elements; the UI patterns from Asset transfer (V22TransferAssetModal + notification Accept/Decline + `dot.lineage` append) should port directly to Claims and Eval Results. Open questions: does a Claim transfer bring its `referencedAssetIds[]` Assets along, or just the Claim? Does an Eval Result transfer require co-signing by the Claim owner (since the Eval Result is entangled with the Claim lineage)?
+- **Source:** Phase 9A.4 — Assets-only scope limitation; rescoped Phase 12.2 to focus on PoE transfer specifically.
+- **Context:** Canon X.5 applies uniformly across data elements with DOTs. The UI patterns from Asset transfer (V22TransferAssetModal + notification Accept/Decline + dot.lineage append) port directly to Proofs of Evaluation (#168) once PoEs land as a first-class node type with their own DOT. Claim and individual Eval Result transferring deferred indefinitely — Claims and Eval Results are entangled with their evidence and evaluator lineage in ways that don't translate cleanly to standalone transfer semantics.
+- **Depends on:** #168 (PoE node types) — implement after PoEs ship.
 
 ### 73. Transfer constraint — Asset backing a disclosed Claim
 - **Status:** Open
@@ -293,11 +242,6 @@ Item numbers are permanent IDs; they are never resequenced. Gaps (#84, #92, #109
 - **Source:** Phase 9A.5 planning — deferred. Pairs with #71 and the broader animation-restoration phase.
 - **Context:** On transfer accept, the recipient-side reveal (pan-to + NEW badge) works; the sender-side UX is abrupt — the Asset vanishes from the sender's canvas without a retreat animation. Target: choreographed sequence on both canvases — sender canvas shows the Asset fading out with a short "transferred" micro-animation; recipient canvas shows the Asset arriving with a reveal pulse. The Phase 9D.2 unravel primitive provides the leaving-canvas pattern; could be reused here.
 
-### 81. Reciprocal acceptance notification audit
-- **Status:** Open
-- **Effort:** M
-- **Source:** Phase 9A.5 planning — pairs with animation work (#80). Explicit known gap: Disclosure Request acceptance doesn't currently notify the requester; the notification is the trigger for the provisional → whole-node transformation animation (#71).
-- **Context:** Inventory every party-to-party action that should reciprocally notify (Disclosure accept, Disclosure decline, Amend Claim, Amend Disclosure, Run Evaluation, Cancel Request, Transfer accept/decline/cancel, etc.) and verify each fires both directions. CLAUDE.md now codifies this as a convention ("Reciprocal notifications for all party-to-party actions") so new work should comply; this audit item closes the gap for existing flows.
 
 ### 88. Transfer cascade — Parse Results and dependent Claims on sender side
 - **Status:** Open
@@ -401,21 +345,43 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 - **Source:** V2.1 backlog #24
 - **Context:** Time-series log of all events (creations, disclosures, evaluations, amendments) across the user's network. Useful for audit and analysis.
 
+### 168. Proof of Evaluation (PoE) node type
+- **Status:** Open
+- **Effort:** L
+- **Priority:** High (Phase 13+ priority #1)
+- **Source:** Phase 12 design huddle.
+- **Context:** A Proof of Evaluation (PoE) is a new first-class node type that wraps an Eval Result batch produced by a single Run Evaluation invocation. Distinct from the individual Eval Results inside the batch; provides an aggregation layer suitable for Badge attachment (#169) and inter-party transfer flows (#72).
+- **Design decisions (locked in Phase 12.2):**
+  - 1:1 with Eval Result batch — every Run Evaluation invocation produces one PoE wrapping all sibling Eval Results sharing that batchId.
+  - PoEs get their own Detail Panel surface.
+  - PoEs carry their own DOT (transferable artifact per Canon X.5; pairs with #82 design blocker resolution).
+- **Open design questions:**
+  - Visual placement on canvas — parent of Eval Results, sibling, or new layer entirely?
+  - Disclosure semantics — does sharing a PoE share all wrapped Eval Results, or can it be selective per-Eval-Result?
+  - Migration: solo Eval Results (batchId: null after Phase 12.2) — get retroactive single-Eval-Result PoEs at PoE-launch time, or stay as raw Eval Results?
+- **Depends on:** #121 (batch ID infrastructure — Phase 12.2 ships this), #82 (DOT model decision).
+
+### 169. Badges
+- **Status:** Open
+- **Effort:** L
+- **Priority:** High (Phase 13+ priority #2)
+- **Source:** Phase 12 design huddle.
+- **Context:** Badges are third-party issued endorsements that reference Proofs of Evaluation (#168). Live as discoverable artifacts on the platform. Surface on both Claim Detail Panels (showing the badge attached to the underlying PoE) and Actor Detail Panels (aggregating all badges across the Actor's Claims).
+- **Design decisions (locked in Phase 12.2):**
+  - Issuance: any Actor can issue a Badge to any other Actor (not to themselves) — the platform treats all Actors symmetrically. No special "issuer" role; no badge-issuer authority gating.
+  - Reference: Badges reference a specific PoE (#168), not a Claim or Actor directly. The Claim and Actor relationships derive from the PoE's lineage.
+  - Display: Both Claim Detail Panels (badge attached to the underlying PoE) and Actor Detail Panels (aggregated across all of the Actor's Claims).
+  - Revocation: follows existing revocation patterns (Phase 9D unravel + cross-role notification).
+- **Open design questions:**
+  - Issuance flow UX — modal triggered from the PoE Detail Panel? From the Actor Detail Panel?
+  - Badge taxonomy — custom labels only, structured types, or both?
+  - Public Directory surfacing — do badges appear on Directory dots, on Claim previews, on Actor cluster headers?
+  - Revocation cascade — what happens to the Badge when the underlying PoE is superseded or revoked?
+- **Depends on:** #168 (PoE node types).
+
 ---
 
 ## Exploratory / Experimental
-
-### 31. Parse-less app branch (§17.1 unification)
-- **Status:** Investigation
-- **Effort:** XL
-- **Source:** Andrew's note from client architecture discussion
-- **Context:** Thesis: Parse Templates and Requirements Sets can be unified because Parsing is essentially Evaluation without criteria. A "self-evaluation with unified templates" architecture could replace Parsing entirely. Explicit future direction per spec §17.1. Implement in V2.3 or later.
-
-### 32. Multi-party agreements
-- **Status:** Investigation
-- **Effort:** XL
-- **Source:** Spec §17.4
-- **Context:** Current Agreements are two-party (grantor + grantee). Client model hints at support for additional participants. Keep `participants[]` array extensible in schemas.
 
 ### 43. Clickable Directory Layer dots
 - **Status:** Deferred to Phase 14
@@ -542,11 +508,52 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 
 ---
 
+## Removed
+
+(Items removed from active scope with audit-trail rationale. Distinct from Completed — these items are not "done" but are explicitly out of scope and won't be revisited unless rationale changes. Phase 12.2 introduced this section.)
+
+### 31. Parse-less app branch (§17.1 unification)
+- **Status:** Investigation
+- **Effort:** XL
+- **Source:** Andrew's note from client architecture discussion
+- **Context:** Thesis: Parse Templates and Requirements Sets can be unified because Parsing is essentially Evaluation without criteria. A "self-evaluation with unified templates" architecture could replace Parsing entirely. Explicit future direction per spec §17.1. Implement in V2.3 or later.
+- **Removed Phase 12.2** — out of scope; not pursuing parse-less unification in this prototype.
+
+### 32. Multi-party agreements
+- **Status:** Investigation
+- **Effort:** XL
+- **Source:** Spec §17.4
+- **Context:** Current Agreements are two-party (grantor + grantee). Client model hints at support for additional participants. Keep `participants[]` array extensible in schemas.
+- **Removed Phase 12.2** — out of scope; current two-party model sufficient.
+
+### 46. Corner-node morph on Directory entry/exit
+- **Status:** Deferred to Phase 14
+- **Effort:** M
+- **Source:** Spec §8.1 — unimplemented in Phase 7
+- **Context:** Spec calls for the Radiant Network chrome button to morph mid-animation into the Directory Layer's corner anchor node (and vice versa on exit). Currently the two are visually distinct: the chrome icon stays in place, and the corner anchor fades in via the clip-path wipe. A continuous transform (translate + scale + shape interpolation) would sell the "one animation, not two" principle more convincingly.
+- **Removed Phase 12.2** — no longer relevant to the shipped Directory entry/exit UX.
+
+### 114. Umbrella Disclosure concept + second seller role with pre-existing DA to Bob
+- **Status:** Partial (Phase 11A seeded ChipCo + warm-path DA; full umbrella semantics + Asset-hierarchy interaction still scoping)
+- **Effort:** M
+- **Priority:** High (enables #113's two-flow contrast — already shipped in 11C as the warm-path EA-only flow)
+- **Source:** Andrew planning conversation post-9C — modeling realistic procurement relationships.
+- **Context:** Real procurement doesn't ad-hoc request disclosure on every transaction. Mature buyer-supplier relationships have framework agreements covering visibility broadly, with specific actions exercised under those frameworks. The platform supports this via "umbrella" Disclosure Agreements at the Radiant Network layer — a standing DA from a seller to a buyer covering the seller's entire published catalog. Set up administratively (out-of-app, like a master service agreement at onboarding); not a UX flow within Radiant. Phase 11A added Dave/ChipCo as the second seller actor with a pre-existing DA to Bob; Phase 11C exercised the warm-path EA flow against it.
+- **Removed Phase 12.2** — out of scope; umbrella disclosure ability deferred to a future Admin App, separate from this interface. Phase 11A's Dave/ChipCo seed data + warm-path EA flow remains in place to support narrative needs.
+
+---
+
 ## Completed
 
 (All items marked ✅ Complete, ✅ Verified, or ✅ Superseded — preserved with their Status entries, phase references, and commit hashes for archive value. Phase 11.5 hygiene pass moved them to this section to keep the topic sections above focused on remaining work.)
 
 ### Notifications — completed
+
+### 16. Deep-linking from notifications
+- **Status:** ✅ Complete (variants shipped across Phases 5–11; verified Phase 12.2). Click on a notification pans/selects/opens the relevant artifact across all shipped notification types (acceptance, decline, amendment, EA-only request, transfer, revocation, eval-result-stale). Moved to Completed Phase 12.2 — already shipped across Phases 5–11; remaining Detail Panel refinements tracked under #161 and Phase 13+ Detail Panel UI cleanup priority.
+
+### 81. Reciprocal acceptance notification audit
+- **Status:** ✅ Complete (Phase 9 artifact; verified Phase 12.2). CLAUDE.md codifies the reciprocal-notification convention; multi-round QA across Phases 9-11 confirms reciprocal notifications fire correctly for every party-to-party action. Moved to Completed Phase 12.2 — Phase 9 artifact; multi-round QA confirms reciprocal notifications fire correctly across all party-to-party actions.
 
 ### 164. Acknowledgment amendment acceptance UX (counter-acceptance flow)
 - **Status:** ✅ Complete (Phase 11.6). EA amendments converted from unilateral grantor mutations to bilateral proposals requiring grantee acceptance. Closes the post-acceptance acknowledgment-injection exploit. Three new factory helpers (`proposeEvaluationAgreementAmendment`, `acceptEvaluationAgreementAmendment`, `rejectEvaluationAgreementAmendment`) replace the unilateral `makeAmendedEvaluationAgreement`. New EA `status` enum value `'pending-acceptance'` between `'active'` and a possible return to `'active'`. New per-amendment shape with `id` / `status` / `proposalMessage` / `responseMessage` / `responseDate` / `termsBefore` / `proposed` / `acknowledgmentChanges`. New `AmendmentResponseModal` for the grantee-side accept/reject UX with per-row acknowledgment ticking + expiration confirm. Three new notification types `v22-ea-amendment-proposal` / `v22-ea-amendment-accepted` / `v22-ea-amendment-rejected` (sunset the old `v22-ea-amendment` informational type). Pending-acceptance lock blocks Run Evaluation submit + Amend EA button on both grantor and grantee sides; revoke is the only override. Scope was deliberately limited to EA amendments — DA amendments stay unilateral pending future work tracked under #167. Architecture spec §11.2a major revision documents the new lifecycle + record shape; new §11.2b documents the lock semantics; §7.4 replaces the old single notification row with three new rows.
@@ -555,6 +562,12 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 - **Status:** ✅ Complete (Phase 11E.2 + 11E.4 rollback). DA-amendment scope only — the parallel Claim-amendment fan-out shipped briefly in Phase 11E.2 and was rolled back in Phase 11E.4 after a conceptual review concluded that grantees only learn of new Claim content via Disclosure Agreement amendment, never via the Claim amendment itself. Two preserved deliverables: (a) the existing DA-amendment notification was renamed `v22-amendment` → `v22-da-amendment` (parallel to `v22-ea-amendment`), with click handler updated to deep-link directly to the DA Detail Panel via `setOpenAgreement({ kind: 'disclosure', disclosureAgreementId })`. Badge label initially `DA AMENDED` (Phase 11E.2), then unified to `AMENDMENT` (Phase 11E.4) when the EA amendment badge was unified to the same label. (b) Notification body copy now includes the Claim name + optional `(Note: …)` suffix — pre-fix the body fell through to a bare `req.asset?.name`. Architecture spec §7.4 notification table extended with `v22-da-amendment` row; §11.2 prototype notes updated for the DA-amendment case; §6 worked example + §11.3 evaluation-amendment narrative now reference the DA-amendment type.
 
 ### Visual & Rendering — completed
+
+### 9. Richer provisional → active transition
+- **Status:** ✅ Complete (Phase 11C.3–11C.5 wired the flip-from-provisional → active card animation; verified Phase 12.2). Animation primitive at `src/v2/animations/reveal.js`. Pairs with #139 (Phase 11E.3 ship). Moved to Completed Phase 12.2 — sufficient for current bar.
+
+### 110. Edge glow + marching-ants animations (V2.1 restoration)
+- **Status:** ✅ Complete (shipped during V2.2 polish work; verified Phase 12.2). Edge styling palette in `V2Canvas.jsx` carries the dashed/solid + opacity pattern from V2.1 — visually equivalent. Moved to Completed Phase 12.2 — already shipped during V2.2 polish work.
 
 ### 44. Radiant Network Actor node on owner canvas
 - **Status:** ✅ Complete (Phase 11A seeded the node via `buildViewForActor` line 1725 — `if (hasPublished) actors.push(RADIANT_NETWORK_ACTOR)`; Phase 11.8 added the double-click interaction). Double-clicking the Radiant Network Actor card opens the Public Directory with the circular wipe originating from the card's screen-space center instead of the chrome globe-button corner. New `wipeOrigin` prop on `DirectoryLayer` accepts a viewport-pixel `{ x, y }`; the open-phase pin captures the origin so the close animation collapses back to the same point. Globe-button click path is unchanged (passes null → falls back to bottom-left corner).
@@ -682,6 +695,15 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 
 ### Data Model & Content — completed
 
+### 18. Third-actor Carol demo data expansion
+- **Status:** ✅ Complete (existing seed data sufficient for Carol's narratives; verified Phase 12.2). Carol's PRM audit Eval Result + her audit-workspace Asset cover the documented Story 3 path. Moved to Completed Phase 12.2 — existing seed data sufficient.
+
+### 19. Published standards data
+- **Status:** ✅ Complete (Phase 12.1 wired the public RS pool via `SEED_PUBLISHED_REQUIREMENT_SETS`; verified Phase 12.2). Bob's MIL-PRF-55681 v1 + v2 + System Integration v1 ship as published standards visible in the Library's Published tab. Moved to Completed Phase 12.2 — verified accessible in V2.2 Library; no further work needed.
+
+### 122. Remove evidence from a Claim despite prior evaluation (Asset versioning + OUTDATED state)
+- **Status:** ✅ Complete (Phase 12.2). Claims gain a parallel `assetReferences[]` audit chain on top of the existing primitive `referencedAssetIds[]` (the active in-scope set). Each chain entry: `{ assetId, supersededBy, addedDate, removedDate }`. AmendClaim grew Replace + Remove affordances per evaluated-Asset row — Replace opens a successor picker that stamps `supersededBy` on the existing entry and appends a fresh entry for the replacement; Remove stamps `removedDate` on the existing entry without successor. The Asset node itself is NEVER modified. New Eval Result `status` value `'outdated'` triggered when any `evidenceUsed` Asset has been superseded or removed since the evaluation. `isEvalResultStale(evalResult, claim)` walks the chain to detect; AmendClaim submit fires `v22-eval-result-stale` notifications (single-grantee, informational, click deep-links to the Eval Result) and flips status synchronously. AssetNode renders an OUTDATED badge in Row 0 + dashed amber card border. Eval Result Detail Panel renders an "Out of date" notice section near the top with re-run guidance. Re-run produces a new active Eval Result via #117's flow; the prior OUTDATED Eval Result transitions to `'superseded'`. New helper `getLatestAssetVersion(assetId, claim)` mirrors `getLatestRSVersion` from #120. Documented deviation: existing 42+ call sites read `referencedAssetIds` as primitives — kept that shape and added the chain in parallel rather than converting all consumers; the brief explicitly allowed this either-or path.
+
 ### 120. Reference published Requirements Sets on a Claim (non-binding)
 - **Status:** ✅ Complete (Phase 12.1). Claims gain `referencedRequirementsSets[]` of `{ requirementsSetId, addedDate }` entries. **Informational only** — does not couple to evaluation, does not auto-suggest in Run Evaluation, does not produce notifications when changed. **Owner-authoritative** — only the Claim owner can edit; references do not inherit from Assets. **Pool:** owner's authored RS + publicly published RS; privately-shared RS deferred. **Edit pathways:** Create-time picker + AmendClaim add/remove (cascade-skip — no Eval Result staleness, no notifications) + inline `UpdateRSReferenceModal` for single-row supersession updates (the only inline mutation affordance on this section, justified because version drift is passive state). **Version-pinned** — references store the specific version id; library supersession surfaces a "Newer version available" pill rather than auto-retargeting. **Mutable lifecycle** — no lock-on-disclosure semantics. New shared `RequirementsSetPicker` primitive used by Create + Amend Claim flows. Demo data: Alice and Dave's seeded Claims now reference public + authored standards; MIL-PRF-55681 ships in v1 + v2 so the supersession surfacing is visible on first load. New helper `getLatestRSVersion(rsId, allRS)` walks the lineage chain. Architecture spec §10.3 updated + new §10.3a documenting the field semantics, version-pinning, and inline-mutation exception.
 
@@ -695,6 +717,18 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 - **Status:** ✅ Complete for the V22RunEvaluationModal call sites (Phase 11D W6). "Evidence in scope (N)" → "Assets in scope (N)"; "...without evidence (self-attestation)" → "...as a self-attestation"; "Select at least one evidence Asset" → "Select at least one Asset"; "(Requirements Set, evidence) combination" → "(Requirements Set, Asset selection) combination"; processing subtitle "across N evidence file(s)" → "across N Asset(s)". Internal variable names kept per the user-facing-vs-internal boundary. Pairs with the broader #17 client-canon reconciliation.
 
 ### Process Flows — completed
+
+### 105. Run Evaluation modal: empty-evidence copy update
+- **Status:** ✅ Complete (Phase 12.2). Owner viewing their own evidence-less Claim sees "There is no evidence associated with this Claim. Add evidence to self-evaluate." Non-owner (evaluator) sees "There is no evidence associated with this Claim. Ask the owner of this Claim to add evidence to evaluate." Both gate the modal's submit action — empty-evidence Claims cannot be evaluated. New `isOwnerView` prop on `V22RunEvaluationModal`; V2App resolves at mount time via `claim?.owner === activeRole.party`.
+
+### 106. Remove evidence picker from Run Evaluation modal
+- **Status:** ✅ Complete (Phase 12.2). Modal opens directly to a review-rows surface — no Asset picker step. `evidenceUsed` is computed at submit time as the snapshot of all currently-in-scope Asset references on the Claim (filtered through the supersession chain). Existing single-Asset-list summary rendering retained as a read-only "Assets in scope (N) — auto-snapshot at submit" panel; the legacy `evidenceSelection` state stays as a no-op placeholder so the processing-stage copy referencing the Asset count works unchanged. Submit gates simplified — empty-evidence Claims block via the empty-state copy path instead of the prior "select at least one Asset" affordance. Pairs with #88 (transfer cascade) — both deal with Claim-vs-evidence boundary semantics; this item consolidated the boundary on the evaluation side.
+
+### 117. Re-Run Evaluation: diff readout
+- **Status:** ✅ Complete (Phase 12.2; reshaped from "permissive Asset selection"). Re-run shows a "Changes since last evaluation" banner above the review rows in the Run Evaluation modal when a prior Eval Result by the same evaluator on this Claim has a non-empty diff vs. the current effective evidence snapshot. Banner counts: +N Assets, −M Assets, S superseded, K carried over. Banner suppressed when no prior or fully empty diff. Resulting Eval Result Detail Panel renders a "Changes from prior evaluation" section with the same diff content, persistent in audit trail. New helper `computeEvidenceDiff(priorEvalResult, claim)` returns `{ added, removed, superseded, carried }`. Re-run flips the prior Eval Result's status to `'superseded'` with `supersededBy` set to the new Eval Result's id; new Eval Result carries `priorEvalResultId` + `evidenceDiff` for audit. NEW badges on freshly-disclosed Assets (the brief's auxiliary item from prior framing) deferred — current diff banner readout covers the "what changed since" question for evaluators.
+
+### 121. Evaluate a Claim against multiple Requirements Sets simultaneously
+- **Status:** ✅ Complete (Phase 12.2). Run Evaluation modal's RS picker grew a primary/additional split: clicking a row sets it as the primary RS (whose review rows surface in step 2); clicking the `+ BATCH` chip toggles a row as a sibling (no separate review rows — uses AI confidence + status verbatim). Submit produces N Eval Results, all sharing a freshly-generated `batchId` (`batch-{timestamp}-{rand}`). Solo evaluations carry `batchId: null`. `makeEvaluationResult` extended with `batchId`, `priorEvalResultId`, `evidenceDiff` fields. V22EvalResultPanel renders a "Sibling Evaluations" section listing batch members when `batchId !== null` and the batch contains 2+ members; section omitted otherwise (backwards-compat for pre-12.2 seed Eval Results). Demo data: Bob's existing PRM Eval Result retro-fitted with `batchId: 'batch-seed-bob-prm-001'`; new sibling Eval Result `eval-bob-prm-002` against System Integration v1 ships in the same batch + new proof / ownership DAs so both batch members appear on Alice's canvas.
 
 ### 54. Total reset button in user menu
 - **Status:** ✅ Complete (Phase 11.8). New "Reset all data" action in the user menu dropdown, below the SWITCH USER block under its own divider. Click opens a confirmation modal explaining the scope (every role's canvas state, notifications, provisional artifacts) before committing. On confirm: `v22Provisionals` reset to empty initial shape; `perRoleState` reset to `emptyRoleState` for every role; `credits` reset to the active role's seeded balance; selection / Detail Panel / Directory state cleared. Theme + skip-boot localStorage flags are preserved (user preferences, not demo state). Note the original brief mentioned "clears localStorage and re-plays the boot sequence" — that path was deemed too aggressive for the demo (theme regression + forced 3D boot every reset), so the shipped scope is in-memory state only. Pairs with #53 (session persistence) which would extend the reset surface to persisted state when that ships.
@@ -889,6 +923,7 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 - 2026-04-30: Phase 11D.4.1 — Eval Result placement derived from source Claim + AssetNode tooltip z-index fix.
 - 2026-04-30: **Phase 11.5 — Dev hygiene pass.** Reorganized this file: ~70 ✅ Complete / ✅ Verified / ✅ Superseded items moved into a new `## Completed` section at the bottom of the file (preserved verbatim with their Status entries, phase references, and commit hashes). The topic sections above (Visual & Rendering, Edge Interactions, Detail Panels, V1 File Cleanup, Notifications, Data Model & Content, Process Flows, Spec Updates, Future Features, Exploratory) now contain only Open / Partial / Deferred / Investigation items. **Status vocabulary standardized** to one of: `Open`, `Partial`, `Deferred to Phase X`, `Investigation`. **Effort field** added to every remaining open item: `S` / `M` / `L` / `XL` / `?`. **Phase queue assignments** baked into Status fields: Phase 11E (`#108`, `#102`, `#139`); Phase 12 (`#117`, `#105`, `#106`, `#120`, `#121`, `#122`); Phase 13 (`#26`); Phase 14 (`#43`, `#45`, `#46`, `#47`, `#132`); Phase 15 (`#11`, `#48`, `#104`). **Misfilings rehoused:** #74 (Provenance lineage UI) moved from Process Flows → Detail Panels. **No item triage** (no kills, no merges beyond the existing `#12 → #111` superseded). #84, #92, #109 ID gaps left as historical artifacts. Architecture spec audited and Phase 11 summary entry added; `ROUND-13-CONTEXT.md` created at the repo root as a setup checklist for the next conversation.
 - 2026-04-30: **Phase 11E.1 — Amend Evaluation Agreement (#108).** Wired the EA amendment flow end-to-end: new modal `AmendEvaluationAgreementModal.jsx` (expiration via shared `ExpiryPicker` + acknowledgment editor list + amendment note), new factory `makeAmendedEvaluationAgreement` mirroring `makeAmendedDisclosureAgreement` shape, new pure helper `diffAcknowledgments(before, after)`, `makeEvaluationAgreement` extended with `amendments[]`. New notification type `v22-ea-amendment` (single-grantee, informational; deep-links to Claim + opens EA Detail Panel). EA Detail Panel: Amendments section between Status and paired-DA navigation; Amend footer button gated to grantor + active + non-revoked. Acknowledgments shipped with **Option B** semantics — acknowledgments live on the Claim and Amend EA mutates the Claim directly while the EA's `acknowledgmentsAccepted` audit trail is preserved. Multi-EA implicit propagation + lineage chaining are documented limitations; Option C target deferred to production via new backlog item #160. Architecture spec §11.2a (new subsection) + §7.4 (notification table extended) + Changelog entry. #108 moved to Completed; #12 superseded note updated.
+- 2026-05-04: **Phase 12.2 — Evaluation Architecture Cluster (#106, #117, #121, #122, #105) + backlog hygiene + new item filings (#168 PoE, #169 Badges).** Five evaluation items shipped together; major restructure of the Run Evaluation flow + new Asset versioning + OUTDATED Eval Result lifecycle. **#122 Asset versioning:** Claims gain a parallel `assetReferences[]` audit chain on top of the existing primitive `referencedAssetIds[]` — entries `{ assetId, supersededBy, addedDate, removedDate }`. Documented deviation: kept `referencedAssetIds` as primitives + added the chain in parallel rather than converting all 42+ consumer call sites; the brief explicitly allowed this either-or path. AmendClaim grew Replace + Remove affordances per evaluated-Asset row — Replace opens a successor picker that stamps `supersededBy` on the existing entry and appends a fresh entry for the replacement; Remove stamps `removedDate` on the existing entry without successor. Asset node itself is NEVER modified. New Eval Result `status` value `'outdated'` triggered when any `evidenceUsed` Asset has been superseded or removed since the evaluation. New helpers `isEvalResultStale`, `getLatestAssetVersion`. AmendClaim submit fires `v22-eval-result-stale` notifications (single-grantee, informational, OUTDATED badge label, click deep-links to the Eval Result) and flips status synchronously. AssetNode renders an OUTDATED badge in Row 0 + dashed amber card border. V22EvalResultPanel renders an "Out of date" notice section near the top with re-run guidance. **#106 Drop Asset picker:** Run Evaluation modal opens directly to a review-rows surface; `evidenceUsed` is computed at submit time as the snapshot of all currently-in-scope Assets. Submit gates simplified — empty-evidence Claims block via the new role-split copy path. **#121 Multi-RS:** RS picker grew a primary/additional split (primary radio-like, additional `+ BATCH` chip toggle); submit produces N Eval Results sharing a freshly-generated `batchId`. Solo evaluations carry `batchId: null`. `makeEvaluationResult` extended with `batchId`, `priorEvalResultId`, `evidenceDiff` fields. V22EvalResultPanel renders a "Sibling Evaluations" section listing batch members when `batchId !== null` and the batch contains 2+ members; section omitted otherwise (backwards-compat for pre-12.2 seed Eval Results). **#117 Re-run diff:** new helper `computeEvidenceDiff(priorEvalResult, claim)` returns `{ added, removed, superseded, carried }`. Run Evaluation modal renders a "Changes since last evaluation" banner above review rows when a non-empty diff exists. V22EvalResultPanel renders a "Changes from prior evaluation" section persisting the diff in audit trail. Re-run flips prior Eval Result status to `'superseded'` with `supersededBy` set to the new id. **#105 Empty-state copy:** owner-specific vs. non-owner-specific copy split, gated via new `isOwnerView` prop. **Demo data:** Bob's existing PRM Eval Result retro-fitted with `batchId: 'batch-seed-bob-prm-001'`; new sibling Eval Result `eval-bob-prm-002` (System Integration v1) ships in the same batch + new proof / ownership DAs so both batch members appear on Alice's canvas. OUTDATED scenario reachable in 2 clicks via AmendClaim → Replace/Remove on an evaluated row. **Backlog hygiene:** 6 items moved to Completed (#9, #16, #18, #19, #81, #110); 4 items moved to a new `## Removed` section with audit-trail rationale (#31, #32, #46, #114); #72 rewritten with narrowed PoE-transfer scope; #168 (Proof of Evaluation node type) and #169 (Badges) filed in Future Features as Phase 13+ priorities #1 + #2. **Documentation:** spec §10.3 + new §10.3a updated for the Asset versioning chain + OUTDATED lifecycle; spec Changelog gains five Phase 12.2 entries (one per item). CLAUDE.md "Active phase queue" line updated with Phase 13+ strict-ordered priorities. **Footer v0.12.1 → v0.12.2.**
 - 2026-05-04: **Phase 12.1 — Reference Published Requirements Sets on a Claim (#120).** Single-item phase shipping non-binding "Referenced Standards" metadata on Claims as a discoverability signal — strictly informational, no evaluation coupling, no notifications. **Data model:** `makeClaim` factory in `v2_2Data.js` gains `referencedRequirementsSets: [{ requirementsSetId, addedDate }]`. Each `amendments[]` entry gains parallel `addedRequirementsSetIds[]` / `removedRequirementsSetIds[]` arrays. Both fields version-pinned (store the specific RS version id, not a lineage / "latest" pointer). New helper `getLatestRSVersion(rsId, allRS)` walks the RS supersession chain and returns the latest version's id. `makeAmendedClaim` extended to accept the RS diff buckets; cascade-skip semantics are inherited from the existing handler (no Eval Result staleness, no notification fan-out). **Picker primitive:** new `RequirementsSetPicker` shared component with two-tab pool (My Requirements Sets / Published), search, locked-row support for already-referenced entries. Used by `V22CreateClaimModal` (optional create-time section) and `AmendClaimModal` (toggleable add picker). **Amend Claim modal:** restructured from Asset-add-only to support both Asset add and RS add/remove. Submit shape now `{ addedAssetIds, addedRequirementsSetIds, removedRequirementsSetIds }`; gated on at-least-one of the three buckets. Existing references render with × buttons + Undo on toggle; new picks render with NEW badges in an inline preview. **Inline supersession update:** new `UpdateRSReferenceModal` opens exclusively from the Detail Panel "Newer version available" pill (owner-only click). Confirm records a one-line amendment with diff = removed `[oldVersionId]`, added `[latestVersionId]` and updates the array entry's `requirementsSetId` to the latest version with a fresh `addedDate`. Update jumps to the latest in the supersession chain (not the next link). The only inline mutation affordance on this section — precedent does not extend elsewhere. **Detail Panel:** `V22ClaimPanel` Referenced Standards section between Referenced Assets and Acknowledgments. Each row: clickable name (deep-link to Library at the originally-referenced version, NOT the latest, with provenance-aware tab routing — own → Requirement Sets, public → Published), provenance badge ("Authored by you" / "Public"), optional "Newer version available" amber pill (owner click → UpdateRSReferenceModal; non-owner → static informational text), `addedDate` in muted small text. Empty state omits the section. **Demo data:** Alice's `claim-prm-assembly` references MIL-PRF-55681 v1 (public, supersession case) + Incoming QC v1 (authored). `claim-vreg-ic` references System Integration v1 (public). Dave's `claim-chipco-prm-ic` references MIL-PRF-55681 v2 (public, latest — exercises Public badge without the supersession pill). New `SEED_PUBLISHED_REQUIREMENT_SETS` constant in `requirementSets.js` seeds Bob's MIL-PRF-55681 v1 + v2 + System Integration v1 into the public pool on first load (was empty array prior). New v2 of MIL-PRF-55681 added to bob-govco's authored RS list adding an EMI/EMC requirement on top of v1's six rows. **Scope deviations:** (1) Brief mentioned an `ExpandedArtifactModal` mirror — no Claim expanded view exists in V2.2 (Detail Panel V22ClaimPanel IS the canonical expanded view), so the section renders only there. (2) Brief mentioned "one Claim per demo role" with references — only Alice and Dave own Claims in the demo (Bob and Carol are evaluators, not Claim owners), so seeded references span Alice + Dave; cross-role coverage is achieved via grantee canvases when Bob/Carol have a DA on Alice's/Dave's referenced Claims (referencedRequirementsSets travels with the Claim artifact). (3) AmendClaim diff render is inline (existing rows with strikethrough on removal-marked, NEW-badged preview on additions) rather than a separate two-step confirmation flow — keeps the existing single-step modal pattern; the diff signal is preserved without restructuring the surface. **Footer v0.11.31 → v0.12.1** (first phase of the 12.x series). Architecture spec §10.3 updated + new §10.3a documenting the field semantics, version-pinning, and inline-mutation exception; Changelog entry. #120 moved to Completed.
 - 2026-05-04: **Phase 11.8 — Quick wins batch (#24, #39, #44, #54, #98, #99).** Six items in one commit. **#24 + #39 backlog moves:** verified the underlying code was already correct (spec §4.4 prose at `architecture-spec.md:267-274` already reflects the shipped 65% white blend / +1.5px stroke values; `handleV22DismissDeclined` already calls `playUnravelAnimation`) — both moved from open sections to Completed with explanatory entries. **#44 Radiant Network double-click → Directory:** new `wipeOrigin` prop on `DirectoryLayer` accepts viewport-pixel `{ x, y }` and threads through both clip-path strings — the open-phase pin captures the origin so the close animation collapses back to the same point. New `onV22OpenDirectoryFromNode` callback on `V2Canvas` wires a DOM-level `onDoubleClick` on the Radiant Network Actor card wrapper (gated on `node.isNetworkNode && node.v22Type === 'ACTOR'`); reads the wrapper's bounding rect at fire time, emits screen-space center to V2App. Globe-button click path stays at the bottom-left wipe (`origin: null`). New V2App state `v22DirectoryWipeOrigin` cleared by the globe-button toggle to keep the two paths independent. **#54 Reset all data:** new red action in the Account dropdown below SWITCH USER under its own divider; opens a confirmation modal explaining the scope. On confirm: `v22Provisionals` reset to empty initial shape; `perRoleState` reset to `emptyRoleState` for every role; `credits` reset to active role's seeded balance; selection / Detail Panel / Directory state cleared. Theme + skip-boot localStorage flags preserved (user preferences, not demo state). The original brief mentioned "clears localStorage and re-plays the boot sequence" — that path was deemed too aggressive (theme regression + forced 3D boot every reset), so shipped scope is in-memory state only. **#98 CreditCostRow + add-credits sub-modal:** drop "Only" prefix on insufficient (both states show plain "N available"); new `onAddCreditsClick` prop renders an indigo "Add credits →" link when wired. V22CreateAssetModal + V22CreateClaimModal forward the prop (incl. nested register-from-Claim path). New V2App sub-modal opens on top of the parent Create modal with "+100 credits" and "Reset to role default" actions. Both close only the sub-modal so the user sees the updated balance reflected immediately in the CREDIT COST row. **#99 Create Claim NEW badges:** Asset picker now floats `initialAssetIds` + Assets registered via the inline "+ Register new Asset…" CTA to the top with indigo NEW badges. Two Sets track the badge: `recentlyRegisteredIds` (seeded from `initialAssetIds`, grown by `handleNestedAssetComplete`) and `clearedBadgeIds` (grown when the user toggles a NEW row from selected → unselected). Badge clears on first deselect and does not return on re-selection — answers "what's new since I opened this modal" rather than persisting for the modal's lifetime. Footer v0.11.30 → v0.11.31. No spec content changes.
 - 2026-05-03: **Phase 11.7 — Documentation hygiene pass.** Doc-only commit (no code changes, no build implications). Three docs synced after the Phase 11E + 11.6 sequence. **`CLAUDE-phase-log.md`:** appended completion-notes entries for every sub-phase shipped after Phase 11E.1 — 11E.1.1 → 11E.1.7 (May 1-2 Amend EA polish bursts), 11E.2 + 11E.3 (reciprocal amendment notifications + initial single-edge animation attempt; Claim-amendment side rolled back in 11E.4), 11E.4 (rollback + two-edge architecture + AMENDMENT badge unification), 11E.5 (geometry stub fix attempt + #164 filing), 11E.6 (`_fullInstanceCount = Infinity` root-cause fix), 11E.7 (`_showAsProvisional` stamp lifecycle), 11E.8 (`anyDecoration` gate + draw-in 500ms → 1200ms), 11E.9 (direction reverse + `applyEdgeStylingRef` provisional flag respect), 11.6 (amendment-as-proposal + draw-in smoothness + retrospective), 11.6.1 (five 11.6 QA fixes). Each entry one paragraph, dated, ending with the commit hash. **`architecture-spec.md`:** §11.2a header + opening paragraph rewritten to drop the historical "Phase 11E.1 unilateral Option B" framing per the brief — section now describes only the current proposal model. §7.4 verified (three new EA amendment rows + DA amendment row, no rolled-back Claim-amendment row). §11.5b verified (acceptance reveal stamp lifecycle). §11.2b verified (pending-acceptance lock semantics). §11.6a verified (warm-path EA-only). New summary changelog entry rolling up no-spec-impact sub-phases (11E.1.1 → 11E.1.7, 11E.5, 11E.6, 11E.8, 11E.9, 11.6.1) with one-line summaries pointing readers to the phase log for detail. **`polish-backlog.md`:** Update Log entries 11E.1.1 + 11E.1.2 were out of position — they were chronologically appended in their own ship-time but broke the newest-first convention used everywhere else. Moved to their correct chronological slot (between 11E.1.3 and 11E.1 entries) and swapped to newest-first within (11E.1.2 above 11E.1.1). Footer v0.11.29 → v0.11.30. No spec content changes (only audit + fill gaps; no semantics changed).

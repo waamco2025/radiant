@@ -1253,6 +1253,76 @@ function V22ParseResultPanel({ node, onClose, sourceAsset }) {
 }
 
 /* ─── Eval Result Panel ───────────────────────────────────────────────── */
+// Phase 12.2 (#117): inline diff readout for the Changes-from-prior section.
+function ChangesFromPriorBlock({ diff, priorEvalResultId, assetNameLookup = {}, onSelectAsset }) {
+  if (!diff) return null
+  const { added = [], removed = [], superseded = [], carried = [] } = diff
+  const totalDelta = added.length + removed.length + superseded.length
+  if (totalDelta === 0) return (
+    <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+      No evidence changes since the prior evaluation; rows were re-run unchanged.
+    </div>
+  )
+  const renderName = (assetId) => assetNameLookup[assetId]?.name || assetId
+  const renderRow = (label, color, items, mode) => (
+    items.length > 0 ? (
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color, letterSpacing: '0.06em', marginBottom: 4 }}>
+          {label} ({items.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {items.map((entry, i) => {
+            const isSupersede = mode === 'superseded'
+            const fromId = isSupersede ? entry.from : entry
+            const toId = isSupersede ? entry.to : null
+            const clickableFrom = !!onSelectAsset && !!fromId
+            return (
+              <div key={isSupersede ? `${fromId}-${toId}-${i}` : `${fromId}-${i}`} style={{
+                fontSize: 11, color: 'var(--text-secondary)', padding: '4px 8px',
+                background: 'var(--bg-raised)', borderRadius: 3,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span
+                  onClick={clickableFrom ? () => onSelectAsset(fromId) : undefined}
+                  style={{
+                    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    cursor: clickableFrom ? 'pointer' : 'default',
+                    textDecoration: clickableFrom ? 'underline dotted color-mix(in srgb, var(--accent-indigo) 50%, transparent)' : 'none',
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  {renderName(fromId)}
+                  {isSupersede && (
+                    <>
+                      {' → '}
+                      <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{renderName(toId)}</span>
+                    </>
+                  )}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    ) : null
+  )
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, lineHeight: 1.5 }}>
+        Compared to the prior Evaluation Result {priorEvalResultId ? `(${priorEvalResultId.slice(0, 24)}…)` : ''}.
+      </div>
+      {renderRow('ADDED', 'var(--accent-green)', added, 'added')}
+      {renderRow('REMOVED', 'var(--accent-red)', removed, 'removed')}
+      {renderRow('SUPERSEDED', 'var(--accent-amber)', superseded, 'superseded')}
+      {carried.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+          {carried.length} carried over unchanged
+        </div>
+      )}
+    </div>
+  )
+}
+
 function V22EvalResultPanel({
   node, activeParty, onClose, onReRunEvaluation,
   // Phase 9D.1.3 Fix 6: orphaned Eval Result — backing DA or EA has been
@@ -1266,22 +1336,58 @@ function V22EvalResultPanel({
   // available — useful for proof-only grantees who see an Eval Result pulled
   // in via a proof-only Claim DA and want to confirm what it evaluates.
   linkedClaimName,
+  // Phase 12.2 (#121): sibling Eval Results in the same `batchId`. V2App
+  // resolves the list against the merged dataset; null/empty means solo
+  // evaluation (omit the section). Each entry: { id, name, status }.
+  siblingEvalResults = [],
+  onSelectSiblingEvalResult,
+  // Phase 12.2 (#117): asset-name lookup for the "Changes from prior
+  // evaluation" diff section.
+  assetNameLookup = {},
+  onSelectDiffAsset,
 }) {
   const er = node.v22Artifact
   const isOwner = activeParty === node.owner
   const isSuperseded = er?.status === 'superseded'
+  const isOutdated = er?.status === 'outdated'
   const supersededBadge = isSuperseded ? (
     <span style={{
       fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
       padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
       color: 'var(--text-dim)', background: 'var(--bg-raised)',
     }}>SUPERSEDED</span>
+  ) : isOutdated ? (
+    <span style={{
+      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+      padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+      color: 'var(--accent-amber)',
+      background: 'color-mix(in srgb, var(--accent-amber) 12%, transparent)',
+      border: '1px dashed color-mix(in srgb, var(--accent-amber) 50%, transparent)',
+    }}>OUTDATED</span>
   ) : null
   return (
     <PanelLayout
       header={<PanelHeader typeLabel="EVAL RESULT" name={node.name} pin={node.pin} onClose={onClose} badge={supersededBadge} />}
       body={
         <>
+          {/* Phase 12.2 (#122): OUTDATED notice — the underlying Claim's
+              evidence has changed since the evaluation. Surfaces near the
+              top of the panel so the evaluator sees it before the
+              now-stale results below. Re-Run is the resolution path; the
+              footer's existing Re-Run Evaluation button covers it. */}
+          {isOutdated && (
+            <div style={{
+              padding: '12px 14px', marginBottom: 14, borderRadius: 8,
+              background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+              border: '1px dashed color-mix(in srgb, var(--accent-amber) 45%, transparent)',
+              fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.55,
+            }}>
+              <div style={{ fontWeight: 700, color: 'var(--accent-amber)', marginBottom: 4, fontSize: 11 }}>
+                OUT OF DATE
+              </div>
+              This evaluation references evidence that has changed. Re-run to refresh.
+            </div>
+          )}
           {/* Phase 11D.3: section header reads "Owner" (the Eval Result is
               owned by the evaluator; the panel doesn't carry a separate
               "Evaluator" + "Owner" pair — they're the same party). */}
@@ -1321,6 +1427,57 @@ function V22EvalResultPanel({
               })}
             </div>
           </Section>
+          {/* Phase 12.2 (#121): Sibling Evaluations — other Eval Results
+              from the same Run Evaluation invocation (sharing batchId).
+              Solo evaluations + pre-12.2 seed Eval Results have batchId:
+              null — section is omitted. Section also omits when the only
+              batch member is this Eval Result itself. */}
+          {er?.batchId && siblingEvalResults.length > 0 && (
+            <Section title={`Sibling Evaluations (${siblingEvalResults.length})`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {siblingEvalResults.map((s) => {
+                  const sibStatus = s.status === 'superseded'
+                    ? { label: 'SUPERSEDED', color: 'var(--text-dim)' }
+                    : s.status === 'outdated'
+                      ? { label: 'OUTDATED', color: 'var(--accent-amber)' }
+                      : { label: 'ACTIVE', color: 'var(--accent-green)' }
+                  const clickable = !!onSelectSiblingEvalResult
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={clickable ? () => onSelectSiblingEvalResult(s) : undefined}
+                      style={{
+                        padding: '6px 8px', borderRadius: 3,
+                        background: 'var(--bg-raised)',
+                        cursor: clickable ? 'pointer' : 'default',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        transition: 'background 100ms',
+                      }}
+                      onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 70%, var(--accent-indigo))' } : undefined}
+                      onMouseLeave={clickable ? (e) => { e.currentTarget.style.background = 'var(--bg-raised)' } : undefined}
+                    >
+                      <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.name}
+                      </span>
+                      <span style={{
+                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        color: sibStatus.color, padding: '1px 5px', borderRadius: 3,
+                        background: `color-mix(in srgb, ${sibStatus.color} 12%, transparent)`,
+                      }}>{sibStatus.label}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+          {/* Phase 12.2 (#117): Changes from prior evaluation — persistent
+              audit trail of the diff that led to this re-run. Only renders
+              when this Eval Result was a re-run (evidenceDiff !== null). */}
+          {er?.evidenceDiff && (
+            <Section title="Changes from prior evaluation">
+              <ChangesFromPriorBlock diff={er.evidenceDiff} priorEvalResultId={er.priorEvalResultId} assetNameLookup={assetNameLookup} onSelectAsset={onSelectDiffAsset} />
+            </Section>
+          )}
           {isSuperseded && er?.supersededBy && (
             <Section title="Supersession">
               <Row label="Superseded by" value={er.supersededBy} mono />
