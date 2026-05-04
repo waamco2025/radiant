@@ -50,12 +50,23 @@ export default function V22CreateClaimModal({
   onNestedAssetCreated,        // optional ({ file, displayName }) => newAssetId — lets
                                // V2App create the Asset and return its id so the new
                                // row gets auto-selected in the picker.
+  // Phase 11.8 #98: forwarded to CreditCostRow's "Add credits →" link.
+  onAddCreditsClick,
 }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [selected, setSelected] = useState(() => new Set(initialAssetIds))
   const [showNestedRegister, setShowNestedRegister] = useState(false)
+  // Phase 11.8 #99: Asset rows that should sort to the top + render a NEW
+  // badge. Seeded with `initialAssetIds` (the Asset that opened the modal)
+  // and grown by inline-registered Assets via handleNestedAssetComplete.
+  // `clearedBadgeIds` tracks rows the user has acknowledged by deselecting
+  // — once cleared, re-selecting does NOT bring the NEW badge back, so the
+  // badge cleanly answers the "what's new" question rather than persisting
+  // for the lifetime of the modal.
+  const [recentlyRegisteredIds, setRecentlyRegisteredIds] = useState(() => new Set(initialAssetIds))
+  const [clearedBadgeIds, setClearedBadgeIds] = useState(() => new Set())
   // Phase 11C.1: pre-set acknowledgments authored at Claim creation time.
   // Local rows carry transient client keys for React; the factory generates
   // stable ids on submit. Empty rows (no title AND no description) are
@@ -66,8 +77,17 @@ export default function V22CreateClaimModal({
   const toggle = (id) => {
     setSelected(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+        // Phase 11.8 #99: deselecting a NEW-badged row clears the badge.
+        if (recentlyRegisteredIds.has(id) && !clearedBadgeIds.has(id)) {
+          setClearedBadgeIds((c) => {
+            const cn = new Set(c); cn.add(id); return cn
+          })
+        }
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
@@ -104,6 +124,13 @@ export default function V22CreateClaimModal({
     const ids = Array.isArray(newIds) ? newIds : (newIds ? [newIds] : [])
     if (ids.length > 0) {
       setSelected(prev => {
+        const next = new Set(prev)
+        for (const id of ids) next.add(id)
+        return next
+      })
+      // Phase 11.8 #99: newly-registered Assets get a NEW badge and sort
+      // to the top of the picker until the user deselects them.
+      setRecentlyRegisteredIds(prev => {
         const next = new Set(prev)
         for (const id of ids) next.add(id)
         return next
@@ -195,8 +222,23 @@ export default function V22CreateClaimModal({
                     border: '1px solid var(--border)', borderRadius: 8,
                     background: 'var(--bg-card)',
                   }}>
-                    {ownedAssets.map((a, i) => {
+                    {/* Phase 11.8 #99: stable sort that floats pre-selected
+                        + newly-registered Assets to the top while their NEW
+                        badge is still showing. Once the user deselects a
+                        row (clearedBadgeIds) it loses both the badge and
+                        the priority sort, so the list converges on the
+                        natural seed order as the user makes selections. */}
+                    {ownedAssets
+                      .map((a, i) => ({ a, i }))
+                      .sort((x, y) => {
+                        const xNew = recentlyRegisteredIds.has(x.a.id) && !clearedBadgeIds.has(x.a.id)
+                        const yNew = recentlyRegisteredIds.has(y.a.id) && !clearedBadgeIds.has(y.a.id)
+                        if (xNew !== yNew) return xNew ? -1 : 1
+                        return x.i - y.i
+                      })
+                      .map(({ a }, i, arr) => {
                       const sel = selected.has(a.id)
+                      const isNew = recentlyRegisteredIds.has(a.id) && !clearedBadgeIds.has(a.id)
                       return (
                         <div
                           key={a.id}
@@ -213,7 +255,7 @@ export default function V22CreateClaimModal({
                           style={{
                             padding: '10px 14px', cursor: 'pointer',
                             background: sel ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)' : 'transparent',
-                            borderBottom: i < ownedAssets.length - 1 ? '1px solid var(--border-faint)' : 'none',
+                            borderBottom: i < arr.length - 1 ? '1px solid var(--border-faint)' : 'none',
                             display: 'flex', alignItems: 'center', gap: 10,
                             transition: 'background 120ms',
                           }}
@@ -227,7 +269,20 @@ export default function V22CreateClaimModal({
                             {sel && <span style={{ color: 'var(--bg-deep)', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{a.name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                              {isNew && (
+                                <span style={{
+                                  fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                  letterSpacing: '0.1em',
+                                  padding: '1px 5px', borderRadius: 3,
+                                  color: 'var(--accent-indigo)',
+                                  background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                                  border: '1px solid color-mix(in srgb, var(--accent-indigo) 30%, transparent)',
+                                  flexShrink: 0,
+                                }}>NEW</span>
+                              )}
+                            </div>
                             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {a.file?.filename || a.id}
                               {a.file?.size != null && <span> · {formatBytes(a.file.size)}</span>}
@@ -426,7 +481,7 @@ export default function V22CreateClaimModal({
             </div>
 
             {creditsPerClaim > 0 && (
-              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
+              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} onAddCreditsClick={onAddCreditsClick} />
             )}
             <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
               The Claim will render on your canvas with a NEW badge and connect to each
@@ -474,6 +529,7 @@ export default function V22CreateClaimModal({
           creditsPerAsset={creditsPerAsset}
           onClose={() => setShowNestedRegister(false)}
           onComplete={handleNestedAssetComplete}
+          onAddCreditsClick={onAddCreditsClick}
         />
       )}
     </>

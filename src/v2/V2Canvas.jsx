@@ -426,6 +426,11 @@ const V2Canvas = forwardRef(function V2Canvas({
   selectedEdgeId = null,
   onEdgeClick,
   onEdgeHover,                // Phase 9B: ({ edgeId, sdaType, x, y }) | null
+  // Phase 11.8 #44: double-click on the Radiant Network actor card opens
+  // the Directory Layer with the circular wipe originating from the
+  // node's screen-space center. V2App passes a callback receiving
+  // `{ screenX, screenY }` in viewport pixels.
+  onV22OpenDirectoryFromNode,
 }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -3504,8 +3509,31 @@ const V2Canvas = forwardRef(function V2Canvas({
             }
           }
 
+          // Phase 11.8 #44: Radiant Network actor card supports double-click
+          // → opens the Directory Layer with a circular wipe originating
+          // from the card's screen-space center. The wrapper div catches
+          // dblclick at the DOM layer (not the Three.js raycaster), reads
+          // its bounding rect at fire-time, and emits viewport pixel
+          // coordinates to V2App. Click pass-through to AssetNode is
+          // unaffected — dblclick fires on the wrapper, AssetNode owns
+          // single-click selection.
+          const isNetworkActor = node.isNetworkNode && node.v22Type === 'ACTOR'
+          const handleNetworkDblClick = isNetworkActor && !transitioning && typeof onV22OpenDirectoryFromNode === 'function'
+            ? (e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                onV22OpenDirectoryFromNode({
+                  screenX: rect.left + rect.width / 2,
+                  screenY: rect.top + rect.height / 2,
+                })
+              }
+            : undefined
           return (
-            <div key={isAnchor ? `${node.id}-anchor` : node.id} data-card-id={node.id} style={cardStyle}>
+            <div
+              key={isAnchor ? `${node.id}-anchor` : node.id}
+              data-card-id={node.id}
+              style={cardStyle}
+              onDoubleClick={handleNetworkDblClick}
+            >
               <AssetNode
                 node={node}
                 isSelected={selectedId === node.id}

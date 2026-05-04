@@ -108,6 +108,11 @@ export default function DirectoryLayer({
   onClusterClick,
   materializedClaim,
   onCloseMaterializedClaim,
+  // Phase 11.8 #44: `wipeOrigin` lets the caller route the circular wipe
+  // animation through a custom screen-space origin (e.g. a double-clicked
+  // Radiant Network node). Pass `{ x, y }` in viewport pixels. When null,
+  // the wipe falls back to the chrome globe-button corner (0% 100%).
+  wipeOrigin,
 }) {
   // Track whether the wipe should expand (opening) or contract (closing).
   // `phase` is 'in' | 'out' | 'closed'. We keep the layer mounted during the
@@ -148,8 +153,21 @@ export default function DirectoryLayer({
   // the whole viewport). Reversed on exit. Opening (first render) sits at
   // clipCollapsed for one frame before transitioning to clipExpanded so the
   // CSS transition has a from-state to animate from.
-  const clipCollapsed = 'circle(0% at 0% 100%)'
-  const clipExpanded = 'circle(180% at 0% 100%)'
+  // Phase 11.8 #44: pin the wipe origin to the first opening's `wipeOrigin`
+  // so the closing animation collapses back to the same point that opened
+  // it. Without the pin, a globe-close after a node-double-click would
+  // reverse-wipe to the bottom-left corner, breaking the visual continuity.
+  const pinnedOriginRef = useRef(null)
+  if (phase === 'closed') pinnedOriginRef.current = null
+  if (phase === 'opening' && pinnedOriginRef.current === null) {
+    pinnedOriginRef.current = wipeOrigin || null
+  }
+  const activeOrigin = pinnedOriginRef.current
+  const originStr = activeOrigin
+    ? `${Math.round(activeOrigin.x)}px ${Math.round(activeOrigin.y)}px`
+    : '0% 100%'
+  const clipCollapsed = `circle(0% at ${originStr})`
+  const clipExpanded = `circle(180% at ${originStr})`
   const clipPath = phase === 'in' ? clipExpanded : clipCollapsed
 
   // Alice's 3 publicly-disclosed Claims form the only real MicroCo cluster.

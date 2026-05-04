@@ -202,7 +202,11 @@ export function InfoRow({ label, value }) {
 // V22CreateAssetModal and V22CreateClaimModal. `cost` is the total for the
 // operation (cost-per-Asset × N, or cost-per-Claim). Teal when sufficient,
 // red when insufficient — matches V2.1 precedent.
-export function CreditCostRow({ cost, credits, sufficient }) {
+// Phase 11.8 #98: drop the "Only" prefix on insufficient (still red) and
+// append an "Add credits →" link that fires `onAddCreditsClick` to open
+// the demo top-up sub-modal. The link only renders when the host wires
+// the callback so legacy call sites stay backwards-compatible.
+export function CreditCostRow({ cost, credits, sufficient, onAddCreditsClick }) {
   return (
     <div style={{
       marginTop: 14, padding: '12px 14px', borderRadius: 8,
@@ -224,8 +228,25 @@ export function CreditCostRow({ cost, credits, sufficient }) {
         fontSize: 11, fontFamily: 'var(--font-mono)',
         color: sufficient ? 'var(--text-dim)' : 'var(--accent-red)',
       }}>
-        {sufficient ? `${credits} available` : `Only ${credits} available`}
+        {credits} available
       </span>
+      {typeof onAddCreditsClick === 'function' && (
+        <span
+          onClick={onAddCreditsClick}
+          style={{
+            fontSize: 11, fontFamily: 'var(--font-mono)',
+            color: 'var(--accent-indigo)',
+            cursor: 'pointer',
+            textDecoration: 'none',
+            borderBottom: '1px dashed color-mix(in srgb, var(--accent-indigo) 50%, transparent)',
+            paddingBottom: 1,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-indigo-hover, var(--accent-indigo))'; e.currentTarget.style.borderBottomColor = 'var(--accent-indigo)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--accent-indigo)'; e.currentTarget.style.borderBottomColor = 'color-mix(in srgb, var(--accent-indigo) 50%, transparent)' }}
+        >
+          Add credits →
+        </span>
+      )}
     </div>
   )
 }

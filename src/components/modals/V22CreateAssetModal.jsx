@@ -144,6 +144,8 @@ export default function V22CreateAssetModal({
   onClose,
   onComplete,              // ({ files }) => void — files: [{ file, displayName, hash }]
   parentAssetName = null,  // Phase 10.2: when set, modal copy adapts for child registration
+  // Phase 11.8 #98: forwarded to CreditCostRow's "Add credits →" link.
+  onAddCreditsClick,
 }) {
   const [step, setStep] = useState(0)
   // Each row: { id, file, label, hashPhase: 'pending'|'hashing'|'endorsing'|'done', hash }
@@ -418,7 +420,7 @@ export default function V22CreateAssetModal({
               ))}
             </div>
             {creditsPerAsset > 0 && (
-              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} />
+              <CreditCostRow cost={totalCost} credits={credits} sufficient={hasSufficientCredits} onAddCreditsClick={onAddCreditsClick} />
             )}
             <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
               {rows.length > 1 ? 'These' : 'This'} will appear on your canvas with {rows.length > 1 ? 'NEW badges' : 'a NEW badge'},

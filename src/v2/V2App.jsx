@@ -81,7 +81,7 @@ import AmendmentResponseModal from '../components/modals/AmendmentResponseModal.
 // (consumed by LibraryModal in `embedded` mode); their default-export
 // standalone forms are no longer mounted from V2App.
 import LibraryModal from '../components/modals/LibraryModal.jsx'
-import { Backdrop } from '../components/modals/ModalShared.jsx'
+import { Backdrop, Modal, ModalHeader, ModalBody, ModalFooter, Btn } from '../components/modals/ModalShared.jsx'
 import { getRequirementSetsForRole } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
 
@@ -193,6 +193,11 @@ export default function V2App() {
   const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
   // V2.2 Phase 7 — Directory Layer + AI Shopper (spec §8 / §9)
   const [v22DirectoryOpen, setV22DirectoryOpen] = useState(false)
+  // Phase 11.8 #44: when the Radiant Network actor node is double-clicked,
+  // we route the directory's circular wipe through the node's screen-space
+  // center instead of the chrome globe-button corner. Null = use default
+  // bottom-left origin (globe button click path).
+  const [v22DirectoryWipeOrigin, setV22DirectoryWipeOrigin] = useState(null)
   // Phase 11B: when the user clicks the ChipCo cluster in the Directory,
   // we materialize one of ChipCo's Claims as a card on top of the cluster
   // and open the Detail Panel for it. Shape: { claim, anchor: { xPct, yPct } }
@@ -2772,6 +2777,14 @@ export default function V2App() {
   const [credits, setCredits] = useState(activeRole.credits)
   const [showCredits, setShowCredits] = useState(false)
   const [showAcct, setShowAcct] = useState(false)
+  // Phase 11.8 #54: reset-all confirmation modal — clears every role's
+  // canvas state, notifications, and provisionals back to seeded shape.
+  const [v22ResetConfirmOpen, setV22ResetConfirmOpen] = useState(false)
+  // Phase 11.8 #98: add-credits sub-modal — opens from CreditCostRow's
+  // "Add credits →" link in V22CreateAssetModal / V22CreateClaimModal.
+  // Sits at a higher z-index than the Create modal's backdrop; both
+  // dismiss paths leave the parent Create modal open.
+  const [v22AddCreditsOpen, setV22AddCreditsOpen] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
   // Phase 9B.2 Fix 3: fade-during-animation tooltip handling. When edgeMenu
@@ -3615,6 +3628,11 @@ export default function V2App() {
                   setForceExpandSda(null)
                   setSelectedEdgeId(null)
                   setOpenAgreement(null)
+                  // Phase 11.8 #44: globe-button click uses the default
+                  // bottom-left wipe origin. Clear any pinned origin from a
+                  // prior node-double-click so the next open animates from
+                  // the corner.
+                  setV22DirectoryWipeOrigin(null)
                   setV22DirectoryOpen((open) => {
                     if (open) setV22DirectoryMaterializedClaim(null)
                     return !open
@@ -4391,6 +4409,32 @@ export default function V2App() {
                   })}
                 </div>
 
+                {/* Phase 11.8 #54: Reset all data — clears every role's
+                    canvas state (perRoleState), provisional artifacts, and
+                    credits back to their seeded defaults. Confirmation
+                    modal explains the scope before committing. */}
+                <div style={{ borderTop: '1px solid var(--border)', padding: '6px 0' }}>
+                  <div
+                    onClick={() => {
+                      setShowAcct(false)
+                      setV22ResetConfirmOpen(true)
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 14px',
+                      cursor: 'pointer',
+                      transition: 'background .15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-red) 8%, transparent)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <span style={{ fontSize: 11, color: 'var(--accent-red)', width: 16, textAlign: 'center' }}>↺</span>
+                    <span style={{ fontSize: 11, color: 'var(--accent-red)', flex: 1, fontWeight: 500 }}>Reset all data</span>
+                  </div>
+                </div>
+
                 {/* Account actions */}
                 <div style={{ borderTop: '1px solid var(--border)', padding: '6px 0' }}>
                   {[
@@ -4447,6 +4491,19 @@ export default function V2App() {
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].v22Type && !nodeMap[sel].isNetworkNode ? 480 : 0}
           onLayerChange={setLayerInfo}
+          // Phase 11.8 #44: double-click on the Radiant Network actor node
+          // opens the Directory Layer with the circular wipe originating
+          // from the node's screen-space center. V2Canvas computes the
+          // origin via world-to-screen projection on the node's group.
+          onV22OpenDirectoryFromNode={({ screenX, screenY }) => {
+            setSel(null)
+            setForcePanelTab(null)
+            setForceExpandSda(null)
+            setSelectedEdgeId(null)
+            setOpenAgreement(null)
+            setV22DirectoryWipeOrigin({ x: screenX, y: screenY })
+            setV22DirectoryOpen(true)
+          }}
           // Phase 8: onConnect was V2.1's "connect to counterparty" handler
           // on the Asset card. V2.2 has no equivalent (request flow lives in
           // the Detail Panel); pass undefined so the card's connect button
@@ -4917,6 +4974,10 @@ export default function V2App() {
           <DirectoryLayer
             open={v22DirectoryOpen}
             activeParty={activeRole.party}
+            // Phase 11.8 #44: route the circular wipe through the screen-space
+            // origin captured when the Radiant Network actor node was
+            // double-clicked. Null falls back to the chrome globe-button corner.
+            wipeOrigin={v22DirectoryWipeOrigin}
             onOpenAIShopper={() => setV22AIShopperOpen(true)}
             onClose={() => {
               setV22DirectoryOpen(false)
@@ -5546,6 +5607,7 @@ export default function V2App() {
             onClose={() => setV22RegisteringAsset(null)}
             onComplete={handleV22CreateAssetSubmit}
             parentAssetName={v22RegisteringAsset?.parentAsset?.name || null}
+            onAddCreditsClick={() => setV22AddCreditsOpen(true)}
           />
         )}
 
@@ -5567,6 +5629,7 @@ export default function V2App() {
               onClose={() => setV22CreatingClaim(null)}
               onComplete={handleV22CreateClaimSubmit}
               onNestedAssetCreated={handleV22NestedAssetCreated}
+              onAddCreditsClick={() => setV22AddCreditsOpen(true)}
             />
           )
         })()}
@@ -5622,6 +5685,132 @@ export default function V2App() {
             onConfirm={handleRevokeConfirm}
             onClose={() => setV22Revoking(null)}
           />
+        )}
+
+        {/* Phase 11.8 #54: reset-all confirmation modal. Wipes every role's
+            canvas state, notifications, and provisional artifacts back to
+            seeded shape; resets credits to the active role's default. The
+            theme + boot-skip flags are preserved (those are user
+            preferences, not demo state). */}
+        {v22ResetConfirmOpen && (
+          <Backdrop onClose={() => setV22ResetConfirmOpen(false)}>
+            <Modal width={460}>
+              <ModalHeader
+                title="Reset all data?"
+                subtitle="This will return the demo to its seeded state."
+                onClose={() => setV22ResetConfirmOpen(false)}
+              />
+              <ModalBody>
+                <div style={{
+                  padding: '14px 16px', borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--accent-red) 4%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent-red) 18%, transparent)',
+                  display: 'flex', gap: 12, alignItems: 'flex-start',
+                }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                    background: 'color-mix(in srgb, var(--accent-red) 10%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--accent-red)', fontSize: 11, fontWeight: 700,
+                  }}>!</div>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                    Every role's canvas state, notifications, and provisional
+                    artifacts (requests, accepted agreements, evaluations,
+                    transfers, revocations) will be cleared. Credits reset to
+                    the active role's seeded balance. Theme preference and
+                    the skip-boot flag are preserved. This action cannot be
+                    undone.
+                  </div>
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Btn label="Cancel" onClick={() => setV22ResetConfirmOpen(false)} />
+                <Btn
+                  label="Reset all data"
+                  danger
+                  onClick={() => {
+                    setV22Provisionals({
+                      disclosureAgreements: [],
+                      evaluationAgreements: [],
+                      evaluationResults: [],
+                      declineRecords: [],
+                      transfers: [],
+                      revocationRecords: [],
+                    })
+                    setPerRoleState(() => {
+                      const init = {}
+                      ROLES.forEach((r) => {
+                        init[r.id] = {
+                          addedNodes: [], addedSDAs: {}, addedEdges: [],
+                          dismissedReqs: [], addedChildren: {}, addedRequests: [],
+                          removedSDAs: [], removedNodes: [], removedEdges: [],
+                          newlyDisclosedIds: [], requirementSets: null, pepTemplates: null,
+                        }
+                      })
+                      return init
+                    })
+                    setCredits(activeRole.credits)
+                    setSel(null)
+                    setSelectedEdgeId(null)
+                    setOpenAgreement(null)
+                    setForcePanelTab(null)
+                    setForceExpandSda(null)
+                    setV22DirectoryOpen(false)
+                    setV22DirectoryMaterializedClaim(null)
+                    setV22DirectoryWipeOrigin(null)
+                    setV22ResetConfirmOpen(false)
+                  }}
+                />
+              </ModalFooter>
+            </Modal>
+          </Backdrop>
+        )}
+
+        {/* Phase 11.8 #98: Add credits demo sub-modal. Opens from the
+            CreditCostRow "Add credits →" link inside V22CreateAssetModal /
+            V22CreateClaimModal. Renders as a sibling Backdrop after the
+            parent modal so DOM paint order keeps it visually on top
+            (Backdrop's z-index is fixed at 10000). Both buttons close only
+            the sub-modal — the parent Create modal stays open so the user
+            sees the updated balance reflected in the CREDIT COST row. */}
+        {v22AddCreditsOpen && (
+          <Backdrop onClose={() => setV22AddCreditsOpen(false)}>
+            <Modal width={400}>
+              <ModalHeader
+                title="Add credits"
+                subtitle="Top up your demo balance."
+                onClose={() => setV22AddCreditsOpen(false)}
+              />
+              <ModalBody>
+                <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)', marginBottom: 14 }}>
+                  Current balance: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{credits} credit{credits === 1 ? '' : 's'}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                  This is a demo top-up — no real billing. Choose how to
+                  refill the active role's balance, then continue with your
+                  pending registration.
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Btn
+                  label="Reset to role default"
+                  onClick={() => {
+                    setCredits(activeRole.credits)
+                    setV22AddCreditsOpen(false)
+                  }}
+                />
+                <Btn
+                  label="+100 credits"
+                  accent
+                  onClick={() => {
+                    setCredits((c) => c + 100)
+                    setV22AddCreditsOpen(false)
+                  }}
+                />
+              </ModalFooter>
+            </Modal>
+          </Backdrop>
         )}
 
         {/* Phase 9D.1.4 Fix 2: orphaned Eval Result Dismiss confirmation. */}
@@ -6202,7 +6391,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.30 &middot; Changelog
+          v0.11.31 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6249,6 +6438,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.11.31', date: '2026-05-04', label: 'Phase 11.8', items: [
+                  'New (#44): double-clicking the Radiant Network actor card opens the Public Directory with a circular wipe originating from the node — same animation as the globe button, anchored to where you actually clicked.',
+                  'New (#54): "Reset all data" action in the user menu — confirmation modal restores every role\'s canvas state, notifications, and provisional artifacts to seeded shape (theme + skip-boot preferences are preserved).',
+                  'New (#98): credit-cost row now exposes an "Add credits →" link in registration modals; opens a demo top-up sub-modal with "+100 credits" and "Reset to role default" actions. Empty-state copy dropped the redundant "Only" prefix.',
+                  'New (#99): Create Claim Asset picker now floats pre-selected and just-registered Assets to the top with NEW badges. Deselecting clears the badge for that row.',
+                  'Backlog hygiene (#24, #39): two state-bug tickets verified against shipped code and moved to Completed.',
+                ]},
                 { version: '0.11.30', date: '2026-05-03', label: 'Phase 11.7', items: [
                   'Documentation hygiene pass: phase log brought current through Phase 11.6.1; spec body audited and synced; backlog Update Log verified.',
                 ]},
