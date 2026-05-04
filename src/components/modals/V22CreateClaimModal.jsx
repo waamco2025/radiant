@@ -26,6 +26,7 @@ import {
   Btn, FieldLabel, InfoRow, StepDots, CreditCostRow,
 } from './ModalShared'
 import V22CreateAssetModal from './V22CreateAssetModal.jsx'
+import RequirementsSetPicker from './RequirementsSetPicker.jsx'
 
 function formatBytes(bytes) {
   if (bytes == null) return '—'
@@ -52,6 +53,9 @@ export default function V22CreateClaimModal({
                                // row gets auto-selected in the picker.
   // Phase 11.8 #98: forwarded to CreditCostRow's "Add credits →" link.
   onAddCreditsClick,
+  // Phase 12.1 (#120): Referenced Standards picker pools.
+  ownRequirementSets = [],     // active role's authored RS
+  publicRequirementSets = [],  // public RS authored by other parties (already filtered)
 }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
@@ -67,6 +71,18 @@ export default function V22CreateClaimModal({
   // for the lifetime of the modal.
   const [recentlyRegisteredIds, setRecentlyRegisteredIds] = useState(() => new Set(initialAssetIds))
   const [clearedBadgeIds, setClearedBadgeIds] = useState(() => new Set())
+  // Phase 12.1 (#120): selected Referenced Standards (RS ids). Optional —
+  // empty array submits cleanly. Pool comes from ownRequirementSets +
+  // publicRequirementSets via the shared RequirementsSetPicker.
+  const [selectedRsIds, setSelectedRsIds] = useState(() => new Set())
+  const toggleRs = (rsId) => {
+    setSelectedRsIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(rsId)) next.delete(rsId)
+      else next.add(rsId)
+      return next
+    })
+  }
   // Phase 11C.1: pre-set acknowledgments authored at Claim creation time.
   // Local rows carry transient client keys for React; the factory generates
   // stable ids on submit. Empty rows (no title AND no description) are
@@ -111,6 +127,9 @@ export default function V22CreateClaimModal({
       description: description.trim(),
       referencedAssetIds: Array.from(selected),
       acknowledgments: finalAcks,
+      // Phase 12.1 (#120): bare RS ids — caller stamps `addedDate` at
+      // submit time inside V2App.handleV22CreateClaimSubmit.
+      referencedRequirementsSetIds: Array.from(selectedRsIds),
     })
   }
 
@@ -411,6 +430,23 @@ export default function V22CreateClaimModal({
                 + Add Acknowledgment
               </button>
             </div>
+
+            {/* Phase 12.1 (#120): Referenced Standards section. Optional —
+                no minimum required. The picker exposes both the active
+                role's authored RS pool and the public-directory pool. */}
+            <div>
+              <FieldLabel label={`Referenced Standards (optional, ${selectedRsIds.size} selected)`} />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 10 }}>
+                Declare which standards this Claim is built to satisfy. Non-binding —
+                this does not affect evaluations.
+              </div>
+              <RequirementsSetPicker
+                ownRequirementSets={ownRequirementSets}
+                publicRequirementSets={publicRequirementSets}
+                selectedIds={Array.from(selectedRsIds)}
+                onToggle={toggleRs}
+              />
+            </div>
           </div>
         )}
 
@@ -440,6 +476,9 @@ export default function V22CreateClaimModal({
                 const reviewAckCount = acks.filter((a) => (a.title || '').trim() || (a.description || '').trim()).length
                 return <InfoRow label="Acknowledgments" value={reviewAckCount === 0 ? 'None' : `${reviewAckCount}`} />
               })()}
+              {/* Phase 12.1 (#120): show the count + first names of any
+                  Referenced Standards added at create time. */}
+              <InfoRow label="Referenced Standards" value={selectedRsIds.size === 0 ? 'None' : `${selectedRsIds.size}`} />
               <InfoRow label="Created" value="On submit" />
             </div>
 

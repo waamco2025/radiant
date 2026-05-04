@@ -637,6 +637,13 @@ function V22ClaimPanel({
   onRunEvaluation,
   onAmendClaim,
   onSelfEvaluate,
+  // Phase 12.1 (#120): Referenced Standards section data + handlers.
+  // `referencedStandardRows` is the resolved list of {requirementsSetId,
+  // addedDate, name, version, provenance, latestVersionId}. Empty array
+  // omits the section entirely.
+  referencedStandardRows = [],
+  onSelectRsReference,        // (rs) => void — open Library at the originally-referenced version
+  onUpdateRsReference,        // (rs) => void — owner only; opens UpdateRSReferenceModal
   // Phase 11C: warm-path "Request Evaluation Agreement" footer button.
   // Renders when the viewer is non-owner, has an active DA on this Claim,
   // and does NOT yet have an EA. Click opens EARequestModal pre-populated
@@ -958,6 +965,112 @@ function V22ClaimPanel({
               </div>
             )}
           </Section>
+          {/* Phase 12.1 (#120): Referenced Standards section. Non-binding
+              metadata. Owner can edit via AmendClaim; the inline "Newer
+              version available" pill is the ONLY inline mutation affordance
+              on this section (justified because version drift is passive
+              state — the Library moved, not the Claim). Empty state omits
+              the section. Non-owners see the pill as informational text
+              only (not clickable). */}
+          {referencedStandardRows.length > 0 && (
+            <Section title={`Referenced Standards (${referencedStandardRows.length})`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {referencedStandardRows.map((row) => {
+                  const isSuperseded = row.latestVersionId && row.latestVersionId !== row.requirementsSetId
+                  const provenanceLabel = row.provenance === 'own' ? 'Authored by you'
+                    : row.provenance === 'public' ? 'Public' : null
+                  const rowClickable = !!onSelectRsReference && !!row.requirementsSetId
+                  const handleRowClick = rowClickable ? () => onSelectRsReference(row) : undefined
+                  // Phase 12.1: pill click is owner-only. Non-owners see the
+                  // pill as static informational text. The brief explicitly
+                  // calls out this asymmetry so non-owners can see drift
+                  // exists without being able to act on it.
+                  const isOwnerView = activeParty === node.owner
+                  const pillClickable = isSuperseded && isOwnerView && !!onUpdateRsReference
+                  return (
+                    <div
+                      key={row.requirementsSetId}
+                      style={{
+                        padding: '8px 10px',
+                        background: 'var(--bg-raised)',
+                        borderRadius: 4,
+                        border: '1px solid var(--border-faint)',
+                        display: 'flex', flexDirection: 'column', gap: 4,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          onClick={(e) => { if (rowClickable) { e.stopPropagation(); handleRowClick() } }}
+                          style={{
+                            fontSize: 12, color: 'var(--text-primary)', fontWeight: 600,
+                            flex: 1, minWidth: 0,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            cursor: rowClickable ? 'pointer' : 'default',
+                            textDecoration: rowClickable ? 'underline dotted color-mix(in srgb, var(--accent-indigo) 50%, transparent)' : 'none',
+                            textUnderlineOffset: 3,
+                          }}
+                          onMouseEnter={rowClickable ? (e) => { e.currentTarget.style.color = 'var(--accent-indigo)' } : undefined}
+                          onMouseLeave={rowClickable ? (e) => { e.currentTarget.style.color = 'var(--text-primary)' } : undefined}
+                        >
+                          {row.name || row.requirementsSetId}
+                          {row.version != null && (
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginLeft: 6 }}>v{row.version}</span>
+                          )}
+                        </span>
+                        {provenanceLabel && (
+                          <span style={{
+                            fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            letterSpacing: '0.1em',
+                            padding: '1px 5px', borderRadius: 3,
+                            color: 'var(--text-dim)',
+                            background: 'var(--bg-deep)',
+                            border: '1px solid var(--border-faint)',
+                            flexShrink: 0,
+                            textTransform: 'uppercase',
+                          }}>{provenanceLabel}</span>
+                        )}
+                      </div>
+                      {isSuperseded && (
+                        <div
+                          onClick={pillClickable ? (e) => { e.stopPropagation(); onUpdateRsReference(row) } : undefined}
+                          title={pillClickable ? 'Click to update this reference to the latest version' : 'A newer version of this standard is available in the Library.'}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            alignSelf: 'flex-start',
+                            padding: '2px 7px', borderRadius: 10,
+                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            letterSpacing: '0.06em',
+                            color: 'var(--accent-amber)',
+                            background: 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--accent-amber) 35%, transparent)',
+                            cursor: pillClickable ? 'pointer' : 'default',
+                            textTransform: 'uppercase',
+                          }}
+                          onMouseEnter={pillClickable ? (e) => {
+                            e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-amber) 20%, transparent)'
+                          } : undefined}
+                          onMouseLeave={pillClickable ? (e) => {
+                            e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-amber) 10%, transparent)'
+                          } : undefined}
+                        >
+                          NEWER VERSION AVAILABLE
+                          {pillClickable && (
+                            <span style={{ fontSize: 9, marginLeft: 2 }}>›</span>
+                          )}
+                        </div>
+                      )}
+                      {row.addedDate && (
+                        <div style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                          Added {row.addedDate.slice(0, 10)}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+
           {/* Phase 11C.2 W2: Acknowledgments section. Visible to all viewers
               (owner sees what they authored; counterparty sees what they
               agreed to or would need to agree to before requesting). The

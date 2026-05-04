@@ -25,6 +25,27 @@ export const DEMO_REQUIREMENT_SETS = {
         { id: 'req-006', label: 'Meets MIL-PRF-55681?', type: 'inference', description: 'Does the component meet all MIL-PRF-55681 requirements?', criterion: 'All quantitative thresholds in \u00a74.6 must be satisfied', instruction: 'Assess overall compliance based on extracted values', required: false, aiValue: 'Yes \u2014 4 of 5 quantitative thresholds satisfied; radiation tolerance above threshold', aiConfidence: 0.82 },
       ],
     },
+    // Phase 12.1 (#120): v2 of MIL-PRF-55681 to seed the supersession
+    // surfacing flow. Adds an EMI/EMC requirement on top of v1's six rows
+    // \u2014 when a Claim references v1, the Detail Panel's
+    // "Newer version available" pill points readers at this v2 entry.
+    {
+      id: 'reqset-mil-prf-55681-v2',
+      lineageId: 'lineage-mil-prf-55681',
+      version: 2,
+      name: 'MIL-PRF-55681 Compliance',
+      description: 'Military specification for electronic component qualification \u2014 power, thermal, radiation, EMI, and export compliance. v2 adds EMI/EMC requirement.',
+      created: '2026-04-12',
+      requirements: [
+        { id: 'req-001', label: 'Power output stability', type: 'extraction', description: 'Rated output voltage and tolerance under load', criterion: 'Must meet \u00b11% tolerance at rated current per MIL-PRF-55681 \u00a74.6.2', instruction: 'Verify voltage stability under full load conditions', required: true, aiValue: '3.3V \u00b10.5% under load', aiConfidence: 0.94 },
+        { id: 'req-002', label: 'Thermal dissipation', type: 'extraction', description: 'Maximum power dissipation at rated current', criterion: 'Must not exceed 2W at rated current per \u00a74.6.4', instruction: 'Check thermal derating curve at max ambient', required: true, aiValue: '< 2W at rated current', aiConfidence: 0.91 },
+        { id: 'req-003', label: 'Operating temperature range', type: 'extraction', description: 'Minimum and maximum operating temperature', criterion: 'Must operate across -55\u00b0C to +125\u00b0C per MIL-STD-883', instruction: 'Verify against environmental test data', required: true, aiValue: '-55\u00b0C to +125\u00b0C', aiConfidence: 0.97 },
+        { id: 'req-004', label: 'Radiation tolerance', type: 'extraction', description: 'Total ionizing dose tolerance level', criterion: 'TID must exceed 100 krad(Si) per MIL-STD-883 TM 1019', instruction: 'Reference radiation test report or wafer lot data', required: true, aiValue: 'TID > 100 krad(Si)', aiConfidence: 0.88 },
+        { id: 'req-005', label: 'ITAR classification', type: 'extraction', description: 'Export control classification under ITAR', criterion: 'Must have valid ITAR classification with category and section reference', instruction: 'Extract from export compliance documentation', required: true, aiValue: 'USML Category XV (c)', aiConfidence: 0.86 },
+        { id: 'req-007', label: 'EMI/EMC compliance', type: 'extraction', description: 'Conducted and radiated emissions compliance', criterion: 'Must meet MIL-STD-461 limits for conducted (CE102) and radiated (RE102) emissions', instruction: 'Reference EMI/EMC test report or pre-compliance scan', required: true, aiValue: 'CE102 / RE102 within MIL-STD-461 limits', aiConfidence: 0.81 },
+        { id: 'req-006', label: 'Meets MIL-PRF-55681?', type: 'inference', description: 'Does the component meet all MIL-PRF-55681 requirements (including v2 EMI scope)?', criterion: 'All quantitative thresholds in \u00a74.6 plus EMI/EMC compliance must be satisfied', instruction: 'Assess overall compliance based on extracted values', required: false, aiValue: 'Yes \u2014 5 of 6 quantitative thresholds satisfied; EMI/EMC within limits', aiConfidence: 0.80 },
+      ],
+    },
     {
       id: 'reqset-system-integration-v1',
       lineageId: 'lineage-system-integration',
@@ -75,3 +96,39 @@ export const DEMO_REQUIREMENT_SETS = {
 export function getRequirementSetsForRole(roleId) {
   return DEMO_REQUIREMENT_SETS[roleId] || []
 }
+
+// Phase 12.1 (#120): seed entries for `publishedRequirementSets` so the
+// "Public" picker tab in CreateClaim / AmendClaim and the Phase 12.1
+// "Public" provenance badge are populated on first load — without
+// requiring a user to manually publish via the Library first.
+//
+// Each entry mirrors the runtime publish-record shape produced by
+// V2App.handlePublishRequirementSet (`_publishedBy` party label,
+// `_publishedByRoleId` role id, `_publishedDate` YYYY-MM-DD). Both v1
+// and v2 of MIL-PRF-55681 are seeded so the supersession chain is
+// fully exercised cross-role: when Alice references v1 (via the seed
+// data below), the Detail Panel correctly surfaces "Newer version
+// available" because v2 also lives in this pool.
+export const SEED_PUBLISHED_REQUIREMENT_SETS = [
+  {
+    ...DEMO_REQUIREMENT_SETS['bob-govco'][0],   // MIL-PRF-55681 v1
+    _published: true,
+    _publishedBy: 'GovCo',
+    _publishedByRoleId: 'bob-govco',
+    _publishedDate: '2026-02-16',
+  },
+  {
+    ...DEMO_REQUIREMENT_SETS['bob-govco'][1],   // MIL-PRF-55681 v2
+    _published: true,
+    _publishedBy: 'GovCo',
+    _publishedByRoleId: 'bob-govco',
+    _publishedDate: '2026-04-13',
+  },
+  {
+    ...DEMO_REQUIREMENT_SETS['bob-govco'][2],   // System Integration v1
+    _published: true,
+    _publishedBy: 'GovCo',
+    _publishedByRoleId: 'bob-govco',
+    _publishedDate: '2026-02-22',
+  },
+]

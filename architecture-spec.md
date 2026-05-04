@@ -561,7 +561,7 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
 
 ### 10.3 Claim artifact
 
-> **Prototype note — Claim field authority.** Platform-issued: `pin`, `createdDate`, each `amendments[].date`. App-derived / actor-input: `name`, `description`, `referencedAssetIds[]`, `acknowledgments[]`, `amendments[].added[]`, `amendments[].removed[]`. **Authority:** DPP (Platform-issued fields and amendment chain registration).
+> **Prototype note — Claim field authority.** Platform-issued: `pin`, `createdDate`, each `amendments[].date`. App-derived / actor-input: `name`, `description`, `referencedAssetIds[]`, `acknowledgments[]`, `referencedRequirementsSets[]` (§10.3a), `amendments[].added[]`, `amendments[].removed[]`, `amendments[].addedRequirementsSetIds[]`, `amendments[].removedRequirementsSetIds[]`. **Authority:** DPP (Platform-issued fields and amendment chain registration).
 
 `acknowledgments` is an array of pre-set terms the Claim owner authors when creating (or amending) the Claim. Each entry is `{ id, title, description }`. Surface to requesters as required-checkbox gates: any DA, EA, or combined request flow against this Claim must show the entire `acknowledgments[]` set as checkboxes; the requester must check every box before Submit enables. The ids of the boxes the requester checked are recorded on the resulting EA's `acknowledgmentsAccepted` field (§10.5) as audit trail. Acknowledgments are owner-authored — they're how the Claim owner pre-encodes terms requesters must acknowledge before the agreement-grant ceremony begins.
 
@@ -581,16 +581,38 @@ Like the Directory Layer, AI Shopper is a back-burner item. Its existence is spe
       "description": "Evaluation results are for internal use only and will not be shared with third parties."
     }
   ],
+  "referencedRequirementsSets": [
+    { "requirementsSetId": "reqset-mil-prf-55681-v1", "addedDate": "2026-03-01T10:01:00Z" }
+  ],
   "createdDate": "2026-03-01T10:00:00Z",
   "amendments": [
     {
       "date": "2026-04-05T12:00:00Z",
       "added": ["asset-prm-thermal"],
-      "removed": []
+      "removed": [],
+      "addedRequirementsSetIds": [],
+      "removedRequirementsSetIds": []
     }
   ]
 }
 ```
+
+### 10.3a Referenced Standards (Phase 12.1 #120)
+
+`referencedRequirementsSets` is a non-binding metadata array declaring which Requirements Sets the Claim is **built to satisfy**. Strictly informational — does not couple to evaluation, does not auto-suggest in Run Evaluation, and does not produce notifications when changed.
+
+**Entry shape:** `{ requirementsSetId: string, addedDate: ISO8601 }`. The `requirementsSetId` is the version-pinned RS id (e.g. `reqset-mil-prf-55681-v1`), not a lineage id. References stay pointed at the originally-referenced version even after the Library author supersedes the RS — drift is surfaced via the "Newer version available" pill on the Detail Panel row, not via auto-retargeting.
+
+**Authority:** owner-authoritative. Only the Claim owner can add or remove references. A Claim does NOT inherit references from its referenced Assets. The pool of selectable RS for the picker is the union of (owner's authored RS in their Library) + (publicly published RS in the Public Directory). Privately-shared RS from third parties are out of scope.
+
+**Edit pathways:**
+- **Create-time:** picker section in `V22CreateClaimModal`. Optional, defaults to `[]`.
+- **Add / remove (canonical):** `AmendClaimModal` — adds an amendment record with `addedRequirementsSetIds[]` / `removedRequirementsSetIds[]` populated. Cascade-skip: does NOT mark prior Eval Results stale and does NOT generate notifications. Amendment record is logged for audit only.
+- **Inline supersession update (scoped exception):** `UpdateRSReferenceModal` opens from the "Newer version available" pill on a single row (owner only). Confirm records an amendment with diff = removed `[oldVersionId]`, added `[latestVersionId]` and updates the array entry's `requirementsSetId` to the latest version with a fresh `addedDate`. Update jumps to the latest in the supersession chain (not the next link). Each row updated independently — no batch action. This is the **only** inline mutation affordance on the Referenced Standards section; the precedent does not extend to other Detail Panel sections.
+
+**Cross-role behavior:** the field travels with the Claim artifact, so every viewer (owner + grantees of any DA on the Claim) sees the same `referencedRequirementsSets` data. Non-owners see the "Newer version available" pill as informational text only — not clickable.
+
+**Detail Panel rendering:** `V22ClaimPanel` renders a "Referenced Standards" section after Referenced Assets and before Acknowledgments. Each row shows the RS name (clickable → opens Library at the originally-referenced version), a provenance badge ("Authored by you" / "Public"), an optional "Newer version available" pill when the referenced version is not the latest in its lineage, and the `addedDate` in muted small text. Empty state omits the section entirely.
 
 ### 10.4 Disclosure Agreement artifact
 
@@ -1429,6 +1451,7 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§10.3 / §10.3a — Phase 12.1:** Claims gain non-binding `referencedRequirementsSets[]` field; informational only, no evaluation coupling. Inline supersession-update affordance scoped to this section only. Adds + removes go through AmendClaim as cascade-skip amendments (no Eval Result staleness, no notifications).
 - **§2.3 Proof-Only disclosure — Phase 6:** added the rule that Proof-Only disclosure requires at least one existing Eval Result on the Claim at response time; response modal lists existing Eval Results and blocks with an informational message when none exist.
 - **§3 Node type labels + state badges — Phase 3 / Phase 6 / Phase 6.5+:** codified the multi-line layout (type label above name) and documented `PROVISIONAL` / `DECLINED` / `SUPERSEDED` as separate inline badges (not suffixes on `v22Type`), with `DECLINED` outranking `PROVISIONAL`.
 - **§4.4 Selected-edge state — Phase 3 / Phase 4:** revised blend from 40% → 65% white and stroke from +0.5px → +1.5px; documented the rationale (visibility parity across all four disclosure styles against the dark canvas).

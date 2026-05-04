@@ -28,6 +28,9 @@ import {
   buildClaimNodeForDirectoryMaterialization,
   // Phase 11C: warm-path EA-only request factories.
   makeProvisionalEvaluationAgreement, finalizeProvisionalEvaluationAgreement,
+  // Phase 12.1 (#120): RS supersession lookup for the Claim Detail Panel
+  // "Newer version available" pill.
+  getLatestRSVersion,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -72,6 +75,7 @@ import { playRevealEdgeAnimation } from './animations/edgeDrawIn.js'
 // #50 dead-handler sweep. Import removed to keep the V2App surface clean.
 // import V22RevocationNoticeModal from '../components/modals/V22RevocationNoticeModal.jsx'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
+import UpdateRSReferenceModal from '../components/modals/UpdateRSReferenceModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
 import AmendEvaluationAgreementModal from '../components/modals/AmendEvaluationAgreementModal.jsx'
 // Phase 11.6 (#164): grantee-side response modal for amendment proposals.
@@ -82,7 +86,7 @@ import AmendmentResponseModal from '../components/modals/AmendmentResponseModal.
 // standalone forms are no longer mounted from V2App.
 import LibraryModal from '../components/modals/LibraryModal.jsx'
 import { Backdrop, Modal, ModalHeader, ModalBody, ModalFooter, Btn } from '../components/modals/ModalShared.jsx'
-import { getRequirementSetsForRole } from './requirementSets.js'
+import { getRequirementSetsForRole, SEED_PUBLISHED_REQUIREMENT_SETS } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -159,6 +163,11 @@ export default function V2App() {
   const [v22RespondingTo, setV22RespondingTo] = useState(null) // { daId }
   const [v22EvalContext, setV22EvalContext] = useState(null) // { evaluationAgreementId|null, claimId, selfEvaluation?, lockedRequirementsSetId?, priorActiveResultId? }
   const [v22AmendingClaimId, setV22AmendingClaimId] = useState(null) // claim id being amended
+  // Phase 12.1 (#120): inline supersession-update state. Shape:
+  // { claimId, fromRsId, toRsId } — driven from the V22ClaimPanel
+  // "Newer version available" pill (owner only) and consumed by
+  // UpdateRSReferenceModal.
+  const [v22UpdatingRsReference, setV22UpdatingRsReference] = useState(null)
   const [v22AmendingDaId, setV22AmendingDaId] = useState(null) // disclosure agreement id being amended
   // Phase 11E.1 (#108): evaluation agreement id being amended via the new
   // AmendEvaluationAgreementModal flow.
@@ -1664,7 +1673,11 @@ export default function V2App() {
 
   // ── Phase 6: Amendment handlers ──────────────────────────────────────
 
-  const handleV22AmendClaimSubmit = useCallback(({ addedAssetIds }) => {
+  const handleV22AmendClaimSubmit = useCallback(({
+    addedAssetIds = [],
+    addedRequirementsSetIds = [],
+    removedRequirementsSetIds = [],
+  }) => {
     if (!v22AmendingClaimId) return
     // Phase 11E.4: rolled back the Phase 11E.2 `v22-claim-amendment`
     // fan-out. Counterparties don't see Claim amendments directly —
@@ -1673,6 +1686,11 @@ export default function V2App() {
     // amendment is the user-visible event; Claim amendment is internal
     // Claim-owner state. The corresponding spec §7.4 row + §11.2
     // prototype-note reference were also removed in Phase 11E.4.
+    //
+    // Phase 12.1 (#120): RS edits are also cascade-skip — they DO NOT
+    // mark Eval Results stale and DO NOT generate notifications. The
+    // amendment record carries the RS diff for audit only. Same path
+    // as the Asset add (no notification fan-out lives in this handler).
     setV22Provisionals((prev) => {
       // Look up the latest version of the claim (could be a prior amendment).
       const existing = prev.claims?.find((c) => c.id === v22AmendingClaimId)
@@ -1681,6 +1699,8 @@ export default function V2App() {
       const { claim: amended, newClaimRefEdges } = makeAmendedClaim({
         claim: existing,
         addedAssetIds,
+        addedRequirementsSetIds,
+        removedRequirementsSetIds,
       })
       return {
         ...prev,
@@ -1699,6 +1719,38 @@ export default function V2App() {
     setV22RecentlyAcceptedClaimId(v22AmendingClaimId)
     // Phase 7 carry-over #1: no timeout; clears on deselection.
   }, [v22AmendingClaimId])
+
+  // Phase 12.1 (#120): inline RS supersession update. Same cascade-skip
+  // semantics as a regular AmendClaim RS edit — no Eval Result staleness,
+  // no notifications. Records a one-line amendment with the from/to ids
+  // in `addedRequirementsSetIds` / `removedRequirementsSetIds`.
+  const handleV22UpdateRsReference = useCallback(() => {
+    const ctx = v22UpdatingRsReference
+    if (!ctx) return
+    const { claimId, fromRsId, toRsId } = ctx
+    if (!claimId || !fromRsId || !toRsId || fromRsId === toRsId) {
+      setV22UpdatingRsReference(null)
+      return
+    }
+    setV22Provisionals((prev) => {
+      const existing = prev.claims?.find((c) => c.id === claimId)
+        || buildV22SharedArtifacts().claims.find((c) => c.id === claimId)
+      if (!existing) return prev
+      const { claim: amended, newClaimRefEdges } = makeAmendedClaim({
+        claim: existing,
+        addedRequirementsSetIds: [toRsId],
+        removedRequirementsSetIds: [fromRsId],
+      })
+      return {
+        ...prev,
+        claims: [...(prev.claims || []).filter((c) => c.id !== amended.id), amended],
+        // newClaimRefEdges is empty here (no Asset add) but the helper
+        // still returns the array — defensive spread keeps shape stable.
+        disclosureAgreements: [...prev.disclosureAgreements, ...newClaimRefEdges],
+      }
+    })
+    setV22UpdatingRsReference(null)
+  }, [v22UpdatingRsReference])
 
   // Phase 8: V2.2 parse flow — the Asset panel fires this via setV22ParsingAsset.
   // Produces a new Parse Result + an internal Full DA that wires it back to the
@@ -1823,7 +1875,7 @@ export default function V2App() {
   // Phase 9A.3: V2.2 Claim creation. Produces a new Claim + Actor→Claim
   // ownership DA + one Claim→Asset internal DA per reference. Unilateral.
   // NEW badge + pan-to via the shared `_isNew` reveal path.
-  const handleV22CreateClaimSubmit = useCallback(({ name, description, referencedAssetIds, acknowledgments }) => {
+  const handleV22CreateClaimSubmit = useCallback(({ name, description, referencedAssetIds, acknowledgments, referencedRequirementsSetIds }) => {
     if (!name || !name.trim() || !Array.isArray(referencedAssetIds) || referencedAssetIds.length === 0) {
       return null
     }
@@ -1835,6 +1887,8 @@ export default function V2App() {
       referencedAssetIds,
       // Phase 11C.1: pass through acknowledgments authored at creation time.
       acknowledgments: acknowledgments || [],
+      // Phase 12.1 (#120): pass through Referenced Standards (optional).
+      referencedRequirementsSetIds: referencedRequirementsSetIds || [],
     })
     setV22Provisionals((prev) => ({
       ...prev,
@@ -2846,7 +2900,12 @@ export default function V2App() {
   // it via setLibraryInitialTab. Legacy `showPEPLibrary` removed; the
   // `open-pep-library` event now opens the unified Library on the parsing tab.
   const [libraryInitialTab, setLibraryInitialTab] = useState(null)
-  const [publishedRequirementSets, setPublishedRequirementSets] = useState([])
+  // Phase 12.1 (#120): seed Bob's MIL-PRF-55681 (v1 + v2) and System
+  // Integration v1 into the public pool so the "Public" picker tab and
+  // provenance badges work on first load. Every role except Bob sees these
+  // as Public; Bob sees them as authored-by-self (filtered out via the
+  // existing `_publishedByRoleId !== roleId` filter at line 3050+).
+  const [publishedRequirementSets, setPublishedRequirementSets] = useState(SEED_PUBLISHED_REQUIREMENT_SETS)
   useEffect(() => {
     const handler = () => {
       setLibraryInitialTab('parsing')
@@ -5453,6 +5512,14 @@ export default function V2App() {
           const alreadyReferencedAssets = (v22View?.assets || [])
             .filter(a => alreadyReferenced.has(a.id))
             .map(a => ({ id: a.id, name: a.name, file: a.file }))
+          // Phase 12.1 (#120): assemble the RS lookup table so the modal
+          // can render existing references with names + versions, and pass
+          // through the picker pools.
+          const rsLookup = {}
+          for (const rs of requirementSets) rsLookup[rs.id] = rs
+          for (const rs of publishedRequirementSets) {
+            if (!rsLookup[rs.id]) rsLookup[rs.id] = rs
+          }
           return (
             <AmendClaimModal
               activeParty={activeRole.party}
@@ -5464,6 +5531,37 @@ export default function V2App() {
               onSubmit={handleV22AmendClaimSubmit}
               onNestedAssetCreated={handleV22NestedAssetCreated}
               onClose={() => setV22AmendingClaimId(null)}
+              ownRequirementSets={requirementSets}
+              publicRequirementSets={visiblePublishedSets}
+              rsLookup={rsLookup}
+            />
+          )
+        })()}
+
+        {/* Phase 12.1 (#120): inline RS supersession-update modal.
+            Triggered exclusively from the Claim Detail Panel's
+            "Newer version available" pill (owner-only click). The
+            from/to RS lookup uses the union pool; the modal renders
+            from-name + version vs to-name + version and confirms an
+            in-place reference update on the Claim. Cascade-skip:
+            no Eval Result staleness, no notifications. */}
+        {v22UpdatingRsReference && (() => {
+          const { fromRsId, toRsId } = v22UpdatingRsReference
+          const allRsForLookup = [...requirementSets, ...publishedRequirementSets]
+          const rsById = new Map()
+          for (const rs of allRsForLookup) {
+            if (!rsById.has(rs.id)) rsById.set(rs.id, rs)
+          }
+          const fromRs = rsById.get(fromRsId)
+            || { id: fromRsId, name: fromRsId, version: undefined }
+          const toRs = rsById.get(toRsId)
+            || { id: toRsId, name: toRsId, version: undefined }
+          return (
+            <UpdateRSReferenceModal
+              fromRs={fromRs}
+              toRs={toRs}
+              onConfirm={handleV22UpdateRsReference}
+              onClose={() => setV22UpdatingRsReference(null)}
             />
           )
         })()}
@@ -5630,6 +5728,9 @@ export default function V2App() {
               onComplete={handleV22CreateClaimSubmit}
               onNestedAssetCreated={handleV22NestedAssetCreated}
               onAddCreditsClick={() => setV22AddCreditsOpen(true)}
+              // Phase 12.1 (#120): RS picker pools.
+              ownRequirementSets={requirementSets}
+              publicRequirementSets={visiblePublishedSets}
             />
           )
         })()}
@@ -5963,6 +6064,44 @@ export default function V2App() {
                 .filter(Boolean)
             }
           }
+          // Phase 12.1 (#120): Resolve `referencedRequirementsSets` rows for
+          // V22ClaimPanel. The pool is the union of (active role's authored
+          // RS) + (publishedRequirementSets — public pool, including own
+          // and other-party entries). Provenance: 'own' if the active role
+          // authored the RS, else 'public' if it lives in the public pool,
+          // else null (e.g. a privately-shared RS — out of scope this phase
+          // so we render no badge rather than guessing). The latestVersionId
+          // is computed against the same pool so the supersession pill
+          // surfaces drift cross-role consistently.
+          let referencedStandardRows = []
+          if (node.v22Type === 'CLAIM' && node.v22Artifact?.referencedRequirementsSets?.length) {
+            const allRsForLookup = [...requirementSets, ...publishedRequirementSets]
+            // Dedupe by id (own + public pools may overlap when the active
+            // role's RS is also published).
+            const rsById = new Map()
+            for (const rs of allRsForLookup) {
+              if (!rsById.has(rs.id)) rsById.set(rs.id, rs)
+            }
+            const rsArr = Array.from(rsById.values())
+            const ownRsIds = new Set(requirementSets.map((r) => r.id))
+            const publicRsIds = new Set(publishedRequirementSets.map((r) => r.id))
+            referencedStandardRows = node.v22Artifact.referencedRequirementsSets.map((entry) => {
+              const rs = rsById.get(entry.requirementsSetId)
+              const provenance = ownRsIds.has(entry.requirementsSetId)
+                ? 'own'
+                : publicRsIds.has(entry.requirementsSetId) ? 'public' : null
+              const latestVersionId = getLatestRSVersion(entry.requirementsSetId, rsArr)
+              return {
+                requirementsSetId: entry.requirementsSetId,
+                addedDate: entry.addedDate,
+                name: rs?.name || entry.requirementsSetId,
+                version: rs?.version,
+                lineageId: rs?.lineageId,
+                provenance,
+                latestVersionId,
+              }
+            })
+          }
           const evaluationResultsForClaim = (v22View?.evaluationResults || []).filter(e => e.claimId === node.id)
           const parseResultsForAsset = (v22View?.parseResults || []).filter(p => p.sourceAssetId === node.id)
           // EA the active actor can use to evaluate this Claim.
@@ -6217,6 +6356,28 @@ export default function V2App() {
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
                 claimIsProofOnlyOnly={claimIsProofOnlyOnly}
+                // Phase 12.1 (#120): Referenced Standards section data + handlers.
+                referencedStandardRows={referencedStandardRows}
+                onSelectRsReference={(row) => {
+                  // Open the Library deep-linked to the originally-referenced
+                  // version (NOT the latest — per brief acceptance criterion
+                  // 7). Provenance picks the tab: 'own' → Requirement Sets
+                  // (authored), 'public' → Published. Default 'requirements'
+                  // covers the unknown-provenance fallback (e.g. legacy
+                  // references whose RS pool hasn't been resolved).
+                  setLibraryInitialTab(row.provenance === 'public' ? 'published' : 'requirements')
+                  setLibraryInitialSetId(row.requirementsSetId)
+                  setShowLibrary(true)
+                }}
+                onUpdateRsReference={(row) => {
+                  // Owner-only — V22ClaimPanel gates the click. Open the
+                  // confirmation sub-modal with from/to context.
+                  setV22UpdatingRsReference({
+                    claimId: node.id,
+                    fromRsId: row.requirementsSetId,
+                    toRsId: row.latestVersionId,
+                  })
+                }}
                 onSelectEvalResult={(er) => {
                   // Phase 11D.3: pan to the Eval Result node and open its
                   // Detail Panel (replaces the Claim panel since selection
@@ -6391,7 +6552,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.11.31 &middot; Changelog
+          v0.12.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6438,6 +6599,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.12.1', date: '2026-05-04', label: 'Phase 12.1', items: [
+                  'New (#120): Claims gain a non-binding "Referenced Standards" field. Owner can declare which Requirements Sets a Claim is built to satisfy at create time, edit them via Amend Claim, or update a single reference to the latest version inline. Strictly informational — does not couple to evaluation, does not auto-suggest in Run Evaluation, does not generate notifications.',
+                  'New: Claim Detail Panel "Referenced Standards" section with provenance badges ("Authored by you" / "Public") and a "Newer version available" pill that opens an inline confirmation modal for owners and renders as informational text only for non-owners.',
+                  'New: shared RequirementsSetPicker primitive with two-tab pool (My Requirements Sets / Published), now used by Create Claim and Amend Claim flows.',
+                  'Demo data: Alice and Dave\'s seeded Claims now reference public + authored standards out of the box. MIL-PRF-55681 ships in v1 + v2 so the supersession surfacing is visible on first load (Alice\'s PRM Assembly references v1).',
+                ]},
                 { version: '0.11.31', date: '2026-05-04', label: 'Phase 11.8', items: [
                   'New (#44): double-clicking the Radiant Network actor card opens the Public Directory with a circular wipe originating from the node — same animation as the globe button, anchored to where you actually clicked.',
                   'New (#54): "Reset all data" action in the user menu — confirmation modal restores every role\'s canvas state, notifications, and provisional artifacts to seeded shape (theme + skip-boot preferences are preserved).',

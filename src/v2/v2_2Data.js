@@ -297,6 +297,15 @@ export function makeParseResult({
  * Claim artifact — spec §10.3.
  * V2.2 uses `referencedAssetIds[]` to reference Assets as first-class nodes. V2.1's
  * embedded evidence arrays are not carried over.
+ *
+ * Phase 12.1 (#120): `referencedRequirementsSets[]` is informational metadata
+ * declaring which standards the Claim is built to satisfy. Non-binding —
+ * does not couple to evaluation, does not auto-suggest in Run Evaluation,
+ * does not produce notifications when changed. Owner-authoritative: only
+ * the Claim owner can add/remove. Version-pinned: each entry stores the
+ * specific RS version id, not a "latest" pointer. See §10.3a.
+ *
+ * Entry shape: `{ requirementsSetId: string, addedDate: ISO8601 string }`.
  */
 export function makeClaim({
   id,
@@ -310,6 +319,8 @@ export function makeClaim({
   // required-checkbox gates for any DA / EA / combined request against
   // this Claim.
   acknowledgments = [],
+  // Phase 12.1 (#120): non-binding "Referenced Standards" metadata.
+  referencedRequirementsSets = [],
   createdDate,
   amendments = [],
   dot,   // optional structured DOT; derived below if absent
@@ -343,14 +354,58 @@ export function makeClaim({
       title: a.title,
       description: a.description,
     })),
+    // Phase 12.1 (#120): version-pinned RS references. Each entry preserves
+    // the specific version id at addition time so library supersessions
+    // don't silently retarget existing references.
+    referencedRequirementsSets: referencedRequirementsSets.map((r) => ({
+      requirementsSetId: r.requirementsSetId,
+      addedDate: r.addedDate,
+    })),
     createdDate,
     amendments: amendments.map((a) => ({
       date: a.date,
       added: [...(a.added || [])],
       removed: [...(a.removed || [])],
+      // Phase 12.1: parallel diff arrays for Referenced Standards changes.
+      // Empty for legacy Asset-only amendments. Both add/remove and the
+      // supersession-update path (UpdateRSReferenceModal) write into these
+      // fields; supersession updates produce one entry in each.
+      addedRequirementsSetIds: [...(a.addedRequirementsSetIds || [])],
+      removedRequirementsSetIds: [...(a.removedRequirementsSetIds || [])],
     })),
     dot: claimDot,
   }
+}
+
+// Phase 12.1 (#120): helper that walks the RS supersession chain and
+// returns the latest version's id given any version's id. `allRS` should
+// be the union of every RS visible to the active actor (own authored +
+// publicly published). Returns the input id unchanged when no successor
+// exists (i.e. the RS is the latest in its lineage, or the lineage has
+// no other entries in the supplied pool).
+//
+// V2.2 RS shape carries:
+//   { id: 'reqset-foo-v1', lineageId: 'lineage-foo', version: 1, ... }
+//
+// All entries with the same `lineageId` are versions of the same logical
+// standard. The latest is the highest `version`. RS without a `lineageId`
+// (legacy/standalone) are treated as their own lineage of one.
+//
+// Phase 12.2 callers may also need the full latest RS object — this
+// helper returns just the id for parity with how the field stores it;
+// callers can `.find(rs => rs.id === id)` once they have the id.
+export function getLatestRSVersion(rsId, allRS = []) {
+  if (!rsId) return rsId
+  const ref = allRS.find((rs) => rs.id === rsId)
+  if (!ref) return rsId
+  const lineageId = ref.lineageId || ref.id
+  const inLineage = allRS.filter((rs) => (rs.lineageId || rs.id) === lineageId)
+  if (inLineage.length === 0) return rsId
+  let latest = ref
+  for (const rs of inLineage) {
+    if ((rs.version ?? 0) > (latest.version ?? 0)) latest = rs
+  }
+  return latest.id
 }
 
 /**
@@ -1059,6 +1114,14 @@ export function buildV22SharedArtifacts() {
         description: 'If results are referenced externally (audits, certifications), MicroCo will be credited.',
       },
     ],
+    // Phase 12.1 (#120): supersession seed — Alice references MIL-PRF-55681 v1
+    // (publicly published by GovCo) plus her own Incoming QC standard. v2 of
+    // MIL-PRF-55681 also exists in the public pool, so the Detail Panel will
+    // surface a "Newer version available" pill on the v1 row.
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', addedDate: '2026-03-01T10:01:00Z' },
+      { requirementsSetId: 'reqset-incoming-qc-v1', addedDate: '2026-03-01T10:01:30Z' },
+    ],
     createdDate: '2026-03-01T10:00:00Z',
     amendments: [],
   })
@@ -1069,6 +1132,11 @@ export function buildV22SharedArtifacts() {
     name: 'Voltage Regulator IC',
     description: 'Fully disclosed VREG-IC-500 component with datasheet.',
     referencedAssetIds: [aVregDatasheet.id],
+    // Phase 12.1: single public reference — exercises owner-public combo
+    // on a one-Asset Claim where no prior multi-RS row was visible.
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-03-02T09:31:00Z' },
+    ],
     createdDate: '2026-03-02T09:30:00Z',
     amendments: [],
   })
@@ -1098,6 +1166,13 @@ export function buildV22SharedArtifacts() {
         title: 'Result confidentiality',
         description: 'Evaluation results are for internal use only and will not be shared with third parties.',
       },
+    ],
+    // Phase 12.1 (#120): Dave references the latest MIL-PRF-55681 (v2),
+    // exercising the "Public" badge without a supersession pill (since v2
+    // IS the latest). Demonstrates a Claim authored against a current
+    // public standard.
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-26T10:01:00Z' },
     ],
     createdDate: '2026-02-26T10:00:00Z',
     amendments: [],
@@ -2809,19 +2884,45 @@ export function finalizeProvisionalAgreementPair({
 }
 
 /**
- * Amend a Claim by adding additional referenced Assets (spec §11.1). Returns a
- * new Claim artifact with the merged `referencedAssetIds` plus a new entry in
+ * Amend a Claim by adding additional referenced Assets (spec §11.1) and / or
+ * editing the Claim's Referenced Standards (spec §10.3a, Phase 12.1 #120).
+ * Returns a new Claim artifact with the merged state plus a new entry in
  * `amendments[]`. The original Claim's id is preserved so the artifact replaces
  * its prior version when merged into the shared dataset via `mergeProvisionals`.
  *
  * Also returns the new internal claim-ref Disclosure Agreements that need to be
  * added to the shared dataset for the new Asset references to render edges.
  * (The seeded `claimRefEdges` only covers original references.)
+ *
+ * Phase 12.1: `addedRequirementsSetIds` / `removedRequirementsSetIds` are
+ * cascade-skip — they DO NOT mark Eval Results stale and DO NOT generate
+ * notifications. The amendment record carries them in parallel diff fields
+ * for audit purposes only.
  */
-export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = [] }) {
+export function makeAmendedClaim({
+  claim,
+  addedAssetIds = [],
+  removedAssetIds = [],
+  addedRequirementsSetIds = [],
+  removedRequirementsSetIds = [],
+}) {
   const existing = new Set(claim.referencedAssetIds)
   for (const id of removedAssetIds) existing.delete(id)
   for (const id of addedAssetIds) existing.add(id)
+
+  // Phase 12.1: re-derive the Referenced Standards array. Removed entries
+  // are dropped; added entries get a freshly stamped `addedDate`. Preserve
+  // existing entries' `addedDate` (don't reset on every amendment).
+  const amendmentDate = new Date().toISOString()
+  const removedRsSet = new Set(removedRequirementsSetIds)
+  const carryRs = (claim.referencedRequirementsSets || [])
+    .filter((r) => !removedRsSet.has(r.requirementsSetId))
+  const addedRs = addedRequirementsSetIds.map((rsId) => ({
+    requirementsSetId: rsId,
+    addedDate: amendmentDate,
+  }))
+  const nextRs = [...carryRs, ...addedRs]
+
   const amendedClaim = makeClaim({
     id: claim.id,
     owner: claim.owner,
@@ -2832,13 +2933,16 @@ export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = 
     // Phase 11C.1: preserve existing acknowledgments through Asset
     // amendments. Editing acknowledgments themselves is a future workstream.
     acknowledgments: claim.acknowledgments || [],
+    referencedRequirementsSets: nextRs,
     createdDate: claim.createdDate,
     amendments: [
       ...(claim.amendments || []),
       {
-        date: new Date().toISOString(),
+        date: amendmentDate,
         added: [...addedAssetIds],
         removed: [...removedAssetIds],
+        addedRequirementsSetIds: [...addedRequirementsSetIds],
+        removedRequirementsSetIds: [...removedRequirementsSetIds],
       },
     ],
   })
@@ -2849,7 +2953,7 @@ export function makeAmendedClaim({ claim, addedAssetIds = [], removedAssetIds = 
       ownerDot: claim.ownerDot,
       subject: { kind: 'claim', id: claim.id },
       scope: { assetIds: [assetId], includeDerivatives: true },
-      terms: { createdDate: amendedClaim.amendments.at(-1).date },
+      terms: { createdDate: amendmentDate },
     }),
   )
   return { claim: amendedClaim, newClaimRefEdges }
@@ -3324,6 +3428,10 @@ export function makeClaimCreationArtifacts({
   // Phase 11C.1: optional acknowledgments authored by the Claim creator.
   // Format: [{ title, description }] — the factory generates per-row ids.
   acknowledgments = [],
+  // Phase 12.1 (#120): optional Referenced Standards. Bare RS ids; the
+  // factory stamps `addedDate = createdDate` so the seed and create
+  // pathways produce structurally identical entries.
+  referencedRequirementsSetIds = [],
 }) {
   if (!ownerParty) throw new Error('makeClaimCreationArtifacts: ownerParty is required')
   if (!name || !name.trim()) throw new Error('makeClaimCreationArtifacts: name is required')
@@ -3346,6 +3454,14 @@ export function makeClaimCreationArtifacts({
       description: (a.description || '').trim(),
     }))
 
+  // Phase 12.1: dedupe RS ids (defensive — UI shouldn't produce dupes but
+  // the factory is the audit boundary) and stamp the addedDate.
+  const dedupedRsIds = Array.from(new Set(referencedRequirementsSetIds || []))
+  const referencedRequirementsSets = dedupedRsIds.map((rsId) => ({
+    requirementsSetId: rsId,
+    addedDate: createdDate,
+  }))
+
   const claim = makeClaim({
     id: claimId,
     owner: ownerParty,
@@ -3354,6 +3470,7 @@ export function makeClaimCreationArtifacts({
     description,
     referencedAssetIds,
     acknowledgments: finalAcks,
+    referencedRequirementsSets,
     createdDate,
     amendments: [],
   })
