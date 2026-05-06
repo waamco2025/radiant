@@ -40,6 +40,9 @@
 import { useState, useEffect } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 import { AssetEvidenceViewer, SelectiveDisclosurePanel } from '../AssetEvidencePanel.jsx'
+// Phase 15.0 (#172 part 1): per-Requirements-Set color palette for the
+// annotation overlay dots in the eval-output / poe Output tabs.
+import { buildRsColorMap } from '../../v2/data/rsColors.js'
 import {
   getAssetJsonRecord,
   getClaimJsonRecord,
@@ -381,7 +384,7 @@ function EvalResultsTable({ rows }) {
   )
 }
 
-function EvalResultOutputBody({ evalResult }) {
+function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
   if (!evalResult) {
     return <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>No evaluation result.</div>
   }
@@ -395,6 +398,39 @@ function EvalResultOutputBody({ evalResult }) {
   const rsList = evalResult.requirementsSets
     || (evalResult.requirementsSet ? [evalResult.requirementsSet] : [])
   const rsCount = rsList.length
+
+  // Phase 15.0 (#172 part 1): Asset evidence panel for the Output tab.
+  // Single-Asset display: pick the first evidence Asset that has a
+  // localPath. Anchors are computed across all rows + filtered to those
+  // pointing at the displayed Asset. Phase 15.1 will add a per-Asset
+  // switcher when multiple Assets exist.
+  const displayAsset = (evidenceAssets || []).find((a) => a?.file?.localPath) || null
+  const assetOrdinal = displayAsset
+    ? Math.max(1, (evidenceAssets || []).findIndex((a) => a?.id === displayAsset.id) + 1)
+    : null
+  const rsColorByRsId = buildRsColorMap(rsList.map((rs) => rs.id))
+  // Build anchors with rowOrdinal + RS id + label/value for the displayed
+  // Asset. rowOrdinal scoped per-RS so each RS's rows enumerate from 1.
+  const anchorsForAsset = (() => {
+    if (!displayAsset) return []
+    const out = []
+    const cursors = new Map()
+    for (const row of allRows) {
+      const ord = (cursors.get(row.requirementsSetId) || 0) + 1
+      cursors.set(row.requirementsSetId, ord)
+      for (const a of (row.evidenceAnchors || [])) {
+        if (a.sourceAssetId !== displayAsset.id) continue
+        out.push({
+          ...a,
+          rowOrdinal: ord,
+          requirementsSetId: row.requirementsSetId,
+          label: row.label,
+          value: row.value,
+        })
+      }
+    }
+    return out
+  })()
 
   return (
     <LayeredOutputContainer>
@@ -431,6 +467,42 @@ function EvalResultOutputBody({ evalResult }) {
         </div>
       </div>
 
+      {/* Phase 15.0 (#172 part 1): Asset evidence with PDF.js + annotation
+          overlay. Renders only when a displayable Asset is in scope; falls
+          back silently when none. */}
+      {displayAsset && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px', borderRadius: 4,
+            background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+          }}>
+            <span style={{
+              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+              color: 'var(--accent-amber)',
+              background: 'color-mix(in srgb, var(--accent-amber) 14%, transparent)',
+            }}>EVIDENCE</span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {displayAsset.name}
+            </span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+              Asset {assetOrdinal} of {evidenceAssets.length}
+            </span>
+          </div>
+          <AssetEvidenceViewer
+            asset={displayAsset}
+            iframeHeight={520}
+            usePdfJs={true}
+            evidenceAnchors={anchorsForAsset}
+            assetOrdinal={assetOrdinal}
+            rsColorByRsId={rsColorByRsId}
+          />
+        </div>
+      )}
+
       {/* Per-RS section: header + table */}
       {rsList.map((rs) => {
         const rsRows = allRows.filter((r) => (r.requirementsSetId || rsList[0]?.id) === rs.id)
@@ -465,7 +537,7 @@ function EvalResultOutputBody({ evalResult }) {
 
 // ─── PoE Output content (Phase 13.4 — Step 4) ─────────────────────────────
 
-function PoeOutputBody({ poe, wrappedEvalResult, provenanceChain = [], onSelectEvalResult }) {
+function PoeOutputBody({ poe, wrappedEvalResult, provenanceChain = [], onSelectEvalResult, evidenceAssets = [] }) {
   // Section 1 — wrapped Eval Result Output content (sourced from the wrapped
   // Eval Result, falls back to PoE-level metadata when the wrapped object
   // hasn't been resolved by the caller).
@@ -510,7 +582,7 @@ function PoeOutputBody({ poe, wrappedEvalResult, provenanceChain = [], onSelectE
       {/* Section 1: Final Evaluation (the wrapped Eval Result's output) */}
       <div>
         <SectionHeading>Final Evaluation</SectionHeading>
-        <EvalResultOutputBody evalResult={wrappedFallback} />
+        <EvalResultOutputBody evalResult={wrappedFallback} evidenceAssets={evidenceAssets} />
       </div>
 
       {/* Section 2: Evaluation Provenance — full supersession chain */}
@@ -964,6 +1036,11 @@ export default function ExpandedArtifactModal({
   // Used both by Output rendering and to populate the JSON record's
   // computed-fields surfacing.
   badgeIssuanceContext,
+  // Phase 15.0 (#172 part 1): caller-resolved evidence Assets for the
+  // eval-output / poe schemas — drives the PDF.js + annotation overlay
+  // rendering on the Output tab. Single-Asset display in 15.0; Phase 15.1
+  // adds the multi-Asset switcher.
+  evidenceAssets = [],
   onClose,
 }) {
   const [tab, setTab] = useState('output')
@@ -1035,7 +1112,7 @@ export default function ExpandedArtifactModal({
       </LayeredOutputContainer>
     )
   } else if (schema === 'eval-output') {
-    outputBody = <EvalResultOutputBody evalResult={artifact} />
+    outputBody = <EvalResultOutputBody evalResult={artifact} evidenceAssets={evidenceAssets} />
   } else if (schema === 'claim') {
     outputBody = <ClaimOutputBody claim={artifact} />
   } else if (schema === 'poe') {
@@ -1044,6 +1121,7 @@ export default function ExpandedArtifactModal({
         poe={artifact}
         wrappedEvalResult={wrappedEvalResult}
         provenanceChain={provenanceChain}
+        evidenceAssets={evidenceAssets}
         onSelectEvalResult={(id) => {
           if (onSelectEvalResult) {
             onClose?.()

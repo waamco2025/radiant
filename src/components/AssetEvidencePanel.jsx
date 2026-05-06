@@ -27,6 +27,11 @@
 // region the same way it has since Phase 11B.
 
 import CopyBadge from './DetailPanel/shared/CopyBadge.jsx'
+// Phase 15.0 (#172 part 1): PDF.js renderer with annotation overlay.
+// Opt-in via `usePdfJs` prop. Default behaviour (iframe) preserved for
+// every existing call site; Run Eval modal + Eval Result expand + PoE
+// expand surfaces opt in.
+import AnnotatedPdfViewer from './AnnotatedPdfViewer.jsx'
 
 function formatBytes(bytes) {
   if (bytes == null) return '—'
@@ -47,7 +52,18 @@ function formatDateTime(iso) {
   return `${yyyy}-${mm}-${dd} · ${hh}:${min} UTC`
 }
 
-export function AssetEvidenceViewer({ asset, iframeHeight = 400, fillHeight = false }) {
+export function AssetEvidenceViewer({
+  asset,
+  iframeHeight = 400,
+  fillHeight = false,
+  // Phase 15.0 (#172 part 1): opt-in to PDF.js rendering (with annotation
+  // overlay) for application/pdf assets. Other MIME types fall back to
+  // iframe regardless. Default false preserves every existing call site.
+  usePdfJs = false,
+  evidenceAnchors = null,
+  assetOrdinal = null,
+  rsColorByRsId = null,
+}) {
   const file = asset?.file || {}
   const hash = file.hash || ''
   // Phase 12.6: `fillHeight` switches between the legacy fixed iframe height
@@ -56,6 +72,8 @@ export function AssetEvidenceViewer({ asset, iframeHeight = 400, fillHeight = fa
   // right column). Header + footer stay natural-height; only the iframe /
   // empty-state placeholder grows.
   const stretchStyle = fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }
+  // Phase 15.0: pick the renderer based on mime + opt-in flag.
+  const renderViaPdfJs = usePdfJs && file.mimeType === 'application/pdf' && !!file.localPath
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 14,
@@ -84,7 +102,17 @@ export function AssetEvidenceViewer({ asset, iframeHeight = 400, fillHeight = fa
         </span>
       </div>
 
-      {file.localPath ? (
+      {renderViaPdfJs ? (
+        <div style={{ ...(fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }) }}>
+          <AnnotatedPdfViewer
+            fileUrl={file.localPath}
+            evidenceAnchors={evidenceAnchors || []}
+            assetOrdinal={assetOrdinal}
+            rsColorByRsId={rsColorByRsId || {}}
+            height={fillHeight ? '100%' : iframeHeight}
+          />
+        </div>
+      ) : file.localPath ? (
         <iframe
           src={file.localPath}
           style={{
@@ -209,7 +237,16 @@ export function SelectiveDisclosurePanel({ asset, disclosedFields, fillHeight = 
   )
 }
 
-export default function AssetEvidencePanel({ assetRow, iframeHeight = 400, fillHeight = false }) {
+export default function AssetEvidencePanel({
+  assetRow,
+  iframeHeight = 400,
+  fillHeight = false,
+  // Phase 15.0 (#172 part 1): forward to AssetEvidenceViewer.
+  usePdfJs = false,
+  evidenceAnchors = null,
+  assetOrdinal = null,
+  rsColorByRsId = null,
+}) {
   if (!assetRow) {
     return (
       <div style={{
@@ -232,7 +269,17 @@ export default function AssetEvidencePanel({ assetRow, iframeHeight = 400, fillH
   }
   const { asset, disclosureType, disclosedFields } = assetRow
   if (disclosureType === 'owner' || disclosureType === 'full') {
-    return <AssetEvidenceViewer asset={asset} iframeHeight={iframeHeight} fillHeight={fillHeight} />
+    return (
+      <AssetEvidenceViewer
+        asset={asset}
+        iframeHeight={iframeHeight}
+        fillHeight={fillHeight}
+        usePdfJs={usePdfJs}
+        evidenceAnchors={evidenceAnchors}
+        assetOrdinal={assetOrdinal}
+        rsColorByRsId={rsColorByRsId}
+      />
+    )
   }
   if (disclosureType === 'selective') {
     return <SelectiveDisclosurePanel asset={asset} disclosedFields={disclosedFields} fillHeight={fillHeight} />

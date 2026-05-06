@@ -6754,6 +6754,7 @@ export default function V2App() {
             onSelectEvalResult={v22ExpandedArtifact.onSelectEvalResult}
             referencedRequirementSets={v22ExpandedArtifact.referencedRequirementSets}
             badgeIssuanceContext={v22ExpandedArtifact.badgeIssuanceContext}
+            evidenceAssets={v22ExpandedArtifact.evidenceAssets}
             onClose={() => setV22ExpandedArtifact(null)}
           />
         )}
@@ -7232,10 +7233,22 @@ export default function V2App() {
                 // provenance chain for PoE).
                 onExpand={(artifact) => {
                   const t = node.v22Type
+                  // Phase 15.0 (#172 part 1): resolve evidence Assets from
+                  // the eval result's `evidenceUsed[]` so the expand modal
+                  // can render PDF.js + annotations on the Output tab.
+                  // Single-Asset display in 15.0 — Phase 15.1 will add the
+                  // multi-Asset switcher when an Eval Result references
+                  // multiple Assets.
+                  const resolveEvidenceAssets = (er) => (er?.evidenceUsed || []).map((id) =>
+                    (sharedForPanel.assets || []).find((a) => a.id === id),
+                  ).filter(Boolean)
                   if (t === 'CLAIM') {
                     setV22ExpandedArtifact({ artifact, schema: 'claim' })
                   } else if (t === 'EVAL RESULT') {
-                    setV22ExpandedArtifact({ artifact, schema: 'eval-output' })
+                    setV22ExpandedArtifact({
+                      artifact, schema: 'eval-output',
+                      evidenceAssets: resolveEvidenceAssets(artifact),
+                    })
                   } else if (t === 'PROOF OF EVALUATION') {
                     const wrappedId = artifact?.wrappedEvalResultId
                     const erList = sharedForPanel.evaluationResults || []
@@ -7270,6 +7283,10 @@ export default function V2App() {
                       artifact, schema: 'poe',
                       wrappedEvalResult,
                       provenanceChain,
+                      // Phase 15.0: PoE Output tab Section 1 (the wrapped
+                      // Eval Result content) needs access to evidence
+                      // Assets to render PDF.js + annotations.
+                      evidenceAssets: resolveEvidenceAssets(wrappedEvalResult),
                       onSelectEvalResult: (erId) => {
                         setSel(erId)
                         setForcePanelTab(null)
@@ -7644,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.14.5 &middot; Changelog
+          v0.15.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7691,6 +7708,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.0', date: '2026-05-06', label: 'Phase 15.0', items: [
+                  '#172 part 1 of 3: PDF.js integration. Three demo PDFs (PRM-3A Datasheet, PRM-3A Test Report, VReg-12C Datasheet) generated from a deterministic pdf-lib script and committed under public/seed-pdfs/. Each PDF carries a MicroCo-branded header (green accent, owner attribution, document type, revision, generation date) and a multi-page body with calibrated values that map to the seed Requirements Sets.',
+                  'Annotated evidence overlay. Each Eval Result `result` row gains an `evidenceAnchors[]` array recording PDF point-space rectangles (`{ sourceAssetId, page, x, y, w, h }`) per requirement. Coordinates are emitted by the same script that generates the PDFs, so the seed and the PDFs never drift.',
+                  'New `<AnnotatedPdfViewer>` component renders PDFs via pdfjs-dist (replacing iframe) and overlays numbered dots at the anchored coordinates. Dot labels follow `{assetOrdinal}.{rowOrdinal}`; per-Requirements-Set color coding via a new `getRsColor` palette helper.',
+                  'Opt-in PDF.js rendering via a new `usePdfJs` prop on AssetEvidencePanel. Default false preserves iframe behaviour everywhere except the three target surfaces: Run Evaluation modal Step 1 evidence panel, Eval Result expand modal Output tab, and PoE expand modal Output tab. Asset Detail Panel previews + Claim referenced-asset previews continue to use iframe rendering.',
+                  '2-Asset / 2-RS demo scenario: Bob\'s PRM Eval Result references both PRM Datasheet (Asset 1) and PRM Test Report (Asset 2). MIL-PRF requirements anchor in either PDF depending on whether the value is published spec (Datasheet) or measured (Test Report). System Integration requirements anchor in the Datasheet.',
+                  'Static rendering only in 15.0 — dots are decorative. Phase 15.1 will wire bidirectional row-click ↔ dot-click interaction; Phase 15.2 will ship the walkthrough markdown + final polish.',
+                ]},
                 { version: '0.14.5', date: '2026-05-06', label: 'Phase 14.5', items: [
                   '#176c: Badge chip container visual tuning. Each shield gains a 2px halo stroked in the rectangle\'s exact background color, so adjacent overlapping shields now show the recognizable negative-space cut that reads as the classic overlapping-tokens look. Shields shrink 20px → 18px (size after halo), STEP_IDLE 15 → 12 (more pronounced overlap), STEP_FAN drops to 22 (matches 18 + 4px gap). Container height adjusts 26px → 24px. Shields vertically centered against the rectangle midline. Single-shield case (no overflow): the rectangle becomes a 24×24 square with the lone shield centered both horizontally and vertically. Container background, border, shadow, fan-out animation timing, and tooltip behavior unchanged.',
                 ]},

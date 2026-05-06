@@ -22,6 +22,10 @@ import Tooltip from '../Tooltip'
 // values on the right. The viewer is the same component used by
 // ExpandedArtifactModal to keep the rendering coherent across surfaces.
 import AssetEvidencePanel from '../AssetEvidencePanel.jsx'
+// Phase 15.0 (#172 part 1): per-Requirements-Set color assignment for the
+// annotation overlay dots. Stable across renders + reused on the Eval
+// Result expand modal Output tab.
+import { buildRsColorMap } from '../../v2/data/rsColors.js'
 
 const STATUS_CYCLE = ['satisfactory', 'unsatisfactory', 'missing', 'na']
 const STATUS_CFG = {
@@ -590,6 +594,47 @@ export default function V22RunEvaluationModal({
       ? `Self-evaluating ${claim?.name || ''} (no Evaluation Agreement required).`
       : `Evaluating ${claim?.name || ''} under Evaluation Agreement ${evaluationAgreement?.id || ''}.`
 
+  // Phase 15.0 (#172 part 1): build the anchor lookup + RS color map once
+  // per render so the inline-expanded Asset evidence panel can pass
+  // anchors to AnnotatedPdfViewer. Anchors source from the priorActiveResult
+  // when present (Re-Run mode); fresh evaluations have no committed anchors
+  // until submit, so the array is empty and PDF.js renders the document
+  // without overlays — that's intentional for Phase 15.0's static-only
+  // scope. Phase 15.1 will surface live evaluator-driven anchor authoring.
+  const anchorsByAssetId = useMemo(() => {
+    const map = new Map()
+    const rows = priorActiveResult?.results || []
+    // Compute rowOrdinal per (rsId, row position within rs).
+    const rsCursors = new Map()
+    rows.forEach((row) => {
+      const rsId = row.requirementsSetId
+      const ord = (rsCursors.get(rsId) || 0) + 1
+      rsCursors.set(rsId, ord)
+      for (const a of (row.evidenceAnchors || [])) {
+        if (!a?.sourceAssetId) continue
+        if (!map.has(a.sourceAssetId)) map.set(a.sourceAssetId, [])
+        map.get(a.sourceAssetId).push({
+          ...a,
+          rowOrdinal: ord,
+          requirementsSetId: rsId,
+          label: row.label,
+          value: row.value,
+        })
+      }
+    })
+    return map
+  }, [priorActiveResult])
+  const rsColorByRsId = useMemo(() => {
+    const ids = (priorActiveResult?.requirementsSets || []).map((r) => r.id)
+    return buildRsColorMap(ids)
+  }, [priorActiveResult])
+  // Asset ordinal: 1-indexed position within the in-scope evidence list.
+  const assetOrdinalById = useMemo(() => {
+    const map = new Map()
+    evidenceAssets.forEach((a, i) => map.set(a.id, i + 1))
+    return map
+  }, [evidenceAssets])
+
   // Phase 12.4 (#171): left panel renders an Asset selector list at top
   // and the disclosure-type-aware AssetEvidencePanel below. Present in
   // every step so the reviewer can see the underlying evidence while
@@ -715,7 +760,18 @@ export default function V22RunEvaluationModal({
                     borderTop: '1px solid var(--border-faint)',
                     background: 'var(--bg-surface)',
                   }}>
-                    <AssetEvidencePanel assetRow={a} iframeHeight={480} />
+                    <AssetEvidencePanel
+                      assetRow={a}
+                      iframeHeight={480}
+                      // Phase 15.0 (#172 part 1): opt in to PDF.js +
+                      // annotation overlay. evidenceAnchors are populated
+                      // only when a priorActiveResult is in scope (Re-Run
+                      // mode); fresh evaluations render the PDF cleanly.
+                      usePdfJs={true}
+                      evidenceAnchors={anchorsByAssetId.get(a.id) || []}
+                      assetOrdinal={assetOrdinalById.get(a.id) || null}
+                      rsColorByRsId={rsColorByRsId}
+                    />
                   </div>
                 )}
               </div>
