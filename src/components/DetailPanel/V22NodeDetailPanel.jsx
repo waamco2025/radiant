@@ -14,6 +14,9 @@ import { useEffect, useRef } from 'react'
 import CopyBadge from './shared/CopyBadge'
 import ExpandButton from './shared/ExpandButton'
 import Tooltip from '../Tooltip'
+import { HealthBar } from '../../v2/AssetNode'
+// Phase 14.1 (#169 part 2): shared shield icon used by all Badge surfaces.
+import BadgeShieldIcon from '../../v2/BadgeShieldIcon'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
 
@@ -191,7 +194,11 @@ function FooterButton({ label, onClick, accent, danger, amber, disabled, title }
     : button
 }
 
-function PanelHeader({ typeLabel, name, pin, onClose, badge }) {
+function PanelHeader({ typeLabel, name, pin, onClose, badge, actions }) {
+  // Phase 13.4 (#175): optional `actions` slot rendered to the left of the
+  // close button. Used by Claim / Eval Result / PoE / Parse Result panels to
+  // surface an Expand button alongside the type badge — the same affordance
+  // location used on the EA Detail Panel since 11C.2.
   return (
     <div style={{ padding: '18px 18px 14px', flexShrink: 0, borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -202,6 +209,7 @@ function PanelHeader({ typeLabel, name, pin, onClose, badge }) {
         }}>{typeLabel}</span>
         {badge}
         <div style={{ flex: 1 }} />
+        {actions}
         <button
           onClick={onClose}
           aria-label="Close detail panel"
@@ -257,6 +265,13 @@ function V22ActorPanel({
   onAmendEa,
   onRevokeDa,
   onRevokeEa,
+  // Phase 14.1 (#169 part 2): Badges section — received-only (badges
+  // ISSUED by this actor are NOT shown here per design huddle decision 4).
+  // `badgesForActor` is resolved by V2App via `getBadgesForRecipient`.
+  badgesForActor = [],
+  badgeTemplateLookup = {},
+  onSelectBadgeIssuance,
+  onRevokeBadge,
 }) {
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
@@ -277,6 +292,19 @@ function V22ActorPanel({
           <Section title="Assets">
             <Row label="Registered" value={ownedAssetCount} />
           </Section>
+          {/* Phase 14.1 (#169 part 2): Received Badges section. Section
+              omitted when zero received. Issued-by-this-Actor badges are
+              NOT shown here. */}
+          {Array.isArray(badgesForActor) && badgesForActor.length > 0 && (
+            <BadgesSection
+              badges={badgesForActor}
+              activeParty={activeParty}
+              badgeTemplateLookup={badgeTemplateLookup}
+              onSelectBadgeIssuance={onSelectBadgeIssuance}
+              onRevokeBadge={onRevokeBadge}
+              title="Badges Received"
+            />
+          )}
           <AgreementsSection
             disclosureAgreements={disclosureAgreementsForNode}
             evaluationAgreements={evaluationAgreementsForNode}
@@ -666,6 +694,24 @@ function V22ClaimPanel({
   // Receives the full Asset artifact so the modal can read file metadata
   // + dot lineage. Optional — when omitted, no Expand button renders.
   onExpandAsset,
+  // Phase 14.0 polish: clicking a Referenced Asset row pans/zooms the
+  // canvas to the Asset and selects it. Receives the Asset id (string).
+  // Optional — when omitted, rows render without click affordances.
+  onSelectAsset,
+  // Phase 14.1 (#169 part 2): aggregated Badges section. `badgesForClaim`
+  // is the resolved list (V2App computes via `getBadgesForClaim`); the
+  // template lookup + select/revoke handlers are shared with the PoE panel.
+  badgesForClaim = [],
+  badgeTemplateLookup = {},
+  onSelectBadgeIssuance,
+  onRevokeBadge,
+  // Phase 14.2 (#169a): Issue Badge footer button. Receives the Claim
+  // artifact; V2App owns the gate (`!isOwner` of the Claim).
+  onIssueBadge,
+  // Phase 13.4 (#175): Expand button in the panel header — opens the Claim
+  // expand modal. Receives the Claim artifact (note: the awaiting/declined/
+  // revoked branches reuse this prop too — same artifact in every case).
+  onExpand,
   evaluationResultsForClaim = [],
   evaluationAgreementForActor,
   disclosureAgreementsForNode = [],
@@ -730,7 +776,12 @@ function V22ClaimPanel({
     // So `activeParty === node.owner` ↔ "Alice viewing Bob's request to her".
     return (
       <PanelLayout
-        header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={awaitingBadge} />}
+        header={(
+          <PanelHeader
+            typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={awaitingBadge}
+            actions={onExpand ? <ExpandButton onClick={() => onExpand(claim)} title={`Expand ${node.name || 'Claim'}`} /> : null}
+          />
+        )}
         body={
           <>
             <Section title="Request">
@@ -780,7 +831,12 @@ function V22ClaimPanel({
     )
     return (
       <PanelLayout
-        header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={declinedBadge} />}
+        header={(
+          <PanelHeader
+            typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={declinedBadge}
+            actions={onExpand ? <ExpandButton onClick={() => onExpand(claim)} title={`Expand ${node.name || 'Claim'}`} /> : null}
+          />
+        )}
         body={
           <>
             <Section title="Decline Details">
@@ -830,7 +886,12 @@ function V22ClaimPanel({
     const cascadeEvalResultCount = evaluationResultsForClaim.filter(er => er._revokedMeta).length
     return (
       <PanelLayout
-        header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={revokedBadge} />}
+        header={(
+          <PanelHeader
+            typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} badge={revokedBadge}
+            actions={onExpand ? <ExpandButton onClick={() => onExpand(claim)} title={`Expand ${node.name || 'Claim'}`} /> : null}
+          />
+        )}
         body={
           <>
             <RevocationNoticeSection
@@ -877,7 +938,12 @@ function V22ClaimPanel({
   const panelViewerIsGrantor = activeParty === node.owner
   return (
     <PanelLayout
-      header={<PanelHeader typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose} />}
+      header={(
+        <PanelHeader
+          typeLabel="CLAIM" name={node.name} pin={node.pin} onClose={onClose}
+          actions={onExpand ? <ExpandButton onClick={() => onExpand(claim)} title={`Expand ${node.name || 'Claim'}`} /> : null}
+        />
+      )}
       body={
         <>
           {noticeForPanel && (
@@ -892,6 +958,23 @@ function V22ClaimPanel({
               cascadeEvalResultCount={noticeForPanel.cascadeEvalResultCount || 0}
             />
           )}
+          {/* Phase 13.2 (#176): Claim minibar — aggregate SAT/UNSAT/MISSING
+              across all non-superseded Eval Results referencing this Claim.
+              Reuses the same HealthBar primitive as the node card so the
+              two surfaces read consistently. Rendered above the description
+              so it sits at the top of the panel body (V2.1 carryover
+              restoration). Hides automatically when no rows have any data
+              (HealthBar returns null on total === 0). */}
+          {(() => {
+            const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+            const total = dh.ok + (dh.warn || 0) + dh.bad
+            if (total === 0) return null
+            return (
+              <div style={{ marginBottom: 14, display: 'flex' }}>
+                <HealthBar health={dh} withLabels />
+              </div>
+            )
+          })()}
           {claim?.description && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>{claim.description}</div>
           )}
@@ -929,39 +1012,64 @@ function V22ClaimPanel({
               <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No referenced Assets.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {referencedAssetNames.map((n) => (
-                  <div key={n.id} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 12,
-                    color: 'var(--text-primary)',
-                    padding: '6px 8px',
-                    background: 'var(--bg-raised)',
-                    borderRadius: 3,
-                  }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
-                    {/* Phase 11D.2: Selective grantees see a disclosed-field
-                        count next to each Asset row. The owner sees no count
-                        (they have full access); Full Disclosure grantees
-                        also see no count (no field-level subset to surface). */}
-                    {n.disclosureType === 'selective' && (
-                      <span style={{
-                        fontSize: 10, fontFamily: 'var(--font-mono)',
-                        color: 'var(--text-dim)', flexShrink: 0,
-                      }}>
-                        {n.disclosedFieldCount ?? 0} {(n.disclosedFieldCount === 1) ? 'field' : 'fields'}
-                      </span>
-                    )}
-                    {/* Phase 11B / 11D.2: Expand button for Asset rows. The
-                        full row is forwarded so the modal can render a
-                        disclosure-type-aware view (PDF iframe vs. parsed-
-                        fields table). */}
-                    {n.asset && onExpandAsset && (
-                      <ExpandButton onClick={() => onExpandAsset(n)} title={`Expand ${n.name}`} />
-                    )}
-                  </div>
-                ))}
+                {referencedAssetNames.map((n) => {
+                  // Phase 14.0 polish: rows are clickable when an
+                  // `onSelectAsset` handler is wired. Click pans/zooms the
+                  // canvas to the Asset and selects it. The Expand button
+                  // (own onClick + stopPropagation) is unaffected.
+                  const rowClickable = !!onSelectAsset && !!n.id
+                  return (
+                    <div
+                      key={n.id}
+                      onClick={rowClickable ? () => onSelectAsset(n.id) : undefined}
+                      role={rowClickable ? 'button' : undefined}
+                      tabIndex={rowClickable ? 0 : undefined}
+                      onKeyDown={rowClickable ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectAsset(n.id) }
+                      } : undefined}
+                      title={rowClickable ? `Open ${n.name} on the canvas` : undefined}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        fontSize: 12,
+                        color: 'var(--text-primary)',
+                        padding: '6px 8px',
+                        background: 'var(--bg-raised)',
+                        borderRadius: 3,
+                        cursor: rowClickable ? 'pointer' : 'default',
+                        transition: 'background 100ms',
+                      }}
+                      onMouseEnter={rowClickable ? (e) => {
+                        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-raised))'
+                      } : undefined}
+                      onMouseLeave={rowClickable ? (e) => {
+                        e.currentTarget.style.background = 'var(--bg-raised)'
+                      } : undefined}
+                    >
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
+                      {/* Phase 11D.2: Selective grantees see a disclosed-field
+                          count next to each Asset row. The owner sees no count
+                          (they have full access); Full Disclosure grantees
+                          also see no count (no field-level subset to surface). */}
+                      {n.disclosureType === 'selective' && (
+                        <span style={{
+                          fontSize: 10, fontFamily: 'var(--font-mono)',
+                          color: 'var(--text-dim)', flexShrink: 0,
+                        }}>
+                          {n.disclosedFieldCount ?? 0} {(n.disclosedFieldCount === 1) ? 'field' : 'fields'}
+                        </span>
+                      )}
+                      {/* Phase 11B / 11D.2: Expand button for Asset rows. The
+                          full row is forwarded so the modal can render a
+                          disclosure-type-aware view (PDF iframe vs. parsed-
+                          fields table). */}
+                      {n.asset && onExpandAsset && (
+                        <ExpandButton onClick={() => onExpandAsset(n)} title={`Expand ${n.name}`} />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </Section>
@@ -1017,7 +1125,26 @@ function V22ClaimPanel({
                             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginLeft: 6 }}>v{row.version}</span>
                           )}
                         </span>
-                        {provenanceLabel && (
+                        {/* Phase 14.0 polish: replace the "PUBLIC" text badge
+                            with the canonical globe icon used elsewhere
+                            (LibraryModal lines 157-161, RequirementsPanel
+                            published rows, BadgesPanel). Authored-by-you and
+                            other provenance values keep the text badge —
+                            the globe is reserved for "this is published on
+                            the network". */}
+                        {row.provenance === 'public' ? (
+                          <Tooltip content="Published Standard" width={160}>
+                            <svg
+                              width={12} height={12} viewBox="0 0 16 16" fill="none"
+                              aria-label="Published Standard"
+                              style={{ flexShrink: 0, color: 'var(--accent-blue)' }}
+                            >
+                              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                              <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+                              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+                            </svg>
+                          </Tooltip>
+                        ) : provenanceLabel && (
                           <span style={{
                             fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
                             letterSpacing: '0.1em',
@@ -1075,6 +1202,18 @@ function V22ClaimPanel({
               (owner sees what they authored; counterparty sees what they
               agreed to or would need to agree to before requesting). The
               section doesn't render when the Claim has no acknowledgments. */}
+          {/* Phase 14.1 (#169 part 2): aggregated Badges across all PoEs
+              that wrap Eval Results referencing this Claim. Section
+              omitted entirely when zero badges. */}
+          {Array.isArray(badgesForClaim) && badgesForClaim.length > 0 && (
+            <BadgesSection
+              badges={badgesForClaim}
+              activeParty={activeParty}
+              badgeTemplateLookup={badgeTemplateLookup}
+              onSelectBadgeIssuance={onSelectBadgeIssuance}
+              onRevokeBadge={onRevokeBadge}
+            />
+          )}
           {claim?.acknowledgments?.length > 0 && (
             <Section title={`Acknowledgments (${claim.acknowledgments.length})`}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1171,7 +1310,10 @@ function V22ClaimPanel({
         const hasOwnerActions = isOwner
         const hasEvalAction = !isOwner && !!evaluationAgreementForActor
         const hasWarmPathAction = !isOwner && !hasEvalAction && hasActiveDaWithoutEa && !!onRequestEvaluationAgreement
-        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction) return null
+        // Phase 14.2 (#169a): Issue Badge footer button on Claim panel.
+        // Visible to any non-owner with an Issue Badge handler wired.
+        const hasIssueBadgeAction = !isOwner && !!onIssueBadge
+        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction && !hasIssueBadgeAction) return null
         return (
           <>
             {noticeForPanel && (
@@ -1185,12 +1327,6 @@ function V22ClaimPanel({
                 )}
               </>
             ) : hasEvalAction ? (
-              // Phase 11.6.1 Fix 3: when the EA has a pending amendment
-              // proposal, the Run Evaluation button is visually disabled
-              // with a tooltip directing the grantee to respond. The
-              // V22RunEvaluationModal would also block submit, but
-              // surfacing the gate at the panel level avoids the dead
-              // click + modal opening at all.
               evaluationAgreementForActor.status === 'pending-acceptance' ? (
                 <FooterButton
                   label="Run Evaluation"
@@ -1204,6 +1340,13 @@ function V22ClaimPanel({
             ) : hasWarmPathAction ? (
               <FooterButton label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
             ) : null}
+            {hasIssueBadgeAction && (
+              <FooterButton
+                label="Issue Badge"
+                onClick={() => onIssueBadge(claim)}
+                title="Issue a Badge against this Claim."
+              />
+            )}
           </>
         )
       })()}
@@ -1212,11 +1355,16 @@ function V22ClaimPanel({
 }
 
 /* ─── Parse Result Panel ──────────────────────────────────────────────── */
-function V22ParseResultPanel({ node, onClose, sourceAsset }) {
+function V22ParseResultPanel({ node, onClose, sourceAsset, onExpand }) {
   const pr = node.v22Artifact
   return (
     <PanelLayout
-      header={<PanelHeader typeLabel="PARSE RESULT" name={node.name} pin={node.pin} onClose={onClose} />}
+      header={(
+        <PanelHeader
+          typeLabel="PARSE RESULT" name={node.name} pin={node.pin} onClose={onClose}
+          actions={onExpand ? <ExpandButton onClick={() => onExpand(pr)} title={`Expand ${node.name || 'Parse Result'}`} /> : null}
+        />
+      )}
       body={
         <>
           <Section title="Source">
@@ -1325,6 +1473,11 @@ function ChangesFromPriorBlock({ diff, priorEvalResultId, assetNameLookup = {}, 
 
 function V22EvalResultPanel({
   node, activeParty, onClose, onReRunEvaluation,
+  // Phase 13 (#168): Create-PoE entry. Receives the Eval Result; V2App
+  // routes to setV22CreatingPoEContext. The button is hidden when the
+  // node already has `_alreadyWrapped: true` (a PoE owns this Eval
+  // Result) or when the Eval Result is superseded / orphaned.
+  onCreatePoE,
   // Phase 9D.1.3 Fix 6: orphaned Eval Result — backing DA or EA has been
   // revoked. When true, the footer swaps from Re-Run Evaluation to Dismiss
   // (with inline confirmation copy explaining that the artifact stays in QS
@@ -1336,15 +1489,27 @@ function V22EvalResultPanel({
   // available — useful for proof-only grantees who see an Eval Result pulled
   // in via a proof-only Claim DA and want to confirm what it evaluates.
   linkedClaimName,
-  // Phase 12.2 (#121): sibling Eval Results in the same `batchId`. V2App
-  // resolves the list against the merged dataset; null/empty means solo
-  // evaluation (omit the section). Each entry: { id, name, status }.
+  // Phase 13.1 (#168a): the batch-grouped sibling concept is retired.
+  // `siblingEvalResults` retained as a successor lookup for the
+  // Supersession section (V2App passes the supersededBy resolution in
+  // a one-entry list when applicable).
   siblingEvalResults = [],
   onSelectSiblingEvalResult,
   // Phase 12.2 (#117): asset-name lookup for the "Changes from prior
   // evaluation" diff section.
   assetNameLookup = {},
   onSelectDiffAsset,
+  // Phase 13.1 (#168a): true when this Eval Result has been wrapped by a
+  // PoE owned by the active actor. The footer's "Re-Run Evaluation" button
+  // disables with a tooltip explaining the gate.
+  isPoeTerminated = false,
+  // Phase 13.3 (Step 2): false when no new evidence Assets have been
+  // disclosed since the prior `evidenceUsed` snapshot. Re-Run is disabled
+  // with the explanatory tooltip when this is false.
+  canRerun = true,
+  // Phase 13.4 (#175): Expand button in the panel header — opens the Eval
+  // Result expand modal with header + per-RS results tables.
+  onExpand,
 }) {
   const er = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -1367,7 +1532,12 @@ function V22EvalResultPanel({
   ) : null
   return (
     <PanelLayout
-      header={<PanelHeader typeLabel="EVAL RESULT" name={node.name} pin={node.pin} onClose={onClose} badge={supersededBadge} />}
+      header={(
+        <PanelHeader
+          typeLabel="EVAL RESULT" name={node.name} pin={node.pin} onClose={onClose} badge={supersededBadge}
+          actions={onExpand ? <ExpandButton onClick={() => onExpand(er)} title={`Expand ${node.name || 'Eval Result'}`} /> : null}
+        />
+      )}
       body={
         <>
           {/* Phase 12.2 (#122): OUTDATED notice — the underlying Claim's
@@ -1397,79 +1567,104 @@ function V22EvalResultPanel({
             <Row label="Evaluated" value={formatDateTime(er?.evaluationDate)} />
             <Row label="Agreement" value={er?.evaluationAgreementId} mono />
           </Section>
-          <Section title="Requirements Set">
-            <Row label="Name" value={er?.requirementsSet?.name} />
-            <Row label="ID" value={er?.requirementsSet?.id} mono />
-            <Row label="Version" value={`v${er?.requirementsSet?.version ?? 1}`} />
-          </Section>
-          <Section title={`Results (${er?.results?.length || 0})`}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(er?.results || []).map((r) => {
-                const cfg = STATUS_CFG[r.status] || STATUS_CFG.missing
-                return (
-                  <div key={r.requirementId} style={{ padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
-                        {r.label}
-                        {isHumanEdited(r) && <HumanEditedIcon />}
-                      </span>
-                      <span style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                        padding: '1px 5px', borderRadius: 3, letterSpacing: '0.06em',
-                        color: cfg.color, background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
-                      }}>{cfg.label}</span>
+          {/* Phase 13.1 (#168a): grouped rendering — one section header per
+              Requirements Set in the bundled Eval Result. The aggregate row
+              at the top reads "X SAT · Y UNSAT · Z MISSING · W N/A across
+              N Requirements Sets". Sibling Evaluations section is gone with
+              the batch-grouping concept. */}
+          {(() => {
+            const rsList = er?.requirementsSets || (er?.requirementsSet ? [er.requirementsSet] : [])
+            const allRows = er?.results || []
+            // Phase 13.2 (#176): drop N/A from displays. The model still
+            // carries `status: 'na'` rows (unchanged); we just dim them in
+            // the per-row UI so the structure stays visible without
+            // pulling visual weight, and we exclude them from the
+            // aggregate header. The minibar primitive `HealthBar` displays
+            // SAT/UNSAT/MISSING with green/red/amber segments.
+            const totals = { sat: 0, unsat: 0, missing: 0 }
+            for (const r of allRows) {
+              if (r.status === 'satisfactory') totals.sat += 1
+              else if (r.status === 'unsatisfactory') totals.unsat += 1
+              else if (r.status === 'missing') totals.missing += 1
+            }
+            const renderableRowCount = allRows.filter((r) => r.status !== 'na').length
+            const aggHealth = { ok: totals.sat, warn: totals.missing, bad: totals.unsat }
+            return (
+              <>
+                <Section title={`Results (${renderableRowCount})`}>
+                  {(aggHealth.ok + aggHealth.warn + aggHealth.bad) > 0 && (
+                    <div style={{ marginBottom: 10, display: 'flex' }}>
+                      <HealthBar health={aggHealth} withLabels />
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      {r.value}
-                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {rsList.map((rs) => {
+                      const rsRows = allRows.filter((r) => (r.requirementsSetId || rsList[0].id) === rs.id)
+                      // Backwards-compat: prior Eval Results without `requirementsSetId` per row
+                      // are treated as belonging to the singular requirementsSet.
+                      return (
+                        <div key={rs.id}>
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '6px 8px', borderRadius: 3,
+                            background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                            marginBottom: 4,
+                          }}>
+                            <span style={{
+                              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                              padding: '1px 5px', borderRadius: 3, letterSpacing: '0.06em',
+                              color: 'var(--accent-indigo)',
+                              background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                            }}>REQUIREMENTS SET</span>
+                            <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {rs.name}
+                            </span>
+                            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                              v{rs.version ?? 1} · {rsRows.length} requirement{rsRows.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {rsRows.map((r) => {
+                              const cfg = STATUS_CFG[r.status] || STATUS_CFG.missing
+                              const isNa = r.status === 'na'
+                              return (
+                                <div
+                                  key={`${rs.id}-${r.requirementId}`}
+                                  style={{
+                                    padding: '6px 8px', background: 'var(--bg-raised)', borderRadius: 3,
+                                    // Phase 13.2 (#176): N/A rows render dimmed
+                                    // so the structure stays visible but the
+                                    // visual weight matches the "excluded
+                                    // from display" semantics.
+                                    opacity: isNa ? 0.45 : 1,
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                                      {r.label}
+                                      {isHumanEdited(r) && <HumanEditedIcon />}
+                                    </span>
+                                    <span style={{
+                                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                                      padding: '1px 5px', borderRadius: 3, letterSpacing: '0.06em',
+                                      color: cfg.color, background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
+                                    }}>{cfg.label}</span>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                                    {r.value}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-            </div>
-          </Section>
-          {/* Phase 12.2 (#121): Sibling Evaluations — other Eval Results
-              from the same Run Evaluation invocation (sharing batchId).
-              Solo evaluations + pre-12.2 seed Eval Results have batchId:
-              null — section is omitted. Section also omits when the only
-              batch member is this Eval Result itself. */}
-          {er?.batchId && siblingEvalResults.length > 0 && (
-            <Section title={`Sibling Evaluations (${siblingEvalResults.length})`}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {siblingEvalResults.map((s) => {
-                  const sibStatus = s.status === 'superseded'
-                    ? { label: 'SUPERSEDED', color: 'var(--text-dim)' }
-                    : s.status === 'outdated'
-                      ? { label: 'OUTDATED', color: 'var(--accent-amber)' }
-                      : { label: 'ACTIVE', color: 'var(--accent-green)' }
-                  const clickable = !!onSelectSiblingEvalResult
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={clickable ? () => onSelectSiblingEvalResult(s) : undefined}
-                      style={{
-                        padding: '6px 8px', borderRadius: 3,
-                        background: 'var(--bg-raised)',
-                        cursor: clickable ? 'pointer' : 'default',
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        transition: 'background 100ms',
-                      }}
-                      onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 70%, var(--accent-indigo))' } : undefined}
-                      onMouseLeave={clickable ? (e) => { e.currentTarget.style.background = 'var(--bg-raised)' } : undefined}
-                    >
-                      <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {s.name}
-                      </span>
-                      <span style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                        color: sibStatus.color, padding: '1px 5px', borderRadius: 3,
-                        background: `color-mix(in srgb, ${sibStatus.color} 12%, transparent)`,
-                      }}>{sibStatus.label}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </Section>
-          )}
+                </Section>
+              </>
+            )
+          })()}
           {/* Phase 12.2 (#117): Changes from prior evaluation — persistent
               audit trail of the diff that led to this re-run. Only renders
               when this Eval Result was a re-run (evidenceDiff !== null). */}
@@ -1563,10 +1758,292 @@ function V22EvalResultPanel({
             />
           )
         }
-        if (onReRunEvaluation) {
-          return <FooterButton label="Re-run Evaluation" accent onClick={onReRunEvaluation} title="Run a new evaluation; this result will be marked superseded." />
+        if (onReRunEvaluation || onCreatePoE) {
+          // Phase 13.1 (#168a) + Phase 13.3 (Step 2): Re-Run disabled when
+          // the Eval Result is PoE-terminated OR when no new evidence
+          // Assets have been disclosed since the prior `evidenceUsed`.
+          // Tooltip varies by reason. Both gates compose with the
+          // existing visible-but-disabled pattern.
+          const reRunDisabled = isPoeTerminated || !canRerun
+          const reRunTooltip = isPoeTerminated
+            ? "An evaluation has already been finalized as a Proof of Evaluation. Modify the Claim's evidence or select a different Requirements Set to continue."
+            : !canRerun
+              ? 'No new evidence to evaluate. Wait for Asset additions or modify the Claim’s evidence.'
+              : 'Run a new evaluation; this result will be marked superseded.'
+          return (
+            <>
+              {onReRunEvaluation && (
+                <FooterButton
+                  label="Re-run Evaluation"
+                  onClick={reRunDisabled ? undefined : onReRunEvaluation}
+                  disabled={reRunDisabled}
+                  title={reRunTooltip}
+                />
+              )}
+              {onCreatePoE && !node._alreadyWrapped && (
+                <FooterButton label="Create Proof of Evaluation" accent onClick={() => onCreatePoE(er)} title="Finalize this evaluation as an immutable Proof of Evaluation. Terminates the evaluation chain for this Asset+Requirements Set combination." />
+              )}
+            </>
+          )
         }
         return null
+      })()}
+    />
+  )
+}
+
+/* ─── PoE Panel — Phase 13 (#168) ─────────────────────────────────────── */
+//
+// Renders the Proof-of-Evaluation node's Detail Panel. Sections per the
+// design huddle (decision 13):
+//   • Owner — evaluator + created date
+//   • Source Claim — clickable, jumps to the wrapped Claim's panel
+//   • Wrapped Eval Results — list of wrapped Eval Result names; rows
+//     clickable to navigate to each Eval Result's panel
+//   • Disclosures — active proof-only DAs targeting this PoE
+//   • Badges — placeholder section ("No badges yet"; #169 will populate)
+//
+function V22PoEPanel({
+  node, activeParty, onClose,
+  // Resolution callbacks supplied by V2App against the merged shared
+  // dataset. All optional — the panel falls back to opaque ids.
+  resolveClaimName,
+  resolveEvalResultName,
+  resolveDaSummary,
+  onSelectClaim,
+  onSelectEvalResult,
+  onSelectDa,
+  // Active proof-only DAs whose scope.poeIds includes this PoE.
+  // Each entry: { id, granteeParty, type, status }.
+  disclosingAgreements = [],
+  // Phase 13.2 (#177): full Eval Result supersession chain that ends at
+  // this PoE's wrapped Eval Result. Entries ordered oldest-first so the
+  // section reads as a timeline. Each: { id, name, status, evaluationDate }.
+  // V2App resolves the chain by walking `priorEvalResultId` from the wrapped
+  // Eval Result back to its origin.
+  provenanceChain = [],
+  // Phase 13.4 (#175): Expand button in the panel header — opens the PoE
+  // expand modal (Section 1 = wrapped Eval Result content; Section 2 =
+  // Evaluation Provenance with the full supersession chain).
+  onExpand,
+  // Phase 14.1 (#169 part 2): Badges. `badgesForPoE` is the active list
+  // (resolved by V2App via `getBadgesForPoE`); `badgeTemplateLookup` maps
+  // template ids → template artifacts for inline display. Handlers:
+  //   • `onIssueBadge(poe)` — opens Issue Badge modal (entry-point gating
+  //     keeps this hidden when current actor is the PoE owner).
+  //   • `onSelectBadgeIssuance(badgeId)` — opens Badge Issuance Detail Panel.
+  //   • `onRevokeBadge(badgeIssuanceId)` — opens Revoke Badge modal.
+  badgesForPoE = [],
+  badgeTemplateLookup = {},
+  onIssueBadge,
+  onSelectBadgeIssuance,
+  onRevokeBadge,
+  // Phase 14.2 (#169a): the PoE's parent Claim summary (id + name +
+  // ownerParty) — resolved by V2App from `poe.claimId` against the merged
+  // dataset. Drives both the "Badges earned by [Claim name]" subtext and
+  // the Issue Badge footer gate.
+  poeBadgesParentClaim,
+  onSelectClaimFromBadgeSubtext,
+}) {
+  const poe = node.v22Artifact
+  // Phase 13.1 (#168a): 1:1 wrap. The singular `wrappedEvalResultId` field
+  // replaces the prior plural list.
+  const wrappedId = poe?.wrappedEvalResultId || null
+  const agg = node.poeAggregate || { sat: 0, unsat: 0, missing: 0, na: 0, rsCount: 0 }
+  return (
+    <PanelLayout
+      header={(
+        <PanelHeader
+          typeLabel="PROOF OF EVALUATION" name={node.name} pin={node.pin} onClose={onClose}
+          actions={onExpand ? <ExpandButton onClick={() => onExpand(poe)} title={`Expand ${node.name || 'Proof of Evaluation'}`} /> : null}
+        />
+      )}
+      body={
+        <>
+          <Section title="Owner">
+            <Row label="Evaluator" value={poe?.owner} />
+            <Row label="Created" value={formatDateTime(poe?.createdDate)} />
+            <Row label="Status" value={poe?.status || 'active'} />
+          </Section>
+
+          <Section title="Source Claim">
+            {poe?.claimId
+              ? (
+                <div
+                  onClick={() => onSelectClaim?.(poe.claimId)}
+                  role={onSelectClaim ? 'button' : undefined}
+                  tabIndex={onSelectClaim ? 0 : undefined}
+                  style={{
+                    padding: '6px 8px', borderRadius: 3,
+                    background: 'var(--bg-raised)',
+                    cursor: onSelectClaim ? 'pointer' : 'default',
+                    fontSize: 11, color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                  title={onSelectClaim ? 'Open the source Claim' : undefined}
+                >
+                  <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)', marginBottom: 2 }}>
+                    {resolveClaimName ? resolveClaimName(poe.claimId) : poe.claimId}
+                  </div>
+                  <div>{poe.claimId}</div>
+                </div>
+              )
+              : <Row label="Claim" value="—" />}
+          </Section>
+
+          {/* Phase 13.2 (#177): "Wrapped Eval Result" → "Evaluation
+              Provenance". Renders the full supersession chain that ends at
+              the wrapped Eval Result. When the wrapped Eval Result is its
+              own origin (no priorEvalResultId), the section is a single
+              row matching the pre-13.2 layout. The aggregate footer drops
+              N/A from the displayed counts (Phase 13.2 #176). */}
+          {(() => {
+            // V2App passes provenanceChain ordered oldest-first. If a
+            // caller didn't pass it, fall back to a one-entry chain
+            // (legacy behavior pre-13.2).
+            const chain = provenanceChain.length > 0
+              ? provenanceChain
+              : (wrappedId ? [{ id: wrappedId, name: resolveEvalResultName ? resolveEvalResultName(wrappedId) : wrappedId, status: 'active', evaluationDate: null }] : [])
+            return (
+              <Section title={`Evaluation Provenance (${chain.length})`}>
+                {chain.length === 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>—</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {chain.map((entry, idx) => {
+                      const isLatest = idx === chain.length - 1
+                      const sBadge = entry.status === 'superseded'
+                        ? { label: 'SUPERSEDED', color: 'var(--text-dim)' }
+                        : entry.status === 'outdated'
+                          ? { label: 'OUTDATED', color: 'var(--accent-amber)' }
+                          : { label: isLatest ? 'WRAPPED' : 'ACTIVE', color: 'var(--accent-green)' }
+                      return (
+                        <div
+                          key={entry.id}
+                          onClick={() => onSelectEvalResult?.(entry.id)}
+                          role={onSelectEvalResult ? 'button' : undefined}
+                          tabIndex={onSelectEvalResult ? 0 : undefined}
+                          style={{
+                            padding: '6px 8px', borderRadius: 3,
+                            background: 'var(--bg-raised)',
+                            cursor: onSelectEvalResult ? 'pointer' : 'default',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            transition: 'background 100ms',
+                          }}
+                          onMouseEnter={onSelectEvalResult ? (e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-raised) 70%, var(--accent-indigo))' } : undefined}
+                          onMouseLeave={onSelectEvalResult ? (e) => { e.currentTarget.style.background = 'var(--bg-raised)' } : undefined}
+                          title={onSelectEvalResult ? 'Open this Eval Result' : undefined}
+                        >
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0, minWidth: 16, textAlign: 'right' }}>{idx + 1}.</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {entry.name}
+                            </div>
+                            {entry.evaluationDate && (
+                              <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                                {entry.evaluationDate.slice(0, 10)}
+                              </div>
+                            )}
+                          </div>
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            color: sBadge.color, padding: '1px 5px', borderRadius: 3,
+                            background: `color-mix(in srgb, ${sBadge.color} 12%, transparent)`,
+                            flexShrink: 0,
+                          }}>{sBadge.label}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                <div style={{
+                  marginTop: 8, fontSize: 10,
+                  color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                }}>
+                  {agg.sat} SAT · {agg.unsat} UNSAT · {agg.missing} MISSING · across {agg.rsCount} Requirements Set{agg.rsCount === 1 ? '' : 's'}
+                </div>
+              </Section>
+            )
+          })()}
+
+          <Section title={`Disclosures (${disclosingAgreements.length})`}>
+            {disclosingAgreements.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                No active disclosures.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {disclosingAgreements.map((da) => (
+                  <div
+                    key={da.id}
+                    onClick={() => onSelectDa?.(da.id)}
+                    role={onSelectDa ? 'button' : undefined}
+                    tabIndex={onSelectDa ? 0 : undefined}
+                    style={{
+                      padding: '6px 8px', borderRadius: 3,
+                      background: 'var(--bg-raised)',
+                      cursor: onSelectDa ? 'pointer' : 'default',
+                    }}
+                    title={onSelectDa ? 'Open this Disclosure Agreement' : undefined}
+                  >
+                    <div style={{ fontSize: 11, color: 'var(--text-primary)' }}>
+                      {resolveDaSummary ? resolveDaSummary(da) : `${da.granteeParty} · ${da.type}`}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      {da.id}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <BadgesSection
+            badges={badgesForPoE}
+            activeParty={activeParty}
+            badgeTemplateLookup={badgeTemplateLookup}
+            onSelectBadgeIssuance={onSelectBadgeIssuance}
+            onRevokeBadge={onRevokeBadge}
+            subtext={poeBadgesParentClaim ? {
+              prefix: 'Badges earned by',
+              linkLabel: poeBadgesParentClaim.name,
+              onClick: onSelectClaimFromBadgeSubtext
+                ? () => onSelectClaimFromBadgeSubtext(poeBadgesParentClaim.id)
+                : null,
+            } : null}
+          />
+
+          <Section title="DOT">
+            {/* Phase 13.3 (Step 10): PIN row removed — the click-to-copy
+                PIN badge in the panel header is the canonical surface,
+                and repeating the full PIN string here was visual noise. */}
+            <Row label="Owner DID" value={poe?.ownerDot?.owner} mono />
+            <Row label="Asset snapshot" value={`${(poe?.assetSnapshot || []).length} Asset(s)`} />
+          </Section>
+        </>
+      }
+      footer={(() => {
+        // Phase 14.2 (#169a): Issue Badge footer gate is `activeParty !==
+        // claim.ownerParty`. The parent Claim's owner is supplied via
+        // `poeBadgesParentClaim.ownerParty` (resolved by V2App from the
+        // PoE's `claimId` against the merged dataset). When the prop isn't
+        // wired, fall back to the pre-14.2 PoE-owner gate.
+        if (!onIssueBadge) return null
+        const claimOwnerParty = poeBadgesParentClaim?.ownerParty
+          || poeBadgesParentClaim?.owner
+          || null
+        const blocked = claimOwnerParty
+          ? activeParty === claimOwnerParty
+          : (poe?.owner === activeParty || poe?.ownerParty === activeParty)
+        if (blocked) return null
+        return (
+          <FooterButton
+            label="Issue Badge"
+            accent
+            onClick={() => onIssueBadge(poe)}
+            title="Issue a Badge against this Claim."
+          />
+        )
       })()}
     />
   )
@@ -1578,6 +2055,323 @@ const STATUS_CFG = {
   missing:        { label: 'MISSING', color: 'var(--accent-amber)' },
   na:             { label: 'N/A',     color: 'var(--text-dim)' },
 }
+
+/* ─── BadgesSection — shared across PoE / Claim / Actor Detail Panels.
+   Phase 14.1 (#169 part 2). Each row: shield + name + version + issuer +
+   creation date. Row click → opens Badge Issuance Detail Panel. When
+   the active actor is the issuer of a row, a Revoke affordance appears.
+   Section is omitted by callers when zero badges (caller checks length). */
+function BadgesSection({
+  badges, activeParty, badgeTemplateLookup = {},
+  onSelectBadgeIssuance, onRevokeBadge, title = 'Badges',
+  // Phase 14.2 (#169a): optional subtext rendered between section header and
+  // rows. Used on PoE Badges section to surface "Badges earned by [Claim
+  // name]" with the Claim name clickable. Shape: { prefix, linkLabel, onClick }.
+  subtext = null,
+}) {
+  const list = badges || []
+  return (
+    <Section title={`${title} (${list.length})`}>
+      {subtext && (
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, display: 'flex', alignItems: 'baseline', gap: 4 }}>
+          <span>{subtext.prefix}</span>
+          {subtext.onClick ? (
+            <span
+              onClick={subtext.onClick}
+              role="button"
+              tabIndex={0}
+              style={{
+                color: 'var(--accent-indigo)', cursor: 'pointer', fontWeight: 600,
+                textDecoration: 'underline dotted color-mix(in srgb, var(--accent-indigo) 50%, transparent)',
+                textUnderlineOffset: 3,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-amber)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--accent-indigo)' }}
+            >{subtext.linkLabel}</span>
+          ) : (
+            <span style={{ color: 'var(--text-primary)' }}>{subtext.linkLabel}</span>
+          )}
+        </div>
+      )}
+      {list.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+          No badges yet.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {list.map((b) => {
+            const template = badgeTemplateLookup[b.badgeTemplateId] || null
+            const name = template?.name || b.badgeTemplateId
+            const version = template?.version ?? null
+            const isIssuer = b.issuerParty === activeParty
+            const clickable = !!onSelectBadgeIssuance
+            return (
+              <div
+                key={b.id}
+                onClick={clickable ? (e) => {
+                  // Don't fire row click if user clicked the Revoke affordance.
+                  if (e.target.closest('[data-revoke-affordance]')) return
+                  onSelectBadgeIssuance(b.id)
+                } : undefined}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                style={{
+                  padding: '8px 10px', borderRadius: 4,
+                  background: 'var(--bg-raised)',
+                  cursor: clickable ? 'pointer' : 'default',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  transition: 'background 100ms',
+                }}
+                onMouseEnter={clickable ? (e) => {
+                  e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-raised))'
+                } : undefined}
+                onMouseLeave={clickable ? (e) => {
+                  e.currentTarget.style.background = 'var(--bg-raised)'
+                } : undefined}
+              >
+                <BadgeShieldIcon size={16} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'baseline', gap: 6,
+                  }}>
+                    <span style={{
+                      fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{name}</span>
+                    {version != null && (
+                      <span style={{
+                        fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        padding: '1px 5px', borderRadius: 3,
+                        color: 'var(--accent-indigo)',
+                        background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                      }}>v{version}</span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2,
+                    display: 'flex', gap: 6,
+                  }}>
+                    <span>{b.issuerParty}</span>
+                    <span>·</span>
+                    <span>{(b.createdDate || '').slice(0, 10)}</span>
+                  </div>
+                </div>
+                {isIssuer && onRevokeBadge && (
+                  <span
+                    data-revoke-affordance
+                    onClick={(e) => { e.stopPropagation(); onRevokeBadge(b.id) }}
+                    style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                      letterSpacing: '0.06em',
+                      padding: '4px 8px', borderRadius: 4, flexShrink: 0,
+                      color: 'var(--accent-red)',
+                      cursor: 'pointer',
+                      border: '1px solid color-mix(in srgb, var(--accent-red) 25%, transparent)',
+                      transition: 'background 100ms',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-red) 8%, transparent)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >REVOKE</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+/* ─── Badge Template Panel — Phase 14.0 (#169 part 1) ─────────────────── */
+//
+// Mirrors the data shape of other V22 Detail Panels (header / sections / footer)
+// for visual consistency. Phase 14.0 doesn't currently mount Badge Templates
+// as canvas nodes — the panel is consumed by BadgesPanel's right-side detail
+// view via direct import, and the router entry below is forward-looking
+// scaffolding for Phase 14.1's Badge Issuance work.
+//
+// The Active Issuances section is a placeholder until 14.1 — once the
+// Badge Issuance artifact ships, this section populates with the real list.
+function V22BadgeTemplatePanel({
+  template,
+  activeParty,
+  onClose,
+  onNewVersion,
+  onSelectRequirementsSet,
+  onExpand,
+  allRequirementSets = [],
+  // Phase 14.1 (#169 part 2): Active Issuances section now populated.
+  // `activeIssuances` is the list filtered to this exact template version
+  // (caller filters by `issuance.badgeTemplateId === template.id`).
+  // `lineageActiveIssuanceCount` is the total across ALL versions in the
+  // template's lineage (for the subtext line).
+  activeIssuances = [],
+  lineageActiveIssuanceCount = 0,
+  poeNameLookup = {},
+  onSelectBadgeIssuance,
+}) {
+  if (!template) return null
+  const isOwn = template.ownerParty === activeParty
+  const isLatest = !template.supersededBy
+  return (
+    <PanelLayout
+      header={(
+        <PanelHeader
+          typeLabel="BADGE TEMPLATE"
+          name={`${template.name} · v${template.version || 1}`}
+          pin={template.pin}
+          onClose={onClose}
+          actions={onExpand ? <ExpandButton onClick={() => onExpand(template)} title={`Expand ${template.name || 'Badge Template'}`} /> : null}
+        />
+      )}
+      body={
+        <>
+          <Section title="Owner">
+            <Row label="Party" value={template.ownerParty} />
+            <Row label="Created" value={formatDateTime(template.createdDate)} />
+            <Row label="Version" value={`v${template.version ?? 1}`} />
+          </Section>
+          {!isLatest && (
+            <Section title="Supersession">
+              <div style={{
+                padding: '8px 12px', borderRadius: 6,
+                background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+                fontSize: 11, color: 'var(--accent-amber)', lineHeight: 1.5,
+              }}>
+                A newer version of this Badge Template exists. You are viewing v{template.version || 1}.
+              </div>
+            </Section>
+          )}
+          {template.description && (
+            <Section title="Description">
+              <div style={{
+                fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+                padding: '8px 10px', background: 'var(--bg-raised)', borderRadius: 4,
+              }}>{template.description}</div>
+            </Section>
+          )}
+          <Section title={`Referenced Requirements Sets (${(template.referencedRequirementsSetIds || []).length})`}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {(template.referencedRequirementsSetIds || []).map((rsId) => {
+                const rs = allRequirementSets.find((r) => r.id === rsId)
+                const clickable = !!onSelectRequirementsSet
+                return (
+                  <div
+                    key={rsId}
+                    onClick={clickable ? () => onSelectRequirementsSet(rsId) : undefined}
+                    role={clickable ? 'button' : undefined}
+                    tabIndex={clickable ? 0 : undefined}
+                    style={{
+                      padding: '6px 8px', borderRadius: 3,
+                      background: 'var(--bg-raised)',
+                      cursor: clickable ? 'pointer' : 'default',
+                      transition: 'background 100ms',
+                    }}
+                    onMouseEnter={clickable ? (e) => {
+                      e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-raised))'
+                    } : undefined}
+                    onMouseLeave={clickable ? (e) => {
+                      e.currentTarget.style.background = 'var(--bg-raised)'
+                    } : undefined}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {rs?.name || rsId}
+                      {rs && (
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginLeft: 6 }}>
+                          v{rs.version || 1}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>
+                      {rsId}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
+          {/* Phase 14.1 (#169 part 2): Active Issuances populated. Lists
+              issuances of THIS specific template version. Subtext line
+              surfaces the total across the whole lineage so users can see
+              "the badge as a whole" usage even when they're looking at a
+              specific version. */}
+          <Section title={`Active Issuances (${activeIssuances.length})`}>
+            {activeIssuances.length === 0 ? (
+              <div style={{
+                padding: '10px 12px', borderRadius: 4,
+                background: 'var(--bg-raised)',
+                fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic',
+              }}>
+                No active issuances of this version.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {activeIssuances.map((b) => {
+                  const poeName = poeNameLookup[b.targetPoeId] || b.targetPoeId
+                  const recipientParty = poeNameLookup[`__owner__${b.targetPoeId}`] || null
+                  const clickable = !!onSelectBadgeIssuance
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={clickable ? () => onSelectBadgeIssuance(b.id) : undefined}
+                      role={clickable ? 'button' : undefined}
+                      tabIndex={clickable ? 0 : undefined}
+                      style={{
+                        padding: '8px 10px', borderRadius: 4,
+                        background: 'var(--bg-raised)',
+                        cursor: clickable ? 'pointer' : 'default',
+                        transition: 'background 100ms',
+                      }}
+                      onMouseEnter={clickable ? (e) => {
+                        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-raised))'
+                      } : undefined}
+                      onMouseLeave={clickable ? (e) => {
+                        e.currentTarget.style.background = 'var(--bg-raised)'
+                      } : undefined}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {poeName}
+                      </div>
+                      <div style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2,
+                        display: 'flex', gap: 6,
+                      }}>
+                        {recipientParty && <><span>{recipientParty}</span><span>·</span></>}
+                        <span>{(b.createdDate || '').slice(0, 10)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {lineageActiveIssuanceCount > 0 && (
+              <div style={{
+                marginTop: 8, fontSize: 10, fontFamily: 'var(--font-mono)',
+                color: 'var(--text-dim)', lineHeight: 1.6,
+              }}>
+                {lineageActiveIssuanceCount} total active issuance{lineageActiveIssuanceCount === 1 ? '' : 's'} across this badge&rsquo;s history.
+              </div>
+            )}
+          </Section>
+        </>
+      }
+      footer={isOwn && isLatest ? (
+        <FooterButton label="Create new version" accent onClick={onNewVersion} title="Create a new version of this Badge Template. Prior versions remain in the Library." />
+      ) : null}
+    />
+  )
+}
+
+// Re-export the panel so BadgesPanel (or any other Library surface) can
+// embed the same component without owning its own forked layout.
+export { V22BadgeTemplatePanel }
+
+// Phase 14.1 (#169 part 2) introduced V22BadgeIssuancePanel as a standalone
+// Detail Panel mount. Phase 14.2 (#169b) removed it: the Detail Panel-over-
+// Detail Panel pattern violated the prototype's UX conventions. Badge
+// Issuance row clicks now route directly to the expand modal (which is the
+// correct overlay pattern for non-canvas artifacts).
 
 /* ─── Agreements Section (Phase 9C — backlog #111) ────────────────────── */
 // Shared sub-panel for Actor / Asset / Claim Detail Panels. Surfaces the
@@ -2221,6 +3015,30 @@ export default function V22NodeDetailPanel(props) {
     case 'CLAIM': return <V22ClaimPanel {...props} />
     case 'PARSE RESULT': return <V22ParseResultPanel {...props} />
     case 'EVAL RESULT': return <V22EvalResultPanel {...props} />
+    case 'PROOF OF EVALUATION': return <V22PoEPanel {...props} />
+    // Phase 14.0 (#169 part 1): forward-looking router entry. Phase 14.1's
+    // Badge Issuance work may surface Badge Templates as a node type; until
+    // then this branch only triggers if a caller wraps a template artifact
+    // in a node-shaped envelope (`{ v22Type: 'BADGE TEMPLATE', v22Artifact: template, ... }`).
+    case 'BADGE TEMPLATE':
+      return (
+        <V22BadgeTemplatePanel
+          template={node.v22Artifact}
+          activeParty={props.activeParty}
+          onClose={props.onClose}
+          onNewVersion={props.onNewVersion}
+          onSelectRequirementsSet={props.onSelectRequirementsSet}
+          onExpand={props.onExpand}
+          allRequirementSets={props.allRequirementSets}
+          activeIssuances={props.activeIssuances}
+          lineageActiveIssuanceCount={props.lineageActiveIssuanceCount}
+          poeNameLookup={props.poeNameLookup}
+          onSelectBadgeIssuance={props.onSelectBadgeIssuance}
+        />
+      )
+    // Phase 14.2 (#169b): the 'BADGE ISSUANCE' router case has been
+    // removed — Badge Issuances are no longer represented as standalone
+    // Detail Panels. Row clicks open the expand modal directly.
     default: return null
   }
 }

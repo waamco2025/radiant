@@ -12,11 +12,14 @@ import { useState, useEffect, useMemo } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 import RequirementsPanel from './library/RequirementsPanel.jsx'
 import ParsingTemplatesPanel from './library/ParsingTemplatesPanel.jsx'
+// Phase 14.0 (#169 part 1): Badge Template tab.
+import BadgesPanel from './library/BadgesPanel.jsx'
 
 const TAB_DEFS = [
   { id: 'parsing',      label: 'Parsing Templates' },
   { id: 'requirements', label: 'Requirement Sets' },
   { id: 'published',    label: 'Published Requirements' },
+  { id: 'badges',       label: 'Badges' },
 ]
 
 function TabBar({ active, onChange, counts }) {
@@ -243,9 +246,20 @@ export default function LibraryModal({
   pepTemplates = [],
   requirementSets = [],
   publishedRequirementSets = [],
+  // Phase 14.0 (#169 part 1): Badge Templates — network-wide, public-by-
+  // default Library artifact. The pool is shared (every Actor sees every
+  // template); only own templates render with edit affordances. The
+  // `activeParty` prop drives the own-vs-other gating in BadgesPanel.
+  badgeTemplates = [],
+  // Phase 14.1 (#169 part 2): Active Issuances data + handlers.
+  badgeIssuances = [],
+  proofsOfEvaluation = [],
+  onSelectBadgeIssuance,
   onSavePepTemplate,
   onSaveRequirementSet,
   onPublishRequirementSet,
+  onSaveBadgeTemplate,
+  activeParty = null,
   initialTab = 'requirements',
   initialSelectedId = null,
   onClose,
@@ -271,6 +285,7 @@ export default function LibraryModal({
     parsing: pepTemplates.length,
     requirements: requirementSets.length,
     published: publishedRequirementSets.length,
+    badges: badgeTemplates.length,
   }
 
   const content = (
@@ -331,6 +346,20 @@ export default function LibraryModal({
         {activeTab === 'published' && (
           <PublishedRequirementsPanel
             publishedRequirementSets={publishedRequirementSets}
+            initialSelectedId={activeTab === initialTab ? initialSelectedId : null}
+          />
+        )}
+        {activeTab === 'badges' && (
+          <BadgesPanel
+            badgeTemplates={badgeTemplates}
+            requirementSets={requirementSets}
+            publishedRequirementSets={publishedRequirementSets}
+            badgeIssuances={badgeIssuances}
+            proofsOfEvaluation={proofsOfEvaluation}
+            onSelectBadgeIssuance={onSelectBadgeIssuance}
+            activeParty={activeParty}
+            onSave={onSaveBadgeTemplate}
+            onClose={onClose}
             initialSelectedId={activeTab === initialTab ? initialSelectedId : null}
           />
         )}

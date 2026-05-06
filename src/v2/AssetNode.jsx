@@ -6,6 +6,9 @@ import Tooltip from '../components/Tooltip.jsx'
 // SLOW_MODE_MULTIPLIER lives in unravel.js; bump it to slow the whole
 // choreography for QA.
 import { UNRAVEL_DURATIONS } from './animations/unravel.js'
+// Phase 14.3 (#176a): card-chip rendering lives in BadgeChipContainer —
+// single rounded rectangle with hover fan-out + per-shield/+N tooltips.
+import BadgeChipContainer from './BadgeChipContainer.jsx'
 
 // Inject reveal animation keyframes once
 if (typeof document !== 'undefined' && !document.getElementById('reveal-keyframes')) {
@@ -75,13 +78,17 @@ function unravelRowStyle(isUnraveling, rowIdx) {
 // (src/components/Tooltip.jsx). StackBadge / GlobeBadge / EvidenceClip /
 // ActionButton each wrap themselves in <Tooltip content=…> now.
 
-function HealthBar({ health }) {
+// Phase 13.2 (#176): HealthBar = the SAT/UNSAT/MISSING minibar. `warn`
+// stamps amber for MISSING; `ok` stamps green for SAT; `bad` stamps red
+// for UNSAT. N/A is excluded from the data upstream (rollup helpers in
+// v2_2Data.js drop na rows). Used on Claim, Eval Result, and PoE cards.
+function HealthBar({ health, withLabels = false }) {
   const total = health.ok + health.warn + health.bad
   if (total === 0) return null
   const okPct = (health.ok / total) * 100
   const warnPct = (health.warn / total) * 100
   const badPct = (health.bad / total) * 100
-  return (
+  const bar = (
     <div style={{
       height: 3, borderRadius: 1.5, flex: 1,
       background: 'var(--border)',
@@ -90,11 +97,34 @@ function HealthBar({ health }) {
       gap: 1,
     }}>
       {okPct > 0 && <div style={{ width: `${okPct}%`, background: 'var(--accent-green, #22c55e)', borderRadius: 1.5 }} />}
-      {warnPct > 0 && <div style={{ width: `${warnPct}%`, background: 'var(--text-dim)', borderRadius: 1.5 }} />}
+      {warnPct > 0 && <div style={{ width: `${warnPct}%`, minWidth: 3, background: 'var(--accent-amber, #f59e0b)', borderRadius: 1.5 }} />}
       {badPct > 0 && <div style={{ width: `${badPct}%`, minWidth: 3, background: 'var(--accent-red, #ef4444)', borderRadius: 1.5 }} />}
     </div>
   )
+  if (!withLabels) return bar
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+      {bar}
+      <span style={{
+        fontSize: 9, fontFamily: 'var(--font-mono)', flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', gap: 3,
+      }}>
+        <span style={{ color: 'var(--accent-green)' }}>{health.ok}</span>
+        {health.warn > 0 && (
+          <>
+            <span style={{ color: 'var(--text-dim)' }}>·</span>
+            <span style={{ color: 'var(--accent-amber)' }}>{health.warn}</span>
+          </>
+        )}
+        <span style={{ color: 'var(--text-dim)' }}>·</span>
+        <span style={{ color: health.bad > 0 ? 'var(--accent-red)' : 'var(--text-dim)' }}>{health.bad}</span>
+      </span>
+    </div>
+  )
 }
+// Phase 13.2 (#176): exported so the Detail Panel surfaces can render the
+// same minibar primitive in their headers.
+export { HealthBar }
 
 function StackBadge({ count, categoryColor }) {
   const [hovered, setHovered] = useState(false)
@@ -476,6 +506,22 @@ export default function AssetNode({
         </div>
       )}
 
+      {/* Phase 14.3 (#176a): single rounded-rectangle chip container with
+          hover fan-out + per-shield / +N tooltips. Position: top-right;
+          when NEW is also present, container sits to the LEFT of NEW with
+          a 6px gap (NEW pill is ~38px wide). */}
+      {Array.isArray(node._activeBadges) && node._activeBadges.length > 0 && (() => {
+        const NEW_PILL_W = isNew ? 38 : 0
+        const rightOffset = -8 + ACTION_BAR_W + NEW_PILL_W + (isNew ? 6 : 0)
+        return (
+          <BadgeChipContainer
+            badges={node._activeBadges}
+            rightOffset={rightOffset}
+            top={-8}
+          />
+        )
+      })()}
+
       {/* Dive hint tooltip — shows when selected node has children */}
       {isSelected && !isAnchor && node.childCount > 0 && (
         <div style={{
@@ -602,7 +648,13 @@ export default function AssetNode({
           // both look wrong. `boxShadow` goes back to the plain hover lift.
           boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
           transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
-          ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
+          // Phase 13.3 (Step 5): superseded Eval Result keeps the grayscale
+          // filter for status differentiation but drops the 0.45 opacity
+          // — the card background should stay opaque so the canvas grid
+          // pattern doesn't show through. SUPERSEDED badge in Row 0 is the
+          // primary status differentiator; minibar + text already render
+          // dimmed via existing color choices.
+          ...(node.isEvaluation && node.status === 'superseded' ? { filter: 'grayscale(60%)' } : {}),
           userSelect: 'none',
           WebkitUserSelect: 'none',
           display: 'flex',
@@ -855,6 +907,31 @@ export default function AssetNode({
                   : 'Awaiting disclosure from owner'}
           </div>
         ) : (() => {
+          // Phase 13.2 (#176): minibar replaces the prior text aggregate on
+          // Eval Result and PoE cards. SAT/UNSAT/MISSING only — N/A is
+          // dropped from displays. The minibar is the same primitive used
+          // for Claim cards, so the visual reads consistently across all
+          // three artifact types. The "N RS" suffix is dropped.
+          if (node.isPoe && node.poeAggregate) {
+            const a = node.poeAggregate
+            const dh = { ok: a.sat || 0, warn: a.missing || 0, bad: a.unsat || 0 }
+            if (dh.ok + dh.warn + dh.bad === 0) return null
+            return (
+              <div style={{ display: 'flex', marginBottom: 3, ...unravelRowStyle(isUnraveling, 3) }}>
+                <HealthBar health={dh} />
+              </div>
+            )
+          }
+          if (node.isEvaluation && node.evalAggregate) {
+            const a = node.evalAggregate
+            const dh = { ok: a.totalSat || 0, warn: a.totalMissing || 0, bad: a.totalUnsat || 0 }
+            if (dh.ok + dh.warn + dh.bad === 0) return null
+            return (
+              <div style={{ display: 'flex', marginBottom: 3, ...unravelRowStyle(isUnraveling, 3) }}>
+                <HealthBar health={dh} />
+              </div>
+            )
+          }
           if (node.isEvidence || node.isParse || node.category === 'parse') return null
           const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
           const total = dh.ok + (dh.warn || 0) + dh.bad
@@ -973,18 +1050,53 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           // re-deriving the DA/EA state.
           buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
         }
+        // Phase 14.2 (#169a): Issue Badge entry point on Claim cards.
+        // Gate: any non-owner can issue (badges target Claims now). Visible
+        // alongside any other non-owner actions (Run Evaluation, Request
+        // Eval Agreement) — independent affordance.
+        if (!isOwner) {
+          buttons.push({ icon: '★', tooltip: 'Issue Badge', onClick: fire('issueBadge') })
+        }
       }
       break
     }
     case 'EVAL RESULT': {
       const isSuperseded = node.v22Artifact?.status === 'superseded'
       if (isOwner && !isSuperseded && onV22CardAction) {
-        buttons.push({ icon: '↻', tooltip: 'Re-run Evaluation', onClick: fire('reRunEvaluation') })
+        // Phase 13.1 (#168a): hide Re-Run when the Eval Result is in a
+        // PoE-terminated chain.
+        // Phase 13.3 (Step 2): also hide Re-Run when no new Assets exist
+        // to evaluate. `_canRerun` is stamped by V2App's data adapter
+        // based on `hasNewAssetsForRerun` against the Claim's current
+        // in-scope Asset set. Detail Panel footer keeps Re-Run visible-
+        // but-disabled with an explanatory tooltip in that case.
+        if (!node._alreadyWrapped) {
+          if (node._canRerun !== false) {
+            buttons.push({ icon: '↻', tooltip: 'Re-run Evaluation', onClick: fire('reRunEvaluation') })
+          }
+          buttons.push({ icon: '◈', tooltip: 'Create Proof of Evaluation', onClick: fire('createPoE') })
+        }
       }
       break
     }
-    // PARSE RESULT and ACTOR intentionally have no card actions — matches
-    // the empty-footer state in V22NodeDetailPanel.
+    // PARSE RESULT, ACTOR intentionally have no card actions.
+    case 'PROOF OF EVALUATION': {
+      // Phase 14.2 (#169a): "Issue Badge" entry point on PoE node cards.
+      // Gate: `activeParty !== claim.ownerParty`. The Claim owner is
+      // stamped on the node as `_claimOwnerParty` by V2App's data adapter.
+      // Falls back to `!isOwner` (PoE owner) when the stamp is absent —
+      // safer-than-permissive default.
+      if (onV22CardAction) {
+        const claimOwnerParty = node._claimOwnerParty || null
+        const blocked = claimOwnerParty
+          ? activeParty === claimOwnerParty
+          : isOwner   // fallback when stamp missing
+        if (!blocked) {
+          buttons.push({ icon: '★', tooltip: 'Issue Badge', onClick: fire('issueBadge') })
+        }
+      }
+      break
+    }
   }
   if (buttons.length === 0) return null
   return (
@@ -1328,7 +1440,10 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         gap: 0,
         boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
         transition: 'border-color 120ms, box-shadow 120ms, opacity 300ms',
-        ...(node.isEvaluation && node.status === 'superseded' ? { opacity: 0.45, filter: 'grayscale(60%)' } : {}),
+        // Phase 13.3 (Step 5): same change as full-card LOD — drop the 0.45
+        // outer-card opacity so superseded mini cards stay opaque against
+        // the canvas grid. Grayscale filter preserves the status read.
+        ...(node.isEvaluation && node.status === 'superseded' ? { filter: 'grayscale(60%)' } : {}),
         // Phase 9D.2 / 9D.2.1 (#124): unravel at mini LOD. Skips the
         // SVG border erasure + per-row stagger (those don't read at
         // zoomed-out scale); just runs the Stage-4 card fade so the
@@ -1361,13 +1476,26 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
           }}>{node.name}</span>
         </div>
         {/* Bottom half: minibar or empty space */}
+        {/* Phase 13.2 (#176): minibar surfaces SAT/UNSAT/MISSING (green/
+            red/amber). Eval Result and PoE cards now also render the
+            minibar (was: text aggregate). */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', paddingTop: 1 }}>
           {(() => {
             if (node.isEvidence || node.isParse || node.category === 'parse') return null
-            const dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+            let dh = null
+            if (node.isPoe && node.poeAggregate) {
+              const a = node.poeAggregate
+              dh = { ok: a.sat || 0, warn: a.missing || 0, bad: a.unsat || 0 }
+            } else if (node.isEvaluation && node.evalAggregate) {
+              const a = node.evalAggregate
+              dh = { ok: a.totalSat || 0, warn: a.totalMissing || 0, bad: a.totalUnsat || 0 }
+            } else {
+              dh = node.displayHealth || node.health || { ok: 0, warn: 0, bad: 0 }
+            }
             const total = dh.ok + (dh.warn || 0) + dh.bad
             if (total === 0) return null
             const okPct = (dh.ok / total) * 100
+            const warnPct = (dh.warn / total) * 100
             const badPct = (dh.bad / total) * 100
             return (
               <div style={{
@@ -1376,6 +1504,7 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
                 display: 'flex', gap: 1, overflow: 'hidden',
               }}>
                 {okPct > 0 && <div style={{ width: `${okPct}%`, background: 'var(--accent-green, #22c55e)', borderRadius: 1 }} />}
+                {warnPct > 0 && <div style={{ width: `${warnPct}%`, minWidth: 2, background: 'var(--accent-amber, #f59e0b)', borderRadius: 1 }} />}
                 {badPct > 0 && <div style={{ width: `${badPct}%`, minWidth: 2, background: 'var(--accent-red, #ef4444)', borderRadius: 1 }} />}
               </div>
             )

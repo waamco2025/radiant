@@ -30,7 +30,10 @@ export default function CombinedResponseModal({
   request,              // { claim, ownerParty, requesterParty, requesterAsset, message, requestedRequirementsSetIds, proposedEaTerms? }
   referencedAssets = [],   // [{ id, name }] — Assets referenced by the Claim (owned by the grantor)
   parseResults = [],       // [{ id, sourceAssetId, templateName, fields: [{ id, name }] }]
-  evalResultsForClaim = [], // [{ id, requirementsSet: { name, version }, evaluationDate, status }] — for Proof-Only scope step
+  // Phase 13 (#168): Proof-Only step now picks PoEs instead of individual
+  // Eval Results. Each PoE wraps one or more active Eval Results;
+  // share-PoE-shares-all auto-discloses every wrapped result.
+  poesForClaim = [],       // [{ id, name, owner, wrappedCount, sat, unsat }]
   onAccept,             // ({ type, scope, eaTerms }) => void
   onDecline,            // ({ reason }) => void
   onClose,
@@ -46,7 +49,7 @@ export default function CombinedResponseModal({
   const [step, setStep] = useState(eaOnlyMode ? 3 : 1)
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [selectedFieldIds, setSelectedFieldIds] = useState([])
-  const [selectedEvalResultIds, setSelectedEvalResultIds] = useState([])
+  const [selectedPoeIds, setSelectedPoeIds] = useState([])
   // Phase 11E.1.6 Fix 2: separate DA + EA expiration state. Cold path lets
   // the responder set both independently — DA in Step 2, EA in Step 3.
   // Warm path (eaOnlyMode) doesn't render a DA picker; daExpiry stays at
@@ -113,7 +116,7 @@ export default function CombinedResponseModal({
         // hardcoded to all referenced Assets).
         assetIds: [...selectedAssetIds],
         fieldIds: null,
-        evaluationResultIds: null,
+        poeIds: null,
         includeDerivatives: true,
       }
     }
@@ -121,7 +124,7 @@ export default function CombinedResponseModal({
       return {
         assetIds: selectedAssetIds,
         fieldIds: selectedFieldIds,
-        evaluationResultIds: null,
+        poeIds: null,
         includeDerivatives: false,
       }
     }
@@ -129,7 +132,8 @@ export default function CombinedResponseModal({
       return {
         assetIds: null,
         fieldIds: null,
-        evaluationResultIds: [...selectedEvalResultIds],
+        // Phase 13 (#168): proof-only DAs now target PoEs.
+        poeIds: [...selectedPoeIds],
         includeDerivatives: false,
       }
     }
@@ -180,7 +184,7 @@ export default function CombinedResponseModal({
   const canAdvanceFromStep2Accept = (
     (action === 'full' && selectedAssetIds.length > 0)
     || (action === 'selective' && selectedFieldIds.length > 0)
-    || (action === 'proofonly' && selectedEvalResultIds.length > 0)
+    || (action === 'proofonly' && selectedPoeIds.length > 0)
   )
   // Step 3 is now just expiry — always advanceable.
   const canAdvanceFromStep3 = true
@@ -415,7 +419,7 @@ export default function CombinedResponseModal({
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
                     {request.requesterParty} will see only the pass/fail outcome of the selected Evaluation Results. No access to raw evidence is granted.
                   </div>
-                  {evalResultsForClaim.length === 0 ? (
+                  {poesForClaim.length === 0 ? (
                     <div style={{
                       padding: 14,
                       background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
@@ -427,20 +431,17 @@ export default function CombinedResponseModal({
                     </div>
                   ) : (
                     <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-                      {evalResultsForClaim.map((er) => {
-                        const selected = selectedEvalResultIds.includes(er.id)
-                        const ok = (er.results || []).filter(r => r.status === 'satisfactory').length
-                        const bad = (er.results || []).filter(r => r.status === 'unsatisfactory').length
+                      {poesForClaim.map((poe) => {
+                        const selected = selectedPoeIds.includes(poe.id)
                         return (
                           <div
-                            key={er.id}
-                            onClick={() => toggle(selectedEvalResultIds, setSelectedEvalResultIds, er.id)}
+                            key={poe.id}
+                            onClick={() => toggle(selectedPoeIds, setSelectedPoeIds, poe.id)}
                             style={{
                               padding: '10px 14px', cursor: 'pointer',
                               background: selected ? 'color-mix(in srgb, var(--accent-green) 8%, transparent)' : 'transparent',
                               borderBottom: '1px solid var(--border-faint)',
                               display: 'flex', alignItems: 'center', gap: 10,
-                              opacity: er.status === 'superseded' ? 0.55 : 1,
                             }}
                           >
                             <div style={{
@@ -453,11 +454,10 @@ export default function CombinedResponseModal({
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
-                                {er.requirementsSet?.name || er.id}
+                                {poe.name}
                               </div>
                               <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                                by {er.owner} · {ok} SAT · {bad} UNSAT
-                                {er.status === 'superseded' && ' · SUPERSEDED'}
+                                by {poe.owner} · wraps {poe.wrappedCount || 1} · {poe.sat || 0} SAT · {poe.unsat || 0} UNSAT
                               </div>
                             </div>
                           </div>
@@ -466,7 +466,7 @@ export default function CombinedResponseModal({
                     </div>
                   )}
                   <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
-                    {selectedEvalResultIds.length} eval result{selectedEvalResultIds.length !== 1 ? 's' : ''} selected
+                    {selectedPoeIds.length} Proof{selectedPoeIds.length !== 1 ? 's' : ''} of Evaluation selected
                   </div>
                 </>
               )}
@@ -592,7 +592,7 @@ export default function CombinedResponseModal({
                 {action === 'proofonly' && (
                   <div style={{ display: 'flex', gap: 14 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Eval Results shared</div>
-                    <div style={{ color: 'var(--text-primary)' }}>{selectedEvalResultIds.length}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{selectedPoeIds.length}</div>
                   </div>
                 )}
                 {/* Phase 11E.1.6 Fix 2: cold path shows DA + EA expirations

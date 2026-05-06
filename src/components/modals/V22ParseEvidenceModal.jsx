@@ -22,6 +22,12 @@ import {
 } from './ModalShared'
 import PrimeRadiant from '../../v2/PrimeRadiant.jsx'
 import Tooltip from '../Tooltip'
+// Phase 12.4 (#171) §17.1: same split-panel parity as Run Evaluation —
+// the source Asset's evidence renders in the left panel via the shared
+// AssetEvidencePanel component. Parse is owner-only, so the selector
+// trivially collapses to a single row and the viewer always renders
+// AssetEvidenceViewer (disclosureType: 'owner').
+import AssetEvidencePanel from '../AssetEvidencePanel.jsx'
 
 // Deterministic mock for "parsed" field values when the user hasn't yet
 // supplied real text. Mirrors the evaluation modal's mock-row initialisation:
@@ -132,58 +138,140 @@ export default function V22ParseEvidenceModal({
     onSubmit?.({ template: selectedTemplate, rows: rowsForSubmit })
   }
 
+  // Phase 12.7 (#171c): Option A — single overflow container holds the
+  // (single, in Parse's case) Asset row with its body inline below. Same
+  // structure as V22RunEvaluationModal's accordion. The outer scroll
+  // container uses `flex: 1; minHeight: 0` so the column stretches to
+  // full height even when the single accordion's natural height is
+  // shorter than the right panel — preserving the Phase 12.6 height
+  // parity fix without depending on `fillHeight`.
+  const sourceAssetRow = sourceAsset
+    ? { id: sourceAsset.id, name: sourceAsset.name, asset: sourceAsset, disclosureType: 'owner' }
+    : null
+  const [expandedAssetId, setExpandedAssetId] = useState(() => sourceAsset?.id ?? null)
+  const toggleAssetExpanded = (assetId) => {
+    setExpandedAssetId((prev) => (prev === assetId ? null : assetId))
+  }
+  const renderLeftPanel = () => {
+    if (!sourceAsset) return null
+    const expanded = expandedAssetId === sourceAsset.id
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <FieldLabel label="Source Asset (1)" />
+        <div style={{
+          flex: 1, minHeight: 0, overflowY: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 8,
+          paddingRight: 2,
+        }}>
+          <div style={{
+            // Phase 13 (#173 fold-in): pin to natural height — same fix
+            // as V22RunEvaluationModal. Single-row case is already stable
+            // but applying it preserves visual consistency if the modal
+            // ever grows multi-Asset support.
+            flexShrink: 0,
+            border: `1px solid ${expanded ? 'var(--accent-indigo)' : 'var(--border)'}`,
+            borderRadius: 6,
+            background: 'var(--bg-card)',
+            overflow: 'hidden',
+            transition: 'border-color 120ms',
+          }}>
+            <div
+              onClick={() => toggleAssetExpanded(sourceAsset.id)}
+              role="button"
+              aria-expanded={expanded}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  toggleAssetExpanded(sourceAsset.id)
+                }
+              }}
+              style={{
+                padding: '8px 10px', cursor: 'pointer',
+                background: expanded
+                  ? 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)'
+                  : 'transparent',
+                display: 'flex', alignItems: 'center', gap: 8,
+                transition: 'background 120ms',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{sourceAsset?.name || '—'}</div>
+                <div style={{
+                  fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{sourceAsset?.file?.filename || sourceAsset?.id}</div>
+              </div>
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '1px 5px', borderRadius: 3, letterSpacing: '0.08em',
+                color: 'var(--text-dim)',
+                background: 'var(--bg-deep)',
+                border: '1px solid var(--border-faint)',
+                flexShrink: 0,
+                textTransform: 'uppercase',
+              }}>Owner</span>
+              <span aria-hidden style={{
+                fontSize: 12, color: 'var(--text-dim)', flexShrink: 0,
+                width: 14, textAlign: 'center',
+              }}>{expanded ? '▾' : '▸'}</span>
+            </div>
+            {expanded && (
+              <div style={{
+                padding: '10px 12px',
+                borderTop: '1px solid var(--border-faint)',
+                background: 'var(--bg-surface)',
+              }}>
+                <AssetEvidencePanel assetRow={sourceAssetRow} iframeHeight={480} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Phase 12.4 (#171): split-panel layout shared across all three stages
+  // for consistency with V22RunEvaluationModal — the left panel is
+  // present on the template picker, processing, and review steps so the
+  // user has the underlying evidence in view at every stage.
+  const renderSplitBody = (rightContent) => (
+    <ModalBody>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: 24,
+        height: 'calc(90vh - 220px)',
+        minHeight: 420, maxHeight: 720,
+      }}>
+        <div style={{
+          minHeight: 0, display: 'flex', flexDirection: 'column',
+          paddingRight: 24, borderRight: '1px solid var(--border-faint)',
+        }}>
+          {renderLeftPanel()}
+        </div>
+        <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {rightContent}
+        </div>
+      </div>
+    </ModalBody>
+  )
+
   return (
     <Backdrop onClose={onClose}>
-      {stage === 2 ? (
-        <Modal width={1040}>
+      <Modal width={1280}>
+        {stage === 2 && (
+          <>
           <ModalHeader
             title="Parse Evidence"
             subtitle={`Review extracted fields for ${sourceAsset?.name || 'this Asset'}`}
             step={3} totalSteps={3} onClose={onClose}
           />
-          <ModalBody>
-            {/* Phase 8.5 Bug 5: the left (evidence) and right (extracted
-                fields) sides scroll independently. Giving the outer container
-                a bounded height + `minHeight: 0` on each side is the key —
-                without it, ModalBody's own overflow:auto ate the whole split
-                panel as one scroll region. */}
-            <div style={{
-              display: 'flex', gap: 20,
-              height: 'calc(90vh - 220px)',
-              minHeight: 360, maxHeight: 640,
-            }}>
-              {/* Left: evidence metadata preview (parity with V22RunEvaluationModal's evidence panel). */}
-              <div style={{
-                width: '45%', flexShrink: 0,
-                display: 'flex', flexDirection: 'column',
-                minHeight: 0, overflowY: 'auto',
-              }}>
-                <div style={{
-                  fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
-                  letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8,
-                }}>Source Asset</div>
-                <div style={{
-                  flex: 1, padding: 14, borderRadius: 6, display: 'flex', flexDirection: 'column',
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  gap: 12,
-                }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {sourceAsset?.name}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Owner:</span>{' '}
-                    <span style={{ fontFamily: 'var(--font-mono)' }}>{sourceAsset?.owner}</span>
-                  </div>
-                  <div style={{
-                    padding: 10, borderRadius: 4, fontSize: 11, color: 'var(--text-dim)',
-                    background: 'var(--bg-deep)', border: '1px dashed var(--border)', fontStyle: 'italic', lineHeight: 1.6,
-                  }}>
-                    Evidence-file preview is placeholder-grade in this release. A PDF / image viewer lands with polish item #41.
-                  </div>
-                </div>
-              </div>
-
-              {/* Right: editable fields (parity with V22RunEvaluationModal's review rows). */}
+          {renderSplitBody(
+              /* Right: editable fields (parity with V22RunEvaluationModal's review rows). */
               <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14,
@@ -246,8 +334,7 @@ export default function V22ParseEvidenceModal({
                   </div>
                 ))}
               </div>
-            </div>
-          </ModalBody>
+          )}
           <ModalFooter>
             <Btn label="← Back" onClick={() => setStage(0)} />
             <Btn
@@ -257,33 +344,45 @@ export default function V22ParseEvidenceModal({
               disabled={!canSubmit}
             />
           </ModalFooter>
-        </Modal>
-      ) : (
-        <Modal width={620}>
-          {stage === 0 && (
+          </>
+        )}
+        {stage === 0 && (
             <>
               <ModalHeader
                 title="Parse Evidence"
                 subtitle={<>Extract structured data from <strong style={{ color: 'var(--text-primary)' }}>{sourceAsset?.name}</strong></>}
                 step={1} totalSteps={3} onClose={onClose}
               />
-              <ModalBody>
+              {renderSplitBody(
+                /* Phase 12.5: right-panel layout pass —
+                    (a) helper text moved below the "Parse Template *" title,
+                    (b) Parse Template list scrollable (maxHeight: 300px),
+                    (c) "FIELDS TO EXTRACT" panel stretches to fill remaining
+                    column height (matches left-panel viewer for visual
+                    balance) instead of capping at 160px. */
                 <div style={{
-                  padding: '12px 16px', borderRadius: 8, marginBottom: 18,
+                  flex: 1, minHeight: 0,
+                  display: 'flex', flexDirection: 'column', gap: 12,
+                  paddingRight: 4,
+                }}>
+                <FieldLabel label="Parse Template" required />
+                <div style={{
+                  padding: '12px 16px', borderRadius: 8,
                   background: 'color-mix(in srgb, var(--accent-indigo) 5%, transparent)',
                   border: '1px solid color-mix(in srgb, var(--accent-indigo) 15%, transparent)',
                   fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.7,
+                  flexShrink: 0,
                 }}>
                   Parsing extracts structured fields from an Asset's evidence file. The resulting Parse Result
                   enables Selective Disclosure — where specific fields can be shared without revealing the full document.
                 </div>
 
-                <FieldLabel label="Parse Template" required />
                 {availableTemplates.length === 0 ? (
                   <div style={{
                     padding: 14, background: 'var(--bg-card)',
                     border: '1px solid var(--accent-amber)', borderRadius: 6,
                     fontSize: 11, color: 'var(--text-secondary)',
+                    flexShrink: 0,
                   }}>
                     No Parsing Templates in your library. Add one via the Library before parsing.
                   </div>
@@ -292,9 +391,11 @@ export default function V22ParseEvidenceModal({
                     display: 'flex', flexDirection: 'column', gap: 4,
                     // Phase 9A.6 Gate C (#91): scroll container sized per the
                     // CLAUDE.md picker convention so lists of N>>10 templates
-                    // don't break the modal layout.
+                    // don't break the modal layout. Phase 12.5 retained at
+                    // 300px to mirror V22RunEvaluationModal's RS picker.
                     maxHeight: 300, overflowY: 'auto',
                     paddingRight: 2,
+                    flexShrink: 0,
                   }}>
                     {availableTemplates.map((t) => {
                       const selected = selectedTemplateId === t.id
@@ -354,11 +455,12 @@ export default function V22ParseEvidenceModal({
 
                 {selectedTemplate && (
                   <>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, marginTop: 16, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, flexShrink: 0 }}>
                       {selectedTemplate.description || 'Extracts structured fields from evidence.'}
                     </div>
                     <div style={{
-                      maxHeight: 160, overflow: 'auto', borderRadius: 6,
+                      flex: 1, minHeight: 0,
+                      overflow: 'auto', borderRadius: 6,
                       border: '1px solid var(--border)', background: 'var(--bg-card)',
                     }}>
                       <div style={{
@@ -368,7 +470,7 @@ export default function V22ParseEvidenceModal({
                       }}>
                         FIELDS TO EXTRACT
                       </div>
-                      {(selectedTemplate.fields || []).map((f, i) => (
+                      {(selectedTemplate.fields || []).map((f) => (
                         <div key={f.id} style={{
                           padding: '8px 14px',
                           borderTop: '1px solid var(--border)',
@@ -386,7 +488,8 @@ export default function V22ParseEvidenceModal({
                     </div>
                   </>
                 )}
-              </ModalBody>
+                </div>
+              )}
               <ModalFooter>
                 <StepDots current={0} total={3} />
                 <Btn label="Parse Evidence →" accent disabled={!canStart} onClick={handleStart} />
@@ -401,8 +504,8 @@ export default function V22ParseEvidenceModal({
                 subtitle="Processing evidence file…"
                 step={2} totalSteps={3} onClose={onClose}
               />
-              <ModalBody>
-                <div style={{ padding: '60px 36px', textAlign: 'center' }}>
+              {renderSplitBody(
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: 'center', padding: '40px 24px' }}>
                   <div style={{ display: 'flex', justifyContent: 'center', margin: '0 auto 28px' }}>
                     <PrimeRadiant size={80} fps={30} strutScale={1.8} brightness={0.3} />
                   </div>
@@ -425,11 +528,10 @@ export default function V22ParseEvidenceModal({
                   </div>
                   <style>{`@keyframes v22parseprogress { from { width: 0% } to { width: 100% } }`}</style>
                 </div>
-              </ModalBody>
+              )}
             </>
           )}
         </Modal>
-      )}
     </Backdrop>
   )
 }

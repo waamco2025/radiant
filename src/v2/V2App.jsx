@@ -37,6 +37,19 @@ import {
   isEvalResultStale,
   getLatestAssetVersion,
   computeEvidenceDiff,
+  // Phase 13.3 (Step 2): Re-Run gating helper.
+  hasNewAssetsForRerun,
+  // Phase 13 (#168): PoE factory for the Create-PoE flow.
+  makePoE,
+  // Phase 13.1 (#168a): id helper + proof-only DA factory for the
+  // PoE-creation disclosure transition.
+  makeArtifactId,
+  makeProofOfEvalDisclosureAgreement,
+  // Phase 14.1 (#169 part 2): Badge Issuance factory + helpers.
+  makeBadgeIssuance,
+  getBadgesForPoE,
+  getBadgesForClaim,
+  getBadgesForRecipient,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -83,6 +96,11 @@ import { playRevealEdgeAnimation } from './animations/edgeDrawIn.js'
 import AmendClaimModal from '../components/modals/AmendClaimModal.jsx'
 import UpdateRSReferenceModal from '../components/modals/UpdateRSReferenceModal.jsx'
 import AmendDisclosureModal from '../components/modals/AmendDisclosureModal.jsx'
+// Phase 13 (#168): Create-Proof-of-Evaluation confirmation modal.
+import CreatePoEModal from '../components/modals/CreatePoEModal.jsx'
+// Phase 14.1 (#169 part 2): Badge Issuance + Revocation modals.
+import IssueBadgeModal from '../components/modals/IssueBadgeModal.jsx'
+import RevokeBadgeModal from '../components/modals/RevokeBadgeModal.jsx'
 import AmendEvaluationAgreementModal from '../components/modals/AmendEvaluationAgreementModal.jsx'
 // Phase 11.6 (#164): grantee-side response modal for amendment proposals.
 import AmendmentResponseModal from '../components/modals/AmendmentResponseModal.jsx'
@@ -178,6 +196,10 @@ export default function V2App() {
   // Phase 11E.1 (#108): evaluation agreement id being amended via the new
   // AmendEvaluationAgreementModal flow.
   const [v22AmendingEaId, setV22AmendingEaId] = useState(null)
+  // Phase 13 (#168): Create-Proof-of-Evaluation modal context. Null when
+  // closed; { evalResultId } when the user clicked Create PoE on an Eval
+  // Result card or Detail Panel footer.
+  const [v22CreatingPoEContext, setV22CreatingPoEContext] = useState(null)
   // Phase 11.6 (#164): grantee-side state for the AmendmentResponseModal.
   // Set when the grantee clicks a `v22-ea-amendment-proposal` notification;
   // shape: { eaId, amendmentId } | null. Cleared on accept / reject /
@@ -318,6 +340,25 @@ export default function V2App() {
   const [edgeMenuPanning, setEdgeMenuPanning] = useState(false)
   const [openAgreement, setOpenAgreement] = useState(null) // { kind: 'disclosure'|'evaluation', edgeId }
 
+  // Phase 14.0 (#169 part 1): Badge Templates state. Declared before
+  // v22DataWithReveal so that memo can reference badge data for chip
+  // rendering without hitting a TDZ.
+  const [badgeTemplates, setBadgeTemplates] = useState(() => {
+    const seed = buildV22SharedArtifacts()
+    return seed.badgeTemplates || []
+  })
+  // Phase 14.1 (#169 part 2): Badge Issuances state. Same TDZ ordering rule.
+  const [badgeIssuances, setBadgeIssuances] = useState(() => {
+    const seed = buildV22SharedArtifacts()
+    return seed.badgeIssuances || []
+  })
+  const [v22IssueBadgeContext, setV22IssueBadgeContext] = useState(null)
+  const [v22RevokeBadgeContext, setV22RevokeBadgeContext] = useState(null)
+  // Phase 14.2 (#169b): the standalone Badge Issuance Detail Panel was
+  // removed — Detail Panel over Detail Panel violated the prototype's UX
+  // patterns. Badge Issuance row clicks now route directly to the expand
+  // modal (modal over Detail Panel is fine).
+
   const v22DataWithReveal = useMemo(() => {
     if (!v22Data) return v22Data
     // Phase 9A.6.1 Fix 1: v22RecentlyAcceptedAssetId may be a single id OR an
@@ -410,18 +451,87 @@ export default function V2App() {
     // memo's early-return short-circuited and the pending-reveal +
     // active-reveal edge stamping never ran — incident edges rendered in
     // their typed (active) styling instead of dashed grey provisional.
+    // Phase 13 (#168): build a set of every Eval Result id wrapped by a
+    // PoE owned by the active actor. AssetNode reads `_alreadyWrapped` to
+    // hide the Create-PoE action-bar button on already-wrapped Eval
+    // Results (per design decision 1 — only one PoE per (Asset set, RS
+    // set, evaluator)).
+    const wrappedByOwnedPoe = new Set()
+    for (const poe of (v22View?.proofsOfEvaluation || [])) {
+      if (poe.owner !== activeRole.party) continue
+      // Phase 13.1: 1:1 wrapping — singular `wrappedEvalResultId`.
+      if (poe.wrappedEvalResultId) wrappedByOwnedPoe.add(poe.wrappedEvalResultId)
+    }
+    // Phase 13.3 (Step 2): for each owned, active, non-PoE-wrapped Eval
+    // Result, decide whether Re-Run is permitted. Re-Run requires at
+    // least one Asset in the Claim's currently-disclosed in-scope set
+    // that wasn't in the prior `evidenceUsed`. AssetNode reads
+    // `_canRerun: false` to hide the action-bar Re-Run button; the
+    // Detail Panel footer reads it to disable the button + render the
+    // explanatory tooltip.
+    const canRerunByErId = new Map()
+    for (const er of (v22View?.evaluationResults || [])) {
+      if (er.owner !== activeRole.party) continue
+      if (er.status !== 'active') continue
+      if (wrappedByOwnedPoe.has(er.id)) continue
+      const claim = (v22View?.claims || []).find((c) => c.id === er.claimId)
+      const inScope = claim ? (claim.referencedAssetIds || []) : []
+      canRerunByErId.set(er.id, hasNewAssetsForRerun(inScope, er))
+    }
+    // Phase 14.2 (#169a): build per-node badge lists with the Claim-as-target
+    // model. PoE nodes derive badges via the parent Claim (PoE → wrapped ER
+    // → claimId → badges). Claim nodes use direct lookup. Stamp the parent
+    // Claim's owner on PoE nodes so the action bar's Issue-Badge gate can
+    // check `activeParty !== claim.ownerParty` without re-walking.
+    const badgesByNodeId = new Map()
+    const claimOwnerByNodeId = new Map()
+    {
+      const allErs = v22View?.evaluationResults || []
+      const allPoEs = v22View?.proofsOfEvaluation || []
+      const claimsById = new Map((v22View?.claims || []).map((c) => [c.id, c]))
+      // Phase 14.3 (#176a): enrich badge-issuance entries with template
+      // name + version so BadgeChipContainer renders tooltips without a
+      // second prop chain through V2Canvas → AssetNode.
+      const templatesById = new Map((badgeTemplates || []).map((t) => [t.id, t]))
+      const enrich = (issuance) => {
+        const tpl = templatesById.get(issuance.badgeTemplateId)
+        return {
+          id: issuance.id,
+          issuerParty: issuance.issuerParty,
+          badgeTemplateId: issuance.badgeTemplateId,
+          badgeName: tpl?.name || 'Badge',
+          badgeVersion: tpl?.version || 1,
+        }
+      }
+      for (const poe of allPoEs) {
+        const list = getBadgesForPoE(poe.id, allErs, allPoEs, badgeIssuances)
+        if (list.length > 0) badgesByNodeId.set(poe.id, list.map(enrich))
+        const claim = claimsById.get(poe.claimId)
+        if (claim) claimOwnerByNodeId.set(poe.id, claim.owner || claim.ownerParty)
+      }
+      for (const claim of (v22View?.claims || [])) {
+        const list = getBadgesForClaim(claim.id, badgeIssuances)
+        if (list.length > 0) badgesByNodeId.set(claim.id, list.map(enrich))
+      }
+    }
     const anyDecoration = flagged.size > 0 || endpointSet.size > 0
       || Object.keys(eaByClaimForActor).length > 0
       || claimsWithActiveDaWithoutEa.size > 0
       || unravelingId != null
       || pendingRevealClaimIds.size > 0
       || v22RevealActiveClaimId != null
+      || wrappedByOwnedPoe.size > 0
+      || badgesByNodeId.size > 0
     if (!anyDecoration) return v22Data
     const nodes = v22Data.nodes.map(n => {
       const needsReveal = flagged.has(n.id)
       const isEndpoint = endpointSet.has(n.id)
       const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
       const hasActiveDaWithoutEa = n.v22Type === 'CLAIM' && claimsWithActiveDaWithoutEa.has(n.id)
+      const alreadyWrapped = n.v22Type === 'EVAL RESULT' && wrappedByOwnedPoe.has(n.id)
+      const canRerunFlag = n.v22Type === 'EVAL RESULT' && canRerunByErId.has(n.id)
+        ? canRerunByErId.get(n.id)
+        : null  // null = N/A; AssetNode treats !== false as "show button"
       const isUnraveling = unravelingId === n.id
       // Phase 11C.2 W1: stamp `_wasProvisional` ONLY on the recently-accepted
       // Claim id (not on accompanying Asset reveal ids). The notification-click
@@ -464,9 +574,15 @@ export default function V2App() {
       // scope) would preserve NEW on those paths without leaking
       // cross-session stamps from the acceptance handlers.
       const skipNewBadge = needsReveal && n.v22Type === 'ASSET' && n.owner === activeRole.party
-      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional) return n
+      const activeBadges = badgesByNodeId.get(n.id) || null
+      const claimOwnerParty = claimOwnerByNodeId.get(n.id) || null
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional && !alreadyWrapped && canRerunFlag === null && !activeBadges && !claimOwnerParty) return n
       return {
         ...n,
+        ...(alreadyWrapped ? { _alreadyWrapped: true } : {}),
+        ...(canRerunFlag !== null ? { _canRerun: canRerunFlag } : {}),
+        ...(activeBadges ? { _activeBadges: activeBadges } : {}),
+        ...(claimOwnerParty ? { _claimOwnerParty: claimOwnerParty } : {}),
         ...(needsReveal && !skipNewBadge ? { _isNew: true } : {}),
         // _wasProvisional rides along with _isNew (drives the
         // notification-click reveal-trigger guard at V2App:3221 + the
@@ -513,7 +629,7 @@ export default function V2App() {
       ))
     }
     return { ...v22Data, nodes, edges, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId, v22PendingRevealsByRole, roleId])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId, v22PendingRevealsByRole, roleId, badgeIssuances, badgeTemplates])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -1589,13 +1705,12 @@ export default function V2App() {
     setSelectedEdgeId(null)
   }, [])
 
-  // Phase 12.2 (#106 + #117 + #121): orchestrate a (possibly multi-RS)
-  // evaluation submit. The modal hands back either the legacy single-RS
-  // shape (`requirementsSet`, `rows`) for backwards compat, or the new
-  // batch shape (`perRsResults`, `batchId`). Both paths flow through
-  // `makeEvaluationRunArtifacts` per-RS; batch members share `batchId`.
-  // The first run also stamps `priorEvalResultId` + `evidenceDiff` per #117
-  // for re-run audit trail.
+  // Phase 13.1 (#168a): single-call evaluation submit. The modal hands back
+  // `perRsResults: [{ requirementsSet, rows }]` for the multi-RS case (or a
+  // single-entry array for solo). All RSes are bundled into ONE Eval Result;
+  // `makeEvaluationRunArtifacts` runs once per submission, producing one
+  // Eval Result + one auto-disclosure DA + one ownership DA. The
+  // `batchId` mechanism is gone — multi-RS evaluations are one artifact.
   const handleV22EvaluationSubmit = useCallback((payload) => {
     if (!v22EvalContext) return
     const { evaluationAgreementId, claimId, selfEvaluation } = v22EvalContext
@@ -1615,93 +1730,101 @@ export default function V2App() {
       if (!ea) return
     }
     // Normalize input: legacy single-RS callers expand to a one-entry
-    // batch; new callers pass `perRsResults` directly.
+    // batch; modern callers pass `perRsResults` directly.
     const perRsResults = payload.perRsResults && payload.perRsResults.length > 0
       ? payload.perRsResults
       : [{
           requirementsSet: payload.requirementsSet,
           rows: payload.rows,
         }]
-    const batchId = payload.batchId || null
     const evidenceUsed = payload.evidenceUsed || []
     const evidenceDiff = payload.evidenceDiff || null
     const priorEvalResultId = payload.priorEvalResultId || null
 
-    const allArtifactSets = []
-    for (const { requirementsSet, rows } of perRsResults) {
-      const prior = findPriorActiveEvaluationResult({
-        claimId, requirementsSetId: requirementsSet.id,
+    // Phase 13.1: bundle all selected RSes into one Eval Result.
+    // Build the flat results[] with each row stamped with its requirementsSetId.
+    const requirementsSets = perRsResults.map(({ requirementsSet }) => requirementsSet)
+    const rows = []
+    for (const { requirementsSet, rows: rsRows } of perRsResults) {
+      for (const r of (rsRows || [])) {
+        rows.push({ ...r, requirementsSetId: requirementsSet.id })
+      }
+    }
+    // Look up a prior Eval Result whose RS overlaps any of the new RSes
+    // (any single-RS match supersedes — the prior shape may be old singular
+    // or new plural).
+    let prior = null
+    for (const rs of requirementsSets) {
+      const candidate = findPriorActiveEvaluationResult({
+        claimId, requirementsSetId: rs.id,
         shared: buildV22SharedArtifacts(), provisionals: v22Provisionals,
       })
-      const artifacts = makeEvaluationRunArtifacts({
-        evaluatorParty: ea.grantee.party,
-        evaluatorDot: activeRole.partyDot,
-        claimOwnerParty: ea.grantor.party,
-        evaluationAgreement: ea,
-        granteeAssetId: ea.granteeAssetId,
-        requirementsSet,
-        rows,
-        evidenceUsed,
-        priorActiveResult: prior,
-      })
-      // Phase 12.2: stamp batchId + re-run audit fields on the new Eval
-      // Result. Each batch member gets the same batchId; only the primary
-      // RS gets the priorEvalResultId/evidenceDiff (additional batch
-      // members are first-time evaluations, not re-runs).
-      const isPrimary = artifacts.evaluationResult.requirementsSet?.id === perRsResults[0].requirementsSet.id
-      artifacts.evaluationResult = {
-        ...artifacts.evaluationResult,
-        batchId,
-        priorEvalResultId: isPrimary ? priorEvalResultId : null,
-        evidenceDiff: isPrimary ? evidenceDiff : null,
-      }
-      allArtifactSets.push(artifacts)
+      if (candidate) { prior = candidate; break }
+    }
+    const artifacts = makeEvaluationRunArtifacts({
+      evaluatorParty: ea.grantee.party,
+      evaluatorDot: activeRole.partyDot,
+      claimOwnerParty: ea.grantor.party,
+      evaluationAgreement: ea,
+      granteeAssetId: ea.granteeAssetId,
+      requirementsSets,
+      rows,
+      evidenceUsed,
+      priorActiveResult: prior,
+    })
+    // Stamp re-run audit fields on the new Eval Result.
+    artifacts.evaluationResult = {
+      ...artifacts.evaluationResult,
+      priorEvalResultId,
+      evidenceDiff,
     }
 
     setV22Provisionals((prev) => {
       let newEvalResults = [...prev.evaluationResults]
-      const newDas = []
-      for (const artifacts of allArtifactSets) {
-        newEvalResults.push(artifacts.evaluationResult)
-        if (artifacts.supersededPriorResult) {
-          const idx = newEvalResults.findIndex((e) => e.id === artifacts.supersededPriorResult.id)
-          if (idx >= 0) newEvalResults[idx] = artifacts.supersededPriorResult
-          else newEvalResults.push(artifacts.supersededPriorResult)
-        }
-        newDas.push(artifacts.proofDisclosureAgreement, artifacts.ownershipDisclosureAgreement)
+      newEvalResults.push(artifacts.evaluationResult)
+      if (artifacts.supersededPriorResult) {
+        const idx = newEvalResults.findIndex((e) => e.id === artifacts.supersededPriorResult.id)
+        if (idx >= 0) newEvalResults[idx] = artifacts.supersededPriorResult
+        else newEvalResults.push(artifacts.supersededPriorResult)
       }
       return {
         ...prev,
-        disclosureAgreements: [...prev.disclosureAgreements, ...newDas],
+        disclosureAgreements: [
+          ...prev.disclosureAgreements,
+          artifacts.proofDisclosureAgreement,
+          artifacts.ownershipDisclosureAgreement,
+        ],
         evaluationResults: newEvalResults,
       }
     })
     setV22EvalContext(null)
-    // Pan to the FIRST (primary) new Eval Result.
-    const primaryNewER = allArtifactSets[0].evaluationResult
-    setSel(primaryNewER.id)
+    const newER = artifacts.evaluationResult
+    setSel(newER.id)
     setForcePanelTab(null)
     setForceExpandSda(null)
-    setV22PanToClaimId(primaryNewER.id)
-    setV22RecentlyAcceptedClaimId(primaryNewER.id)
-    // Notify the Claim owner — once per RS submitted (each Eval Result
-    // is a distinct artifact the owner may want to inspect).
+    setV22PanToClaimId(newER.id)
+    setV22RecentlyAcceptedClaimId(newER.id)
     if (!selfEvaluation) {
       const claimOwnerRole = ROLES.find((r) => r.party === ea.grantor.party)
       const sharedClaim = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals).claims.find((c) => c.id === claimId)
       if (claimOwnerRole && sharedClaim) {
-        for (const artifacts of allArtifactSets) {
-          enqueueV22NotificationForRequester(claimOwnerRole.id, {
-            id: `v22-evaluation-${artifacts.evaluationResult.id}`,
-            type: 'v22-evaluation',
-            from: { name: activeRole.party, dot: activeRole.partyDot },
-            asset: { name: sharedClaim.name, pin: sharedClaim.pin },
-            v22EvalResultId: artifacts.evaluationResult.id,
-            supersedesPriorResultId: artifacts.supersededPriorResult?.id || null,
-            requirementsSetName: artifacts.evaluationResult.requirementsSet?.name,
-            date: new Date().toISOString().slice(0, 10),
-          })
-        }
+        // First RS name surfaces in the notification; multi-RS bundles
+        // append a "(+N more)" hint for the inbox preview.
+        const firstRs = newER.requirementsSets?.[0]
+        const moreCount = (newER.requirementsSets?.length || 1) - 1
+        const rsName = firstRs
+          ? (moreCount > 0 ? `${firstRs.name} (+${moreCount} more)` : firstRs.name)
+          : null
+        enqueueV22NotificationForRequester(claimOwnerRole.id, {
+          id: `v22-evaluation-${newER.id}`,
+          type: 'v22-evaluation',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: sharedClaim.name, pin: sharedClaim.pin },
+          v22EvalResultId: newER.id,
+          supersedesPriorResultId: artifacts.supersededPriorResult?.id || null,
+          requirementsSetName: rsName,
+          date: new Date().toISOString().slice(0, 10),
+        })
       }
     }
   }, [v22EvalContext, v22View, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
@@ -1876,6 +1999,100 @@ export default function V2App() {
     setV22RecentlyAcceptedClaimId(artifacts.parseResult.id)
     // Phase 7 carry-over #1: no timeout; clears on deselection.
   }, [v22ParsingAsset, activeRole.party, activeRole.partyDot])
+
+  // Phase 13.1 (#168a): Create Proof of Evaluation, 1:1 wrap. Atomically:
+  //   1. Build the new PoE wrapping the source Eval Result.
+  //   2. Find the existing Eval-Result-targeting auto-disclosure DA (created
+  //      at Eval Result save time) and mark it `status: 'revoked'` so its
+  //      edge unravel-animates per the Phase 9D pattern.
+  //   3. Build a new PoE-targeting proof-only DA from evaluator → claim owner.
+  //   4. Reveal the PoE node + its new DA edge.
+  const handleV22CreatePoE = useCallback(() => {
+    const ctx = v22CreatingPoEContext
+    if (!ctx) return
+    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const sourceEr = (merged.evaluationResults || []).find((er) => er.id === ctx.evalResultId)
+    if (!sourceEr) return
+    const sourceClaim = (merged.claims || []).find((c) => c.id === sourceEr.claimId)
+    const requirementsSetIds = (sourceEr.requirementsSets || []).map((rs) => rs.id)
+    const assetSnapshot = [...(sourceEr.evidenceUsed || [])]
+    const now = new Date().toISOString()
+    const poeId = makeArtifactId('poe', `${activeRole.party}-${sourceEr.id}-${Date.now()}`)
+    const poe = makePoE({
+      id: poeId,
+      owner: activeRole.party,
+      ownerDot: activeRole.partyDot,
+      claimId: sourceEr.claimId,
+      claimName: sourceClaim?.name,
+      wrappedEvalResultId: sourceEr.id,
+      requirementsSetIds,
+      assetSnapshot,
+      createdDate: now,
+    })
+    // Locate the existing Eval-Result-targeting auto-disclosure DA (the
+    // proof-only DA created at Eval Result save time, evaluator → claim
+    // owner). Marks it `revoked` so the edge unravels.
+    const claimOwnerParty = sourceClaim?.owner
+    const priorAutoDa = (merged.disclosureAgreements || []).find((da) => (
+      da.subject?.kind === 'evalResult'
+      && da.subject?.id === sourceEr.id
+      && da.grantor?.party === activeRole.party
+      && da.grantee?.party === claimOwnerParty
+      && da.grantor?.party !== da.grantee?.party
+      && da.status === 'active'
+    ))
+    const newProofDa = makeProofOfEvalDisclosureAgreement({
+      id: makeArtifactId('da-proof', `${poeId}-${Date.now()}`),
+      evaluator: activeRole.party,
+      evaluatorDot: activeRole.partyDot,
+      claimOwner: claimOwnerParty,
+      claimOwnerDot: sourceClaim?.ownerDot,
+      poeId,
+      terms: { createdDate: now },
+    })
+    setV22Provisionals((prev) => {
+      const nextDas = [...prev.disclosureAgreements]
+      if (priorAutoDa) {
+        // Mark the prior DA revoked. Same pattern as the regular revoke flow.
+        const idx = nextDas.findIndex((d) => d.id === priorAutoDa.id)
+        const revokedDa = { ...priorAutoDa, status: 'revoked', _supersededByPoeId: poeId }
+        if (idx >= 0) nextDas[idx] = revokedDa
+        else nextDas.push(revokedDa)
+      }
+      nextDas.push(newProofDa)
+      return {
+        ...prev,
+        proofsOfEvaluation: [...(prev.proofsOfEvaluation || []), poe],
+        disclosureAgreements: nextDas,
+      }
+    })
+    setV22CreatingPoEContext(null)
+    setSel(poe.id)
+    setV22PanToClaimId(poe.id)
+    setV22RecentlyAcceptedClaimId(poe.id)
+    // Phase 14.2: fire `v22-poe-created` notification on the Claim owner's
+    // inbox (gap from Phase 13.1 — visibility flowed via the proof-of-eval
+    // DA, but no notification fired so the recipient had no inbox cue).
+    // Self-PoE creation (evaluator === claim owner) skips the notification:
+    // the actor is acting on their own canvas, so there's no cross-actor
+    // signal to surface.
+    if (claimOwnerParty && claimOwnerParty !== activeRole.party) {
+      const recipientRole = ROLES.find((r) => r.party === claimOwnerParty)
+      if (recipientRole) {
+        enqueueV22NotificationForRequester(recipientRole.id, {
+          id: `v22-poe-created-${poe.id}`,
+          type: 'v22-poe-created',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          poeId: poe.id,
+          poeName: poe.name,
+          claimId: sourceClaim?.id,
+          claimName: sourceClaim?.name,
+          sourceErId: sourceEr.id,
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [v22CreatingPoEContext, v22Provisionals, activeRole.party, activeRole.partyDot, enqueueV22NotificationForRequester])
 
   // Phase 9A.3: V2.2 Asset registration. Produces a new Asset + ownership DA
   // (makeAssetRegistrationArtifacts) and merges both into v22Provisionals.
@@ -3002,6 +3219,150 @@ export default function V2App() {
   // as Public; Bob sees them as authored-by-self (filtered out via the
   // existing `_publishedByRoleId !== roleId` filter at line 3050+).
   const [publishedRequirementSets, setPublishedRequirementSets] = useState(SEED_PUBLISHED_REQUIREMENT_SETS)
+  // Phase 14.0 (#169 part 1): Badge Templates. Network-wide, public-by-default
+  // Library artifact owned by an Actor. State is shared across all roles
+  // (every Actor sees every template; only own templates are editable).
+  // Initialized once from `buildV22SharedArtifacts` seed; mutations land
+  // here via `handleSaveBadgeTemplate`.
+  // (badgeTemplates / badgeIssuances state declared earlier — moved above
+  // v22DataWithReveal to avoid TDZ when chip rendering pulls badge data.)
+  const handleSaveBadgeTemplate = useCallback((template, opts = {}) => {
+    const { isNewVersion = false, priorTemplateId = null } = opts
+    setBadgeTemplates((prev) => {
+      const next = prev.slice()
+      if (isNewVersion && priorTemplateId) {
+        // Update prior version's `supersededBy` to point at the new template.
+        const priorIdx = next.findIndex((t) => t.id === priorTemplateId)
+        if (priorIdx >= 0) {
+          next[priorIdx] = { ...next[priorIdx], supersededBy: template.id }
+        }
+      }
+      next.push(template)
+      return next
+    })
+    // Phase 14.1 (#169 part 2): fan-out `v22-badge-template-new-version`
+    // notification to every recipient with an active issuance against any
+    // prior version of this lineage. Walk active issuances → resolve target
+    // PoE → find PoE owner = recipient; dedupe by recipient party.
+    // Phase 14.2 (#169a): walk via Claim ownership (was via PoE owner).
+    if (isNewVersion && priorTemplateId) {
+      try {
+        const seed = buildV22SharedArtifacts()
+        const sharedClaims = seed.claims || []
+        const ownerByClaimId = new Map(sharedClaims.map((c) => [c.id, c.owner || c.ownerParty]))
+        const lineageId = template.lineageId
+        if (lineageId) {
+          const lineageVersionIds = new Set(
+            badgeTemplates.filter((t) => t.lineageId === lineageId).map((t) => t.id),
+          )
+          const recipientParties = new Set()
+          for (const issuance of badgeIssuances) {
+            if (issuance.status !== 'active') continue
+            if (!lineageVersionIds.has(issuance.badgeTemplateId)) continue
+            const recipientParty = ownerByClaimId.get(issuance.targetClaimId)
+            if (recipientParty) recipientParties.add(recipientParty)
+          }
+          for (const party of recipientParties) {
+            const recipientRole = ROLES.find((r) => r.party === party)
+            if (!recipientRole) continue
+            enqueueV22NotificationForRequester(recipientRole.id, {
+              id: `v22-badge-template-new-version-${template.id}-${party}`,
+              type: 'v22-badge-template-new-version',
+              from: { name: template.ownerParty, dot: template.ownerDot },
+              badge: { templateId: template.id, name: template.name, version: template.version },
+              date: new Date().toISOString().slice(0, 10),
+            })
+          }
+        }
+      } catch (e) {
+        console.warn('Phase 14.1: badge-template-new-version fan-out failed', e)
+      }
+    }
+  }, [badgeTemplates, badgeIssuances, enqueueV22NotificationForRequester])
+
+  // Phase 14.2 (#169a): Issue Badge handler. Target shifted from PoE to
+  // Claim. Self-issuance gate is now `issuerParty !== claim.ownerParty`.
+  // The PoE-anchored entry points still work — they pass the parent
+  // Claim's id (derived from the PoE's claimId field) as targetClaimId.
+  const handleV22IssueBadge = useCallback((targetClaimId, badgeTemplateId, description) => {
+    const seed = buildV22SharedArtifacts()
+    const sharedClaims = seed.claims || []
+    const targetClaim = sharedClaims.find((c) => c.id === targetClaimId)
+    if (!targetClaim) return
+    const recipientParty = targetClaim.owner || targetClaim.ownerParty
+    if (recipientParty === activeRole.party) return  // self-issuance guard
+    const id = makeArtifactId('badge', `${targetClaimId}-${badgeTemplateId}-${Date.now()}`)
+    const issuance = makeBadgeIssuance({
+      id,
+      issuerDot: activeRole.partyDot,
+      issuerParty: activeRole.party,
+      targetClaimId,
+      badgeTemplateId,
+      description: description || '',
+      createdDate: new Date().toISOString(),
+    })
+    setBadgeIssuances((prev) => [...prev, issuance])
+    setV22IssueBadgeContext(null)
+    // Fire notification on the Claim owner's inbox.
+    const recipientRole = ROLES.find((r) => r.party === recipientParty)
+    const template = badgeTemplates.find((t) => t.id === badgeTemplateId)
+    if (recipientRole) {
+      enqueueV22NotificationForRequester(recipientRole.id, {
+        id: `v22-badge-issued-${id}`,
+        type: 'v22-badge-issued',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        badge: {
+          issuanceId: id,
+          templateId: badgeTemplateId,
+          name: template?.name || 'Badge',
+          version: template?.version || 1,
+        },
+        targetClaimId,
+        description: description || '',
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [activeRole.party, activeRole.partyDot, badgeTemplates, enqueueV22NotificationForRequester])
+
+  const handleV22RevokeBadge = useCallback((badgeIssuanceId, reason) => {
+    let revokedIssuance = null
+    setBadgeIssuances((prev) => prev.map((b) => {
+      if (b.id !== badgeIssuanceId) return b
+      revokedIssuance = {
+        ...b,
+        status: 'revoked',
+        revokedDate: new Date().toISOString(),
+        revocationReason: reason || '',
+      }
+      return revokedIssuance
+    }))
+    setV22RevokeBadgeContext(null)
+    // Phase 14.2: fire notification on the Claim owner's inbox.
+    if (revokedIssuance) {
+      const seed = buildV22SharedArtifacts()
+      const sharedClaims = seed.claims || []
+      const targetClaim = sharedClaims.find((c) => c.id === revokedIssuance.targetClaimId)
+      const recipientParty = targetClaim?.owner || targetClaim?.ownerParty
+      const recipientRole = recipientParty ? ROLES.find((r) => r.party === recipientParty) : null
+      const template = badgeTemplates.find((t) => t.id === revokedIssuance.badgeTemplateId)
+      if (recipientRole) {
+        enqueueV22NotificationForRequester(recipientRole.id, {
+          id: `v22-badge-revoked-${revokedIssuance.id}`,
+          type: 'v22-badge-revoked',
+          from: { name: revokedIssuance.issuerParty, dot: revokedIssuance.issuerDot },
+          badge: {
+            issuanceId: revokedIssuance.id,
+            templateId: revokedIssuance.badgeTemplateId,
+            name: template?.name || 'Badge',
+            version: template?.version || 1,
+          },
+          targetClaimId: revokedIssuance.targetClaimId,
+          reason: reason || '',
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+  }, [badgeTemplates, enqueueV22NotificationForRequester])
   useEffect(() => {
     const handler = () => {
       setLibraryInitialTab('parsing')
@@ -3925,11 +4286,17 @@ export default function V2App() {
                     // Claim. Click pans to the Eval Result; informational
                     // only (the OUTDATED badge stays until re-run).
                     const isV22EvalResultStale = req.type === 'v22-eval-result-stale'
+                    // Phase 14.1 (#169 part 2): Badge notifications.
+                    const isV22BadgeIssued = req.type === 'v22-badge-issued'
+                    const isV22BadgeRevoked = req.type === 'v22-badge-revoked'
+                    const isV22BadgeTemplateNewVersion = req.type === 'v22-badge-template-new-version'
+                    // Phase 14.2: PoE creation notification.
+                    const isV22PoeCreated = req.type === 'v22-poe-created'
                     // Phase 11.6 (#164): amendment-proposal accept/reject get
                     // their own colors — green for accepted, red for rejected
                     // — to match the actionable consequence (vs. the
                     // generic indigo "informational amendment" badges).
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
@@ -3941,7 +4308,7 @@ export default function V2App() {
                     // consequences (accept/reject), distinct from the
                     // informational AMENDMENT category used for DA
                     // amendments and the rolled-back unilateral EA model.
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : 'REQUEST'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -4213,6 +4580,67 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
+                        } else if (req.type === 'v22-poe-created') {
+                          // Phase 14.2: click navigates to the PoE Detail
+                          // Panel on the recipient's canvas.
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
+                            const targetNode = req.poeId ? nodeMap[req.poeId] : null
+                            if (targetNode) {
+                              setSel(targetNode.id)
+                              canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                            }
+                          })
+                        } else if (req.type === 'v22-badge-issued') {
+                          // Phase 14.2: deep-link to the target Claim's
+                          // Detail Panel (where the new badge appears in
+                          // the Badges section). Recipient = Claim owner.
+                          ensureParentLayer(() => {
+                            updateRoleState(roleId, prev => ({
+                              ...prev,
+                              dismissedReqs: [...prev.dismissedReqs, req.id],
+                            }))
+                            const targetNode = req.targetClaimId ? nodeMap[req.targetClaimId] : null
+                            if (targetNode) {
+                              setSel(targetNode.id)
+                              canvasRef.current?.animatedPanToWithZoom?.(targetNode.x, targetNode.y, 1.28, 500)
+                            }
+                          })
+                        } else if (req.type === 'v22-badge-revoked') {
+                          // Phase 14.2: open the Badge Issuance expand modal
+                          // (no longer a Detail Panel) so the recipient sees
+                          // the revocation context (reason) directly.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          const issuance = badgeIssuances.find((b) => b.id === req.badge?.issuanceId)
+                          if (issuance) {
+                            const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                            const targetClaim = (merged.claims || []).find((c) => c.id === issuance.targetClaimId) || null
+                            const template = badgeTemplates.find((t) => t.id === issuance.badgeTemplateId) || null
+                            setV22ExpandedArtifact({
+                              artifact: issuance,
+                              schema: 'badge-issuance',
+                              badgeIssuanceContext: {
+                                template,
+                                recipientParty: targetClaim?.owner || targetClaim?.ownerParty,
+                                targetClaimName: targetClaim?.name,
+                                allClaims: merged.claims || [],
+                                allBadgeTemplates: badgeTemplates,
+                              },
+                            })
+                          }
+                        } else if (req.type === 'v22-badge-template-new-version') {
+                          // Phase 14.1 (#169 part 2): informational — clicking
+                          // dismisses; no auto-navigation.
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
                         } else if (req.type === 'v22-da-revoked' || req.type === 'v22-ea-revoked') {
                           // Phase 9D.1 (#112 UX redo): revocation notifications
                           // no longer open a modal. Click dismisses the
@@ -4351,7 +4779,15 @@ export default function V2App() {
                                                               ? `Disclosure Agreement amended: ${req.asset?.name || 'a Claim'}.${req.note ? ` (Note: ${req.note})` : ''}`
                                                               : isV22EvalResultStale
                                                                 ? `${req.from?.name || 'The Claim owner'} amended evidence on a Claim — your Evaluation Result "${req.evalResultName || req.evalResultId}" is now out of date.`
-                                                                : req.asset?.name || ''
+                                                                : isV22BadgeIssued
+                                                                  ? `${req.from.name} issued the "${req.badge?.name || 'Badge'} v${req.badge?.version ?? 1}" badge against your Proof of Evaluation.${req.description ? ` "${req.description}"` : ''}`
+                                                                  : isV22BadgeRevoked
+                                                                    ? `${req.from.name} revoked the "${req.badge?.name || 'Badge'} v${req.badge?.version ?? 1}" badge.${req.reason ? ` "${req.reason}"` : ''}`
+                                                                    : isV22BadgeTemplateNewVersion
+                                                                      ? `${req.from.name} published v${req.badge?.version ?? '?'} of "${req.badge?.name || 'Badge Template'}". Your existing badge of this template remains valid.`
+                                                                      : isV22PoeCreated
+                                                                        ? `${req.from.name} created a Proof of Evaluation${req.claimName ? ` on your Claim "${req.claimName}"` : ''}.`
+                                                                        : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -4869,13 +5305,44 @@ export default function V2App() {
                 const er = node.v22Artifact
                 if (!er) return
                 const eaForRerun = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
+                // Phase 13.2: pass the full RS id list so multi-RS bundled
+                // Eval Results carry every RS forward into the re-run picker.
+                const lockedRsIds = (er.requirementsSets || []).map((rs) => rs.id)
                 setV22EvalContext({
                   evaluationAgreementId: eaForRerun ? eaForRerun.id : null,
                   claimId: er.claimId,
                   selfEvaluation: !eaForRerun,
-                  lockedRequirementsSetId: er.requirementsSet?.id || null,
+                  lockedRequirementsSetIds: lockedRsIds.length > 0 ? lockedRsIds : null,
+                  lockedRequirementsSetId: lockedRsIds.length === 1 ? lockedRsIds[0] : null,
                   priorActiveResultId: er.id,
                 })
+                return
+              }
+              case 'createPoE': {
+                // Phase 13 (#168): open the Create-PoE confirmation modal.
+                // Gating (Eval Result is active + no PoE already wraps it)
+                // is enforced by the action bar itself (button hidden in
+                // those cases) — this dispatch just opens the modal.
+                const er = node.v22Artifact
+                if (!er) return
+                setV22CreatingPoEContext({ evalResultId: er.id })
+                return
+              }
+              case 'issueBadge': {
+                // Phase 14.2 (#169a): Issue Badge entry point. Target is the
+                // Claim. From a PoE node: derive Claim id from PoE.claimId.
+                // From a Claim node: use the Claim's id directly. Self-
+                // issuance is gated upstream (action bar hides the button
+                // when the current actor owns the parent Claim).
+                if (node.v22Type === 'PROOF OF EVALUATION') {
+                  const poe = node.v22Artifact
+                  if (!poe?.claimId) return
+                  setV22IssueBadgeContext({ targetClaimId: poe.claimId })
+                } else if (node.v22Type === 'CLAIM') {
+                  const claim = node.v22Artifact
+                  if (!claim?.id) return
+                  setV22IssueBadgeContext({ targetClaimId: claim.id })
+                }
                 return
               }
               default:
@@ -5103,6 +5570,12 @@ export default function V2App() {
                     handleOpenRevocationConfirm(da, 'DA')
                   }}
                   onViewEvaluationAgreement={swapToEvaluation}
+                  // Phase 13.4 (#175): Expand → ExpandedArtifactModal
+                  // ('disclosure-agreement' schema).
+                  onExpand={() => setV22ExpandedArtifact({
+                    artifact: resolved.disclosureAgreement,
+                    schema: 'disclosure-agreement',
+                  })}
                 />
               ) : (
                 <EvaluationAgreementDetailPanel
@@ -5310,6 +5783,10 @@ export default function V2App() {
                     setV22ExpandedArtifact({ artifact: row, schema: 'asset' })
                   }
                 }}
+                // Phase 13.4 (#175): Expand affordance for the directory-
+                // materialized Claim. The synthetic node is always a CLAIM,
+                // so route directly to the 'claim' schema.
+                onExpand={(artifact) => setV22ExpandedArtifact({ artifact, schema: 'claim' })}
                 evaluationResultsForClaim={[]}
                 evaluationAgreementForActor={null}
                 disclosureAgreementsForNode={[]}
@@ -5449,11 +5926,30 @@ export default function V2App() {
               templateName: pr.templateName,
               fields: pr.fields.map(f => ({ id: f.id, name: f.name })),
             }))
-          // Phase 6 carry-over #7: Eval Results visible to the grantor for the
-          // Proof-Only scope step. Pull from view.evaluationResults filtered to
-          // this Claim (includes both grantor-owned and proof-of-eval-shared).
-          const evalResultsForClaim = (v22View?.evaluationResults || [])
-            .filter(er => er.claimId === claim.id)
+          // Phase 13 (#168): Proof-Only step picks PoEs (not Eval Results).
+          // Pull PoEs the grantor owns wrapping evaluations of this Claim.
+          // The picker row shows the wrapped count + SAT/UNSAT aggregate.
+          const evalResultByIdForPoe = new Map((v22View?.evaluationResults || []).map((er) => [er.id, er]))
+          const poesForClaim = (v22View?.proofsOfEvaluation || [])
+            .filter(poe => poe.claimId === claim.id && poe.owner === da.grantor.party)
+            .map((poe) => {
+              let sat = 0, unsat = 0
+              const er = evalResultByIdForPoe.get(poe.wrappedEvalResultId)
+              if (er) {
+                for (const r of (er.results || [])) {
+                  if (r.status === 'satisfactory') sat += 1
+                  else if (r.status === 'unsatisfactory') unsat += 1
+                }
+              }
+              return {
+                id: poe.id,
+                name: poe.name,
+                owner: poe.owner,
+                wrappedCount: 1,
+                sat,
+                unsat,
+              }
+            })
           // Phase 11C.1: surface the requester's accepted acknowledgments (ids
           // referencing the Claim's `acknowledgments[]`) so the response
           // modal can render the read-only audit panel at step 3 + step 4.
@@ -5474,7 +5970,7 @@ export default function V2App() {
               }}
               referencedAssets={referencedAssets}
               parseResults={parseResultsForModal}
-              evalResultsForClaim={evalResultsForClaim}
+              poesForClaim={poesForClaim}
               onAccept={handleV22Accept}
               onDecline={handleV22Decline}
               onClose={() => setV22RespondingTo(null)}
@@ -5524,7 +6020,7 @@ export default function V2App() {
               }}
               referencedAssets={[]}
               parseResults={[]}
-              evalResultsForClaim={[]}
+              poesForClaim={[]}
               onAccept={handleV22AcceptEAOnly}
               onDecline={handleV22DeclineEAOnly}
               onClose={() => setV22RespondingToEaOnly(null)}
@@ -5572,13 +6068,63 @@ export default function V2App() {
             ...sharedForEval.assets,
             ...(v22View?.assets || []),
           ]
+          const allParseResultsForEval = [
+            ...(sharedForEval.parseResults || []),
+            ...(v22View?.parseResults || []),
+          ]
           const seenAssetIds = new Set()
+          // Phase 12.4 (#171): enrich each in-scope Asset row with disclosure
+          // context (`disclosureType` + `disclosedFields`) so the modal's
+          // left-panel viewer can branch between the AssetEvidenceViewer
+          // (Full / owner) and the parsed-fields table (Selective). Mirrors
+          // the per-Asset enrichment used for the V22ClaimPanel referenced-
+          // Asset rows so the same shared `<AssetEvidencePanel>` component
+          // can render either context.
           const evidenceAssets = scopeAssetIds
-            .map(id => {
+            .map((id) => {
               if (seenAssetIds.has(id)) return null
               seenAssetIds.add(id)
-              const asset = allAssetSources.find(a => a.id === id)
-              return asset ? { id: asset.id, name: asset.name, file: asset.file } : null
+              const asset = allAssetSources.find((a) => a.id === id)
+              if (!asset) return null
+              const row = {
+                id: asset.id,
+                name: asset.name,
+                file: asset.file,
+                asset,
+              }
+              if (isSelf) {
+                row.disclosureType = 'owner'
+              } else if (da?.type === 'selective') {
+                row.disclosureType = 'selective'
+                const fieldIdSet = new Set(da?.scope?.fieldIds || [])
+                const prsForAsset = allParseResultsForEval.filter((pr) => pr.sourceAssetId === asset.id)
+                const disclosedFields = []
+                for (const pr of prsForAsset) {
+                  for (const f of (pr.fields || [])) {
+                    if (fieldIdSet.has(`${pr.id}::${f.id}`)) {
+                      disclosedFields.push({
+                        id: f.id,
+                        name: f.name,
+                        label: f.name,
+                        value: f.value,
+                        confidence: f.confidence,
+                        parseResultId: pr.id,
+                        parseResultName: pr.templateName || pr.id,
+                      })
+                    }
+                  }
+                }
+                row.disclosedFields = disclosedFields
+                row.disclosedFieldCount = disclosedFields.length
+              } else {
+                // Defensive default: full disclosure (matches Phase 11D.2's
+                // `coveringDa?.type || 'full'` fallback). Proof-only DAs
+                // don't grant evaluation rights so this path shouldn't fire
+                // under that disclosure type — the Run Evaluation modal
+                // wouldn't have been opened in the first place.
+                row.disclosureType = da?.type === 'proofonly' ? 'proofonly' : 'full'
+              }
+              return row
             })
             .filter(Boolean)
           // Library is the requester's full library; the EA's suggested ids
@@ -5590,6 +6136,7 @@ export default function V2App() {
               evidenceAssets={evidenceAssets}
               availableRequirementsSets={requirementSets.map(rs => ({
                 id: rs.id,
+                lineageId: rs.lineageId,
                 name: rs.name,
                 version: rs.version ?? 1,
                 requirements: rs.requirements || [],
@@ -5601,6 +6148,7 @@ export default function V2App() {
               // owner-authored side (provenance: 'own' badge).
               publicRequirementSets={visiblePublishedSets.map((rs) => ({
                 id: rs.id,
+                lineageId: rs.lineageId,
                 name: rs.name,
                 version: rs.version ?? 1,
                 requirements: rs.requirements || [],
@@ -5617,6 +6165,7 @@ export default function V2App() {
                   : null
               }
               lockedRequirementsSetId={v22EvalContext.lockedRequirementsSetId || null}
+              lockedRequirementsSetIds={v22EvalContext.lockedRequirementsSetIds || null}
               existingEvalResults={
                 // Phase 6.5+ #6: feed the modal the eval results already on
                 // this Claim so it can detect exact (Req Set, evidence) duplicates.
@@ -5655,6 +6204,20 @@ export default function V2App() {
                 }
                 return lookup
               })()}
+              // Phase 13 (#168): existing PoEs the active actor owns on
+              // this Claim. The modal's submit-time gate consults this
+              // list to block submissions whose (Asset set, RS) combo
+              // is already finalized as a Proof of Evaluation.
+              existingPoEs={
+                (v22View?.proofsOfEvaluation || [])
+                  .filter((poe) => poe.claimId === claim.id && poe.owner === activeRole.party)
+                  .map((poe) => ({
+                    id: poe.id,
+                    name: poe.name,
+                    requirementsSetIds: [...(poe.requirementsSetIds || [])],
+                    assetSnapshot: [...(poe.assetSnapshot || [])],
+                  }))
+              }
             />
           )
         })()}
@@ -5764,9 +6327,13 @@ export default function V2App() {
               label: f.name,
               parseTemplateName: pr.templateName,
             })))
-          const candidateEvalResults = (v22View?.evaluationResults || [])
-            .filter(er => er.claimId === da.subject.id)
-            .map(er => ({ id: er.id, name: er.requirementsSet?.name || er.id }))
+          // Phase 13 (#168): proof-only Claim DAs now disclose PoEs (which
+          // wrap Eval Results) instead of individual Eval Results. Picker
+          // candidates are the active PoEs that wrap evaluations of this
+          // Claim — owned by the DA grantor (the disclosing actor).
+          const candidatePoEs = (v22View?.proofsOfEvaluation || [])
+            .filter(poe => poe.claimId === da.subject.id && poe.owner === da.grantor.party)
+            .map(poe => ({ id: poe.id, name: poe.name }))
           // §11.2: items already evaluated (referenced by an active eval result)
           // cannot be removed. Compute lock sets per scope dimension.
           const evaluatedAssets = new Set(
@@ -5775,23 +6342,82 @@ export default function V2App() {
               .flatMap(er => er.evidenceUsed || []),
           )
           const evaluatedFields = new Set() // V2.1 evals don't track field provenance; safe to leave empty for Phase 6
-          const evaluatedEvals = new Set(
-            (v22View?.evaluationResults || [])
-              .filter(er => er.claimId === da.subject.id && er.status !== 'superseded')
-              .map(er => er.id),
-          )
+          // For PoE scope: any PoE currently in the DA's scope.poeIds is
+          // locked once it's been finalized (PoE creation is terminal).
+          const lockedPoEs = new Set(da.scope?.poeIds || [])
           return (
             <AmendDisclosureModal
               agreement={da}
               claim={claim}
               candidateAssets={candidateAssets}
               candidateFields={candidateFields}
-              candidateEvalResults={candidateEvalResults}
+              candidatePoEs={candidatePoEs}
               lockedAssetIds={Array.from(evaluatedAssets).filter(id => (da.scope?.assetIds || []).includes(id))}
               lockedFieldIds={Array.from(evaluatedFields)}
-              lockedEvalResultIds={Array.from(evaluatedEvals).filter(id => (da.scope?.evaluationResultIds || []).includes(id))}
+              lockedPoeIds={Array.from(lockedPoEs)}
               onSubmit={handleV22AmendDisclosureSubmit}
               onClose={() => setV22AmendingDaId(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 13.1 (#168a): Create Proof of Evaluation modal. 1:1 wrap —
+            wraps exactly the targeted Eval Result (which may itself bundle
+            multiple Requirements Sets via Phase 13.1's flat results[]). No
+            batch-sibling walk; the prior multi-Eval-Result-batch concept
+            is retired. */}
+        {v22CreatingPoEContext && (() => {
+          const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const evalResult = (merged.evaluationResults || []).find((er) => er.id === v22CreatingPoEContext.evalResultId)
+          if (!evalResult) return null
+          const claim = (merged.claims || []).find((c) => c.id === evalResult.claimId)
+          return (
+            <CreatePoEModal
+              evalResult={evalResult}
+              claim={claim}
+              onConfirm={handleV22CreatePoE}
+              onClose={() => setV22CreatingPoEContext(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 14.1 (#169 part 2): Issue Badge modal. Two-step picker +
+            description. Self-issuance is gated upstream (entry-point hides
+            the button) and additionally guarded inside the modal. */}
+        {v22IssueBadgeContext && (() => {
+          const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const targetClaim = (merged.claims || []).find((c) => c.id === v22IssueBadgeContext.targetClaimId)
+          if (!targetClaim) return null
+          return (
+            <IssueBadgeModal
+              targetClaim={{
+                id: targetClaim.id,
+                name: targetClaim.name,
+                ownerParty: targetClaim.owner || targetClaim.ownerParty,
+              }}
+              activeParty={activeRole.party}
+              badgeTemplates={badgeTemplates}
+              onIssue={handleV22IssueBadge}
+              onClose={() => setV22IssueBadgeContext(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 14.1 (#169 part 2), corrected 14.2: Revoke Badge modal. */}
+        {v22RevokeBadgeContext && (() => {
+          const issuance = badgeIssuances.find((b) => b.id === v22RevokeBadgeContext.badgeIssuanceId)
+          if (!issuance) return null
+          const template = badgeTemplates.find((t) => t.id === issuance.badgeTemplateId)
+          const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const targetClaim = (merged.claims || []).find((c) => c.id === issuance.targetClaimId)
+          const recipientParty = targetClaim?.owner || targetClaim?.ownerParty
+          return (
+            <RevokeBadgeModal
+              issuance={issuance}
+              badgeTemplate={template}
+              recipientParty={recipientParty}
+              onRevoke={handleV22RevokeBadge}
+              onClose={() => setV22RevokeBadgeContext(null)}
             />
           )
         })()}
@@ -5865,6 +6491,11 @@ export default function V2App() {
                 name: v22ParsingAsset.name,
                 owner: v22ParsingAsset.owner,
                 ownerDot: v22ParsingAsset.dot,
+                // Phase 12.4 (#171): file + registrationDate feed the
+                // left-panel AssetEvidenceViewer (parse is owner-only,
+                // so disclosure-type is implicitly 'owner').
+                file: v22ParsingAsset.v22Artifact?.file || v22ParsingAsset.file,
+                registrationDate: v22ParsingAsset.v22Artifact?.registrationDate || v22ParsingAsset.registrationDate,
               }}
               availableTemplates={pepTemplates}
               existingParseResultIds={existingParseResultTemplateIds}
@@ -6118,6 +6749,11 @@ export default function V2App() {
             schema={v22ExpandedArtifact.schema}
             disclosureType={v22ExpandedArtifact.disclosureType}
             disclosedFields={v22ExpandedArtifact.disclosedFields}
+            wrappedEvalResult={v22ExpandedArtifact.wrappedEvalResult}
+            provenanceChain={v22ExpandedArtifact.provenanceChain}
+            onSelectEvalResult={v22ExpandedArtifact.onSelectEvalResult}
+            referencedRequirementSets={v22ExpandedArtifact.referencedRequirementSets}
+            badgeIssuanceContext={v22ExpandedArtifact.badgeIssuanceContext}
             onClose={() => setV22ExpandedArtifact(null)}
           />
         )}
@@ -6560,14 +7196,17 @@ export default function V2App() {
                     toRsId: row.latestVersionId,
                   })
                 }}
-                onSelectEvalResult={(er) => {
-                  // Phase 11D.3: pan to the Eval Result node and open its
-                  // Detail Panel (replaces the Claim panel since selection
-                  // changes).
-                  setSel(er.id)
+                onSelectEvalResult={(arg) => {
+                  // Phase 11D.3 + Phase 13.2 (#177): used by both
+                  // V22ClaimPanel (which calls with the full Eval Result
+                  // object) and V22PoEPanel's Evaluation Provenance rows
+                  // (which call with the string id). Accept both shapes.
+                  const erId = typeof arg === 'string' ? arg : arg?.id
+                  if (!erId) return
+                  setSel(erId)
                   setForcePanelTab(null)
                   setForceExpandSda(null)
-                  setV22PanToClaimId(er.id)
+                  setV22PanToClaimId(erId)
                 }}
                 // Phase 11B: open the ExpandedArtifactModal for an Asset row.
                 onExpandAsset={(row) => {
@@ -6583,6 +7222,65 @@ export default function V2App() {
                     })
                   } else {
                     setV22ExpandedArtifact({ artifact: row, schema: 'asset' })
+                  }
+                }}
+                // Phase 13.4 (#175): top-level Expand affordance for Claim,
+                // Eval Result, PoE, and Parse Result Detail Panels. The
+                // panel sub-components call this with their own artifact;
+                // here we branch by node.v22Type to choose the modal schema
+                // and resolve any per-type extras (wrapped Eval Result +
+                // provenance chain for PoE).
+                onExpand={(artifact) => {
+                  const t = node.v22Type
+                  if (t === 'CLAIM') {
+                    setV22ExpandedArtifact({ artifact, schema: 'claim' })
+                  } else if (t === 'EVAL RESULT') {
+                    setV22ExpandedArtifact({ artifact, schema: 'eval-output' })
+                  } else if (t === 'PROOF OF EVALUATION') {
+                    const wrappedId = artifact?.wrappedEvalResultId
+                    const erList = sharedForPanel.evaluationResults || []
+                    const wrappedEvalResult = wrappedId ? erList.find((e) => e.id === wrappedId) : null
+                    // Reuse the same provenance walk the PoE panel uses.
+                    const provenanceChain = (() => {
+                      if (!wrappedId) return []
+                      const erById = new Map(erList.map((er) => [er.id, er]))
+                      const reverseChain = []
+                      let cursorId = wrappedId
+                      const seen = new Set()
+                      while (cursorId && !seen.has(cursorId)) {
+                        seen.add(cursorId)
+                        const er = erById.get(cursorId)
+                        if (!er) break
+                        const rsList = er.requirementsSets || (er.requirementsSet ? [er.requirementsSet] : [])
+                        const name = rsList.length === 1
+                          ? rsList[0].name
+                          : rsList.length > 1 ? `${rsList[0].name} (+${rsList.length - 1} more)`
+                            : er.id
+                        reverseChain.push({
+                          id: er.id,
+                          name,
+                          status: er.status,
+                          evaluationDate: er.evaluationDate,
+                        })
+                        cursorId = er.priorEvalResultId
+                      }
+                      return reverseChain.reverse()
+                    })()
+                    setV22ExpandedArtifact({
+                      artifact, schema: 'poe',
+                      wrappedEvalResult,
+                      provenanceChain,
+                      onSelectEvalResult: (erId) => {
+                        setSel(erId)
+                        setForcePanelTab(null)
+                        setForceExpandSda(null)
+                        setV22PanToClaimId(erId)
+                      },
+                    })
+                  } else if (t === 'PARSE RESULT') {
+                    setV22ExpandedArtifact({ artifact, schema: 'parse-output' })
+                  } else if (t === 'ASSET') {
+                    setV22ExpandedArtifact({ artifact, schema: 'asset' })
                   }
                 }}
                 evaluationResultsForClaim={evaluationResultsForClaim}
@@ -6627,14 +7325,90 @@ export default function V2App() {
                   const er = node.v22Artifact
                   if (!er) return
                   const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
+                  // Phase 13.2: re-run carries forward EVERY RS in the prior
+                  // Eval Result's bundle, not just the first. The picker
+                  // pre-checks and locks all of them; user can add additional
+                  // RSes to broaden scope but can't unlock the carried set.
+                  const lockedRsIds = (er.requirementsSets || []).map((rs) => rs.id)
                   setV22EvalContext({
                     evaluationAgreementId: ea ? ea.id : null,
                     claimId: er.claimId,
                     selfEvaluation: !ea,
-                    lockedRequirementsSetId: er.requirementsSet?.id || null,
+                    lockedRequirementsSetIds: lockedRsIds.length > 0 ? lockedRsIds : null,
+                    lockedRequirementsSetId: lockedRsIds.length === 1 ? lockedRsIds[0] : null,
                     priorActiveResultId: er.id,
                   })
                 }}
+                // Phase 13 (#168): Create-PoE entry from the Eval Result
+                // panel footer. Hidden when the Eval Result is already
+                // wrapped (`node._alreadyWrapped` flag stamped above).
+                onCreatePoE={node.v22Type === 'EVAL RESULT' && node.owner === activeRole.party && !node._alreadyWrapped
+                  ? (er) => setV22CreatingPoEContext({ evalResultId: er?.id || node.id })
+                  : undefined}
+                // Phase 13 (#168): PoE panel resolution callbacks. Resolve
+                // wrapped Eval Result names + source Claim name from the
+                // merged shared dataset; click handlers route to setSel for
+                // navigation. Phase 13.4 (#175) dedup: `resolveClaimName`
+                // and `onSelectEvalResult` are wired earlier in this same
+                // mount and shared across V22ClaimPanel + V22PoEPanel —
+                // duplicates here would shadow the earlier handlers.
+                resolveEvalResultName={(erId) => {
+                  const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                  const er = merged.evaluationResults.find((e) => e.id === erId)
+                  if (!er) return erId
+                  const rsList = er.requirementsSets || []
+                  if (rsList.length === 1) return rsList[0].name
+                  if (rsList.length > 1) return `${rsList[0].name} (+${rsList.length - 1} more)`
+                  return er.requirementsSet?.name || erId
+                }}
+                resolveDaSummary={(da) => `${da.granteeParty || da.grantee?.party || '?'} · ${da.type || '?'}`}
+                onSelectClaim={(claimId) => { setSel(claimId); setV22PanToClaimId(claimId) }}
+                onSelectDa={(daId) => { setOpenAgreement({ kind: 'disclosure', disclosureAgreementId: daId }) }}
+                disclosingAgreements={node.v22Type === 'PROOF OF EVALUATION'
+                  ? (v22View?.disclosureAgreements || []).filter(
+                      (da) => Array.isArray(da.scope?.poeIds) && da.scope.poeIds.includes(node.id)
+                        && !da._declineMeta && !da._revokedMeta && da.type !== 'provisional',
+                    ).map((da) => ({
+                      id: da.id,
+                      granteeParty: da.grantee?.party,
+                      type: da.type,
+                      status: da.status,
+                    }))
+                  : []
+                }
+                // Phase 13.2 (#177): "Evaluation Provenance" chain for the
+                // PoE panel. Walk priorEvalResultId from the wrapped Eval
+                // Result back to the chain origin; emit oldest-first.
+                provenanceChain={(() => {
+                  if (node.v22Type !== 'PROOF OF EVALUATION') return []
+                  const poe = node.v22Artifact
+                  const wrappedId = poe?.wrappedEvalResultId
+                  if (!wrappedId) return []
+                  const erList = sharedForPanel.evaluationResults || []
+                  const erById = new Map(erList.map((er) => [er.id, er]))
+                  const reverseChain = []
+                  let cursorId = wrappedId
+                  const seen = new Set()
+                  while (cursorId && !seen.has(cursorId)) {
+                    seen.add(cursorId)
+                    const er = erById.get(cursorId)
+                    if (!er) break
+                    const rsList = er.requirementsSets || (er.requirementsSet ? [er.requirementsSet] : [])
+                    const name = rsList.length === 1
+                      ? rsList[0].name
+                      : rsList.length > 1 ? `${rsList[0].name} (+${rsList.length - 1} more)`
+                        : er.id
+                    reverseChain.push({
+                      id: er.id,
+                      name,
+                      status: er.status,
+                      evaluationDate: er.evaluationDate,
+                    })
+                    cursorId = er.priorEvalResultId
+                  }
+                  // Reverse so the oldest-first ordering reads as a timeline.
+                  return reverseChain.reverse()
+                })()}
                 // Phase 9D.1.3 Fix 6: orphan detection for Eval Result panel.
                 // An ER is orphaned when its backing EA is no longer in the
                 // active view — either revoked or already dismissed. Self-
@@ -6650,42 +7424,37 @@ export default function V2App() {
                   return !ea
                 })()}
                 onDismissOrphanedEvalResult={() => setV22DismissingEvalResult(node.v22Artifact || null)}
+                // Phase 13.1 (#168a): Re-Run gating moves from submit-time to
+                // entry-point. The Detail Panel footer shows Re-Run disabled
+                // with a tooltip when the Eval Result is in a PoE-terminated
+                // chain. Action-bar Re-Run is hidden via _alreadyWrapped.
+                isPoeTerminated={node.v22Type === 'EVAL RESULT' && !!node._alreadyWrapped}
+                canRerun={node.v22Type !== 'EVAL RESULT' || node._canRerun !== false}
                 // Phase 11D.3: linked Claim name for Eval Result panels.
                 // Resolves the ER's claimId against the merged dataset so
                 // proof-only grantees can see what the ER evaluates.
                 linkedClaimName={node.v22Type === 'EVAL RESULT' && node.v22Artifact?.claimId
                   ? (sharedForPanel.claims.find((c) => c.id === node.v22Artifact.claimId)?.name || null)
                   : null}
-                // Phase 12.2 (#121): sibling Eval Results in the same batch.
-                // Phase 12.3 (Bug C): also include the supersession successor
-                // when this Eval Result is superseded — the V22EvalResultPanel's
-                // Supersession section uses the same lookup to render a
-                // clickable row, and the successor may live outside this
-                // batch (re-runs typically generate a new batchId).
+                // Phase 13.1 (#168a): the Phase 12.2 batch concept is
+                // retired — siblingEvalResults now carries only the
+                // supersession successor (when this Eval Result is
+                // superseded). The V22EvalResultPanel uses this lookup to
+                // render the Supersession row clickable.
                 siblingEvalResults={(() => {
                   if (node.v22Type !== 'EVAL RESULT') return []
                   const er = node.v22Artifact
                   const all = (sharedForPanel.evaluationResults || [])
                   const out = []
-                  if (er?.batchId) {
-                    for (const s of all) {
-                      if (s.batchId === er.batchId && s.id !== er.id) {
-                        out.push({
-                          id: s.id,
-                          name: s.requirementsSet?.name || s.id,
-                          status: s.status,
-                        })
-                      }
-                    }
-                  }
-                  if (er?.supersededBy && !out.some((x) => x.id === er.supersededBy)) {
+                  if (er?.supersededBy) {
                     const successor = all.find((s) => s.id === er.supersededBy)
                     if (successor) {
-                      out.push({
-                        id: successor.id,
-                        name: successor.requirementsSet?.name || successor.id,
-                        status: successor.status,
-                      })
+                      const rsList = successor.requirementsSets || []
+                      const name = rsList.length === 1
+                        ? rsList[0].name
+                        : rsList.length > 1 ? `${rsList[0].name} (+${rsList.length - 1} more)`
+                          : successor.requirementsSet?.name || successor.id
+                      out.push({ id: successor.id, name, status: successor.status })
                     }
                   }
                   return out
@@ -6745,6 +7514,92 @@ export default function V2App() {
                 expandedRevokedDaId={expandedRevokedDaId}
                 expandedRevokedDaInfo={expandedRevokedDaInfo}
                 onDismissExpandedRevokedDa={handleV22DismissRevokedDaGrantorSide}
+                // Phase 14.1 (#169 part 2), corrected Phase 14.2 (#169a):
+                // Badge surfaces — Claim is the canonical target. PoE-side
+                // badges derive via aggregation; Claim-side badges are
+                // direct lookups; Actor-side walks via Claim ownership.
+                badgesForPoE={(() => {
+                  if (node.v22Type !== 'PROOF OF EVALUATION') return []
+                  const allErs = v22View?.evaluationResults || []
+                  const allPoEs = v22View?.proofsOfEvaluation || []
+                  return getBadgesForPoE(node.id, allErs, allPoEs, badgeIssuances)
+                })()}
+                badgesForClaim={(() => {
+                  if (node.v22Type !== 'CLAIM') return []
+                  return getBadgesForClaim(node.id, badgeIssuances)
+                })()}
+                badgesForActor={(() => {
+                  if (node.v22Type !== 'ACTOR') return []
+                  // Use the merged shared dataset so the actor sees badges
+                  // received against all of their Claims, not just the
+                  // ones currently on this canvas.
+                  const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                  return getBadgesForRecipient(node.name, badgeIssuances, merged.claims || [])
+                })()}
+                // Phase 14.2 (#169a): subtext on the PoE Badges section
+                // reads "Badges earned by [Claim name]". Caller resolves
+                // the parent Claim's name + id for the click handler.
+                poeBadgesParentClaim={(() => {
+                  if (node.v22Type !== 'PROOF OF EVALUATION') return null
+                  const poe = node.v22Artifact
+                  if (!poe?.claimId) return null
+                  const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                  const claim = (merged.claims || []).find((c) => c.id === poe.claimId)
+                  if (!claim) return null
+                  return { id: claim.id, name: claim.name, ownerParty: claim.owner || claim.ownerParty }
+                })()}
+                onSelectClaimFromBadgeSubtext={(claimId) => {
+                  setSel(claimId)
+                  setForcePanelTab(null)
+                  setForceExpandSda(null)
+                  setV22PanToClaimId(claimId)
+                }}
+                badgeTemplateLookup={(() => {
+                  const lookup = {}
+                  for (const t of badgeTemplates) lookup[t.id] = t
+                  return lookup
+                })()}
+                // Phase 14.2: Issue Badge gate is `activeParty !== claim.ownerParty`.
+                // PoE entry: derive Claim from PoE.claimId. Claim entry: own claim id.
+                onIssueBadge={(() => {
+                  if (node.v22Type === 'PROOF OF EVALUATION') {
+                    const poe = node.v22Artifact
+                    if (!poe?.claimId) return undefined
+                    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                    const claim = (merged.claims || []).find((c) => c.id === poe.claimId)
+                    if (!claim) return undefined
+                    if (claim.owner === activeRole.party) return undefined  // self-issuance gate
+                    return () => setV22IssueBadgeContext({ targetClaimId: claim.id })
+                  }
+                  if (node.v22Type === 'CLAIM') {
+                    if (node.owner === activeRole.party) return undefined  // self-issuance gate
+                    return () => setV22IssueBadgeContext({ targetClaimId: node.id })
+                  }
+                  return undefined
+                })()}
+                // Phase 14.2 (#169b): Badge Issuance row click opens the
+                // expand modal directly (no longer a standalone Detail
+                // Panel — modals over Detail Panels is the right pattern,
+                // Detail Panels over Detail Panels is not).
+                onSelectBadgeIssuance={(badgeIssuanceId) => {
+                  const issuance = badgeIssuances.find((b) => b.id === badgeIssuanceId)
+                  if (!issuance) return
+                  const template = badgeTemplates.find((t) => t.id === issuance.badgeTemplateId) || null
+                  const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+                  const targetClaim = (merged.claims || []).find((c) => c.id === issuance.targetClaimId) || null
+                  setV22ExpandedArtifact({
+                    artifact: issuance,
+                    schema: 'badge-issuance',
+                    badgeIssuanceContext: {
+                      template,
+                      recipientParty: targetClaim?.owner || targetClaim?.ownerParty || null,
+                      targetClaimName: targetClaim?.name || issuance.targetClaimId,
+                      allClaims: merged.claims || [],
+                      allBadgeTemplates: badgeTemplates,
+                    },
+                  })
+                }}
+                onRevokeBadge={(badgeIssuanceId) => setV22RevokeBadgeContext({ badgeIssuanceId })}
               />
             </div>
           )
@@ -6789,7 +7644,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.12.3 &middot; Changelog
+          v0.14.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -6836,6 +7691,129 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.14.5', date: '2026-05-06', label: 'Phase 14.5', items: [
+                  '#176c: Badge chip container visual tuning. Each shield gains a 2px halo stroked in the rectangle\'s exact background color, so adjacent overlapping shields now show the recognizable negative-space cut that reads as the classic overlapping-tokens look. Shields shrink 20px → 18px (size after halo), STEP_IDLE 15 → 12 (more pronounced overlap), STEP_FAN drops to 22 (matches 18 + 4px gap). Container height adjusts 26px → 24px. Shields vertically centered against the rectangle midline. Single-shield case (no overflow): the rectangle becomes a 24×24 square with the lone shield centered both horizontally and vertically. Container background, border, shadow, fan-out animation timing, and tooltip behavior unchanged.',
+                ]},
+                { version: '0.14.4', date: '2026-05-05', label: 'Phase 14.4', items: [
+                  '#176b: Badge chip container visual polish. Dropped the circular wrapper around each shield and the pill wrapper around the "+N" indicator — shield silhouettes now render directly inside the rounded rectangle, and "+N" renders as plain indigo monospaced text. Shields scaled up from 16px to 20px to fill the freed space; the rectangle\'s height grows accordingly (22px → 26px). STEP values rescale proportionally so the 25%-overlap idle and 4px-gap fan-out feel balanced at the new size. Container background, border, shadow, fan-out animation timing (180ms ease-out), and tooltip behavior unchanged.',
+                ]},
+                { version: '0.14.3', date: '2026-05-05', label: 'Phase 14.3', items: [
+                  'Bug fix: Issue Badge picker scope. Previously the picker showed Badge Templates owned by every actor (sectioned by party); other actors\' templates would render but submission would have been a violation of the per-template ownership rule. The picker now restricts strictly to the current actor\'s own templates. Other actors\' templates remain visible in the Library tab — they\'re simply not issuable cross-actor.',
+                  '#176a: Badge chip container refactored from independent absolute-positioned chips + a separate "+N" pill to a single rounded-rectangle container. Same visual treatment as the NEW pill (4px border-radius, indigo-tinted background, subtle shadow). Cleaner read at idle.',
+                  '#176a: Hover fan-out behavior. When a card has 2+ badges, hovering the chip rectangle expands it leftward; the rightmost shield + "+N" stay anchored, previously-overlapped shields slide left to un-overlap with 4px spacing. 180ms ease-out animation on both container width + per-shield position.',
+                  '#176a: Per-shield tooltip on hover. Each shield in the fanned-out rectangle reveals a tooltip with the badge name + version (line 1) and the issuer party (line 2). Auto-flips below the shield when insufficient vertical space above (e.g., near the canvas top edge).',
+                  '#176a: "+N" tooltip on hover. Listing of buried badges (those past the visible 3) — one row per badge, "Badge Name · Issuer Party" format. Same auto-flip behavior.',
+                  '#176a: Click guard. Clicking inside the chip rectangle background no longer triggers card-level interactions (selection, drag).',
+                  'Backlog hygiene: Netgraph cleanup item (#4) gains "Child-layer burial rules (Phase 14.3 design notes)" sub-section capturing burial candidates per node type + the Cascading Disclosures (#26) gating dependency.',
+                ]},
+                { version: '0.14.2', date: '2026-05-07', label: 'Phase 14.2', items: [
+                  'Architectural correction (#169a): badges target Claims, not PoEs. The Claim is what earns the badge; PoEs that wrap qualifying Eval Results display the badge via aggregation. Enables third-party endorsements on self-evaluations (e.g. OSHA → Alice\'s self-evaluated Claim).',
+                  'Issuance gate is now `issuerParty !== claim.ownerParty`. Visible from PoE Detail Panel footer + Claim Detail Panel footer + PoE action bar + Claim action bar. Self-issuance (Claim owner endorsing own Claim) is blocked at every entry point.',
+                  'Issuance entry points expand to Claim Detail Panel + Claim node action bar. Both the PoE-anchored and the Claim-anchored entry resolve to the same target Claim before the modal opens.',
+                  'Detail Panel sections updated: PoE Badges section now derives from the parent Claim ("Badges earned by [Claim name]" subtext clickable to navigate). Claim Badges section is the canonical surface (direct lookup). Actor Badges Received walks via Claim ownership.',
+                  'Notification recipient routing fixed: `v22-badge-issued`, `v22-badge-revoked`, and `v22-badge-template-new-version` all route to the Claim owner (was: PoE owner). Same recipient in most existing scenarios; OSHA-style cases now route correctly. Badge-issued click → Claim Detail Panel; badge-revoked click → Badge Issuance expand modal.',
+                  'Regression fix: PoE creation now fires `v22-poe-created` notification on the Claim owner\'s inbox. Phase 13.1 wired the visibility (proof-of-eval DA grantee=Claim owner makes Bob\'s PoE appear on Alice\'s canvas — this verifiably worked) but the notification was missing. The PoE visibility itself was never broken; only the inbox cue was.',
+                  'Architectural correction (#169b): standalone Badge Issuance Detail Panel removed. Badge Issuance row clicks now open the Badge Issuance expand modal directly. Detail Panel-over-Detail Panel violated the prototype\'s overlay conventions; modal-over-Detail-Panel is the correct pattern.',
+                  'Filed #182: Amend Claim to include a PoE as an Asset (deferred). Use case: third-party reviewer (OSHA) verifies a self-evaluation by receiving full disclosure to a Claim that includes the self-PoE in its Asset bundle.',
+                ]},
+                { version: '0.14.1', date: '2026-05-06', label: 'Phase 14.1', items: [
+                  'New (#169 part 2): Badge Issuance artifact. Versioned, network-wide endorsements that reference a Proof of Evaluation + a specific Badge Template version. Recipient is derived from the target PoE owner — single source of truth.',
+                  'Self-issuance is blocked: a user cannot issue a Badge against their own Proof of Evaluation. Gated at the action bar, the PoE Detail Panel footer, and inside IssueBadgeModal as a final guard.',
+                  'New: two-step Issue Badge modal — sectioned Badge Template picker (My Badges + per-Actor) with latest-version SUGGESTED auto-promotion, then optional message → Confirm. Single-step Revoke Badge modal with required reason.',
+                  'New: three notification types. v22-badge-issued (recipient sees the new badge, click → target PoE Detail Panel). v22-badge-revoked (recipient sees revocation reason, click → target PoE). v22-badge-template-new-version (informational fan-out to every recipient with an active badge of any prior version of the same lineage).',
+                  'New: badge chips on PoE + Claim node cards. Chips render top-right corner, to the LEFT of any NEW badge. Up to 3 visible side-by-side at 25% horizontal overlap; +N indicator on the right when total > 3. Visible at full-card and mini-card LODs.',
+                  'New: PoE Detail Panel Badges section is now populated (was a placeholder since Phase 13). Each row: shield + name + version + issuer + creation date. Issuer-of-row sees a Revoke affordance. Click → Badge Issuance Detail Panel.',
+                  'New: Claim Detail Panel Badges section. Aggregated walk: claim → eval results → PoEs → badges. Section omitted when zero badges.',
+                  'New: Actor Detail Panel Badges Received section. Filtered to issuances where this actor\'s PoEs are the target (issued-by-this-actor badges are NOT shown here).',
+                  'New: Badge Issuance Detail Panel — Issuer / Recipient / Target PoE / Badge Template / Description sections + Revocation context (red-tinted block when status: revoked) + DOT. Footer "Revoke Badge" button visible only to the issuer.',
+                  'New: Active Issuances section in Badge Template Detail Panel (Phase 14.0 placeholder → populated). Shows issuances of THIS specific version + subtext line "X total active issuances across this badge\'s history" rolling up the lineage.',
+                  'New: Badge Issuance expand modal (Output + JSON tabs per Phase 13.4 convention). Output renders header + Parties + References + Description + Revocation context. JSON record carries computed fields (recipientDid, recipientParty, badgeTemplateLineageId) clearly marked as derived from the canonical references.',
+                  'Architectural: getJsonRecordFor dispatcher accepts an optional context parameter for cross-artifact reference resolution. Used by Badge Issuance for derived recipient + lineage fields. Future artifacts that need cross-references can use the same hook without re-architecting.',
+                  'Seed data: 5 Badge Issuances exercising display surfaces. Bob → Carol\'s PoE on PRM Claim (Aerospace Grade A v1). Carol → Bob\'s PoE on PRM Claim (Audit Verified). Alice → Bob\'s PoE on PRM Claim (Component Quality Assured). Alice → Carol\'s PoE on PRM Claim. Bob → Carol\'s PoE on PRM Claim (Audit Verified, second). The PRM Claim aggregates 4+ badges so the Claim card chip shows 3 chips + +1 overflow on first load.',
+                ]},
+                { version: '0.14.0', date: '2026-05-06', label: 'Phase 14.0', items: [
+                  'New (#169 part 1): Badge Template artifact. Versioned, network-wide Library artifact owned by an Actor; references Requirements Sets it expects to be evaluated against. Phase 14.1 will layer Badge Issuance + display surfaces on top.',
+                  'Library: 4th tab "Badges" appended after Published Requirements. Sectioned list shows your Badge Templates first (My Badges), then each other Actor\'s templates under their party heading.',
+                  'Library: + Create new badge button gives you an inline form (name + description + multi-select Requirements Set picker); RS picker draws from your own RSes plus all Published Standards. At least one RS required to save.',
+                  'Versioning: New Version button on your own Badge Templates pre-fills the form with prior values and locks the name. Save creates a new template with the same lineageId, version + 1, and updates the prior version\'s supersededBy. Both versions remain visible.',
+                  'Badge Templates have an Expand button on the right-panel detail view — opens the canonical Output / JSON tab modal (Phase 13.4 convention). Output: header + description + referenced RS table. JSON: realistic distributed-storage record (references by ID).',
+                  'New (#181 filed): User-uploaded Badge Template graphics deferred to a future phase. The shield silhouette is the Phase 14 placeholder.',
+                  'Polish: Claim Detail Panel — Referenced Assets rows are now clickable. Click pans/zooms the canvas to the Asset and selects it.',
+                  'Polish: Claim Detail Panel — Referenced Standards section replaces the "PUBLIC" text badge with the canonical globe icon used elsewhere (LibraryModal, RequirementsPanel published rows, BadgesPanel). Hovering shows a "Published Standard" tooltip.',
+                ]},
+                { version: '0.13.4', date: '2026-05-05', label: 'Phase 13.4', items: [
+                  'New (#175): Expand modals for Eval Result and Proof of Evaluation. Both Detail Panels now carry an Expand button in the header; the modal opens at 1280px wide with the canonical [Output] [JSON] two-tab convention.',
+                  'New: Eval Result expand Output renders a header (name + minibar + aggregate + evaluation date + evaluator), then a per-Requirements-Set section with a results table — Requirement, Value, Status (colored chip), Confidence (level + percentage). N/A rows are dropped from display per Phase 13.2.',
+                  'New: PoE expand Output renders Section 1 (the wrapped Eval Result\'s Output content — same minibar + aggregate + per-RS results tables) and Section 2 (Evaluation Provenance — the full supersession chain, oldest-first, each row clickable to navigate to that Eval Result\'s Detail Panel).',
+                  'Convention: every artifact type\'s expand modal now carries a JSON tab rendering a realistic distributed-storage record — references are ID-only (a Claim\'s referencedAssetIds is `[\"asset-...\", ...]`, not embedded Asset objects). Selective Asset views still surface a disclosed-portion-only record so file metadata stays private.',
+                  'Convention: Asset / Claim / DA / EA / Parse Result expand modals\' first tab is now labeled "Output" (was a mix of "Asset Details" / unlabeled / etc.). Existing content is unchanged where the convention rename is the only delta; substantive Output for these types waits for the Detail Panel cleanup phase (#180).',
+                  'New: Claim and Disclosure Agreement Detail Panels now carry an Expand button in their header. Parse Result Detail Panel does too.',
+                  'Affordance: Both Output and JSON tab headers carry a "Download" button — disabled in 13.4 with the tooltip "Export coming soon." Wires up under #58 in a future phase. The affordance is in place so future callers don\'t restructure the modal.',
+                  'Refactor (latent dedup): two pre-existing duplicate JSX attributes on the V22NodeDetailPanel mount (`onSelectEvalResult` and `resolveClaimName`) were collapsed. The single `onSelectEvalResult` handler now accepts either an Eval Result object (V22ClaimPanel\'s usage) or a string id (V22PoEPanel\'s usage).',
+                ]},
+                { version: '0.13.3', date: '2026-05-05', label: 'Phase 13.3', items: [
+                  'Fix: Proof of Evaluation creation now reroutes the disclosure edge through the PoE node. Pre-13.3 the chain endpoint kept its direct ER → Claim edge alongside the new PoE-targeting DA, producing a parallel bypass. Now the path runs cleanly: Asset → ... → Latest ER → PoE → Claim with no parallel edges.',
+                  'New (#177a): Multi-column chain placement — Eval Result chains span columns by chain position. Asset → E0 → E1 → ... → Latest → PoE → Claim reads left-to-right on the evaluator\'s canvas; mirror order on the Claim owner\'s canvas. Globally aligned: column N is "chain position N" everywhere, not per-chain. Downstream columns (Pulled Claim, Pulled Asset, Public) shift right to accommodate longer chains.',
+                  'Tightening: Re-Run Evaluation now requires at least one Asset that wasn\'t in the prior evaluation\'s evidenceUsed. The action-bar Re-Run button hides when no new Assets exist; Detail Panel footer disables with tooltip "No new evidence to evaluate." Re-Run RS picker locks to the prior Eval Result\'s exact set — user can no longer expand selection.',
+                  'UX: Re-Run mode Step 1 — Asset accordion rows start collapsed (vs all-expanded for fresh evaluations). Newly-disclosed Assets (not in prior evidenceUsed) render a NEW badge in their row header.',
+                  'Visual: Superseded Eval Result cards now have opaque backgrounds. The grayscale filter still differentiates status; the canvas grid no longer shows through.',
+                  'UX: Run Evaluation Step 3 header reads "Evaluating [Claim label] by [Claim owner]" so the artifact + provenance context is visible during row review.',
+                  'UX: SUGGESTED badge hides on disabled / locked / PoE-blocked rows so the visual signal doesn\'t conflict with the unselectable state.',
+                  'UX: SUGGESTED badge auto-promotes to the latest version of an RS family. If the EA suggested v1 but v2 of the same lineage exists in the library, the badge surfaces on v2.',
+                  'Polish: PoE name format is now "Proof of [Claim label] Evaluation". The createdDate suffix is dropped — date stays in the data model and surfaces in the Detail Panel header.',
+                  'Polish: PoE Detail Panel body-section PIN row removed. The click-to-copy PIN badge in the panel header is now the canonical surface.',
+                  'New (#178): Run Evaluation RS picker is now a two-section accordion — "Your Requirements Sets" expanded by default, "Published Standards" collapsed by default. Published rows surface a globe icon + publishing actor inline.',
+                  'New (#179): Published Standards in the Library now show globe icons inline on left-panel rows; the right-panel header surfaces a prominent globe + publishing actor line.',
+                ]},
+                { version: '0.13.2', date: '2026-05-05', label: 'Phase 13.2', items: [
+                  'Fix: Re-Run Evaluation now carries forward EVERY Requirements Set from the prior Eval Result, not just one. The picker pre-checks and locks the carried-over set; you can still add additional Requirements Sets to broaden scope.',
+                  'New (#177): Eval Result supersession chains render as connected sequences on the netgraph. Re-runs read as `[Asset] → [Superseded Eval Result] → ... → [Latest Eval Result] → [Claim]`, with proof-only edges throughout. Superseded Eval Results no longer have their own edge to the Claim — only the latest does. PoE creation extends the chain: `... → [Latest Eval Result] → [PoE] → [Claim]`. Reverses left-to-right on the Claim owner\'s canvas.',
+                  'Architectural correction: Eval Result auto-disclosure DAs default to proof-only, not full. Both parties still see all evaluation results in Detail Panels — proof-only is the edge style + the discriminated-union subject discriminator, not a content restriction. Reflects the real-world supply-chain pattern where evaluation outcomes are shared without exposing the source documents.',
+                  'New (#176): Minibars (the SAT/UNSAT/MISSING health bar) restored on Claim cards (V2.1 carryover) and added to Eval Result + PoE cards. Same primitive at full-card and mini-card LODs. Claim Detail Panel header also gains the minibar.',
+                  'Refactor: Eval Result + PoE cards drop the prior text aggregates ("X SAT · Y UNSAT across N Requirements Sets") in favor of the minibar. The "across N Requirements Sets" suffix is gone from card displays.',
+                  'Refactor: N/A drops from displays (Eval Result Detail Panel header aggregate, per-row rendering, minibar segments). The data model still carries N/A status; it\'s just not visualized. Per-row N/A rows render dimmed so the structure stays visible.',
+                  'New (#177): PoE Detail Panel "Wrapped Eval Result" section renamed to "Evaluation Provenance". Lists the full supersession chain ending at the wrapped Eval Result, oldest first, with status badges and clickable rows for navigation.',
+                  'Demo data: Bob\'s VReg evaluation now ships as a 3-Eval-Result chain (V0 superseded by V1 superseded by V_main). Demonstrates chain rendering across multiple supersession steps.',
+                ]},
+                { version: '0.13.1', date: '2026-05-04', label: 'Phase 13.1', items: [
+                  'Fix: Save Evaluation Result no longer crashes. The Phase 13 grep-and-replace had renamed the proof-only DA factory parameter to `poeId` while the save-time call kept passing `evaluationResultId`. Phase 13.1 makes the factory a discriminated union: pass either `evaluationResultId` (auto-disclosure at save) or `poeId` (PoE-creation). The two shapes are distinguished by `subject.kind` downstream.',
+                  'Model correction (#168a): multi-Requirements-Set evaluation submissions produce ONE Eval Result bundling every selected RS, not N Eval Results sharing a `batchId`. The Phase 12.2 batch model is retired. Eval Results now carry `requirementsSets[]` (plural) + a flat `results[]` array where every row carries its own `requirementsSetId`. The Detail Panel renders Results grouped by RS with section headers and a single aggregate row "X SAT · Y UNSAT · Z MISSING · W N/A across N Requirements Sets". The Sibling Evaluations section is gone with the concept.',
+                  'Simplification: Proof of Evaluation now wraps exactly one Eval Result (1:1). The card body reads "X SAT · Y UNSAT · N RS" (no longer "Wraps N"). The PoE Detail Panel\'s "Wrapped Eval Result" section shows a single clickable row.',
+                  'New: clicking Create Proof of Evaluation now revokes the prior Eval-Result-targeting auto-disclosure DA (its edge unravels) and replaces it with a new PoE-targeting DA — Alice sees the transition animate on her canvas the moment Bob finalizes the proof.',
+                  'UX: Re-Run Evaluation gating moves from submit-time to entry-point. The action-bar Re-Run button hides when an Eval Result has been wrapped by a PoE; the Detail Panel footer keeps Re-Run visible-but-disabled with a tooltip explaining how to release the gate (modify evidence or pick a different RS). The RS picker on Run Evaluation disables PoE-covered Requirements Sets with a `PoE` chip + tooltip — the user can\'t even select them.',
+                  'UX: Run Evaluation step 3 header now reads "Reviewing [Claim name]" so the Claim context is visible during row review (matching step 1\'s wording style).',
+                  'UX: Double-clicking the rotating SAT/UNSAT/MISSING/N/A button no longer selects the label text.',
+                  'Demo data: two new unwrapped Eval Results — Bob on Alice\'s VReg Claim, Carol on Alice\'s EMI Shield Claim. Both show "Create Proof of Evaluation" as an action button on first interaction. The existing PRM Eval Results stay wrapped.',
+                  'ID hygiene: PoE / Eval Result / DA / EA seed identifiers regenerated to a content-addressed-style `[type]-[8-char-base32]` format. Actor names ("bob", "carol", etc.) no longer leak into seed IDs.',
+                ]},
+                { version: '0.13.0', date: '2026-05-04', label: 'Phase 13', items: [
+                  'New (#168): Proof of Evaluation (PoE) — a new first-class node type that wraps an active Eval Result batch (or a solo Eval Result). Created via a deliberate "Create Proof of Evaluation" action on the Eval Result card / Detail Panel footer. PoE creation finalizes the evaluation and terminates further evaluations on the same (Asset set, Requirements Set) combination by the same evaluator until the Claim\'s evidence changes.',
+                  'New: PoE node renders with PROOF OF EVALUATION type label, "Wraps N · X SAT · Y UNSAT" aggregate, and edges to each wrapped Eval Result.',
+                  'New: PoE Detail Panel — Owner, Source Claim (clickable), Wrapped Eval Results (clickable), Disclosures, Badges placeholder, DOT.',
+                  'Migration: proof-only Disclosure Agreements now target PoEs. The data field `scope.evaluationResultIds` was renamed to `scope.poeIds` across the codebase. Existing seed proof-only DAs were retroactively migrated to reference the wrapping PoE. Disclosing a PoE auto-discloses every wrapped Eval Result on the grantee\'s canvas (share-PoE-shares-all).',
+                  'Run Evaluation gate: when a PoE you own already wraps an evaluation against a selected Requirements Set covering the current Asset set (or a superset), the modal still opens but Save is blocked at submit time with a copy explaining the gate. Modify the Claim\'s evidence or pick a different RS to release.',
+                  'Fix (#173): collapsed Asset accordion rows in the Run Evaluation modal no longer appear to shrink when a sibling expands. Each card pinned to its natural height via flex-shrink: 0.',
+                ]},
+                { version: '0.12.7', date: '2026-05-04', label: 'Phase 12.7', items: [
+                  'Pivot (#171c): Asset accordion left panel restructured from Phase 12.6\'s split-container layout (capped row list + dedicated body) to a single overflow container with inline-expanded bodies. Scales correctly to arbitrary Asset counts — at 10+ Assets the previous capped row list became too cramped. Each Asset\'s body now sits directly below its row header in natural flow.',
+                  'Polish: inline-expanded body iframe sized at 480px (up from 12.5\'s 360px) for a more substantial preview now that only one Asset shows at a time. Single-expand semantics, accent-indigo treatment, default-first-expanded, and Parse Evidence height parity all preserved.',
+                ]},
+                { version: '0.12.6', date: '2026-05-04', label: 'Phase 12.6', items: [
+                  'Pivot (#171b): Asset accordion changed from multi-expand to single-expand. Only one Asset\'s evidence renders at a time — clicking a different row\'s header expands it and collapses the previous one. Click the currently-expanded row to fully collapse to header-only.',
+                  'New: the Asset row list is now a scroll container so many in-scope Assets remain navigable. Layout: row list capped at ~40% of column height with its own scroll, expanded body fills the rest.',
+                  'Fix: Parse Evidence left/right panel heights now parity. The expanded Asset evidence iframe stretches to fill remaining column height (was capped at 360px, leaving a ~48px shortfall on the left side).',
+                ]},
+                { version: '0.12.5', date: '2026-05-04', label: 'Phase 12.5', items: [
+                  'New (#171a): Run Evaluation and Parse Evidence modal left panels converted to V2.1 accordion pattern. Each Asset is a row that expands inline to show its evidence — all Assets are expanded by default so you can see everything at once, and you can collapse what you don\'t need. Multiple rows can be open at the same time.',
+                  'Fix: Run Evaluation right panel now scrolls properly. The previous per-Requirements-Set tiny scroll boxes (which didn\'t actually scroll) are replaced with a single scroll surface. Section headers stick to the top while their rows scroll past, so you always know which Requirements Set you\'re looking at.',
+                  'Polish: Parse Evidence right panel — helper text moved below the "Parse Template" title, template list scrolls when it grows, and the "Fields to extract" panel now fills the column height so it visually balances with the left panel.',
+                  'Filed #172: PDF annotation overlay (numbered evidence dots) — flagged as an end-of-Phase-12 assessment item (depends on real PDF.js integration #41).',
+                ]},
+                { version: '0.12.4', date: '2026-05-04', label: 'Phase 12.4', items: [
+                  'New (#171): the Run Evaluation modal grew a left-panel evidence viewer. Now you can see the underlying Asset file (or, for Selective Disclosure, the disclosed parsed-fields table) while curating per-requirement values on the right. Multi-Asset Claims get an Asset selector list at the top of the left panel — click a row to swap the viewer.',
+                  'New: V22ParseEvidenceModal got the same split-panel parity (per §17.1). The single source Asset shows in the selector with the AssetEvidenceViewer below it — same component now used in three places.',
+                  'Polish: Run Evaluation and Parse Evidence modals widen to ~1280px on desktop with a 1:1 column split. The modal width stays consistent across all three steps so the size doesn\'t jump as you progress.',
+                ]},
                 { version: '0.12.3', date: '2026-05-04', label: 'Phase 12.3', items: [
                   'New: Run Evaluation Requirements Set picker is now a checkbox multi-select. The "+ BATCH" chip mechanism is gone — every checked Set is treated equally; submit produces one Eval Result per checked Set, all sharing a batch id.',
                   'New: Review stage shows grouped requirement rows per selected Requirements Set, in the order you checked them. Submit-with-defaults works — AI-suggested values flow through unchanged for any Set you don\'t curate.',
@@ -7366,9 +8344,44 @@ export default function V2App() {
             pepTemplates={pepTemplates}
             requirementSets={requirementSets}
             publishedRequirementSets={publishedRequirementSets}
+            badgeTemplates={badgeTemplates}
+            badgeIssuances={badgeIssuances}
+            proofsOfEvaluation={(() => {
+              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              return merged.proofsOfEvaluation || []
+            })()}
+            allClaims={(() => {
+              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              return merged.claims || []
+            })()}
+            onSelectBadgeIssuance={(badgeIssuanceId) => {
+              // Phase 14.2: open the expand modal directly (was: standalone
+              // Detail Panel — removed in 14.2 (#169b)).
+              const issuance = badgeIssuances.find((b) => b.id === badgeIssuanceId)
+              if (!issuance) return
+              const template = badgeTemplates.find((t) => t.id === issuance.badgeTemplateId) || null
+              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              const targetClaim = (merged.claims || []).find((c) => c.id === issuance.targetClaimId) || null
+              setShowLibrary(false)
+              setLibraryInitialSetId(null)
+              setLibraryInitialTab(null)
+              setV22ExpandedArtifact({
+                artifact: issuance,
+                schema: 'badge-issuance',
+                badgeIssuanceContext: {
+                  template,
+                  recipientParty: targetClaim?.owner || targetClaim?.ownerParty || null,
+                  targetClaimName: targetClaim?.name || issuance.targetClaimId,
+                  allClaims: merged.claims || [],
+                  allBadgeTemplates: badgeTemplates,
+                },
+              })
+            }}
             onSavePepTemplate={handleSavePEPTemplate}
             onSaveRequirementSet={handleSaveRequirementSet}
             onPublishRequirementSet={handlePublishRequirementSet}
+            onSaveBadgeTemplate={handleSaveBadgeTemplate}
+            activeParty={activeRole.party}
             initialTab={libraryInitialTab || 'requirements'}
             initialSelectedId={libraryInitialSetId}
             onClose={closeLibrary}

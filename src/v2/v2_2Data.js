@@ -24,12 +24,45 @@ const claimUri = (id) => `provenance://claims/${id}`
 const disclosureAgreementUri = (id) => `provenance://agreements/${id}`
 const evaluationAgreementUri = (id) => `provenance://agreements/${id}`
 const evaluationResultUri = (id) => `provenance://artifacts/${id}`
+const poeUri = (id) => `provenance://poe/${id}`
 
 // Valid disclosure types per spec §4.2 (edge styling table).
 const DISCLOSURE_TYPES = new Set(['full', 'selective', 'proofonly', 'provisional', 'expired'])
 
 // Valid subject kinds per spec §10.4 (DA subject field).
-const SUBJECT_KINDS = new Set(['asset', 'claim', 'evalResult', 'parseResult'])
+const SUBJECT_KINDS = new Set(['asset', 'claim', 'evalResult', 'parseResult', 'poe'])
+
+// Phase 13.1 (#168a): content-addressed-style id format. Replaces the
+// `[type]-[party]-[claim]-NNN` legacy pattern with `[type]-[8-char-base32]`.
+// Actor names no longer leak into ids.
+const ID_BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567'
+function makeShortIdSuffix(seed) {
+  // Deterministic 8-char base32 — uses a hashed seed when supplied so the
+  // seed-construction pass produces stable ids across reloads, while
+  // runtime callers can pass `Date.now()` for entropy. Two independent
+  // FNV-1a streams (different offsets) advance separately to avoid the
+  // monotonic shift convergence that would otherwise repeat the last
+  // char across the lower bits.
+  let h1 = 2166136261 >>> 0
+  let h2 = 1597334677 >>> 0
+  const str = String(seed ?? Math.random())
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 16777619) >>> 0
+    h2 = Math.imul(h2 ^ c, 1597334677) >>> 0
+  }
+  let out = ''
+  for (let i = 0; i < 8; i += 1) {
+    out += ID_BASE32_ALPHABET[(h1 ^ h2) & 31]
+    // Re-mix both streams between characters.
+    h1 = Math.imul(h1 + i + 1, 16777619) >>> 0
+    h2 = Math.imul(h2 ^ (i + 0x9e3779b9), 2654435761) >>> 0
+  }
+  return out
+}
+export function makeArtifactId(prefix, seed) {
+  return `${prefix}-${makeShortIdSuffix(seed)}`
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOT (Data Object Title) — client canon X.1–X.10 / spec §2.4
@@ -483,6 +516,22 @@ export function isEvalResultStale(evalResult, claim) {
   return false
 }
 
+// Phase 13.3 (Step 2): Re-Run requires at least one new Asset that wasn't
+// in the prior Eval Result's `evidenceUsed`. Otherwise re-running against
+// the same evidence + same RSes would produce a duplicate evaluation.
+// `inScopeAssetIds` is the set of Asset ids the evaluator can actually
+// see for this Claim (caller computes via DA scope + Claim references).
+// Returns true iff at least one in-scope Asset id is NOT in the prior
+// `evidenceUsed`.
+export function hasNewAssetsForRerun(inScopeAssetIds, priorEvalResult) {
+  if (!priorEvalResult) return false
+  const prior = new Set(priorEvalResult.evidenceUsed || [])
+  for (const aid of (inScopeAssetIds || [])) {
+    if (!prior.has(aid)) return true
+  }
+  return false
+}
+
 // Phase 12.2 (#117): compute the diff between a prior Eval Result's
 // `evidenceUsed` snapshot and the current Claim's effective in-scope set.
 // Used by the Run Evaluation modal banner and the new Eval Result Detail
@@ -620,7 +669,15 @@ export function makeDisclosureAgreement({
     scope: {
       assetIds: scope.assetIds ? [...scope.assetIds] : null,
       fieldIds: scope.fieldIds ? [...scope.fieldIds] : null,
+      // Phase 13.1 (#168a): proof-only DAs are a discriminated union.
+      // `subject.kind === 'evalResult'` carries `evaluationResultIds`
+      // (auto-disclosure DA created at Eval Result save time, evaluator →
+      // claim owner); `subject.kind === 'poe'` carries `poeIds` (created
+      // at PoE creation time, plus published proof-only Claim DAs that
+      // disclose the PoE wrapper to a third party). Both fields exist on
+      // the data shape; consumers branch on subject.kind.
       evaluationResultIds: scope.evaluationResultIds ? [...scope.evaluationResultIds] : null,
+      poeIds: scope.poeIds ? [...scope.poeIds] : null,
       includeDerivatives: scope.includeDerivatives !== undefined ? scope.includeDerivatives : true,
     },
     terms: {
@@ -660,6 +717,7 @@ export function makeInternalDisclosureAgreement({
       assetIds: scope.assetIds ?? null,
       fieldIds: scope.fieldIds ?? null,
       evaluationResultIds: scope.evaluationResultIds ?? null,
+      poeIds: scope.poeIds ?? null,
       includeDerivatives: scope.includeDerivatives ?? true,
     },
     terms,
@@ -669,8 +727,12 @@ export function makeInternalDisclosureAgreement({
 
 /**
  * Proof-of-Evaluation Disclosure Agreement — evaluator (grantor) → claim owner
- * (grantee). subject is the Eval Result itself; the Claim context is resolved via
- * the Eval Result's `claimId` during edge derivation. See spec §4.1 bullet 2.
+ * (grantee). Phase 13.1 (#168a): discriminated union. Pass either
+ * `evaluationResultId` (auto-disclosure created at Eval Result save time) or
+ * `poeId` (created at PoE creation time). Mutually exclusive — `subject.kind`
+ * disambiguates the two shapes downstream:
+ *   • `subject.kind === 'evalResult'` + `scope.evaluationResultIds: [evalId]`
+ *   • `subject.kind === 'poe'`        + `scope.poeIds: [poeId]`
  */
 export function makeProofOfEvalDisclosureAgreement({
   id,
@@ -678,23 +740,35 @@ export function makeProofOfEvalDisclosureAgreement({
   evaluatorDot,
   claimOwner,
   claimOwnerDot,
-  evaluationResultId,
+  evaluationResultId = null,
+  poeId = null,
   terms = {},
 }) {
-  if (!evaluationResultId) {
-    throw new Error('makeProofOfEvalDisclosureAgreement: evaluationResultId is required')
+  if (!evaluationResultId && !poeId) {
+    throw new Error('makeProofOfEvalDisclosureAgreement: one of evaluationResultId or poeId is required')
   }
+  if (evaluationResultId && poeId) {
+    throw new Error('makeProofOfEvalDisclosureAgreement: evaluationResultId and poeId are mutually exclusive')
+  }
+  const subject = poeId
+    ? { kind: 'poe', id: poeId }
+    : { kind: 'evalResult', id: evaluationResultId }
+  const scope = poeId
+    ? { poeIds: [poeId], includeDerivatives: false }
+    : { evaluationResultIds: [evaluationResultId], includeDerivatives: false }
   return makeDisclosureAgreement({
     id,
     grantor: { party: evaluator, dot: evaluatorDot || makeDot(evaluator) },
     grantee: { party: claimOwner, dot: claimOwnerDot || makeDot(claimOwner) },
-    subject: { kind: 'evalResult', id: evaluationResultId },
+    subject,
     granteeAssetId: null,
-    type: 'full',
-    scope: {
-      evaluationResultIds: [evaluationResultId],
-      includeDerivatives: false,
-    },
+    // Phase 13.2: auto-disclosure default is 'proofonly'. Both parties still
+    // see all results in Detail Panels — proof-only is an edge style + the
+    // discriminated-union subject discriminator, NOT a content restriction.
+    // Reflects the real-world supply-chain pattern where evaluation outcomes
+    // are shared without exposing the source documents.
+    type: 'proofonly',
+    scope,
     terms,
   })
 }
@@ -801,6 +875,13 @@ export function makeEvaluationAgreement({
 /**
  * Evaluation Result artifact — spec §10.6. Owned by the evaluator; visible to the
  * Claim owner via a Proof-of-Evaluation Disclosure Agreement (see spec §3.5).
+ *
+ * Phase 13.1 (#168a) model correction: ONE Eval Result per Run Evaluation
+ * submission. `requirementsSets[]` is plural (multi-RS evaluations bundle all
+ * selected RSes) and `results[]` is flat — every row carries its own
+ * `requirementsSetId`. The legacy singular `requirementsSet` field is gone, as
+ * is the `batchId` grouping mechanism (Phase 12.2's wrong "N Eval Results
+ * sharing batchId" pattern).
  */
 export function makeEvaluationResult({
   id,
@@ -809,17 +890,15 @@ export function makeEvaluationResult({
   evaluationAgreementId,
   claimId,
   granteeAssetId = null,
-  requirementsSet,
+  // Phase 13.1 (#168a): plural array of `{ id, name, version }` covering
+  // every Requirements Set evaluated in this run. Backed by per-row
+  // `requirementsSetId` on each `results[]` entry.
+  requirementsSets = [],
   results = [],
   evidenceUsed = [],
   evaluationDate,
   status = 'active',
   supersededBy = null,
-  // Phase 12.2 (#121): batch id grouping sibling Eval Results from the
-  // same Run Evaluation invocation. Null for solo evaluations and for
-  // pre-12.2 seed Eval Results (backwards compatibility — the Detail
-  // Panel "Sibling Evaluations" section is omitted when batchId is null).
-  batchId = null,
   // Phase 12.2 (#117): re-run audit metadata. `priorEvalResultId` links
   // to the Eval Result this run replaces; `evidenceDiff` captures the
   // delta between prior + current evidence snapshots. Both null on first
@@ -834,8 +913,13 @@ export function makeEvaluationResult({
     throw new Error('makeEvaluationResult: evaluationAgreementId is required')
   }
   if (!claimId) throw new Error('makeEvaluationResult: claimId is required')
-  if (!requirementsSet || !requirementsSet.id) {
-    throw new Error('makeEvaluationResult: requirementsSet { id, name, version } is required')
+  if (!Array.isArray(requirementsSets) || requirementsSets.length === 0) {
+    throw new Error('makeEvaluationResult: requirementsSets[] is required (non-empty)')
+  }
+  for (const rs of requirementsSets) {
+    if (!rs || !rs.id) {
+      throw new Error('makeEvaluationResult: each requirementsSets entry needs { id, name, version }')
+    }
   }
   const pin = makePin(id)
   const ownerDid = ownerDot || makeDot(owner)
@@ -859,12 +943,13 @@ export function makeEvaluationResult({
     evaluationAgreementId,
     claimId,
     granteeAssetId,
-    requirementsSet: {
-      id: requirementsSet.id,
-      name: requirementsSet.name,
-      version: requirementsSet.version ?? 1,
-    },
+    requirementsSets: requirementsSets.map((rs) => ({
+      id: rs.id,
+      name: rs.name,
+      version: rs.version ?? 1,
+    })),
     results: results.map((r) => ({
+      requirementsSetId: r.requirementsSetId,
       requirementId: r.requirementId,
       label: r.label,
       value: r.value,
@@ -879,7 +964,6 @@ export function makeEvaluationResult({
     evaluationDate,
     status, // Phase 12.2: 'active' | 'superseded' | 'outdated'
     supersededBy,
-    batchId,
     priorEvalResultId,
     evidenceDiff: evidenceDiff
       ? {
@@ -891,6 +975,283 @@ export function makeEvaluationResult({
       : null,
     dot: evalDot,
   }
+}
+
+/**
+ * Phase 13.1 (#168a): aggregate counts across an Eval Result's flat
+ * `results[]`. Returns `{ totalSat, totalUnsat, totalMissing, totalNa,
+ * rsCount }` for card / Detail Panel rendering.
+ */
+export function getEvalResultAggregate(evalResult) {
+  const counts = { totalSat: 0, totalUnsat: 0, totalMissing: 0, totalNa: 0, rsCount: 0 }
+  if (!evalResult) return counts
+  for (const r of (evalResult.results || [])) {
+    if (r.status === 'satisfactory') counts.totalSat += 1
+    else if (r.status === 'unsatisfactory') counts.totalUnsat += 1
+    else if (r.status === 'missing') counts.totalMissing += 1
+    else if (r.status === 'na') counts.totalNa += 1
+  }
+  counts.rsCount = (evalResult.requirementsSets || []).length
+  return counts
+}
+
+/**
+ * Proof of Evaluation (PoE) — Phase 13 (#168), simplified in Phase 13.1
+ * (#168a) to a 1:1 wrap. A PoE wraps exactly one Eval Result. Created by a
+ * deliberate Evaluator action; terminates the evaluation chain for the
+ * (Asset set, RS set, evaluator) combination. PoE-targeting DAs replace
+ * the prior pattern of disclosing individual Eval Results.
+ *
+ * Required:
+ *   id, owner, claimId, wrappedEvalResultId, createdDate.
+ * Optional:
+ *   ownerDot, requirementsSetIds (derived from the wrapped Eval Result's
+ *   `requirementsSets[]`), assetSnapshot (in-scope Asset ids at PoE
+ *   creation time), claimName, dot (otherwise derived).
+ */
+export function makePoE({
+  id,
+  owner,
+  ownerDot,
+  claimId,
+  claimName,
+  wrappedEvalResultId,
+  requirementsSetIds = [],
+  assetSnapshot = [],
+  createdDate,
+  dot,
+  status = 'active',
+}) {
+  if (!id) throw new Error('makePoE: id is required')
+  if (!owner) throw new Error('makePoE: owner is required')
+  if (!claimId) throw new Error('makePoE: claimId is required')
+  if (!wrappedEvalResultId || typeof wrappedEvalResultId !== 'string') {
+    throw new Error('makePoE: wrappedEvalResultId is required (1:1 wrap)')
+  }
+  if (!createdDate) {
+    throw new Error('makePoE: createdDate is required')
+  }
+  const pin = makePin(id)
+  const ownerDid = ownerDot || makeDot(owner)
+  // Phase 13.3 (Step 9): name format `Proof of [Claim label] Evaluation`.
+  // The createdDate suffix is dropped from the name — the date stays in
+  // the data model and surfaces in the Detail Panel header. Pre-13.3
+  // names were `PoE for [Claim] · YYYY-MM-DD`; the new wording reads more
+  // naturally and reflects the artifact's role rather than the bookkeeping
+  // detail.
+  const name = claimName
+    ? `Proof of ${claimName} Evaluation`
+    : 'Proof of Evaluation'
+  const poeDot = dot || makeDotObject({
+    pin,
+    hash: null,
+    ownerDid,
+    registrationTimestamp: createdDate,
+    metadata: { claimId, wrappedEvalResultId },
+  })
+  return {
+    artifactType: 'poe',
+    artifactUri: poeUri(id),
+    id,
+    pin,
+    owner,
+    ownerDot: ownerDid,
+    name,
+    claimId,
+    wrappedEvalResultId,
+    requirementsSetIds: [...requirementsSetIds],
+    assetSnapshot: [...assetSnapshot],
+    createdDate,
+    dot: poeDot,
+    status,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BADGE TEMPLATE — Phase 14.0 (#169 part 1)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A Badge Template is a versioned, public, network-wide artifact owned by an
+// Actor. Issuers (Phase 14.1) reference a Badge Template + a wrapped
+// Evaluation Result / PoE to mint a Badge Issuance. The template itself
+// only declares "what counts" — `referencedRequirementsSetIds` enumerates
+// the Requirements Sets an issuance must cover.
+//
+// Versioning mirrors Requirements Sets exactly: same `lineageId`, integer
+// `version`, `supersededBy` chain. Prior versions remain in the Library and
+// remain referenceable. `getLatestBadgeTemplateVersion` walks the chain.
+//
+// All Badge Templates are inherently `published: true` — Phase 14.0 doesn't
+// model unpublished drafts. Phase 14.1 may revisit this if private templates
+// are wanted.
+
+const badgeTemplateUri = (id) => `provenance://badges/${id}`
+
+export function makeBadgeTemplate({
+  id,
+  ownerDot,
+  ownerParty,
+  name,
+  description = '',
+  referencedRequirementsSetIds = [],
+  lineageId,
+  version = 1,
+  supersededBy = null,
+  createdDate,
+  dot,
+}) {
+  if (!id) throw new Error('makeBadgeTemplate: id is required')
+  if (!ownerParty) throw new Error('makeBadgeTemplate: ownerParty is required')
+  if (!name) throw new Error('makeBadgeTemplate: name is required')
+  if (!Array.isArray(referencedRequirementsSetIds) || referencedRequirementsSetIds.length === 0) {
+    throw new Error('makeBadgeTemplate: at least one referencedRequirementsSetId is required')
+  }
+  if (!createdDate) {
+    throw new Error('makeBadgeTemplate: createdDate is required')
+  }
+  const pin = makePin(id)
+  const ownerDid = ownerDot || makeDot(ownerParty)
+  const lid = lineageId || `badgetpl-lineage-${id}`
+  const tplDot = dot || makeDotObject({
+    pin,
+    hash: null,
+    ownerDid,
+    registrationTimestamp: createdDate,
+    metadata: { lineageId: lid, version },
+  })
+  return {
+    artifactType: 'badgeTemplate',
+    artifactUri: badgeTemplateUri(id),
+    id,
+    pin,
+    ownerParty,
+    ownerDot: ownerDid,
+    name,
+    description,
+    referencedRequirementsSetIds: [...referencedRequirementsSetIds],
+    lineageId: lid,
+    version,
+    supersededBy,
+    createdDate,
+    published: true,
+    dot: tplDot,
+  }
+}
+
+// Mirror of `getLatestRSVersion` for Badge Templates. Walks the lineage by
+// id; returns the input id when no successor exists or the entry isn't on
+// the supplied chain.
+export function getLatestBadgeTemplateVersion(badgeTemplateId, allBadgeTemplates = []) {
+  if (!badgeTemplateId) return badgeTemplateId
+  const ref = allBadgeTemplates.find((t) => t.id === badgeTemplateId)
+  if (!ref) return badgeTemplateId
+  const lid = ref.lineageId || ref.id
+  const inLineage = allBadgeTemplates.filter((t) => (t.lineageId || t.id) === lid)
+  if (inLineage.length === 0) return badgeTemplateId
+  let latest = ref
+  for (const t of inLineage) {
+    if ((t.version ?? 0) > (latest.version ?? 0)) latest = t
+  }
+  return latest.id
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BADGE ISSUANCE — Phase 14.1 (#169 part 2), corrected in Phase 14.2 (#169a)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A Badge Issuance is an endorsement event. Phase 14.2 architectural shift:
+// badges target the CLAIM, not the PoE. The Claim is what earns the badge;
+// PoEs that wrap qualifying Eval Results display the badge via aggregation.
+// This enables third-party-issued badges on self-evaluations: OSHA can
+// endorse Alice's Claim regardless of who created the proving PoE.
+//
+// Recipient is NOT stored — derived at render time from the target Claim's
+// owner. Single source of truth.
+//
+// Issuance gate: `issuerParty !== claim.ownerParty`. The Claim owner can't
+// endorse their own Claim. Enforced at every entry point + factory caller.
+// (The factory doesn't load the Claim, so the caller does the check.)
+
+const badgeIssuanceUri = (id) => `provenance://badges/issuances/${id}`
+
+export function makeBadgeIssuance({
+  id,
+  issuerDot,
+  issuerParty,
+  targetClaimId,
+  badgeTemplateId,
+  description = '',
+  createdDate,
+  status = 'active',
+  revokedDate = null,
+  revocationReason = null,
+  dot,
+}) {
+  if (!id) throw new Error('makeBadgeIssuance: id is required')
+  if (!issuerParty) throw new Error('makeBadgeIssuance: issuerParty is required')
+  if (!targetClaimId) throw new Error('makeBadgeIssuance: targetClaimId is required')
+  if (!badgeTemplateId) throw new Error('makeBadgeIssuance: badgeTemplateId is required')
+  if (!createdDate) throw new Error('makeBadgeIssuance: createdDate is required')
+  const pin = makePin(id)
+  const ownerDid = issuerDot || makeDot(issuerParty)
+  const issuanceDot = dot || makeDotObject({
+    pin,
+    hash: null,
+    ownerDid,
+    registrationTimestamp: createdDate,
+    metadata: { targetClaimId, badgeTemplateId },
+  })
+  return {
+    artifactType: 'badgeIssuance',
+    artifactUri: badgeIssuanceUri(id),
+    id,
+    pin,
+    issuerParty,
+    issuerDot: ownerDid,
+    targetClaimId,
+    badgeTemplateId,
+    description,
+    createdDate,
+    status,
+    revokedDate,
+    revocationReason,
+    dot: issuanceDot,
+  }
+}
+
+// Active Badge Issuances targeting a specific Claim — direct lookup.
+// Phase 14.2: this is the canonical aggregation. PoEs derive their badges
+// via the parent Claim (see `getBadgesForPoE`).
+export function getBadgesForClaim(claimId, allBadgeIssuances = []) {
+  if (!claimId) return []
+  return (allBadgeIssuances || []).filter((b) => b.targetClaimId === claimId && b.status === 'active')
+}
+
+// Active Badge Issuances surfaced on a PoE — derived. Phase 14.2: walk
+// PoE → wrappedEvalResultId → eval result's claimId → badges targeting
+// that Claim. The PoE displays its parent Claim's badges.
+export function getBadgesForPoE(poeId, allEvalResults = [], allPoEs = [], allBadgeIssuances = []) {
+  if (!poeId) return []
+  const poe = (allPoEs || []).find((p) => p.id === poeId)
+  if (!poe) return []
+  const er = (allEvalResults || []).find((e) => e.id === poe.wrappedEvalResultId)
+  if (!er) return []
+  return getBadgesForClaim(er.claimId, allBadgeIssuances)
+}
+
+// Active Badge Issuances received by an Actor — Phase 14.2 walk via Claim
+// ownership. Returns badges where the target Claim's owner === actorParty.
+// Issuances issued by this actor are still active in the list (they're
+// canonically active records); UI surfaces filter further if needed.
+export function getBadgesForRecipient(actorParty, allBadgeIssuances = [], allClaims = []) {
+  if (!actorParty) return []
+  const ownerByClaimId = new Map(
+    (allClaims || []).map((c) => [c.id, c.owner || c.ownerParty]),
+  )
+  return (allBadgeIssuances || []).filter((b) => {
+    if (b.status !== 'active') return false
+    return ownerByClaimId.get(b.targetClaimId) === actorParty
+  })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1042,8 +1403,10 @@ export function buildV22SharedArtifacts() {
   // ── Bob's Assets ─────────────────────────────────────────────────────
   // Avionics Module (the Sentinel-4 anchor) is the original Phase 1 Asset and
   // already carries inter-party DAs to MicroCo for the Power Reg + VReg Claims.
+  // Phase 13.1 (#168a): IDs regenerated to `[type]-[8-char-base32]` format —
+  // actor names ("bob") removed from id strings.
   const bAvionics = makeAsset({
-    id: 'asset-bob-avionics',
+    id: makeArtifactId('asset', 'govco-avionics'),
     owner: bob.party,
     ownerDot: bob.partyDot,
     name: 'Avionics Module',
@@ -1062,7 +1425,7 @@ export function buildV22SharedArtifacts() {
   // for Phase 5 so the per-Asset request flow can be exercised end-to-end
   // against Alice's remaining un-disclosed Claims (e.g., EMI Shield).
   const bGuidance = makeAsset({
-    id: 'asset-bob-guidance',
+    id: makeArtifactId('asset', 'govco-guidance'),
     owner: bob.party,
     ownerDot: bob.partyDot,
     name: 'Guidance Computer',
@@ -1078,7 +1441,7 @@ export function buildV22SharedArtifacts() {
     parseResultIds: [],
   })
   const bThermal = makeAsset({
-    id: 'asset-bob-thermal',
+    id: makeArtifactId('asset', 'govco-thermal'),
     owner: bob.party,
     ownerDot: bob.partyDot,
     name: 'Thermal Subsystem',
@@ -1096,7 +1459,7 @@ export function buildV22SharedArtifacts() {
 
   // ── Carol's Assets ────────────────────────────────────────────────────
   const cAuditWorkspace = makeAsset({
-    id: 'asset-carol-audit-workspace',
+    id: makeArtifactId('asset', 'auditco-workspace'),
     owner: carol.party,
     ownerDot: carol.partyDot,
     name: 'AuditCo Evaluation Workspace',
@@ -1113,7 +1476,7 @@ export function buildV22SharedArtifacts() {
   })
   // Carol's secondary anchor — useful for Story 3 (auditing additional Claims).
   const cComplianceQueue = makeAsset({
-    id: 'asset-carol-compliance-queue',
+    id: makeArtifactId('asset', 'auditco-compliance-queue'),
     owner: carol.party,
     ownerDot: carol.partyDot,
     name: 'Compliance Audit Queue',
@@ -1488,7 +1851,7 @@ export function buildV22SharedArtifacts() {
 
   // Explicit inter-party Disclosure Agreements. Edge: subject (Claim) ↔ granteeAssetId.
   const daAliceToBobPrm = makeDisclosureAgreement({
-    id: 'da-alice-bob-prm',
+    id: makeArtifactId('da', 'microco-govco-prm'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: bob.party, dot: bob.partyDot },
     subject: { kind: 'claim', id: cPrm.id },
@@ -1512,7 +1875,7 @@ export function buildV22SharedArtifacts() {
     },
   })
   const daAliceToBobVreg = makeDisclosureAgreement({
-    id: 'da-alice-bob-vreg',
+    id: makeArtifactId('da', 'microco-govco-vreg'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: bob.party, dot: bob.partyDot },
     subject: { kind: 'claim', id: cVreg.id },
@@ -1529,7 +1892,7 @@ export function buildV22SharedArtifacts() {
     },
   })
   const daAliceToCarolPrm = makeDisclosureAgreement({
-    id: 'da-alice-carol-prm',
+    id: makeArtifactId('da', 'microco-auditco-prm'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: carol.party, dot: carol.partyDot },
     subject: { kind: 'claim', id: cPrm.id },
@@ -1590,7 +1953,7 @@ export function buildV22SharedArtifacts() {
   // anchor and Phase 11C may extend the schema if the umbrella concept
   // needs first-class representation.
   const daChipcoToBobPrmIc = makeDisclosureAgreement({
-    id: 'da-chipco-bob-prm-ic',
+    id: makeArtifactId('da', 'chipco-govco-prm-ic'),
     grantor: { party: dave.party, dot: dave.partyDot },
     grantee: { party: bob.party, dot: bob.partyDot },
     subject: { kind: 'claim', id: cChipcoPrmIc.id },
@@ -1609,13 +1972,13 @@ export function buildV22SharedArtifacts() {
 
   // ── Evaluation Agreements (paired with explicit inter-party DAs) ──────
   const eaBobOnPrm = makeEvaluationAgreement({
-    id: 'ea-bob-prm',
+    id: makeArtifactId('ea', 'govco-on-prm'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: bob.party, dot: bob.partyDot },
     claimId: cPrm.id,
     granteeAssetId: bAvionics.id,
     disclosureAgreementId: daAliceToBobPrm.id,
-    authorizedRequirementsSetIds: ['req-mil-prf-55681-v1'],
+    authorizedRequirementsSetIds: ['reqset-mil-prf-55681-v1'],
     terms: {
       createdDate: '2026-03-04T16:42:00Z',
       evaluationDeadline: '2028-04-04T16:42:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-04 (was already past as of 2026-05-01).
@@ -1628,13 +1991,13 @@ export function buildV22SharedArtifacts() {
     },
   })
   const eaBobOnVreg = makeEvaluationAgreement({
-    id: 'ea-bob-vreg',
+    id: makeArtifactId('ea', 'govco-on-vreg'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: bob.party, dot: bob.partyDot },
     claimId: cVreg.id,
     granteeAssetId: bAvionics.id,
     disclosureAgreementId: daAliceToBobVreg.id,
-    authorizedRequirementsSetIds: ['req-mil-prf-55681-v1'],
+    authorizedRequirementsSetIds: ['reqset-mil-prf-55681-v1'],
     terms: {
       createdDate: '2026-03-04T16:42:00Z',
       evaluationDeadline: '2028-04-15T16:42:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-15.
@@ -1644,13 +2007,13 @@ export function buildV22SharedArtifacts() {
     incentives: { onSatisfactory: null, onUnsatisfactory: null },
   })
   const eaCarolOnPrm = makeEvaluationAgreement({
-    id: 'ea-carol-prm',
+    id: makeArtifactId('ea', 'auditco-on-prm'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: carol.party, dot: carol.partyDot },
     claimId: cPrm.id,
     granteeAssetId: cAuditWorkspace.id,
     disclosureAgreementId: daAliceToCarolPrm.id,
-    authorizedRequirementsSetIds: ['req-auditco-prm-audit-v1'],
+    authorizedRequirementsSetIds: ['reqset-auditco-prm-audit-v1'],
     terms: {
       createdDate: '2026-03-10T10:00:00Z',
       evaluationDeadline: '2028-04-20T10:00:00Z',  // Phase 11E.1.3 Fix 2: bumped +24mo from 2026-04-20.
@@ -1662,137 +2025,315 @@ export function buildV22SharedArtifacts() {
       onUnsatisfactory: null,
     },
   })
-  const evaluationAgreements = [eaBobOnPrm, eaBobOnVreg, eaCarolOnPrm]
+  // Phase 13.1: evaluationAgreements list assembled at return time so
+  // eaCarolOnEmi (declared inline alongside its Eval Result below) can be
+  // included.
 
   // ── Evaluation Results ────────────────────────────────────────────────
-  // Phase 12.2 (#121): retroactively pair erBobPrm with a sibling Eval
-  // Result (System Integration) sharing batchId 'batch-seed-bob-prm-001'.
-  // Bob ran both RS in the same Run Evaluation invocation against the
-  // PRM Assembly Claim; the Detail Panel "Sibling Evaluations" section
-  // surfaces them together on first load.
+  // Phase 13.1 (#168a): one Eval Result per evaluation. Bob's prior
+  // 2-Eval-Result batch (Phase 12.2) is collapsed into a single bundled
+  // Eval Result whose `requirementsSets[]` covers both RSes and whose flat
+  // `results[]` carries every row stamped with its `requirementsSetId`.
+  // Carol's evaluation stays a single-RS Eval Result.
   const erBobPrm = makeEvaluationResult({
-    id: 'eval-bob-prm-001',
+    id: makeArtifactId('eval', 'govco-prm-prm-bundle'),
     owner: bob.party,
     ownerDot: bob.partyDot,
     evaluationAgreementId: eaBobOnPrm.id,
     claimId: cPrm.id,
     granteeAssetId: bAvionics.id,
-    requirementsSet: {
-      id: 'req-mil-prf-55681-v1',
-      name: 'MIL-PRF-55681 Compliance',
-      version: 1,
-    },
+    requirementsSets: [
+      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
+      { id: 'reqset-system-integration-v1', name: 'System Integration Requirements', version: 1 },
+    ],
     results: [
-      { requirementId: 'req-001', label: 'Power output stability', value: '3.3V ±0.5% under load', status: 'satisfactory' },
-      { requirementId: 'req-002', label: 'Thermal dissipation', value: '< 2W at rated current', status: 'satisfactory' },
-      { requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory' },
-      { requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID > 100 krad(Si)', status: 'unsatisfactory' },
-      { requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '3.3V ±0.5% under load', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 2W at rated current', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID > 100 krad(Si)', status: 'unsatisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-system-integration-v1', requirementId: 'req-011', label: 'Package type', value: 'CQFP-128 (ceramic quad flat pack)', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-system-integration-v1', requirementId: 'req-012', label: 'Lead count', value: '128 pins', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-system-integration-v1', requirementId: 'req-013', label: 'Interface voltage', value: '3.3V LVCMOS', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-system-integration-v1', requirementId: 'req-014', label: 'Compatible with Sentinel-4 bus?', value: 'Yes', status: 'satisfactory' },
     ],
     evidenceUsed: [aPrmDatasheet.id],
     evaluationDate: '2026-03-09T14:32:00Z',
     status: 'active',
     supersededBy: null,
-    batchId: 'batch-seed-bob-prm-001',
-  })
-  const erBobPrmSysInt = makeEvaluationResult({
-    id: 'eval-bob-prm-002',
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    evaluationAgreementId: eaBobOnPrm.id,
-    claimId: cPrm.id,
-    granteeAssetId: bAvionics.id,
-    requirementsSet: {
-      id: 'reqset-system-integration-v1',
-      name: 'System Integration Requirements',
-      version: 1,
-    },
-    results: [
-      { requirementId: 'req-011', label: 'Package type', value: 'CQFP-128 (ceramic quad flat pack)', status: 'satisfactory' },
-      { requirementId: 'req-012', label: 'Lead count', value: '128 pins', status: 'satisfactory' },
-      { requirementId: 'req-013', label: 'Interface voltage', value: '3.3V LVCMOS', status: 'satisfactory' },
-      { requirementId: 'req-014', label: 'Compatible with Sentinel-4 bus?', value: 'Yes', status: 'satisfactory' },
-    ],
-    evidenceUsed: [aPrmDatasheet.id],
-    evaluationDate: '2026-03-09T14:33:00Z',
-    status: 'active',
-    supersededBy: null,
-    batchId: 'batch-seed-bob-prm-001',
   })
   const erCarolPrm = makeEvaluationResult({
-    id: 'eval-carol-prm-001',
+    id: makeArtifactId('eval', 'auditco-prm-audit'),
     owner: carol.party,
     ownerDot: carol.partyDot,
     evaluationAgreementId: eaCarolOnPrm.id,
     claimId: cPrm.id,
     granteeAssetId: cAuditWorkspace.id,
-    requirementsSet: {
-      id: 'req-auditco-prm-audit-v1',
-      name: 'AuditCo PRM Audit',
-      version: 1,
-    },
+    requirementsSets: [
+      { id: 'reqset-auditco-prm-audit-v1', name: 'AuditCo PRM Audit', version: 1 },
+    ],
     results: [
-      { requirementId: 'a-001', label: 'Document provenance', value: 'All documents have verifiable provenance', status: 'satisfactory' },
-      { requirementId: 'a-002', label: 'Test report independence', value: 'Test report references independent lab', status: 'satisfactory' },
-      { requirementId: 'a-003', label: 'Thermal margin ≥ 15%', value: 'Thermal margin 12% at rated current', status: 'unsatisfactory' },
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-001', label: 'Document provenance', value: 'All documents have verifiable provenance', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-002', label: 'Test report independence', value: 'Test report references independent lab', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-003', label: 'Thermal margin ≥ 15%', value: 'Thermal margin 12% at rated current', status: 'unsatisfactory' },
     ],
     evidenceUsed: [aPrmDatasheet.id, aPrmTestReport.id, aPrmThermal.id],
     evaluationDate: '2026-03-18T14:00:00Z',
     status: 'active',
     supersededBy: null,
   })
-  const evaluationResults = [erBobPrm, erBobPrmSysInt, erCarolPrm]
+  // Phase 13.1 (#168a) Step 3.4: unwrapped Eval Results for demo flexibility.
+  // Bob has a Full DA + EA on Alice's VReg Claim but no PoE — Create-PoE
+  // surfaces as an action button on this Eval Result on first interaction.
+  // Carol gets a parallel unwrapped Eval Result via a second EA on EMI.
+  // Phase 13.2 (#177): seed a 3-Eval-Result chain on Bob's VReg evaluation
+  // (V0 → V1 → V_main, with V0 + V1 superseded). Demonstrates supersession
+  // chain rendering on the netgraph and exercises chain edges through PoE-
+  // less Eval Results. erBobVreg stays unwrapped so the Create-PoE flow
+  // remains exercisable on the chain head.
+  const erBobVregV0 = makeEvaluationResult({
+    id: makeArtifactId('eval', 'govco-vreg-v0'),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    evaluationAgreementId: eaBobOnVreg.id,
+    claimId: cVreg.id,
+    granteeAssetId: bAvionics.id,
+    requirementsSets: [
+      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
+    ],
+    results: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.6% under load', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: 'Unknown', status: 'missing' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'Pending verification', status: 'missing' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory' },
+    ],
+    evidenceUsed: [aVregDatasheet.id],
+    evaluationDate: '2026-03-08T09:15:00Z',
+    status: 'superseded',
+    supersededBy: null, // patched below — id resolves to the next ER once that's built
+    priorEvalResultId: null,
+  })
+  const erBobVregV1 = makeEvaluationResult({
+    id: makeArtifactId('eval', 'govco-vreg-v1'),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    evaluationAgreementId: eaBobOnVreg.id,
+    claimId: cVreg.id,
+    granteeAssetId: bAvionics.id,
+    requirementsSets: [
+      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
+    ],
+    results: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.5% under load', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.7W at rated current', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID ≈ 80 krad(Si)', status: 'unsatisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory' },
+    ],
+    evidenceUsed: [aVregDatasheet.id],
+    evaluationDate: '2026-03-10T10:30:00Z',
+    status: 'superseded',
+    supersededBy: null, // patched below
+    priorEvalResultId: erBobVregV0.id,
+  })
+  const erBobVreg = makeEvaluationResult({
+    id: makeArtifactId('eval', 'govco-vreg-bundle'),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    evaluationAgreementId: eaBobOnVreg.id,
+    claimId: cVreg.id,
+    granteeAssetId: bAvionics.id,
+    requirementsSets: [
+      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
+    ],
+    results: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.4% under load', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.5W at rated current', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID > 100 krad(Si)', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory' },
+    ],
+    evidenceUsed: [aVregDatasheet.id],
+    evaluationDate: '2026-03-12T11:45:00Z',
+    status: 'active',
+    supersededBy: null,
+    priorEvalResultId: erBobVregV1.id,
+  })
+  // Patch the supersededBy pointers now that the chain head ids are known.
+  erBobVregV0.supersededBy = erBobVregV1.id
+  erBobVregV1.supersededBy = erBobVreg.id
+  // Carol's second EA + Eval Result (unwrapped) — Alice → Carol on EMI.
+  const daAliceToCarolEmi = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-auditco-emi'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cEmi.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: {
+      assetIds: [aEmiDatasheet.id],
+      includeDerivatives: true,
+    },
+    terms: {
+      createdDate: '2026-03-15T09:00:00Z',
+      expires: '2027-03-15T09:00:00Z',
+      autoRenew: false,
+    },
+  })
+  const eaCarolOnEmi = makeEvaluationAgreement({
+    id: makeArtifactId('ea', 'auditco-on-emi'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    claimId: cEmi.id,
+    granteeAssetId: cAuditWorkspace.id,
+    disclosureAgreementId: daAliceToCarolEmi.id,
+    authorizedRequirementsSetIds: ['reqset-auditco-prm-audit-v1'],
+    terms: {
+      createdDate: '2026-03-15T09:00:00Z',
+      evaluationDeadline: '2028-04-25T09:00:00Z',
+      resultExpiry: null,
+      flowDownRequirements: [],
+    },
+    incentives: { onSatisfactory: null, onUnsatisfactory: null },
+  })
+  const erCarolEmi = makeEvaluationResult({
+    id: makeArtifactId('eval', 'auditco-emi-bundle'),
+    owner: carol.party,
+    ownerDot: carol.partyDot,
+    evaluationAgreementId: eaCarolOnEmi.id,
+    claimId: cEmi.id,
+    granteeAssetId: cAuditWorkspace.id,
+    requirementsSets: [
+      { id: 'reqset-auditco-prm-audit-v1', name: 'AuditCo PRM Audit', version: 1 },
+    ],
+    results: [
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-001', label: 'Document provenance', value: 'EMI datasheet has verifiable provenance', status: 'satisfactory' },
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-002', label: 'Test report independence', value: 'No external test report referenced', status: 'missing' },
+      { requirementsSetId: 'reqset-auditco-prm-audit-v1', requirementId: 'a-003', label: 'Thermal margin ≥ 15%', value: 'N/A — passive shield', status: 'na' },
+    ],
+    evidenceUsed: [aEmiDatasheet.id],
+    evaluationDate: '2026-03-22T10:00:00Z',
+    status: 'active',
+    supersededBy: null,
+  })
+  // Phase 13.2: chain ancestors for the VReg supersession sequence.
+  const evaluationResults = [erBobPrm, erCarolPrm, erBobVregV0, erBobVregV1, erBobVreg, erCarolEmi]
 
-  // Proof-of-Evaluation Disclosure Agreements (Eval Result → Claim owner).
-  // subject = evalResult; edge derivation resolves the Claim via the Eval Result's claimId.
+  // Phase 13.1 (#168a): PoEs wrap exactly one Eval Result. Bob's PRM PoE
+  // wraps the bundled (multi-RS) Eval Result; Carol's PRM PoE wraps her
+  // single-RS audit Eval Result. erBobVreg + erCarolEmi are unwrapped on
+  // purpose so demos can exercise the Create PoE flow on first click.
+  const poeBobPrm = makePoE({
+    id: makeArtifactId('poe', 'govco-prm'),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    claimId: cPrm.id,
+    claimName: cPrm.name,
+    wrappedEvalResultId: erBobPrm.id,
+    requirementsSetIds: erBobPrm.requirementsSets.map((rs) => rs.id),
+    assetSnapshot: [...erBobPrm.evidenceUsed],
+    createdDate: erBobPrm.evaluationDate,
+  })
+  const poeCarolPrm = makePoE({
+    id: makeArtifactId('poe', 'auditco-prm'),
+    owner: carol.party,
+    ownerDot: carol.partyDot,
+    claimId: cPrm.id,
+    claimName: cPrm.name,
+    wrappedEvalResultId: erCarolPrm.id,
+    requirementsSetIds: erCarolPrm.requirementsSets.map((rs) => rs.id),
+    assetSnapshot: [...erCarolPrm.evidenceUsed],
+    createdDate: erCarolPrm.evaluationDate,
+  })
+  const proofsOfEvaluation = [poeBobPrm, poeCarolPrm]
+
+  // Proof-of-Evaluation Disclosure Agreements (PoE → Claim owner).
+  // Phase 13.1 (#168a): the wrapped pair carries `subject.kind === 'poe'`;
+  // unwrapped Eval Results carry an `evalResult`-targeting auto-disclosure DA
+  // (the discriminated-union pattern).
   const daProofBobPrm = makeProofOfEvalDisclosureAgreement({
-    id: 'da-proof-bob-prm',
+    id: makeArtifactId('da-proof', 'govco-prm-poe'),
     evaluator: bob.party,
     evaluatorDot: bob.partyDot,
     claimOwner: alice.party,
     claimOwnerDot: alice.partyDot,
-    evaluationResultId: erBobPrm.id,
+    poeId: poeBobPrm.id,
     terms: { createdDate: erBobPrm.evaluationDate },
   })
-  // Phase 12.2 (#121): proof DA for the sibling Eval Result so Alice's
-  // canvas pulls in both batch members.
-  const daProofBobPrmSysInt = makeProofOfEvalDisclosureAgreement({
-    id: 'da-proof-bob-prm-sysint',
-    evaluator: bob.party,
-    evaluatorDot: bob.partyDot,
-    claimOwner: alice.party,
-    claimOwnerDot: alice.partyDot,
-    evaluationResultId: erBobPrmSysInt.id,
-    terms: { createdDate: erBobPrmSysInt.evaluationDate },
-  })
   const daProofCarolPrm = makeProofOfEvalDisclosureAgreement({
-    id: 'da-proof-carol-prm',
+    id: makeArtifactId('da-proof', 'auditco-prm-poe'),
     evaluator: carol.party,
     evaluatorDot: carol.partyDot,
     claimOwner: alice.party,
     claimOwnerDot: alice.partyDot,
-    evaluationResultId: erCarolPrm.id,
+    poeId: poeCarolPrm.id,
     terms: { createdDate: erCarolPrm.evaluationDate },
+  })
+  // Phase 13.1 (#168a): auto-disclosure DAs for unwrapped Eval Results.
+  // subject.kind === 'evalResult'; scope.evaluationResultIds = [evalId].
+  const daProofBobVreg = makeProofOfEvalDisclosureAgreement({
+    id: makeArtifactId('da-proof', 'govco-vreg-eval'),
+    evaluator: bob.party,
+    evaluatorDot: bob.partyDot,
+    claimOwner: alice.party,
+    claimOwnerDot: alice.partyDot,
+    evaluationResultId: erBobVreg.id,
+    terms: { createdDate: erBobVreg.evaluationDate },
+  })
+  // Phase 13.2 (#177): chain-ancestor auto-disclosure DAs. Each ancestor in
+  // the supersession chain gets its own auto-disclosure DA targeting itself
+  // (subject.kind='evalResult'). Edge derivation reroutes the edge target
+  // to the ancestor's chain-successor (rather than the Claim) so the chain
+  // reads Asset → V0 → V1 → V_main → Claim. The DAs themselves stay
+  // active as historical artifacts; only the rendered edge is rerouted.
+  const daProofBobVregV0 = makeProofOfEvalDisclosureAgreement({
+    id: makeArtifactId('da-proof', 'govco-vreg-eval-v0'),
+    evaluator: bob.party,
+    evaluatorDot: bob.partyDot,
+    claimOwner: alice.party,
+    claimOwnerDot: alice.partyDot,
+    evaluationResultId: erBobVregV0.id,
+    terms: { createdDate: erBobVregV0.evaluationDate },
+  })
+  const daProofBobVregV1 = makeProofOfEvalDisclosureAgreement({
+    id: makeArtifactId('da-proof', 'govco-vreg-eval-v1'),
+    evaluator: bob.party,
+    evaluatorDot: bob.partyDot,
+    claimOwner: alice.party,
+    claimOwnerDot: alice.partyDot,
+    evaluationResultId: erBobVregV1.id,
+    terms: { createdDate: erBobVregV1.evaluationDate },
+  })
+  const daProofCarolEmi = makeProofOfEvalDisclosureAgreement({
+    id: makeArtifactId('da-proof', 'auditco-emi-eval'),
+    evaluator: carol.party,
+    evaluatorDot: carol.partyDot,
+    claimOwner: alice.party,
+    claimOwnerDot: alice.partyDot,
+    evaluationResultId: erCarolEmi.id,
+    terms: { createdDate: erCarolEmi.evaluationDate },
   })
 
   // ── Proof-only Claim DA (Phase 11D.3) ────────────────────────────────
   // Alice → Dave, subject = Alice's PRM Claim, type = 'proofonly'. Discloses
   // Bob's MIL-PRF-55681 Eval Result to Dave without exposing the underlying
-  // Assets. On Dave's canvas: the Claim is pulled in, the disclosed Eval
-  // Result is pulled in alongside it, and a proof-only-styled edge connects
-  // Eval Result → Claim. The conventional Claim ↔ granteeAssetId anchor edge
-  // also renders so the Claim has a visual home on Dave's canvas.
+  // Assets. On Dave's canvas: the Claim is pulled in, the disclosed PoE
+  // (and its wrapped Eval Result) is pulled in alongside it, and a
+  // proof-only-styled edge connects Eval Result → Claim. The conventional
+  // Claim ↔ granteeAssetId anchor edge also renders so the Claim has a
+  // visual home on Dave's canvas.
   // (Re-disclosure semantics — whether Alice can disclose Bob's Eval Result —
   // are filed as #141; default-allow today.)
   const daAliceToDavePrmProof = makeDisclosureAgreement({
-    id: 'da-alice-dave-prm-proof',
+    id: makeArtifactId('da', 'microco-chipco-prm-proof'),
     grantor: { party: alice.party, dot: alice.partyDot },
     grantee: { party: dave.party, dot: dave.partyDot },
     subject: { kind: 'claim', id: cPrm.id },
     granteeAssetId: dPrmIcDatasheet.id,
     type: 'proofonly',
     scope: {
-      evaluationResultIds: [erBobPrm.id],
+      poeIds: [poeBobPrm.id],
       includeDerivatives: false,
     },
     terms: {
@@ -1806,7 +2347,7 @@ export function buildV22SharedArtifacts() {
   // subject = evalResult; scope.assetIds names the evaluator's anchor Asset.
   // Edge: subject (evalResult) ↔ scope.assetIds[0].
   const daOwnEvalBob = makeInternalDisclosureAgreement({
-    id: `da-own-${erBobPrm.id}`,
+    id: makeArtifactId('da-own', erBobPrm.id),
     owner: bob.party,
     ownerDot: bob.partyDot,
     subject: { kind: 'evalResult', id: erBobPrm.id },
@@ -1815,18 +2356,8 @@ export function buildV22SharedArtifacts() {
     },
     terms: { createdDate: erBobPrm.evaluationDate },
   })
-  const daOwnEvalBobSysInt = makeInternalDisclosureAgreement({
-    id: `da-own-${erBobPrmSysInt.id}`,
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    subject: { kind: 'evalResult', id: erBobPrmSysInt.id },
-    scope: {
-      assetIds: [bAvionics.id],
-    },
-    terms: { createdDate: erBobPrmSysInt.evaluationDate },
-  })
   const daOwnEvalCarol = makeInternalDisclosureAgreement({
-    id: `da-own-${erCarolPrm.id}`,
+    id: makeArtifactId('da-own', erCarolPrm.id),
     owner: carol.party,
     ownerDot: carol.partyDot,
     subject: { kind: 'evalResult', id: erCarolPrm.id },
@@ -1835,6 +2366,46 @@ export function buildV22SharedArtifacts() {
     },
     terms: { createdDate: erCarolPrm.evaluationDate },
   })
+  // Phase 13.1: ownership DAs for the new unwrapped Eval Results.
+  const daOwnEvalBobVreg = makeInternalDisclosureAgreement({
+    id: makeArtifactId('da-own', erBobVreg.id),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    subject: { kind: 'evalResult', id: erBobVreg.id },
+    scope: { assetIds: [bAvionics.id] },
+    terms: { createdDate: erBobVreg.evaluationDate },
+  })
+  // Phase 13.2 (#177): ownership DAs for chain ancestors. Each ancestor
+  // also has an internal ownership DA — edge derivation skips the Asset→ER
+  // edge for ancestors (only the chain origin emits Asset→ER); the DA
+  // artifact persists as ownership audit but produces no canvas edge.
+  const daOwnEvalBobVregV0 = makeInternalDisclosureAgreement({
+    id: makeArtifactId('da-own', erBobVregV0.id),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    subject: { kind: 'evalResult', id: erBobVregV0.id },
+    scope: { assetIds: [bAvionics.id] },
+    terms: { createdDate: erBobVregV0.evaluationDate },
+  })
+  const daOwnEvalBobVregV1 = makeInternalDisclosureAgreement({
+    id: makeArtifactId('da-own', erBobVregV1.id),
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    subject: { kind: 'evalResult', id: erBobVregV1.id },
+    scope: { assetIds: [bAvionics.id] },
+    terms: { createdDate: erBobVregV1.evaluationDate },
+  })
+  const daOwnEvalCarolEmi = makeInternalDisclosureAgreement({
+    id: makeArtifactId('da-own', erCarolEmi.id),
+    owner: carol.party,
+    ownerDot: carol.partyDot,
+    subject: { kind: 'evalResult', id: erCarolEmi.id },
+    scope: { assetIds: [cAuditWorkspace.id] },
+    terms: { createdDate: erCarolEmi.evaluationDate },
+  })
+
+  // Phase 13.1: assemble the EA list now that eaCarolOnEmi is in scope.
+  const evaluationAgreements = [eaBobOnPrm, eaBobOnVreg, eaCarolOnPrm, eaCarolOnEmi]
 
   const disclosureAgreements = [
     ...aliceOwnAssets,
@@ -1850,17 +2421,146 @@ export function buildV22SharedArtifacts() {
     daAliceToBobPrm,
     daAliceToBobVreg,
     daAliceToCarolPrm,
+    daAliceToCarolEmi,
     daChipcoToBobPrmIc,
     daAlicePublicPrm,
     daAlicePublicVreg,
     daAlicePublicEmi,
     daProofBobPrm,
-    daProofBobPrmSysInt,
     daProofCarolPrm,
+    daProofBobVreg,
+    daProofBobVregV0,
+    daProofBobVregV1,
+    daProofCarolEmi,
     daAliceToDavePrmProof,
     daOwnEvalBob,
-    daOwnEvalBobSysInt,
     daOwnEvalCarol,
+    daOwnEvalBobVreg,
+    daOwnEvalBobVregV0,
+    daOwnEvalBobVregV1,
+    daOwnEvalCarolEmi,
+  ]
+
+  // ── Badge Templates — Phase 14.0 (#169 part 1) ────────────────────────
+  // Network-wide, public-by-default Library artifacts. Versioning parallels
+  // Requirements Sets exactly. Seeded across multiple Actors so first-load
+  // exercises sectioning + cross-role visibility. One v1→v2 lineage on
+  // Bob's "Aerospace Grade A" template exercises the new-version UI.
+  const badgeAerospaceV1 = makeBadgeTemplate({
+    id: 'badgetpl-aero26mil',
+    ownerDot: bob.partyDot,
+    ownerParty: bob.party,
+    name: 'Aerospace Grade A',
+    description: 'Issued for components meeting MIL-PRF-55681 baseline qualification under nominal aerospace conditions.',
+    referencedRequirementsSetIds: ['reqset-mil-prf-55681-v1'],
+    lineageId: 'badgetpl-lineage-aerospace-grade-a',
+    version: 1,
+    supersededBy: 'badgetpl-aerov2qual',
+    createdDate: '2026-02-18T09:00:00Z',
+  })
+  const badgeAerospaceV2 = makeBadgeTemplate({
+    id: 'badgetpl-aerov2qual',
+    ownerDot: bob.partyDot,
+    ownerParty: bob.party,
+    name: 'Aerospace Grade A',
+    description: 'Updated to reference the v2 EMI/EMC-aware MIL-PRF-55681 standard. Components must meet the expanded compliance scope.',
+    referencedRequirementsSetIds: ['reqset-mil-prf-55681-v2'],
+    lineageId: 'badgetpl-lineage-aerospace-grade-a',
+    version: 2,
+    createdDate: '2026-04-15T10:30:00Z',
+  })
+  const badgeAuditVerified = makeBadgeTemplate({
+    id: 'badgetpl-audit26ck',
+    ownerDot: carol.partyDot,
+    ownerParty: carol.party,
+    name: 'Audit Verified',
+    description: 'AuditCo-issued attestation that an evaluation has been independently audited against the AuditCo PRM Audit checklist.',
+    referencedRequirementsSetIds: ['reqset-auditco-prm-audit-v1'],
+    lineageId: 'badgetpl-lineage-audit-verified',
+    version: 1,
+    createdDate: '2026-03-10T11:15:00Z',
+  })
+  const badgeComponentQA = makeBadgeTemplate({
+    id: 'badgetpl-qaucm26j',
+    ownerDot: alice.partyDot,
+    ownerParty: alice.party,
+    name: 'Component Quality Assured',
+    description: 'MicroCo internal mark for components that have cleared incoming QC and System Integration sanity checks.',
+    referencedRequirementsSetIds: ['reqset-incoming-qc-v1', 'reqset-system-integration-v1'],
+    lineageId: 'badgetpl-lineage-component-qa',
+    version: 1,
+    createdDate: '2026-03-22T14:45:00Z',
+  })
+  const badgeTemplates = [
+    badgeAerospaceV1,
+    badgeAerospaceV2,
+    badgeAuditVerified,
+    badgeComponentQA,
+  ]
+
+  // ── Badge Issuances — Phase 14.1 (#169 part 2), corrected Phase 14.2.
+  // Phase 14.2 (#169a): badges target Claims (not PoEs). Seed five issuances
+  // against Alice's PRM Claim from non-Alice issuers — exercises +N overflow
+  // (5 badges → 3 chips + "+2") on Alice's Claim card and on every PoE that
+  // wraps an Eval Result of that Claim (PoE-side display derives via
+  // aggregation walk). Issuance gate: `issuerParty !== claim.ownerParty`.
+  // None of the seeded issuances violate the gate (all issuers are Bob or
+  // Carol, neither owns the PRM Claim).
+  const issAerospaceA = makeBadgeIssuance({
+    id: 'badge-aerocarol',
+    issuerDot: bob.partyDot,
+    issuerParty: bob.party,
+    targetClaimId: cPrm.id,                // Bob → Alice's PRM Claim
+    badgeTemplateId: badgeAerospaceV1.id,
+    description: 'GovCo endorses MicroCo’s Power Regulation Module Assembly Claim against the aerospace baseline.',
+    createdDate: '2026-03-12T09:30:00Z',
+  })
+  const issAuditVerifiedBob = makeBadgeIssuance({
+    id: 'badge-auditbob1',
+    issuerDot: carol.partyDot,
+    issuerParty: carol.party,
+    targetClaimId: cPrm.id,                // Carol → Alice's PRM Claim
+    badgeTemplateId: badgeAuditVerified.id,
+    description: 'Independent audit confirms the methodology and findings on MicroCo’s Claim.',
+    createdDate: '2026-03-15T14:00:00Z',
+  })
+  // Phase 14.2: Alice cannot issue against her own Claim — these were
+  // formerly Alice's issuances; reissued from Bob (the second AuditVerified
+  // template was Carol's, so Bob picks up the Component QA endorsement).
+  const issComponentQABob = makeBadgeIssuance({
+    id: 'badge-qabob26m',
+    issuerDot: bob.partyDot,
+    issuerParty: bob.party,
+    targetClaimId: cPrm.id,                // Bob → Alice's PRM Claim
+    badgeTemplateId: badgeComponentQA.id,
+    description: 'GovCo recognizes that MicroCo’s incoming-QC baseline is met on this Claim.',
+    createdDate: '2026-03-20T11:45:00Z',
+  })
+  const issComponentQACarol = makeBadgeIssuance({
+    id: 'badge-qacarol2',
+    issuerDot: carol.partyDot,
+    issuerParty: carol.party,
+    targetClaimId: cPrm.id,                // Carol → Alice's PRM Claim
+    badgeTemplateId: badgeComponentQA.id,
+    description: 'AuditCo concurs that the components on this Claim meet MicroCo’s QC baseline.',
+    createdDate: '2026-03-22T10:00:00Z',
+  })
+  // 5th issuance maintains the +N overflow demo on the PRM Claim card.
+  const issAuditVerifiedCarolByBob = makeBadgeIssuance({
+    id: 'badge-auditcab2',
+    issuerDot: bob.partyDot,
+    issuerParty: bob.party,
+    targetClaimId: cPrm.id,                // Bob → Alice's PRM Claim
+    badgeTemplateId: badgeAuditVerified.id,
+    description: 'GovCo recognizes the AuditCo audit methodology applied to this Claim.',
+    createdDate: '2026-03-25T15:30:00Z',
+  })
+  const badgeIssuances = [
+    issAerospaceA,
+    issAuditVerifiedBob,
+    issComponentQABob,
+    issComponentQACarol,
+    issAuditVerifiedCarolByBob,
   ]
 
   return {
@@ -1871,6 +2571,13 @@ export function buildV22SharedArtifacts() {
     disclosureAgreements,
     evaluationAgreements,
     evaluationResults,
+    // Phase 13 (#168): seed PoEs retroactively wrap every existing Eval Result.
+    proofsOfEvaluation,
+    // Phase 14.0 (#169 part 1): network-wide Badge Templates.
+    badgeTemplates,
+    // Phase 14.1 (#169 part 2): Badge Issuances. Network-wide, single-source-
+    // of-truth recipient (derived from target PoE owner at render time).
+    badgeIssuances,
   }
 }
 
@@ -1948,16 +2655,42 @@ function buildViewForActor(actor, shared) {
     (c) => c.owner !== party && pulledInClaimIds.has(c.id),
   )
 
-  // Eval Results visible: those the actor owns, plus those with a Proof-of-Evaluation
-  // Disclosure Agreement where the actor is the grantee (claim owner seeing
-  // evaluator's result), plus those disclosed via a proof-only Claim DA where
-  // the actor is grantee (Phase 11D.3 — Alice → Dave proof-only of Bob's ER).
+  // Eval Results visible: those the actor owns, plus those wrapped by a PoE
+  // disclosed via a proof-of-evaluation DA where the actor is the grantee
+  // (claim owner seeing evaluator's PoE), plus those wrapped by PoEs
+  // disclosed via a proof-only Claim DA where the actor is grantee
+  // (Phase 11D.3 — Alice → Dave proof-only-of-PoE; Phase 13 (#168)
+  // migration: scope.evaluationResultIds → scope.poeIds, share-PoE-shares-
+  // all auto-discloses every wrapped Eval Result).
+  const sharedPoEs = shared.proofsOfEvaluation || []
+  const poeById = new Map(sharedPoEs.map((p) => [p.id, p]))
   const proofDaEvalResultIds = new Set()
+  // Phase 13 (#168): PoE ids visible via PoE-targeting DAs. The actor sees
+  // PoEs they own (evaluator side) plus PoEs disclosed to them via proof-of-
+  // eval DAs (claim-owner side) or proof-only Claim DAs (Phase 11D.3 →
+  // Phase 13 migration). The canvas adapter places PoE nodes; their wrapped
+  // Eval Results auto-pull-in via this same loop.
+  const visiblePoeIds = new Set()
+  for (const poe of sharedPoEs) {
+    if (poe.owner === party) visiblePoeIds.add(poe.id)
+  }
   // Phase 11D.3: track proof-only-pulled Eval Result ids separately so the
   // canvas adapter can place them in their own column near the pulled Claim
   // (instead of mixing them in with the actor's own evaluation column, which
-  // is where proof-of-evaluation results live).
+  // is where proof-of-evaluation results live). Phase 13 extends this to
+  // proof-only-pulled PoEs (the wrappers).
   const proofOnlyPulledEvalIds = new Set()
+  const proofOnlyPulledPoeIds = new Set()
+  const addPoeAndWrapped = (poeId, fromProofOnlyClaimDa) => {
+    const poe = poeById.get(poeId)
+    if (!poe) return
+    visiblePoeIds.add(poe.id)
+    if (fromProofOnlyClaimDa) proofOnlyPulledPoeIds.add(poe.id)
+    if (poe.wrappedEvalResultId) {
+      proofDaEvalResultIds.add(poe.wrappedEvalResultId)
+      if (fromProofOnlyClaimDa) proofOnlyPulledEvalIds.add(poe.wrappedEvalResultId)
+    }
+  }
   for (const da of disclosureAgreements) {
     // Phase 9D.1.5: revoked POE DAs (cascade-annotated by 9D.1.4 when their
     // backing EA is revoked) no longer confer ER visibility to the Claim
@@ -1965,20 +2698,31 @@ function buildViewForActor(actor, shared) {
     // kept the grantee's ER even though the access agreement was revoked,
     // so the orphaned ER lingered on the grantor's canvas.
     if (da._revokedMeta) continue
-    if (da.subject.kind === 'evalResult') {
-      // Proof-of-eval: grantee is the claim owner receiving the result.
+    if (da.subject.kind === 'poe') {
+      // Phase 13: proof-of-evaluation DA. subject = PoE; grantee is the
+      // claim owner receiving the wrapped Eval Result.
       if (da.grantee.party === party && da.grantor.party !== party) {
+        addPoeAndWrapped(da.subject.id, false)
+      }
+      continue
+    }
+    // Phase 13.1 (#168a): auto-disclosure DA at Eval Result save time —
+    // subject.kind === 'evalResult'; the Claim owner sees the evaluator's
+    // Eval Result via this DA (no PoE involved yet).
+    if (da.subject.kind === 'evalResult') {
+      const internalDa = da.grantor.party === da.grantee.party
+      if (!internalDa && da.grantee.party === party && da.grantor.party !== party) {
         proofDaEvalResultIds.add(da.subject.id)
       }
       continue
     }
-    // Phase 11D.3: proof-only Claim DA → pull each chosen Eval Result onto
-    // the grantee's canvas alongside the source Claim.
+    // Phase 11D.3 / Phase 13 migration: proof-only Claim DA → pull each
+    // disclosed PoE (and its wrapped Eval Result) onto the grantee's
+    // canvas alongside the source Claim.
     if (da.subject.kind === 'claim' && da.type === 'proofonly') {
       if (da.grantee.party === party && da.grantor.party !== party) {
-        for (const erId of (da.scope?.evaluationResultIds || [])) {
-          proofDaEvalResultIds.add(erId)
-          proofOnlyPulledEvalIds.add(erId)
+        for (const poeId of (da.scope?.poeIds || [])) {
+          addPoeAndWrapped(poeId, true)
         }
       }
     }
@@ -2221,11 +2965,15 @@ function buildViewForActor(actor, shared) {
     pairedDaIds,
     pulledInClaimIds,
     pulledInAssetIds,
-    // Phase 11D.3: Eval Result ids pulled in via proof-only Claim DAs (the
-    // actor is grantee). Used by `buildV22Canvas` to place these Eval Results
-    // in their own column near the source Claim, separate from the actor's
-    // own evaluation flow + the proof-of-evaluation results.
+    // Phase 11D.3 / Phase 13: Eval Result ids pulled in via proof-only
+    // Claim DAs. Phase 13 adds parallel `proofOnlyPulledPoeIds` for the
+    // wrapper PoEs themselves.
     proofOnlyPulledEvalIds,
+    proofOnlyPulledPoeIds,
+    // Phase 13 (#168): visible PoEs for this actor — owned + disclosed via
+    // PoE-targeting DAs. Each PoE in this set has its wrapped Eval Results
+    // already added to `visibleEvaluationResults` by the loop above.
+    proofsOfEvaluation: sharedPoEs.filter((p) => visiblePoeIds.has(p.id)),
     provisionalClaimIds,
     provisionalAssetIds,
     declinedClaimIds,
@@ -2286,6 +3034,10 @@ export function mergeProvisionals(shared, provisionals) {
   }
   if (provisionals.evaluationResults?.length) {
     merged.evaluationResults = mergeById(merged.evaluationResults, provisionals.evaluationResults)
+  }
+  // Phase 13 (#168): Create-PoE flow appends to v22Provisionals.proofsOfEvaluation.
+  if (provisionals.proofsOfEvaluation?.length) {
+    merged.proofsOfEvaluation = mergeById(merged.proofsOfEvaluation || [], provisionals.proofsOfEvaluation)
   }
   if (provisionals.parseResults?.length) {
     merged.parseResults = mergeById(merged.parseResults, provisionals.parseResults)
@@ -2369,8 +3121,45 @@ export function deriveAgreementEdges(view) {
   const visibleClaimIds = new Set(view.claims.map((c) => c.id))
   const visibleEvalIds = new Set(view.evaluationResults.map((e) => e.id))
   const visibleParseIds = new Set(view.parseResults.map((p) => p.id))
+  // Phase 13 (#168): PoE nodes are first-class on the canvas.
+  const visiblePoEs = view.proofsOfEvaluation || []
+  const visiblePoeIds = new Set(visiblePoEs.map((p) => p.id))
+  const poeById = new Map(visiblePoEs.map((p) => [p.id, p]))
   const actorPartyInView = new Set(view.actors.map((a) => a.party))
   const evalResultById = new Map(view.evaluationResults.map((e) => [e.id, e]))
+
+  // Phase 13.2 (#177): build per-ER chain maps for chain-edge rerouting.
+  //   • successorByErId: erId → next-ER-in-chain id (ER that has this id
+  //                       as priorEvalResultId)
+  //   • wrappingPoeByErId: erId → PoE id wrapping that ER (Phase 13.3 fix)
+  //   • hasPredecessor:  set of erIds with a non-null priorEvalResultId
+  //                       AND that predecessor is on canvas
+  //
+  // Edges are then derived as:
+  //   - auto-disclosure DA for ER X:
+  //       * if X has a successor on canvas → target the successor (chain).
+  //       * elif X is wrapped by a PoE on canvas (Phase 13.3) → target
+  //         the PoE; the PoE's own DA carries the PoE → Claim edge so
+  //         the chain reads `... → ER → PoE → Claim` without a parallel
+  //         ER → Claim bypass.
+  //       * else → target the Claim (chain endpoint, no PoE).
+  //   - ownership DA for ER X: if X has a predecessor on canvas, skip
+  //     the Asset→ER edge entirely (only the chain origin links to the
+  //     Asset; later chain members link forward through the chain).
+  const successorByErId = new Map()
+  for (const er of view.evaluationResults) {
+    if (er.priorEvalResultId && evalResultById.has(er.priorEvalResultId)) {
+      successorByErId.set(er.priorEvalResultId, er.id)
+    }
+  }
+  const wrappingPoeByErId = new Map()
+  for (const poe of visiblePoEs) {
+    if (poe.wrappedEvalResultId && evalResultById.has(poe.wrappedEvalResultId)) {
+      wrappingPoeByErId.set(poe.wrappedEvalResultId, poe.id)
+    }
+  }
+  const hasPredecessor = (er) =>
+    !!er.priorEvalResultId && evalResultById.has(er.priorEvalResultId)
 
   const daByEvalAgreementId = new Map()
   for (const ea of view.evaluationAgreements) {
@@ -2392,7 +3181,8 @@ export function deriveAgreementEdges(view) {
     visibleAssetIds.has(nodeId) ||
     visibleClaimIds.has(nodeId) ||
     visibleEvalIds.has(nodeId) ||
-    visibleParseIds.has(nodeId)
+    visibleParseIds.has(nodeId) ||
+    visiblePoeIds.has(nodeId)
 
   const pushEdge = (from, to, da) => {
     if (!from || !to || from === to) return
@@ -2490,16 +3280,17 @@ export function deriveAgreementEdges(view) {
       continue
     }
     if (kind === 'claim' && !internal && !toPublic && da.type === 'proofonly') {
-      // Phase 11D.3: proof-only Claim DA. Two edge classes:
-      //   (a) The conventional Claim ↔ granteeAssetId anchor (proof-only
-      //       styled) so the pulled-in Claim has a visual home on the
-      //       grantee's canvas, mirroring full/selective behavior.
-      //   (b) One edge per disclosed Eval Result → Claim, also proof-only
-      //       styled. These edges carry the actual disclosure payload —
-      //       the proof-only relationship is THROUGH the Eval Result.
+      // Phase 11D.3 / Phase 13: proof-only Claim DA. Two edge classes:
+      //   (a) Conventional Claim ↔ granteeAssetId anchor (proof-only styled)
+      //       so the pulled-in Claim has a visual home on the grantee's
+      //       canvas, mirroring full/selective behavior.
+      //   (b) One edge per disclosed PoE → Claim. The proof-only payload is
+      //       now the PoE wrapper rather than individual Eval Results;
+      //       wrapped Eval Results connect to the PoE via wrap edges (see
+      //       PoE-EvalResult pass below).
       if (da.granteeAssetId) pushEdge(id, da.granteeAssetId, da)
-      for (const erId of (da.scope?.evaluationResultIds || [])) {
-        pushEdge(erId, id, da)
+      for (const poeId of (da.scope?.poeIds || [])) {
+        pushEdge(poeId, id, da)
       }
       continue
     }
@@ -2510,22 +3301,61 @@ export function deriveAgreementEdges(view) {
     }
     if (kind === 'evalResult' && internal && hasScopeAssets) {
       // Eval Result → evaluator's Asset (ownership anchor).
+      // Phase 13.2 (#177): chain rerouting — only the *origin* ER in a
+      // supersession chain links to the Asset. Chain members later in the
+      // sequence reach the Asset transitively through their predecessors,
+      // so emitting an Asset→ER edge for every chain member would render
+      // a fan of redundant edges. Skip the edge when the ER has a
+      // predecessor on canvas.
+      const er = evalResultById.get(id)
+      if (er && hasPredecessor(er)) continue
       for (const aid of da.scope.assetIds) pushEdge(id, aid, da)
       continue
     }
     if (kind === 'evalResult' && !internal) {
-      // Proof-of-Evaluation — resolve Claim via the Eval Result.
+      // Phase 13.1 (#168a): auto-disclosure DA created at Eval Result save
+      // time. evaluator (grantor) → claim owner (grantee).
+      // Phase 13.2 (#177): chain rerouting — if the ER has a successor in
+      // its supersession chain, the chain edge targets that successor.
+      // Phase 13.3 (Step 1): when the ER is wrapped by a PoE, skip the
+      // auto-disclosure DA's edge entirely — the synth wrap edge already
+      // produces ER → PoE, and the PoE-targeting DA produces PoE → Claim.
+      // Pre-13.3 the chain endpoint fell through to ER → Claim, which
+      // bypassed the PoE node visually.
       const er = evalResultById.get(id)
-      if (er) pushEdge(id, er.claimId, da)
+      if (!er) continue
+      const successorId = successorByErId.get(er.id)
+      if (successorId) pushEdge(id, successorId, da)
+      else if (wrappingPoeByErId.has(er.id)) {
+        // Skip — synth wrap edge below handles ER → PoE.
+      } else pushEdge(id, er.claimId, da)
+      continue
+    }
+    if (kind === 'poe' && !internal) {
+      // Phase 13 (#168): Proof-of-Evaluation DA. The disclosure subject is
+      // the PoE.
+      // Phase 13.2 (#177): chain insertion — the PoE-targeting DA emits an
+      // edge from the PoE to the Claim. The Latest Eval Result → PoE edge
+      // comes from the synth wrap pass below. Together they read as
+      // `Latest → PoE → Claim`. The pre-13.2 design routed Latest → Claim
+      // directly here, bypassing the PoE node visually; that meant the
+      // PoE wrap edge sat off-chain rather than between the wrapped ER
+      // and the Claim. Phase 13.2 inserts the PoE into the canvas chain.
+      const poe = poeById.get(id)
+      if (poe) pushEdge(poe.id, poe.claimId, da)
       continue
     }
     if (kind === 'evalResult' && internal && !hasScopeAssets) {
       // Self-evaluation proof-of-evaluation — owner is both grantor and grantee.
-      // scope.evaluationResultIds carries the eval id; edge goes to the Claim
-      // (resolved via the eval's claimId) so it reads visually identical to a
-      // non-self proof-of-eval edge.
+      // Phase 13.2 (#177): same chain rerouting as the cross-party path.
+      // Phase 13.3 (Step 1): same PoE-wrap skip as cross-party.
       const er = evalResultById.get(id)
-      if (er) pushEdge(id, er.claimId, da)
+      if (!er) continue
+      const successorId = successorByErId.get(er.id)
+      if (successorId) pushEdge(id, successorId, da)
+      else if (wrappingPoeByErId.has(er.id)) {
+        // Skip — synth wrap edge handles ER → PoE.
+      } else pushEdge(id, er.claimId, da)
       continue
     }
     if (kind === 'parseResult' && internal && hasScopeAssets) {
@@ -2535,6 +3365,29 @@ export function deriveAgreementEdges(view) {
     }
     // Anything else: silently skip. Later phases may introduce additional variants.
     void actorPartyInView
+  }
+
+  // Phase 13.1 (#168a): PoE → wrapped Eval Result wrapping edge. 1:1.
+  // Synthesized (no backing DA) — reflects the artifact-level wrapping
+  // relationship declared on the PoE itself.
+  // Phase 13.2 (#177): edge style switches from `full` to `proofonly` —
+  // PoE wrap is part of the proof-only chain (Latest Eval Result → PoE →
+  // Claim). Direction also reversed to Latest → PoE so the chain reads
+  // forward; pushEdge dedupes order-independently anyway.
+  for (const poe of visiblePoEs) {
+    const erId = poe.wrappedEvalResultId
+    if (!erId || !visibleEvalIds.has(erId)) continue
+    const synthDa = {
+      id: `synth-poewrap-${poe.id}-${erId}`,
+      type: 'proofonly',
+      grantor: { party: poe.owner },
+      grantee: { party: poe.owner },
+      subject: { kind: 'poe', id: poe.id },
+      scope: { poeIds: [poe.id] },
+      terms: {},
+      _isPoeWrap: true,
+    }
+    pushEdge(erId, poe.id, synthDa)
   }
 
   return edges
@@ -2578,6 +3431,11 @@ const COL_PULLED_CLAIM = 2100
 const COL_PULLED_EVAL = 1700
 const COL_PULLED_ASSET = 2500
 const COL_PUBLIC = 2900
+// Phase 13 (#168): PoE column sits 400px right of own Eval Results so PoE
+// nodes appear "downstream" of the Eval Results they wrap. The wrapping
+// edges run leftward to the Eval Result column. Pulled-in (counterparty
+// canvas) PoEs hang next to their source Claim — see placement loop.
+const COL_OWN_POE = 2100
 const ROW_STEP = 300                // Phase 10.2.1: was 260; snap to 100-grid
 // Phase 10.2: per-depth horizontal spacing for the Asset hierarchy column.
 // Phase 10.2.1: bumped 380 → 400 so it stays on the 100-grid (the elastic
@@ -2622,6 +3480,11 @@ export function buildClaimNodeForDirectoryMaterialization(claim, evalResults = [
 }
 
 function rollupClaimHealth(claimId, evalResults) {
+  // Phase 13.2 (#176): minibar maps SAT→ok (green), UNSAT→bad (red),
+  // MISSING→warn (amber). N/A continues to be excluded from displays.
+  // Aggregates across all non-superseded Eval Results referencing the
+  // Claim — chain ancestors that are SUPERSEDED don't contribute (their
+  // values are stale by definition).
   let ok = 0
   let warn = 0
   let bad = 0
@@ -2634,12 +3497,15 @@ function rollupClaimHealth(claimId, evalResults) {
       total += 1
       if (r.status === 'satisfactory') ok += 1
       else if (r.status === 'unsatisfactory') bad += 1
+      else if (r.status === 'missing') warn += 1
     }
   }
   return { health: { ok, warn, bad }, claimCount: total }
 }
 
 function rollupEvalResultHealth(er) {
+  // Phase 13.2 (#176): MISSING maps to the warn (amber) slot, parallel to
+  // rollupClaimHealth above.
   let ok = 0
   let warn = 0
   let bad = 0
@@ -2649,6 +3515,7 @@ function rollupEvalResultHealth(er) {
     total += 1
     if (r.status === 'satisfactory') ok += 1
     else if (r.status === 'unsatisfactory') bad += 1
+    else if (r.status === 'missing') warn += 1
   }
   return { health: { ok, warn, bad }, claimCount: total }
 }
@@ -2837,14 +3704,23 @@ function claimToNode(claim, rollup, x, y) {
   }
 }
 
-function evalResultToNode(er, x, y) {
+function evalResultToNode(er, x, y, claim) {
   const rollup = rollupEvalResultHealth(er)
-  const isSuperseded = er.status === 'superseded'
+  // Phase 13.1 (#168a): multi-RS Eval Results carry a flat results[] across
+  // all selected RSes. Auto-name uses the Claim name as the basis ("Evaluation
+  // of [Claim name]"); falls back to the first RS's name for backwards-compat
+  // when the Claim isn't resolvable.
+  const rsList = er.requirementsSets || []
+  const claimName = claim?.name || null
+  const firstRsName = rsList[0]?.name || null
+  const autoName = claimName
+    ? `Evaluation of ${claimName}`
+    : (rsList.length > 1 ? `${firstRsName} (+${rsList.length - 1} more)` : firstRsName || er.id)
   return {
     id: er.id,
     pin: er.pin,
     dot: er.ownerDot,
-    name: er.requirementsSet.name,
+    name: autoName,
     category: 'evaluation',
     owner: er.owner,
     parentId: null,
@@ -2875,14 +3751,15 @@ function evalResultToNode(er, x, y) {
     status: er.status,
     supersededBy: er.supersededBy,
     claimId: er.claimId,
-    requirementSetId: er.requirementsSet.id,
-    requirementSetName: er.requirementsSet.name,
-    requirementSetVersion: er.requirementsSet.version,
+    // Phase 13.1: surface the bundled RSes for canvas-time decisions.
+    requirementsSets: rsList.map((rs) => ({ ...rs })),
+    evalAggregate: getEvalResultAggregate(er),
     evaluator: er.owner,
     evaluatorParty: er.owner,
     date: er.evaluationDate ? er.evaluationDate.slice(0, 10) : null,
     dateTime: er.evaluationDate,
     claims: er.results.map((r) => ({
+      requirementsSetId: r.requirementsSetId,
       requirementId: r.requirementId,
       label: r.label,
       status: r.status,
@@ -2894,6 +3771,70 @@ function evalResultToNode(er, x, y) {
     // v22Type stays a single canonical label (Phase 6 carry-over #4).
     v22Type: 'EVAL RESULT',
     v22Artifact: er,
+  }
+}
+
+/**
+ * Phase 13.1 (#168a): PoE → canvas node. PoEs wrap exactly one Eval Result;
+ * the card body aggregate ("X SAT · Y UNSAT across N Requirements Sets")
+ * matches the wrapped Eval Result's totals.
+ */
+function rollupPoeAggregate(poe, evalResultsList) {
+  const wrapped = evalResultsList.find((e) => e.id === poe.wrappedEvalResultId)
+  const agg = getEvalResultAggregate(wrapped)
+  return {
+    sat: agg.totalSat,
+    unsat: agg.totalUnsat,
+    missing: agg.totalMissing,
+    na: agg.totalNa,
+    rsCount: agg.rsCount,
+  }
+}
+
+function poeToNode(poe, x, y, evalResultsList = []) {
+  const agg = rollupPoeAggregate(poe, evalResultsList)
+  return {
+    id: poe.id,
+    pin: poe.pin,
+    dot: poe.ownerDot,
+    name: poe.name,
+    category: 'evaluation',
+    owner: poe.owner,
+    parentId: null,
+    children: [],
+    health: EMPTY_HEALTH,
+    childHealth: null,
+    totalHealth: null,
+    displayHealth: EMPTY_HEALTH,
+    claimCount: 1,
+    displayClaimCount: 1,
+    hasEvidence: false,
+    hasStack: false,
+    childCount: 0,
+    evidence: null,
+    evaluations: [],
+    sdas: [],
+    x,
+    y,
+    parentOwner: poe.owner,
+    isCascade: false,
+    cascadeVia: null,
+    upstreamSda: null,
+    isEvidence: false,
+    isClaim: false,
+    isParse: false,
+    isEvaluation: false,
+    isPoe: true,
+    isTerminalNode: true,
+    status: poe.status,
+    claimId: poe.claimId,
+    wrappedEvalResultId: poe.wrappedEvalResultId,
+    poeAggregate: agg,
+    artifactUri: poe.artifactUri,
+    date: poe.createdDate ? poe.createdDate.slice(0, 10) : null,
+    dateTime: poe.createdDate,
+    v22Type: 'PROOF OF EVALUATION',
+    v22Artifact: poe,
   }
 }
 
@@ -3565,27 +4506,31 @@ export function makeRevocationRecord({
 }
 
 /**
- * Build the artifact triple a completed evaluation run produces:
+ * Phase 13.1 (#168a): single-call evaluation submit. Produces ONE Eval
+ * Result wrapping every selected RS, ONE proof-only DA targeting that Eval
+ * Result (auto-disclosure), and ONE ownership DA. Multi-RS evaluation
+ * submissions go through this once, not once-per-RS.
+ *
  *   - The Evaluation Result itself (spec §10.6)
  *   - A Proof-of-Evaluation Disclosure Agreement (evaluator → claim owner)
+ *     with subject.kind='evalResult'
  *   - The evaluator's ownership DA linking the Eval Result to their anchor Asset
  *
- * If `priorActiveResult` is supplied AND its requirementsSet.id matches, the
- * caller should also include the prior result with status='superseded' and
- * supersededBy=newId in the v22Provisionals state.
+ * `priorActiveResult` supersession lineage is keyed on requirements-set
+ * intersection — if any RS in the new run also appeared in the prior
+ * Eval Result, the prior is marked 'superseded'.
  */
 export function makeEvaluationRunArtifacts({
   evaluatorParty, evaluatorDot,
   claimOwnerParty, claimOwnerDot,
   evaluationAgreement,
   granteeAssetId,
-  requirementsSet,
-  rows,            // [{ requirementId, label, value, status }]
-  evidenceUsed,    // [assetId, ...]
+  requirementsSets,    // [{ id, name, version }, ...] — all RSes evaluated
+  rows,                // [{ requirementsSetId, requirementId, label, value, status, confidence, _aiOriginalValue }]
+  evidenceUsed,        // [assetId, ...]
   priorActiveResult,
 }) {
-  const idSeed = `${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`
-  const evalId = `eval-${evaluationAgreement.id}-${idSeed}`
+  const evalId = makeArtifactId('eval', `${evaluationAgreement.id}-${Date.now()}-${Math.random()}`)
   const evaluationDate = new Date().toISOString()
 
   const evalResult = makeEvaluationResult({
@@ -3595,7 +4540,7 @@ export function makeEvaluationRunArtifacts({
     evaluationAgreementId: evaluationAgreement.id,
     claimId: evaluationAgreement.claimId,
     granteeAssetId,
-    requirementsSet,
+    requirementsSets,
     results: rows,
     evidenceUsed,
     evaluationDate,
@@ -3604,7 +4549,7 @@ export function makeEvaluationRunArtifacts({
   })
 
   const proofDa = makeProofOfEvalDisclosureAgreement({
-    id: `da-proof-${evalId}`,
+    id: makeArtifactId('da-proof', `${evalId}-${Date.now()}`),
     evaluator: evaluatorParty,
     evaluatorDot,
     claimOwner: claimOwnerParty,
@@ -3614,7 +4559,7 @@ export function makeEvaluationRunArtifacts({
   })
 
   const ownershipDa = makeInternalDisclosureAgreement({
-    id: `da-own-${evalId}`,
+    id: makeArtifactId('da-own', `${evalId}-${Date.now()}`),
     owner: evaluatorParty,
     ownerDot: evaluatorDot,
     subject: { kind: 'evalResult', id: evalId },
@@ -3624,24 +4569,27 @@ export function makeEvaluationRunArtifacts({
     terms: { createdDate: evaluationDate },
   })
 
-  // If a prior result with the same requirements-set lineage exists, mark it
-  // superseded and link its supersededBy field.
+  // Phase 13.1 (#168a): supersession lineage. The prior result is
+  // superseded when at least one RS in the new run matches an RS the
+  // prior wrapped. (Re-running a subset of the prior's RSes still
+  // supersedes — `priorActiveResult` lookup keys on a single RS so this
+  // condition is equivalent to "prior covers that RS", which by
+  // construction it does.)
   let supersededVersion = null
-  if (priorActiveResult && priorActiveResult.requirementsSet?.id === requirementsSet.id && priorActiveResult.status === 'active') {
-    supersededVersion = makeEvaluationResult({
-      id: priorActiveResult.id,
-      owner: priorActiveResult.owner,
-      ownerDot: priorActiveResult.ownerDot,
-      evaluationAgreementId: priorActiveResult.evaluationAgreementId,
-      claimId: priorActiveResult.claimId,
-      granteeAssetId: priorActiveResult.granteeAssetId,
-      requirementsSet: priorActiveResult.requirementsSet,
-      results: priorActiveResult.results,
-      evidenceUsed: priorActiveResult.evidenceUsed,
-      evaluationDate: priorActiveResult.evaluationDate,
+  const newRsIds = new Set(requirementsSets.map((rs) => rs.id))
+  const priorRsIds = priorActiveResult
+    ? (priorActiveResult.requirementsSets
+        ? priorActiveResult.requirementsSets.map((rs) => rs.id)
+        // Backwards compat for any caller still on the singular shape.
+        : priorActiveResult.requirementsSet ? [priorActiveResult.requirementsSet.id] : [])
+    : []
+  const priorOverlaps = priorRsIds.some((id) => newRsIds.has(id))
+  if (priorActiveResult && priorOverlaps && priorActiveResult.status === 'active') {
+    supersededVersion = {
+      ...priorActiveResult,
       status: 'superseded',
       supersededBy: evalResult.id,
-    })
+    }
   }
 
   return {
@@ -3866,7 +4814,12 @@ export function makeParseRunArtifacts({
 export function findPriorActiveEvaluationResult({ claimId, requirementsSetId, shared, provisionals }) {
   const merged = mergeProvisionals(shared || buildV22SharedArtifacts(), provisionals)
   return merged.evaluationResults.find(
-    (e) => e.claimId === claimId && e.requirementsSet?.id === requirementsSetId && e.status === 'active',
+    (e) => {
+      if (e.claimId !== claimId) return false
+      if (e.status !== 'active') return false
+      const rsIds = e.requirementsSets ? e.requirementsSets.map((rs) => rs.id) : []
+      return rsIds.includes(requirementsSetId)
+    },
   ) || null
 }
 
@@ -3928,14 +4881,52 @@ export function buildV22Canvas(view) {
     : 0
   const assetColShift = maxOwnedAssetDepth * ASSET_COL_GAP
 
-  // Effective column positions — shifted right when hierarchy depth > 0.
+  // Phase 13.3 (Step 4): chain length determines an additional rightward
+  // shift for downstream columns so chain ancestors don't collide with
+  // the Pulled Claim / Pulled Asset / Public columns. Compute once here
+  // before all placement runs so every column is consistent.
+  const ER_COL_SPACING = 300
+  const erIdToErArtifact = new Map(view.evaluationResults.map((e) => [e.id, e]))
+  const chainPositionByErId = new Map()
+  const chainOriginByErId = new Map()
+  for (const er of view.evaluationResults) {
+    let pos = 0
+    let cursor = er
+    while (cursor && cursor.priorEvalResultId && erIdToErArtifact.has(cursor.priorEvalResultId)) {
+      pos += 1
+      cursor = erIdToErArtifact.get(cursor.priorEvalResultId)
+    }
+    chainPositionByErId.set(er.id, pos)
+    chainOriginByErId.set(er.id, cursor.id)
+  }
+  const chainLengthByOriginId = new Map()
+  for (const er of view.evaluationResults) {
+    const origin = chainOriginByErId.get(er.id)
+    const pos = chainPositionByErId.get(er.id)
+    const prev = chainLengthByOriginId.get(origin) || 0
+    if (pos + 1 > prev) chainLengthByOriginId.set(origin, pos + 1)
+  }
+  const chainLengthForEr = (er) =>
+    chainLengthByOriginId.get(chainOriginByErId.get(er.id)) || 1
+  const maxChainLengthOnCanvas = view.evaluationResults.reduce(
+    (acc, er) => Math.max(acc, chainLengthForEr(er)),
+    1,
+  )
+  const chainColShift = Math.max(0, maxChainLengthOnCanvas - 1) * ER_COL_SPACING
+
+  // Effective column positions — shifted right by Asset hierarchy depth
+  // (assetColShift, Phase 10.2) AND chain length (chainColShift, Phase
+  // 13.3). The eval column itself stays at COL_OWN_EVAL + assetColShift;
+  // chain ancestors push right within that column's "lane" via
+  // ER_COL_SPACING. Downstream columns absorb the chain expansion.
   const COL_OWN_PARSE_eff = COL_OWN_PARSE + assetColShift
   const COL_OWN_CLAIM_eff = COL_OWN_CLAIM + assetColShift
   const COL_OWN_EVAL_eff = COL_OWN_EVAL + assetColShift
-  const COL_PULLED_CLAIM_eff = COL_PULLED_CLAIM + assetColShift
+  const COL_OWN_POE_eff = COL_OWN_POE + assetColShift + chainColShift
+  const COL_PULLED_CLAIM_eff = COL_PULLED_CLAIM + assetColShift + chainColShift
   const COL_PULLED_EVAL_eff = COL_PULLED_EVAL + assetColShift
-  const COL_PULLED_ASSET_eff = COL_PULLED_ASSET + assetColShift
-  const COL_PUBLIC_eff = COL_PUBLIC + assetColShift
+  const COL_PULLED_ASSET_eff = COL_PULLED_ASSET + assetColShift + chainColShift
+  const COL_PUBLIC_eff = COL_PUBLIC + assetColShift + chainColShift
 
   // Group owned Assets by depth and place each at its depth's column.
   // Within a depth group, vertical position uses the asset's index inside
@@ -4092,16 +5083,32 @@ export function buildV22Canvas(view) {
   const erProofOnlyPulled = view.evaluationResults.filter((e) =>
     e.owner !== actor.party && proofOnlyPulledEvalIds.has(e.id),
   )
-  // Phase 10.2.1: replaces the legacy `EVAL_ROW_OFFSET = ROW_STEP / 2`
-  // (Phase 6.5 #17) with the standard COL_Y_OFFSET (100 — one full grid
-  // step). External Eval Results stack continuously below the owned ones
-  // via `symmetricRowY(erOwn.length + i)`; the prior `+80` magic spacer is
-  // gone since the symmetric distribution handles separation naturally.
+  // Phase 13.3 (Step 4): multi-column chain placement. ER_COL_SPACING +
+  // chain maps were computed at the top of buildV22Canvas; each ER's
+  // x-position derives from its supersession-chain position. Globally
+  // aligned: column N is "chain position N" across all chains.
+  //
+  // Bob's view (own ER): x = COL_OWN_EVAL_eff + chainPos * ER_COL_SPACING
+  //   (origin near Asset, Latest toward Claim).
+  // Alice's view (proof-of-eval pulled ER): mirrored —
+  //   effectivePos = (chainLength-1) - chainPos
+  //   (Latest at COL_OWN_EVAL_eff close to Claim; origin farther right).
+  const claimById = new Map(view.claims.map((c) => [c.id, c]))
+  // Bob's view (own ERs): chain reads left-to-right toward Claim. x grows
+  // with chainPosition.
   erOwn.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(i) + COL_Y_OFFSET))
+    const chainPos = chainPositionByErId.get(er.id) || 0
+    const x = COL_OWN_EVAL_eff + chainPos * ER_COL_SPACING
+    nodes.push(evalResultToNode(er, x, symmetricRowY(i) + COL_Y_OFFSET, claimById.get(er.claimId)))
   })
+  // Alice's view (proof-of-eval pulled ERs): chain reads right-to-left
+  // (Latest closest to Claim). effectivePos mirrors chainPosition.
   erProofOfEval.forEach((er, i) => {
-    nodes.push(evalResultToNode(er, COL_OWN_EVAL_eff, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET))
+    const chainPos = chainPositionByErId.get(er.id) || 0
+    const len = chainLengthForEr(er)
+    const effectivePos = (len - 1) - chainPos
+    const x = COL_OWN_EVAL_eff + effectivePos * ER_COL_SPACING
+    nodes.push(evalResultToNode(er, x, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET, claimById.get(er.claimId)))
   })
   // Phase 11D.4.1: place each proof-only-pulled Eval Result derived from
   // its source Claim's position, NOT at a fixed column. This avoids
@@ -4124,12 +5131,91 @@ export function buildV22Canvas(view) {
       // Defensive fallback — source Claim isn't on canvas (shouldn't
       // happen since W1 of Phase 11D.3 pulls it in). Drop at the far-right
       // edge of the actor's own evaluation flow.
-      nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, stackIdx * ROW_STEP))
+      nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, stackIdx * ROW_STEP, claimById.get(er.claimId)))
       return
     }
     const x = sourceClaim.x + 200
     const y = sourceClaim.y + 300 + (stackIdx * COL_Y_OFFSET)
-    nodes.push(evalResultToNode(er, x, y))
+    nodes.push(evalResultToNode(er, x, y, claimById.get(er.claimId)))
+  })
+
+  // Phase 13 (#168): PoE node placement.
+  //   • Owned PoEs (the actor is the wrapping evaluator) go in the dedicated
+  //     PoE column to the right of own Eval Results, vertically anchored to
+  //     the centroid of the wrapped Eval Results' y positions so the wrap
+  //     edges read cleanly.
+  //   • Counterparty (proof-only-pulled) PoEs hang next to their source
+  //     Claim, mirroring the proof-only-pulled Eval Result placement so the
+  //     wrap edges between PoE and pulled Eval Result(s) stay short.
+  const allViewPoEs = view.proofsOfEvaluation || []
+  const proofOnlyPulledPoeIds = view.proofOnlyPulledPoeIds || new Set()
+  const ownedPoEs = allViewPoEs.filter((p) => p.owner === actor.party)
+  const proofOnlyPulledPoEs = allViewPoEs.filter((p) => proofOnlyPulledPoeIds.has(p.id))
+  // Phase 13.1 (#168a): proof-of-evaluation pulled PoEs — counterparty PoEs
+  // disclosed via a proof-of-eval DA (subject.kind='poe') where the actor
+  // is the Claim owner. These belong on the actor's canvas next to their
+  // own Claim, mirroring how the wrapped Eval Result was placed previously
+  // (the same column as proof-of-eval ERs, just shifted further right).
+  const proofOfEvalPulledPoEs = allViewPoEs.filter((p) =>
+    p.owner !== actor.party && !proofOnlyPulledPoeIds.has(p.id),
+  )
+  const evalNodeById = new Map(nodes.filter((n) => n.v22Type === 'EVAL RESULT').map((n) => [n.id, n]))
+  // Phase 13.3 (Step 4): PoE placement is chain-position-aware.
+  //   • Owned PoE (Bob's PoE on Bob's canvas): one column right of latest
+  //     ER, i.e. x = COL_OWN_EVAL_eff + chainLength * ER_COL_SPACING.
+  //   • Pulled PoE (Bob's PoE on Alice's canvas): inserts between the
+  //     Claim and Latest. Latest is at COL_OWN_EVAL_eff (mirrored); PoE
+  //     sits one ER_COL_SPACING column to its LEFT toward the Claim.
+  //   • If the PoE has no chain anchor (wrappedER not on canvas), fall
+  //     back to COL_OWN_POE_eff (the standard PoE column).
+  ownedPoEs.forEach((poe, i) => {
+    const wrapped = poe.wrappedEvalResultId ? erIdToErArtifact.get(poe.wrappedEvalResultId) : null
+    const wrappedY = evalNodeById.get(poe.wrappedEvalResultId)?.y
+    const y = typeof wrappedY === 'number'
+      ? wrappedY
+      : symmetricRowY(i) + COL_Y_OFFSET
+    let x
+    if (wrapped) {
+      const len = chainLengthForEr(wrapped)
+      x = COL_OWN_EVAL_eff + len * ER_COL_SPACING
+    } else {
+      x = COL_OWN_POE_eff
+    }
+    nodes.push(poeToNode(poe, x, y, view.evaluationResults))
+  })
+  proofOfEvalPulledPoEs.forEach((poe, i) => {
+    const wrapped = poe.wrappedEvalResultId ? erIdToErArtifact.get(poe.wrappedEvalResultId) : null
+    const wrappedY = evalNodeById.get(poe.wrappedEvalResultId)?.y
+    const y = typeof wrappedY === 'number'
+      ? wrappedY
+      : symmetricRowY(ownedPoEs.length + i) + COL_Y_OFFSET
+    let x
+    if (wrapped) {
+      // Mirror: Latest sits at COL_OWN_EVAL_eff (effectivePos 0). PoE
+      // inserts to its LEFT toward Claim → effectivePos -1 → x =
+      // COL_OWN_EVAL_eff - ER_COL_SPACING.
+      x = COL_OWN_EVAL_eff - ER_COL_SPACING
+    } else {
+      x = COL_OWN_POE_eff
+    }
+    nodes.push(poeToNode(poe, x, y, view.evaluationResults))
+  })
+  // Counterparty (proof-only-pulled) PoEs: anchor next to the source Claim
+  // similar to the proof-only-pulled Eval Result placement, but offset
+  // further so the PoE node sits between Claim and its pulled wrapped
+  // Eval Results.
+  const poePulledPerClaim = new Map()
+  proofOnlyPulledPoEs.forEach((poe) => {
+    const sourceClaim = claimNodeById.get(poe.claimId)
+    const stackIdx = poePulledPerClaim.get(poe.claimId) || 0
+    poePulledPerClaim.set(poe.claimId, stackIdx + 1)
+    if (!sourceClaim) {
+      nodes.push(poeToNode(poe, COL_OWN_POE_eff, stackIdx * ROW_STEP, view.evaluationResults))
+      return
+    }
+    const x = sourceClaim.x + 400
+    const y = sourceClaim.y + 200 + (stackIdx * COL_Y_OFFSET)
+    nodes.push(poeToNode(poe, x, y, view.evaluationResults))
   })
 
   // ── Edges ────────────────────────────────────────────────────────────

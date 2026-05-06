@@ -14,6 +14,7 @@
 // Phase 3 acceptance criterion ("... with Amend action (if grantor)").
 
 import CopyBadge from './shared/CopyBadge'
+import ExpandButton from './shared/ExpandButton'
 import Tooltip from '../Tooltip'
 
 const DISCLOSURE_TYPE_COLOR = {
@@ -91,12 +92,20 @@ export default function DisclosureAgreementDetailPanel({
   onAmend,
   onRevoke, // Phase 9D.1.1 (Fix 4): opens V22RevocationConfirmModal
   onViewEvaluationAgreement, // passed when a paired EA exists
+  // Phase 13.4 (#175): Expand button — opens ExpandedArtifactModal with the
+  // 'disclosure-agreement' schema (Output: parties / subject / scope / terms;
+  // JSON: realistic distributed-storage record).
+  onExpand,
 }) {
   if (!agreement) return null
 
   const isInternal = agreement.grantor.party === agreement.grantee.party
   const isPublic = agreement.grantee.party === 'Radiant Network'
-  const isProofOfEval = agreement.subject.kind === 'evalResult' && !isInternal
+  // Phase 13.1 (#168a): proof-of-eval DAs carry either `evalResult` (auto-
+  // disclosure at save time) or `poe` (created at PoE creation time) as
+  // their subject.kind. Both render with the same "Proof of Evaluation"
+  // header label.
+  const isProofOfEval = (agreement.subject.kind === 'evalResult' || agreement.subject.kind === 'poe') && !isInternal
   const isGrantor = activeParty && activeParty === agreement.grantor.party
   // Phase 9D.1.1 (Fix 3 + Fix 4): grantee may revoke; agreement row already
   // reflects this. The DA Detail Panel footer now mirrors that symmetry.
@@ -159,6 +168,9 @@ export default function DisclosureAgreementDetailPanel({
               color: 'var(--text-dim)', background: 'var(--bg-raised)',
             }}>EXPIRED</span>
           )}
+          {onExpand && (
+            <ExpandButton onClick={onExpand} title="Expand to view DA details" />
+          )}
           <button
             onClick={onClose}
             aria-label="Close agreement panel"
@@ -219,6 +231,17 @@ export default function DisclosureAgreementDetailPanel({
               mono
             />
           )}
+          {Array.isArray(agreement.scope?.poeIds) && agreement.scope.poeIds.length > 0 && (
+            <Row
+              label={`Proofs of Evaluation in scope (${agreement.scope.poeIds.length})`}
+              value={agreement.scope.poeIds.join(', ')}
+              mono
+            />
+          )}
+          {/* Phase 13.1 (#168a): proof-only DAs are a discriminated union.
+              Auto-disclosure DAs (subject.kind === 'evalResult') created at
+              Eval Result save time carry `evaluationResultIds` instead of
+              `poeIds`. */}
           {Array.isArray(agreement.scope?.evaluationResultIds) && agreement.scope.evaluationResultIds.length > 0 && (
             <Row
               label={`Eval Results in scope (${agreement.scope.evaluationResultIds.length})`}

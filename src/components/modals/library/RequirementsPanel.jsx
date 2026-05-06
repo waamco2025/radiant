@@ -283,9 +283,20 @@ function SetList({ sets, selectedId, onSelect, search, setSearch, expandedLineag
                   }}
                   onClick={() => onSelect(s.id)}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{s.name}</div>
+                    {/* Phase 13.3 (Step 12 / #179): each published row
+                        carries a globe icon + the publishing actor name
+                        on the title row so the publishing context is
+                        scannable without expanding into the right panel. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                      <svg width={11} height={11} viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, color: 'var(--accent-blue)' }}>
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+                        <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+                        <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+                      </svg>
+                    </div>
                     <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', display: 'flex', gap: 6 }}>
-                      <span>{s._publishedBy}</span>
+                      <span style={{ color: 'var(--accent-blue)' }}>{s._publishedBy}</span>
                       <span>v{s.version || 1}</span>
                     </div>
                   </div>
@@ -381,9 +392,22 @@ function ViewDetails({ rs, onNewVersion, allSets, searchQuery, onPublish, publis
         )}
       </div>
       <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 4 }}>Created {rs.created}</div>
+      {/* Phase 13.3 (Step 12 / #179): published-RS attribution promoted to
+          a prominent line just below the created date — globe icon +
+          publishing actor + date. Only renders for RSes the active actor
+          didn't author (i.e., they appear under Published Standards in
+          the left panel). */}
       {rs._published && (
-        <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-blue)', marginTop: 2 }}>
-          Published by {rs._publishedBy} · {rs._publishedDate}
+        <div style={{
+          fontSize: 12, fontFamily: 'var(--font-display)', color: 'var(--accent-blue)',
+          marginTop: 4, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+            <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+            <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+          </svg>
+          <span>Published by <strong>{rs._publishedBy}</strong> · {rs._publishedDate}</span>
         </div>
       )}
       <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6, marginTop: 10 }}>{rs.description}</div>

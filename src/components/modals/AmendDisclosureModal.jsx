@@ -3,12 +3,14 @@
 // branches on the DA type:
 //   • full       → toggle which referenced Assets are in scope (assetIds)
 //   • selective  → toggle parsed fields in scope (fieldIds)
-//   • proofonly  → toggle Eval Result ids in scope (evaluationResultIds)
+//   • proofonly  → toggle PoE ids in scope (poeIds — Phase 13 #168 migration
+//                  from per-Eval-Result picker; PoEs wrap Eval Results and
+//                  share-PoE-shares-all auto-discloses every wrapped result)
 //
 // Per spec §11.2 enforcement: if an evaluation has been run against an asset /
-// field / eval result currently in scope, that item cannot be removed. The
-// caller passes `lockedAssetIds` / `lockedFieldIds` / `lockedEvalResultIds` —
-// items with locked === true are pre-checked and disabled.
+// field / PoE currently in scope, that item cannot be removed. The caller
+// passes `lockedAssetIds` / `lockedFieldIds` / `lockedPoeIds` — items with
+// locked === true are pre-checked and disabled.
 
 import { useState } from 'react'
 import {
@@ -76,20 +78,20 @@ export default function AmendDisclosureModal({
   claim,
   candidateAssets = [],       // [{ id, name, file: { filename } }] — for type=full
   candidateFields = [],       // [{ key, label, parseTemplateName }] — for type=selective; key = `${parseId}::${fieldId}`
-  candidateEvalResults = [],  // [{ id, name }] — for type=proofonly
+  candidatePoEs = [],         // [{ id, name }] — for type=proofonly (Phase 13 #168)
   lockedAssetIds = [],
   lockedFieldIds = [],
-  lockedEvalResultIds = [],
+  lockedPoeIds = [],
   onSubmit,                   // ({ scope, terms, note }) => void
   onClose,
 }) {
   const initialAssetIds = new Set([...(agreement.scope?.assetIds || []), ...lockedAssetIds])
   const initialFieldIds = new Set([...(agreement.scope?.fieldIds || []), ...lockedFieldIds])
-  const initialEvalIds  = new Set([...(agreement.scope?.evaluationResultIds || []), ...lockedEvalResultIds])
+  const initialPoeIds   = new Set([...(agreement.scope?.poeIds || []), ...lockedPoeIds])
 
   const [selectedAssetIds, setSelectedAssetIds] = useState(Array.from(initialAssetIds))
   const [selectedFieldIds, setSelectedFieldIds] = useState(Array.from(initialFieldIds))
-  const [selectedEvalIds, setSelectedEvalIds] = useState(Array.from(initialEvalIds))
+  const [selectedPoeIds, setSelectedPoeIds] = useState(Array.from(initialPoeIds))
   const [note, setNote] = useState('')
 
   // Phase 11E.1.6 Fix 3: expiration state. Pre-fill picker to 'custom'
@@ -103,7 +105,7 @@ export default function AmendDisclosureModal({
 
   const lockedAssetSet = new Set(lockedAssetIds)
   const lockedFieldSet = new Set(lockedFieldIds)
-  const lockedEvalSet = new Set(lockedEvalResultIds)
+  const lockedPoeSet = new Set(lockedPoeIds)
 
   const toggle = (arr, setArr, id, lockedSet) => {
     if (lockedSet.has(id)) return
@@ -123,11 +125,11 @@ export default function AmendDisclosureModal({
   }
   const baselineAssetIds = agreement.scope?.assetIds || []
   const baselineFieldIds = agreement.scope?.fieldIds || []
-  const baselineEvalIds = agreement.scope?.evaluationResultIds || []
+  const baselinePoeIds = agreement.scope?.poeIds || []
   const scopeChanged =
     (agreement.type === 'full' && !setsEqual(selectedAssetIds, baselineAssetIds)) ||
     (agreement.type === 'selective' && !setsEqual(selectedFieldIds, baselineFieldIds)) ||
-    (agreement.type === 'proofonly' && !setsEqual(selectedEvalIds, baselineEvalIds))
+    (agreement.type === 'proofonly' && !setsEqual(selectedPoeIds, baselinePoeIds))
 
   // Phase 11E.1.6 Fix 3: compute the would-be next expires (null for
   // 'none', ISO for '1-year' / '2-year', custom date for 'custom').
@@ -166,18 +168,18 @@ export default function AmendDisclosureModal({
   const scopeIsEmpty =
     (agreement.type === 'full' && selectedAssetIds.length === 0) ||
     (agreement.type === 'selective' && selectedFieldIds.length === 0) ||
-    (agreement.type === 'proofonly' && selectedEvalIds.length === 0)
+    (agreement.type === 'proofonly' && selectedPoeIds.length === 0)
   const baselineWasNonEmpty =
     (agreement.type === 'full' && baselineAssetIds.length > 0) ||
     (agreement.type === 'selective' && baselineFieldIds.length > 0) ||
-    (agreement.type === 'proofonly' && baselineEvalIds.length > 0)
+    (agreement.type === 'proofonly' && baselinePoeIds.length > 0)
   const showEmptyScopeWarning = scopeIsEmpty && baselineWasNonEmpty
   const canSubmit = hasChanges && !scopeIsEmpty
   const emptyScopeMessage = agreement.type === 'full'
     ? 'At least one Asset must be in scope.'
     : agreement.type === 'selective'
       ? 'At least one field must be in scope.'
-      : 'At least one Eval Result must be in scope.'
+      : 'At least one Proof of Evaluation must be in scope.'
 
   const handleSubmit = () => {
     let scope
@@ -185,21 +187,21 @@ export default function AmendDisclosureModal({
       scope = {
         assetIds: [...selectedAssetIds],
         fieldIds: agreement.scope?.fieldIds || null,
-        evaluationResultIds: agreement.scope?.evaluationResultIds || null,
+        poeIds: agreement.scope?.poeIds || null,
         includeDerivatives: agreement.scope?.includeDerivatives ?? true,
       }
     } else if (agreement.type === 'selective') {
       scope = {
         assetIds: agreement.scope?.assetIds || null,
         fieldIds: [...selectedFieldIds],
-        evaluationResultIds: null,
+        poeIds: null,
         includeDerivatives: false,
       }
     } else if (agreement.type === 'proofonly') {
       scope = {
         assetIds: null,
         fieldIds: null,
-        evaluationResultIds: [...selectedEvalIds],
+        poeIds: [...selectedPoeIds],
         includeDerivatives: false,
       }
     } else {
@@ -288,15 +290,15 @@ export default function AmendDisclosureModal({
           )}
           {agreement.type === 'proofonly' && (
             <>
-              <FieldLabel label={`Eval Results in scope (${candidateEvalResults.length})`} required />
+              <FieldLabel label={`Proofs of Evaluation in scope (${candidatePoEs.length})`} required />
               <div style={{ border: '1px solid var(--border)', borderRadius: 8, marginBottom: 16, maxHeight: 320, overflowY: 'auto' }}>
-                {candidateEvalResults.map((er) => (
+                {candidatePoEs.map((poe) => (
                   <ToggleRow
-                    key={er.id} id={er.id} label={er.name}
-                    sublabel={er.id}
-                    selected={selectedEvalIds.includes(er.id)}
-                    locked={lockedEvalSet.has(er.id)}
-                    onToggle={(id) => toggle(selectedEvalIds, setSelectedEvalIds, id, lockedEvalSet)}
+                    key={poe.id} id={poe.id} label={poe.name}
+                    sublabel={poe.id}
+                    selected={selectedPoeIds.includes(poe.id)}
+                    locked={lockedPoeSet.has(poe.id)}
+                    onToggle={(id) => toggle(selectedPoeIds, setSelectedPoeIds, id, lockedPoeSet)}
                     color={accentColor}
                   />
                 ))}
@@ -346,7 +348,7 @@ export default function AmendDisclosureModal({
               } else if (agreement.type === 'selective') {
                 parts.push(`${selectedFieldIds.length} field${selectedFieldIds.length !== 1 ? 's' : ''} in scope`)
               } else if (agreement.type === 'proofonly') {
-                parts.push(`${selectedEvalIds.length} Eval Result${selectedEvalIds.length !== 1 ? 's' : ''} in scope`)
+                parts.push(`${selectedPoeIds.length} Proof${selectedPoeIds.length !== 1 ? 's' : ''} of Evaluation in scope`)
               }
               return parts.join(' · ')
             })()}
