@@ -385,6 +385,16 @@ function EvalResultsTable({ rows }) {
 }
 
 function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
+  // Phase 15.0.1: minimal multi-Asset switcher — local state to flip
+  // between in-scope evidence Assets via Previous/Next arrows. Phase 15.1
+  // will add auto-flip on dot click. Default to first Asset that has a
+  // localPath; arrows hide for single-Asset cases.
+  const displayableAssets = (evidenceAssets || []).filter((a) => a?.file?.localPath)
+  const [currentAssetIndex, setCurrentAssetIndex] = useState(0)
+  // Clamp on prop change (e.g. modal reopens with a different eval result).
+  useEffect(() => {
+    if (currentAssetIndex >= displayableAssets.length) setCurrentAssetIndex(0)
+  }, [displayableAssets.length, currentAssetIndex])
   if (!evalResult) {
     return <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>No evaluation result.</div>
   }
@@ -399,12 +409,11 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
     || (evalResult.requirementsSet ? [evalResult.requirementsSet] : [])
   const rsCount = rsList.length
 
-  // Phase 15.0 (#172 part 1): Asset evidence panel for the Output tab.
-  // Single-Asset display: pick the first evidence Asset that has a
-  // localPath. Anchors are computed across all rows + filtered to those
-  // pointing at the displayed Asset. Phase 15.1 will add a per-Asset
-  // switcher when multiple Assets exist.
-  const displayAsset = (evidenceAssets || []).find((a) => a?.file?.localPath) || null
+  // Phase 15.0 (#172 part 1) + 15.0.1: Asset evidence panel for the Output
+  // tab. Multi-Asset switcher (Phase 15.0.1) lets the user flip between
+  // displayable Assets via Previous/Next arrows; the displayed Asset
+  // drives both the PDF.js render and the anchor filter.
+  const displayAsset = displayableAssets[currentAssetIndex] || null
   const assetOrdinal = displayAsset
     ? Math.max(1, (evidenceAssets || []).findIndex((a) => a?.id === displayAsset.id) + 1)
     : null
@@ -488,11 +497,53 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
               {displayAsset.name}
             </span>
+            {/* Phase 15.0.1: multi-Asset switcher — only render arrows
+                when the eval result references more than one displayable
+                Asset. Counter shows current/total. */}
+            {displayableAssets.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Previous Asset"
+                  disabled={currentAssetIndex === 0}
+                  onClick={() => setCurrentAssetIndex((i) => Math.max(0, i - 1))}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: 3,
+                    color: currentAssetIndex === 0 ? 'var(--text-dim)' : 'var(--text-primary)',
+                    cursor: currentAssetIndex === 0 ? 'default' : 'pointer',
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    opacity: currentAssetIndex === 0 ? 0.4 : 1,
+                  }}
+                >◀</button>
+                <button
+                  type="button"
+                  aria-label="Next Asset"
+                  disabled={currentAssetIndex >= displayableAssets.length - 1}
+                  onClick={() => setCurrentAssetIndex((i) => Math.min(displayableAssets.length - 1, i + 1))}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: 3,
+                    color: currentAssetIndex >= displayableAssets.length - 1 ? 'var(--text-dim)' : 'var(--text-primary)',
+                    cursor: currentAssetIndex >= displayableAssets.length - 1 ? 'default' : 'pointer',
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    opacity: currentAssetIndex >= displayableAssets.length - 1 ? 0.4 : 1,
+                  }}
+                >▶</button>
+              </>
+            )}
             <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-              Asset {assetOrdinal} of {evidenceAssets.length}
+              Asset {currentAssetIndex + 1} of {displayableAssets.length}
             </span>
           </div>
           <AssetEvidenceViewer
+            // Phase 15.0.1: keying on Asset id forces a fresh PDF.js
+            // load + re-mount when the user flips between Assets.
+            key={displayAsset.id}
             asset={displayAsset}
             iframeHeight={520}
             usePdfJs={true}

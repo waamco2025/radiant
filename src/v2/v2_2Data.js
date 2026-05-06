@@ -963,6 +963,16 @@ export function makeEvaluationResult({
       // and the human-edited pencil on artifacts after they've landed.
       confidence: r.confidence,
       _aiOriginalValue: r._aiOriginalValue,
+      // Phase 15.0.1 (#172 part 1 hotfix): preserve evidenceAnchors —
+      // the Phase 15.0 ship populated `evidenceAnchors: [...]` on seed
+      // result rows but this factory map didn't pass it through, so
+      // the seed data layer reported zero anchors at the consumer end.
+      // The annotation overlay rendered correctly when probed
+      // standalone but never via the seed; this preserves the field
+      // for both fresh evaluations (passed at submit) and seed data.
+      evidenceAnchors: Array.isArray(r.evidenceAnchors)
+        ? r.evidenceAnchors.map((a) => ({ ...a }))
+        : [],
     })),
     evidenceUsed: [...evidenceUsed],
     evaluationDate,

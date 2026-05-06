@@ -40,7 +40,13 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import pdfjsLib from '../v2/components/pdfJsWorker.js'
 
-const RENDER_SCALE = 1.4  // canvas resolution multiplier; balances clarity vs. perf
+// Phase 15.0.1: derive the render scale from the container width at
+// render time so the canvas fits the column without horizontal scroll.
+// Cap at 1.6 to avoid over-scaling on very wide containers (>1024px).
+const SCALE_CAP = 1.6
+// Padding inside the outer wrapper (12px each side on the scrollable
+// outer + a small margin for the page-wrapper shadow).
+const HOST_HORIZONTAL_PADDING = 28
 
 export default function AnnotatedPdfViewer({
   fileUrl,
@@ -79,11 +85,24 @@ export default function AnnotatedPdfViewer({
         container.innerHTML = ''
         const metrics = []
 
+        // Phase 15.0.1: fit-to-width — pick a render scale based on the
+        // host container's current width so multi-page PDFs don't force
+        // horizontal scroll inside narrow modal columns. Read the host
+        // wrapper (parentElement of containerRef) since the inner
+        // container itself measures content-width and grows with us.
+        const hostEl = container.parentElement || container
+        const hostWidth = hostEl.clientWidth || 600
+
         for (let pageNum = 1; pageNum <= numPages; pageNum++) {
           const page = await doc.getPage(pageNum)
           if (!isCurrent()) return
           const baseViewport = page.getViewport({ scale: 1 })
-          const viewport = page.getViewport({ scale: RENDER_SCALE })
+          // Compute a fit-to-width scale per page (PDF page widths can
+          // differ across pages even within one document, though it's
+          // uncommon). Cap to SCALE_CAP for clarity-vs-perf balance.
+          const fitScale = Math.max(0.6, (hostWidth - HOST_HORIZONTAL_PADDING) / baseViewport.width)
+          const renderScale = Math.min(fitScale, SCALE_CAP)
+          const viewport = page.getViewport({ scale: renderScale })
 
           const pageWrap = document.createElement('div')
           pageWrap.style.position = 'relative'
@@ -115,7 +134,7 @@ export default function AnnotatedPdfViewer({
             viewportH: viewport.height,
             pdfW: baseViewport.width,
             pdfH: baseViewport.height,
-            scale: RENDER_SCALE,
+            scale: renderScale,
           })
         }
 

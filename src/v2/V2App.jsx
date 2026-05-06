@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.0 &middot; Changelog
+          v0.15.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.1', date: '2026-05-06', label: 'Phase 15.0.1', items: [
+                  'Bug fix — annotation dots not rendering despite Phase 15.0 wiring being in place. Root cause: the `makeEvaluationResult` factory\'s `results.map((r) => ({ … }))` block in src/v2/v2_2Data.js explicitly preserved only specific result-row fields (requirementsSetId, requirementId, label, value, status, confidence, _aiOriginalValue) and silently dropped `evidenceAnchors` even though every Phase 15.0 seed call passed it. The factory now preserves `evidenceAnchors` (cloned per-anchor for safety). All four target surfaces (eval flow, Eval Result expand Output, PoE expand Output, Re-Run flow Step 2) now show dots correctly.',
+                  'Layout — PDF fit-to-width. AnnotatedPdfViewer derives the render scale at load time from the host container\'s `clientWidth` (capped at 1.6× base scale on very wide containers). Eliminates horizontal scroll inside the modal evidence column; PDFs scale up cleanly on wider screens.',
+                  'UX — multi-Asset switcher in the expand modal Output tab. Previous/Next arrow controls flip between in-scope evidence Assets when an Eval Result references more than one displayable Asset. The arrows hide for single-Asset cases. The displayed Asset drives both the PDF.js render and the anchor filter; an Asset-id `key` on AssetEvidenceViewer forces a fresh PDF load on flip. Phase 15.1 will add auto-flip on dot click.',
+                  'New docs/PHASE-15-DEMO-SCENARIOS.md captures the four QA scenarios: multi-RS multi-Asset (erBobPrm), single-RS chain head (erBobVreg), PoE expand Output Section 1, and the Run Evaluation re-run flow.',
+                  'Workflow lesson recorded in the spec: runtime probes verify components, not integration. Phase 15.0 shipped with the AnnotatedPdfViewer + AssetEvidencePanel correctly verified standalone — but never opened the actual Detail Panel → Expand → Output flow with seed data. The factory bug surfaced on the very first end-to-end check. Future phases that touch shared seed factories should add an explicit user-path walkthrough verification step before declaring complete.',
+                ]},
                 { version: '0.15.0', date: '2026-05-06', label: 'Phase 15.0', items: [
                   '#172 part 1 of 3: PDF.js integration. Three demo PDFs (PRM-3A Datasheet, PRM-3A Test Report, VReg-12C Datasheet) generated from a deterministic pdf-lib script and committed under public/seed-pdfs/. Each PDF carries a MicroCo-branded header (green accent, owner attribution, document type, revision, generation date) and a multi-page body with calibrated values that map to the seed Requirements Sets.',
                   'Annotated evidence overlay. Each Eval Result `result` row gains an `evidenceAnchors[]` array recording PDF point-space rectangles (`{ sourceAssetId, page, x, y, w, h }`) per requirement. Coordinates are emitted by the same script that generates the PDFs, so the seed and the PDFs never drift.',
