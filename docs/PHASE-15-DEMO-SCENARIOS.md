@@ -239,22 +239,30 @@ inconsistency (`evidenceAnchors[]` references an Asset outside
     `1` through `5` for the SAT criteria.
   - **VReg Test Report** (newly added by Alice in Step 5a) —
     annotation markers `6` and `7` for the previously-MISSING
-    criteria, sourced from anchors pre-stamped on the prior Eval
-    Result.
-- Right panel: 7 requirement rows carried forward — 5 SAT
-  (anchored on Datasheet), 2 MISSING (anchored on Test Report,
-  ready to be reviewed).
+    criteria.
+- Right panel: 7 requirement rows, **all now showing SATISFACTORY**:
+  - req-001 through req-005: SAT, anchored on the Datasheet (carried
+    forward from the prior eval).
+  - req-006 (SEL immunity): SAT with value
+    `> 75 MeV·cm²/mg LET threshold` — **auto-populated** from the
+    Test Report anchor.
+  - req-007 (Burn-in qualification): SAT with value
+    `168 hours at 125°C · 0/100 failures` — **auto-populated** from
+    the Test Report anchor.
 
-**Bob updates the missing rows**
+Phase 15.6 added re-run auto-fill: when re-evaluation brings new
+evidence into scope, MISSING rows whose anchors reference a
+newly-visible Asset get auto-populated with the Asset's discovered
+values + status flips to SATISFACTORY. The narrative is "AI
+evaluation reads the new evidence and fills in the gaps." No badge,
+hint, or status indicator distinguishes auto-populated rows from
+other SAT rows — by design (the AI did the work transparently).
 
-7. Bob expands the **VReg Test Report** in the accordion → confirms
-   the values found there:
-   - req-006 (SEL immunity): `> 75 MeV·cm²/mg LET threshold`
-   - req-007 (Burn-in qualification): `168 hours at 125°C · 0/100 failures`
-8. In the right panel, Bob updates req-006 + req-007 from MISSING to
-   SATISFACTORY with the values from the Test Report.
-9. **Click** "Continue" → Step 3 → review final values.
-10. **Save**.
+**Bob proceeds to save**
+
+7. **Click** "Continue" → Step 3 → review final values (no edits
+   needed for this demo).
+8. **Click** "Save Evaluation Result".
 
 **Expected after save**
 
@@ -271,6 +279,9 @@ inconsistency (`evidenceAnchors[]` references an Asset outside
   Datasheet and the user clicks a row whose anchor is on the Test
   Report (or vice versa), the accordion auto-flips its expanded
   Asset and scrolls there.
+- If you want to demonstrate manual override, you can edit any
+  auto-populated row in Step 2 to a different value before
+  continuing — the auto-fill is a starting point, not a lock.
 
 Fresh evaluations triggered via "Run Evaluation" (not Re-Run) similarly
 render PDFs without indicators on first opening — Phase 15 ships

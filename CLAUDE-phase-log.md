@@ -2673,6 +2673,56 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.6 completion notes (2026-05-07) — Re-Run Auto-Fill from New Asset Evidence (#172 closing scope)
+
+Closes the #172 PDF annotation demo arc with a complete end-to-end happy-path. Re-run carry-forward now auto-populates MISSING rows from `discoveredValue` metadata on anchors pointing to newly-in-scope Assets — the narrative shifts from "user manually fills forms" to "AI evaluation reads new evidence and fills in the gaps."
+
+**Step 1 — `discoveredValue` schema addition.** Anchor entries on `evidenceAnchors[]` gain an optional `discoveredValue: string` field. The seed update to `erBobVreg`'s req-006/007 rows attaches the field to each Test Report anchor: req-006 gets `'> 75 MeV·cm²/mg LET threshold'`; req-007 gets `'168 hours at 125°C · 0/100 failures'`. Values match the Test Report PDF's on-page text exactly so visual coherence between the PDF annotation rect and the right-panel value is preserved when auto-populated.
+
+The `makeEvaluationResult` factory's row projection uses `{ ...a }` spread on each anchor (Phase 15.0.1 hotfix), so the new field passes through without further factory changes. Verified by reading `v2_2Data.js` lines 957-976 — anchor projection accepts arbitrary keys.
+
+**Step 2 — `autoFillRow` carry-forward transformation.** New closure inside `V22RunEvaluationModal.jsx` (immediately above the existing `buildRowsForRs` helper). Implements the auto-fill logic per the design spec:
+
+```js
+const priorEvidenceUsedSet = new Set(priorActiveResult?.evidenceUsed || [])
+const currentScopeAssetIdSet = new Set((evidenceAssets || []).map((a) => a?.id).filter(Boolean))
+const autoFillRow = (row) => {
+  if (!priorActiveResult) return row
+  if (row.status !== 'missing') return row
+  const anchors = row.evidenceAnchors || []
+  const match = anchors.find((a) =>
+    a?.sourceAssetId
+    && a?.discoveredValue
+    && currentScopeAssetIdSet.has(a.sourceAssetId)
+    && !priorEvidenceUsedSet.has(a.sourceAssetId)
+  )
+  if (!match) return row
+  return { ...row, status: 'satisfactory', value: match.discoveredValue }
+}
+```
+
+Integration site: `buildRowsForRs(rs)` — when re-run mode is active and the RS matches a prior RS, the function maps prior rows into the working state via `priorRows.map(...)`. Phase 15.6 wraps each row in an `autoFillRow` invocation that produces the auto-filled row when criteria are met. The mapped row preserves `_aiOriginalValue` set to the (potentially auto-filled) value so the human-edited pencil icon doesn't trigger spuriously when the auto-populated value lands.
+
+The Set lookups make the transformation O(1) per row. The transformation is idempotent — running it twice on the same input produces the same output. The check is intentionally narrow: rows with status other than `'missing'` are returned as-is; rows whose anchors are all on Assets that were already in `evidenceUsed` are returned as-is; fresh evaluations (no `priorActiveResult`) skip the transformation entirely.
+
+**Step 3 — Save flow inherits auto-filled state.** Verified that the save path (`handleSubmit` in V22RunEvaluationModal) builds the new Eval Result from `rowsByRsId` working state. Since auto-fill produces the working state at carry-forward time (Step 2), `handleSubmit` picks up the auto-filled rows automatically. No additional changes needed in the save logic. Cross-role notification flow (Bob saves → Alice receives notification → Alice's canvas reflects 7/7 SAT) inherits the same way.
+
+**No mutation of the prior eval artifact.** The original `erBobVreg` Eval Result in seed/global state is unaffected — auto-fill operates on a derived row array passed to `useState`. Reopening the prior eval's Detail Panel + Expand modal still shows 5 SAT + 2 MISSING. After Bob saves the auto-populated re-run, the prior is marked `superseded` (existing supersession behavior) but its `results[]` content stays as authored.
+
+**Step 4 — Walkthrough doc Section 5b updated.** Step 2 expected-outcome bullet rewritten to show all 7 rows as SATISFACTORY (was 5 SAT + 2 MISSING-ready-to-review with explicit "Bob updates the missing rows" sub-flow). The Phase 15.5 manual-edit sub-section retired since the happy-path demo no longer requires manual edits. Added a note in "Try the interactions" mentioning that auto-populated rows can still be manually overridden if the demoer wants to demonstrate that path.
+
+**Implementation notes.**
+- Initial draft considered exporting `applyAutoFillFromNewAssets` as a module-level function but the closure form keeps `priorActiveResult`, `evidenceAssets`, and the derived Sets in scope without prop-drilling — simpler and the transformation is V22RunEvaluationModal-specific anyway.
+- The two derived Sets (`priorEvidenceUsedSet`, `currentScopeAssetIdSet`) are recomputed on every render since they're declared at the component body. This is fine — the modal isn't render-hot, and the Sets are small (typically 1-3 entries each). If profiling later shows a hotspot, a `useMemo` wrapper is the trivial fix.
+- The `_aiOriginalValue` snapshot is set to the auto-filled value (not the original 'Pending verification' string) so a downstream "human edited the AI's value" pencil icon doesn't fire when Bob continues without editing. This matches the spirit of `_aiOriginalValue` (the value the row was initialized with), even though the auto-fill is technically a post-AI-evaluation transformation.
+- Anchors that don't carry `discoveredValue` (e.g. the existing Datasheet anchors on req-001-005) gracefully skip the transformation — the `find` predicate returns nothing, and the row passes through unchanged. The 5 SAT rows in `erBobVreg` are unaffected by the auto-fill.
+
+**Footer v0.15.8 → v0.15.9.** Architecture spec §17.5 changelog gains a 15.6 bullet documenting the auto-fill mechanism + schema addition; the existing demo-trick callout in §17.5 updated to note that the trick + auto-fill together produce a complete demo arc. polish-backlog Update Log entry. CLAUDE.md "Current state of the world" updated. **#172 closed.**
+
+**Runtime verification.** Build clean (0 errors). HMR-served updates verified via curl probes — `discoveredValue` strings present in `v2_2Data.js`, `autoFillRow` and `priorEvidenceUsedSet` references present in `V22RunEvaluationModal.jsx`. Manual end-to-end walkthrough required (per Phase 15.0.1 workflow lesson): (a) Bob → VReg Eval Result → Expand → Output → confirm 5 SAT + 2 MISSING (unchanged from 15.5; auto-fill doesn't affect the prior eval's display). (b) Switch to Alice → amend VReg Claim → attach Test Report + extend DA scope → save. (c) Switch to Bob → re-run on the Eval Result → Step 2 → confirm right panel shows ALL 7 rows as SATISFACTORY (req-006 with `> 75 MeV·cm²/mg LET threshold`, req-007 with `168 hours at 125°C · 0/100 failures`). (d) Continue → Step 3 → Save → confirm new Eval Result has 7/7 SAT and supersedes prior. (e) Create PoE → confirm the wrap completes the happy path.
+
+**Status:** [x] Complete. **#172 closed.**
+
 ### Phase 15.5 completion notes (2026-05-07) — VReg Re-Run Demo Simplification
 
 VReg evaluation seed redesigned into a coherent demo narrative arc: prior eval shows 5 SAT + 2 MISSING → Alice amends with Test Report → Bob's re-run discovers values for the missing rows in the new evidence → save → 7/7 SAT → create PoE.

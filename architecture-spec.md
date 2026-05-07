@@ -1473,6 +1473,41 @@ results-table row indicator read/write this single source of truth:
   results-table side mirrors the scroll-into-view via a
   `tableScrollContainerRef` watching `[data-row-anchor-id]`.
 
+### Re-Run auto-fill from new Asset evidence (Phase 15.6)
+
+Anchor entries on `evidenceAnchors[]` may carry an optional
+`discoveredValue: string` field. When present, the V22RunEvaluationModal
+re-run carry-forward path uses it to auto-populate MISSING rows whose
+anchors point to a newly-in-scope Asset (an Asset present in the
+current evaluator's `evidenceAssets` but NOT in the prior eval's
+`evidenceUsed`). The transformation flips the row's status from
+`'missing'` to `'satisfactory'` and sets its value to the
+`discoveredValue`.
+
+The transformation is implemented as the `autoFillRow` closure inside
+`V22RunEvaluationModal.jsx`, integrated at the `buildRowsForRs` →
+`priorRows.map(...)` step. Predicates are intentionally narrow:
+
+- Re-run mode only (`priorActiveResult` is set).
+- `row.status === 'missing'` only.
+- At least one anchor must satisfy `currentScopeAssetIdSet.has(sourceAssetId)
+  && !priorEvidenceUsedSet.has(sourceAssetId)
+  && discoveredValue` non-empty.
+
+If multiple anchors qualify (multiple newly-in-scope Assets carrying
+discoveredValues), the first match wins by anchor array order.
+
+The transformation is idempotent and operates on a derived row array
+used by the modal's working state — the prior Eval Result artifact in
+seed/global state is not mutated. The save path picks up the
+auto-filled state automatically via the existing `handleSubmit` →
+working-state read.
+
+No visual distinction is rendered for auto-populated rows by design —
+the demo narrative is "AI evaluation reads new evidence and fills in
+the gaps" and badges or hints would undermine that. Auto-populated
+rows can still be manually overridden in Step 2/3 review.
+
 ### Demo walkthrough reference
 
 Phase 15.2 ships `docs/PHASE-15-DEMO-SCENARIOS.md` as the canonical
@@ -1629,6 +1664,7 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§17.5 — Phase 15.6 (#172 closing):** Re-Run auto-fill from new Asset evidence. Anchor entries gain optional `discoveredValue: string`; the V22RunEvaluationModal carry-forward path (`buildRowsForRs` → row map step) wraps each prior row in an `autoFillRow` closure that auto-populates MISSING rows whose anchors point to newly-in-scope Assets — status flips to `satisfactory`, value flips to the matching anchor's `discoveredValue`. Newly-in-scope = an Asset present in current `evidenceAssets` but NOT in prior `evidenceUsed`. Scope is intentionally narrow (only MISSING rows, only on newly-in-scope Assets, only when `discoveredValue` is non-empty) so existing SAT/UNSAT/N/A rows are never silently overwritten. Fresh evaluations (no `priorActiveResult`) bypass the transformation entirely. The prior Eval Result artifact is NOT mutated — auto-fill operates on a derived row array used by the modal's working state. Demo arc: prior eval shows gaps → Alice amends with new evidence → Bob's re-run auto-populates the missing rows → save → 7/7 SAT → create PoE. **#172 closed.**
 - **§17.5 — Phase 15.5:** VReg Re-Run demo simplified into a coherent narrative arc — prior eval shows 5 SAT + 2 MISSING criteria → Alice amends with Test Report → Bob's re-run "discovers" values for the missing rows in the new evidence → save → 7/7 SAT → create PoE. The Phase 13.2 supersession chain on VReg (V0/V1/V_main) collapsed to a single standalone Eval Result; chain Eval Results + their proof/own-eval auto-disclosure DAs removed. Two new requirements added to MIL-PRF-55681 v1: req-006 (Single Event Latch-up immunity) + req-007 (Burn-in qualification). req-004 value updated from "TID > 100 krad(Si)" to "TID ~ 80 krad(Si)" matching the Datasheet PDF for visual coherence (the prototype RS doesn't encode threshold logic so the SAT label is independent of the value content). Test Report PDF rewritten as a focused 1-page supplementary document containing only req-006 + req-007 sections (was a redundant 2-page mirror of the Datasheet's req-001-005). Demo trick (anchors reference an Asset outside `evidenceUsed`) narrowed to req-006/007 only — the 5 SAT rows reference Datasheet exclusively. Carol's EMI Eval Result is now the only standalone unwrapped Eval Result remaining; the chain-DA pattern from Phase 13.2 is no longer exercised by the current seed, though the rendering code path stays available for future scenarios.
 - **§17.5 — Phase 15.4:** Re-Run demo seed corrected. Phase 15.3 over-eagerly attached the Test Report Asset to `cVreg.referencedAssetIds` and extended `daAliceToBobVreg.scope` at initial seed time — that left VReg's Expand modal showing `Asset 1 of 2` from first boot, duplicating PRM's role as the canonical multi-Asset Expand demo. Phase 15.4 reverts both to single-Asset initial seed (Datasheet only). The Test Report Asset stays defined and stays in `assets`, but Alice-owned-and-unattached — surfacing in her amend Asset picker as the named candidate for the Re-Run prereq. Compliance Notes Asset (Phase 15.3 addition) retired entirely; PDF deleted; generator spec entry removed (the `paragraphs[]` page-spec affordance preserved on the generator). **Demo trick (prototype convention):** `erBobVreg.evidenceUsed` reverts to `[aVregDatasheet.id]` (what was actually evaluated at chain-head time) but its `results[].evidenceAnchors[]` arrays deliberately retain references to both Datasheet AND Test Report. When Alice attaches the Test Report during the amend prereq, Bob's subsequent Re-Run accordion renders annotations against those pre-stamped anchors. In production, anchors shouldn't reference Assets outside `evidenceUsed` — that's a data-integrity invariant. For prototype demo purposes the inconsistency is accepted because it enables the amend-then-rerun-with-annotations narrative without contriving a prior eval that already used the Test Report. Inline comment block in `v2_2Data.js` flags the trick.
 - **§17.5 — Phase 15.3:** Re-Run demo seed enhancement. VReg Claim now seeded with two pre-existing Assets — `aVregDatasheet` + new `aVregTestReport` (id `asset-vreg-test-report`, generated PDF `microco-vreg-test-report.pdf`, anchored on all 5 MIL-PRF-55681 v1 requirements). Chain-head `erBobVreg` Eval Result extended to multi-Asset anchors: every `results[]` row carries `evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ... }, { sourceAssetId: aVregTestReport.id, ... }]` — Asset switcher in the Expand modal flips between annotated PDFs, and the Re-Run flow's accordion inherits multi-Asset annotations via `priorActiveResult.results`. Test report PDF values authored at parity with seed (`5.0V ±0.4% under load`, `< 1.5W at rated current`, etc. — identical strings) so PDF text and seed values stay in sync. Predecessor `erBobVregV0` / `erBobVregV1` retain single-Asset anchors (they predate the test report; preserves chain causality). New `aVregComplianceNotes` Asset (id `asset-vreg-compliance-notes`, generated PDF `microco-vreg-compliance-notes.pdf` — paragraph-only, no anchors) pre-seeded as Alice's owned-but-unattached Asset for the deterministic Re-Run amend prerequisite. PDF generator script extended with optional `paragraphs[]` page-spec field for documentation Assets (no row-based anchor capture). EVIDENCE → ASSETS rename in `V22RunEvaluationModal` Δ delta info box (the missed surface from the 15.1.2 sweep). VReg is now the canonical multi-Asset Re-Run demo path; PRM remains the canonical multi-Asset Expand modal demo path. Walkthrough doc updated — Section 2 rewritten as multi-Asset, Section 5a names the Compliance Notes Asset with rationale, Section 5b describes the three-Asset accordion.

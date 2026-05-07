@@ -2153,25 +2153,30 @@ export function buildV22SharedArtifacts() {
   // Bob has a Full DA + EA on Alice's VReg Claim but no PoE — Create-PoE
   // surfaces as an action button on this Eval Result on first interaction.
   // Carol gets a parallel unwrapped Eval Result via a second EA on EMI.
-  // Phase 15.5: VReg evaluation simplified to a single Eval Result.
+  // Phase 15.5/15.6: VReg evaluation simplified to a single Eval Result.
   // erBobVreg is Bob's standalone evaluation of the VReg Claim against
   // MIL-PRF-55681 v1 (7 requirements). 5 SAT from the Datasheet (the
   // only Asset in scope at evaluation time); 2 MISSING (req-006 SEL
   // immunity, req-007 Burn-in qualification) which the Datasheet
-  // doesn't cover. Bob's Re-Run after Alice attaches the Test Report
-  // discovers values for the missing rows from the new evidence.
+  // doesn't cover.
   //
   // Demo trick (narrowed in 15.5): req-006 and req-007's
   // evidenceAnchors[] reference the Test Report Asset even though
-  // Test Report wasn't in evidenceUsed at evaluation time. When
-  // Alice amends the Claim to attach Test Report (the Re-Run demo
-  // prereq), Bob's re-run displays anchors for the missing rows on
-  // the newly-visible Test Report PDF — narrative: "the AI evaluation
-  // finds the missing values in the new evidence Alice provided." In
-  // production this would require Asset-intrinsic anchor support; for
-  // prototype demo purposes the trick is accepted at narrow scope
-  // (only req-006/007). The 5 SAT rows reference Datasheet only.
-  // Documented in CLAUDE-phase-log.md Phase 15.5 notes.
+  // Test Report wasn't in evidenceUsed at evaluation time. Each Test
+  // Report anchor also carries a `discoveredValue` field (Phase 15.6
+  // schema addition). When Alice amends the Claim to attach Test
+  // Report (the Re-Run demo prereq), Bob's re-run auto-populates
+  // these rows with the discoveredValue + status SATISFACTORY (Phase
+  // 15.6 re-run carry-forward logic in V22RunEvaluationModal's
+  // `applyAutoFillFromNewAssets`). Demo narrative: "the AI evaluation
+  // reads the new evidence and fills in the gaps."
+  //
+  // In production this would require Asset-intrinsic anchor support
+  // with values; for prototype demo purposes the trick is accepted at
+  // narrow scope (only req-006/007 on Test Report). The 5 SAT rows
+  // reference Datasheet only and don't carry discoveredValue (no
+  // gap to fill).
+  // Documented in CLAUDE-phase-log.md Phase 15.5 + 15.6 notes.
   //
   // Phase 15.5: chain Eval Results (erBobVregV0/V1) removed entirely;
   // they contradicted the "Bob's first evaluation" narrative the
@@ -2215,11 +2220,19 @@ export function buildV22SharedArtifacts() {
       // markers on the newly-visible PDF.
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-006', label: 'Single Event Latch-up (SEL) immunity', value: 'Pending verification', status: 'missing',
         evidenceAnchors: [
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-006'] },
+          {
+            sourceAssetId: aVregTestReport.id,
+            ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-006'],
+            discoveredValue: '> 75 MeV·cm²/mg LET threshold',
+          },
         ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-007', label: 'Burn-in qualification', value: 'Pending verification', status: 'missing',
         evidenceAnchors: [
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-007'] },
+          {
+            sourceAssetId: aVregTestReport.id,
+            ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-007'],
+            discoveredValue: '168 hours at 125°C · 0/100 failures',
+          },
         ] },
     ],
     // Phase 15.5: evidenceUsed is single-Asset (Datasheet only) — what

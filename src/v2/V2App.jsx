@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.8 &middot; Changelog
+          v0.15.9 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.9', date: '2026-05-07', label: 'Phase 15.6', items: [
+                  '#172 closing scope: Re-Run auto-fill from new Asset evidence. The PDF annotation demo arc is now end-to-end happy-path — prior eval shows gaps → Alice amends with Test Report → Bob\'s re-run auto-populates the missing rows with values discovered from the new evidence → save → 7/7 SAT → create PoE. The narrative becomes "AI evaluation reads new evidence and fills in the gaps" rather than "user manually fills forms."',
+                  'Schema addition: anchor entries gain an optional `discoveredValue: string` field. When the Asset hosting the anchor becomes newly in scope (via amend) and the corresponding result row is MISSING, re-run carry-forward auto-populates the row with `discoveredValue` and flips status to `satisfactory`. No badge, hint, or status indicator distinguishes auto-populated rows — by design (transparent AI assistance).',
+                  'Auto-fill scope: triggered ONLY in re-run mode (`priorActiveResult` exists), ONLY for rows where prior status === `missing` AND the row has at least one anchor whose `sourceAssetId` is in the current Claim\'s in-scope evidence (`evidenceAssets`) AND NOT in the prior eval\'s `evidenceUsed` AND has a non-empty `discoveredValue`. Existing SAT/UNSAT/N/A rows are never overwritten. Fresh evaluations (no `priorActiveResult`) are unaffected.',
+                  'Implementation site: `V22RunEvaluationModal.buildRowsForRs()` carries prior result rows into the working state via `priorRows.map(...)`. Phase 15.6 adds `autoFillRow(row)` closure that intercepts each row and applies the transformation when criteria are met. The transformation builds a derived row array — `priorActiveResult.results` in seed/global state is NOT mutated. `_aiOriginalValue` snapshots the discovered value too, so the human-edited pencil icon doesn\'t trigger spuriously when the auto-populated value lands.',
+                  'VReg seed updated: req-006 (SEL immunity) anchor gains `discoveredValue: "> 75 MeV·cm²/mg LET threshold"`; req-007 (Burn-in qualification) anchor gains `discoveredValue: "168 hours at 125°C · 0/100 failures"`. Both values match the Test Report PDF\'s on-page text so visual coherence between PDF annotation and right-panel value is preserved when the row auto-populates. The `makeEvaluationResult` factory\'s anchor projection uses spread (`{ ...a }`) so the new field passes through without further changes.',
+                  'Walkthrough doc Section 5b updated to reflect auto-fill — Step 2 expected outcome now shows all 7 rows as SATISFACTORY (was 5 SAT + 2 MISSING-ready-to-review); the explicit "Bob updates the missing rows" sub-section retired (no manual edit required for the happy-path demo). Note added that auto-populated rows can still be manually overridden if the demoer wants to demonstrate that path.',
+                  '#172 closed. Phase 15 arc complete: 15.0 (PDF.js + seed PDFs + static dots), 15.0.1 (hotfix + multi-Asset switcher), 15.1 (visual redesign + bidirectional interaction), 15.1.1 (numbering + shape + layout reorg), 15.1.2 (modal consolidation), 15.2 (Download fix + walkthrough + cleanup), 15.3 (demo enhancement + EVIDENCE rename), 15.4 (correction), 15.5 (simplification), 15.6 (auto-fill closes the arc).',
+                ]},
                 { version: '0.15.8', date: '2026-05-07', label: 'Phase 15.5', items: [
                   'VReg Re-Run demo simplified into a coherent narrative arc: prior eval shows 5 SAT + 2 MISSING criteria → Alice amends with Test Report → Bob\'s re-run "discovers" values for the missing rows in the new evidence → save → 7/7 SAT → create PoE.',
                   'VReg Eval Result chain (V0/V1/V_main from Phase 13.2) collapsed to a single standalone Eval Result. The chain contradicted the "Bob\'s first evaluation" framing the new demo arc needs. `erBobVregV0` and `erBobVregV1` definitions removed; supersession patches removed; `evaluationResults` registry trimmed; chain DAs (`daProofBobVregV0/V1`, `daOwnEvalBobVregV0/V1`) removed; `disclosureAgreements` registry trimmed; Phase 13.2 chain comment removed (Carol\'s EMI Eval Result is unwrapped + standalone, so the chain-DA pattern is no longer exercised by the current seed).',

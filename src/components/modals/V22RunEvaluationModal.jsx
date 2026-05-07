@@ -394,6 +394,39 @@ export default function V22RunEvaluationModal({
     return null
   }
 
+  // Phase 15.6 (#172 closing): re-run auto-fill from new Asset evidence.
+  //
+  // When Alice amends a Claim with a new Asset whose anchors carry
+  // `discoveredValue` fields, the Re-Run flow auto-populates MISSING
+  // rows whose anchors point to that newly-in-scope Asset — status
+  // flips to 'satisfactory', value to the discoveredValue. Demo
+  // narrative: "AI evaluation reads new evidence and fills in the
+  // gaps." Scope is intentionally narrow (only MISSING rows on
+  // newly-in-scope Assets that carry discoveredValue) so existing SAT/
+  // UNSAT rows are never silently overwritten.
+  //
+  // Newly-in-scope Asset = an Asset present in the current evaluator's
+  // in-scope evidence (`evidenceAssets`) but NOT in the prior eval's
+  // `evidenceUsed`. Match check uses Set lookup for O(1) per row.
+  //
+  // The transformation builds a derived row array; the prior Eval
+  // Result artifact in seed/global state is NOT mutated.
+  const priorEvidenceUsedSet = new Set(priorActiveResult?.evidenceUsed || [])
+  const currentScopeAssetIdSet = new Set((evidenceAssets || []).map((a) => a?.id).filter(Boolean))
+  const autoFillRow = (row) => {
+    if (!priorActiveResult) return row
+    if (row.status !== 'missing') return row
+    const anchors = row.evidenceAnchors || []
+    const match = anchors.find((a) =>
+      a?.sourceAssetId
+      && a?.discoveredValue
+      && currentScopeAssetIdSet.has(a.sourceAssetId)
+      && !priorEvidenceUsedSet.has(a.sourceAssetId)
+    )
+    if (!match) return row
+    return { ...row, status: 'satisfactory', value: match.discoveredValue }
+  }
+
   // Build initial rows for an RS — re-eval pre-populates from the prior
   // result, fresh evaluation pre-populates from the RS definition's AI
   // values (Phase 9A.1 item 9) with `_aiOriginalValue` snapshotted for
@@ -411,14 +444,29 @@ export default function V22RunEvaluationModal({
       const priorRows = (priorActiveResult.results || []).filter(
         (r) => (r.requirementsSetId || priorPrimaryRsId) === rs.id,
       )
-      return priorRows.map((r) => ({
-        requirementId: r.requirementId,
-        label: r.label,
-        value: r.value,
-        confidence: typeof r.confidence === 'number' ? r.confidence : null,
-        status: r.status,
-        _aiOriginalValue: r.value,
-      }))
+      return priorRows.map((r) => {
+        // Phase 15.6: apply auto-fill on missing rows whose anchors
+        // point to newly-in-scope Assets carrying discoveredValue. The
+        // returned row's value/status reflect the discovered evidence;
+        // _aiOriginalValue snapshots the discovered value too so the
+        // human-edited pencil icon doesn't trigger spuriously.
+        const filled = autoFillRow({
+          requirementId: r.requirementId,
+          label: r.label,
+          value: r.value,
+          confidence: typeof r.confidence === 'number' ? r.confidence : null,
+          status: r.status,
+          evidenceAnchors: r.evidenceAnchors || [],
+        })
+        return {
+          requirementId: filled.requirementId,
+          label: filled.label,
+          value: filled.value,
+          confidence: filled.confidence,
+          status: filled.status,
+          _aiOriginalValue: filled.value,
+        }
+      })
     }
     const defs = rs.requirements || rs.claims || []
     return defs.map((c) => {
