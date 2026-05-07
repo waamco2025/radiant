@@ -1403,6 +1403,47 @@ export function buildV22SharedArtifacts() {
     registrationDate: '2026-02-12T16:05:00Z',
     parseResultIds: ['parse-vreg-datasheet'],
   })
+  // Phase 15.3: VReg Test Report — second pre-existing Asset on the
+  // VReg Claim. Anchored against the chain-head erBobVreg so the
+  // Re-Run flow demo opens with annotations on TWO Assets.
+  const aVregTestReport = makeAsset({
+    id: 'asset-vreg-test-report',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Voltage Regulator IC Test Report',
+    description: 'Bench-measured compliance test results for VReg-12C (n=8 cohort).',
+    file: {
+      uri: 'provenance://evidence/vreg-test-report-v1',
+      filename: 'microco-vreg-test-report.pdf',
+      size: PDF_FILES['microco-vreg-test-report.pdf'].size,
+      mimeType: 'application/pdf',
+      hash: PDF_FILES['microco-vreg-test-report.pdf'].hash,
+      localPath: '/seed-pdfs/microco-vreg-test-report.pdf',
+    },
+    registrationDate: '2026-02-15T10:20:00Z',
+    parseResultIds: [],
+  })
+  // Phase 15.3: VReg Compliance Notes — Alice-owned but NOT initially
+  // attached to any Claim. Used as the named candidate for the
+  // amendment prerequisite step in the Re-Run demo (satisfies
+  // hasNewAssetsForRerun without forcing the demoer to invent an Asset).
+  const aVregComplianceNotes = makeAsset({
+    id: 'asset-vreg-compliance-notes',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Voltage Regulator IC Compliance Notes',
+    description: 'Supplementary compliance program documentation for VReg-12C — supplier-quality program status, ITAR review, radiation program references.',
+    file: {
+      uri: 'provenance://evidence/vreg-compliance-notes-v1',
+      filename: 'microco-vreg-compliance-notes.pdf',
+      size: PDF_FILES['microco-vreg-compliance-notes.pdf'].size,
+      mimeType: 'application/pdf',
+      hash: PDF_FILES['microco-vreg-compliance-notes.pdf'].hash,
+      localPath: '/seed-pdfs/microco-vreg-compliance-notes.pdf',
+    },
+    registrationDate: '2026-02-20T14:00:00Z',
+    parseResultIds: [],
+  })
   const aEmiDatasheet = makeAsset({
     id: 'asset-emi-datasheet',
     owner: alice.party,
@@ -1576,6 +1617,8 @@ export function buildV22SharedArtifacts() {
     aPrmTestReport,
     aPrmThermal,
     aVregDatasheet,
+    aVregTestReport,            // Phase 15.3: pre-attached to cVreg
+    aVregComplianceNotes,       // Phase 15.3: floating; Alice attaches in Re-Run demo prereq
     aEmiDatasheet,
     bAvionics,
     bGuidance,
@@ -1694,8 +1737,10 @@ export function buildV22SharedArtifacts() {
     owner: alice.party,
     ownerDot: alice.partyDot,
     name: 'Voltage Regulator IC',
-    description: 'Fully disclosed VREG-IC-500 component with datasheet.',
-    referencedAssetIds: [aVregDatasheet.id],
+    description: 'Fully disclosed VREG-IC-500 component with datasheet + bench test report.',
+    // Phase 15.3: Test Report Asset added so the Re-Run demo opens with
+    // annotations on TWO pre-existing Assets, not just the datasheet.
+    referencedAssetIds: [aVregDatasheet.id, aVregTestReport.id],
     // Phase 12.1: single public reference — exercises owner-public combo
     // on a one-Asset Claim where no prior multi-RS row was visible.
     referencedRequirementsSets: [
@@ -1903,7 +1948,10 @@ export function buildV22SharedArtifacts() {
     granteeAssetId: bAvionics.id,
     type: 'full',
     scope: {
-      assetIds: [aVregDatasheet.id],
+      // Phase 15.3: scope expanded to include the Test Report so Bob's
+      // canvas surfaces both pre-existing VReg Assets under full
+      // disclosure (mirrors cVreg.referencedAssetIds).
+      assetIds: [aVregDatasheet.id, aVregTestReport.id],
       includeDerivatives: true,
     },
     terms: {
@@ -2194,21 +2242,40 @@ export function buildV22SharedArtifacts() {
     requirementsSets: [
       { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
     ],
-    // Phase 15.0: chain-head Eval Result; all rows anchor against the
-    // generated VReg Datasheet PDF.
+    // Phase 15.3: chain-head Eval Result; rows anchor against BOTH the
+    // VReg Datasheet AND the VReg Test Report — multi-Asset annotations.
+    // The Re-Run flow inherits these anchors via priorActiveResult.results
+    // so the Re-Run accordion opens with annotations on two pre-existing
+    // Assets (and a third, Compliance Notes, after Alice amends — no
+    // anchors there since it's a new Asset).
     results: [
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.4% under load', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-001'] }] },
+        evidenceAnchors: [
+          { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-001'] },
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-001'] },
+        ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.5W at rated current', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-002'] }] },
+        evidenceAnchors: [
+          { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-002'] },
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-002'] },
+        ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-003'] }] },
+        evidenceAnchors: [
+          { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-003'] },
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-003'] },
+        ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID > 100 krad(Si)', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-004'] }] },
+        evidenceAnchors: [
+          { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-004'] },
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-004'] },
+        ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-005'] }] },
+        evidenceAnchors: [
+          { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-005'] },
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-005'] },
+        ] },
     ],
-    evidenceUsed: [aVregDatasheet.id],
+    evidenceUsed: [aVregDatasheet.id, aVregTestReport.id],
     evaluationDate: '2026-03-12T11:45:00Z',
     status: 'active',
     supersededBy: null,

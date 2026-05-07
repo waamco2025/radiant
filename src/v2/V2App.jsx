@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.5 &middot; Changelog
+          v0.15.6 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.6', date: '2026-05-07', label: 'Phase 15.3', items: [
+                  'Re-Run flow demo enhanced — VReg Claim now seeded with TWO pre-existing Assets (Datasheet + Test Report), both anchored against the chain-head Eval Result so opening the Re-Run flow shows annotations across multiple pre-existing PDFs instead of just one. The chain-head erBobVreg now carries `evidenceAnchors: [datasheet, testreport]` (2 entries per row) for all five MIL-PRF-55681 v1 requirements; values authored to match the seed exactly so PDF text and seed values stay in sync.',
+                  'Phase 15.0 PDF generator script extended with a third PDF spec (`microco-vreg-test-report.pdf`) plus a new optional `paragraphs[]` page-spec field for documentation Assets that don\'t host anchored requirements. `evidenceAnchors.js` regenerates with anchors for the test report\'s req-001 through req-005.',
+                  'New "Voltage Regulator IC Compliance Notes" Asset (`asset-vreg-compliance-notes`, generated PDF `microco-vreg-compliance-notes.pdf`) pre-seeded as Alice\'s owned-but-unattached Asset specifically for the Re-Run amend prerequisite step. Phase 15.2 left Alice\'s prereq as "add any new Asset"; Phase 15.3 names the candidate so the demo path is deterministic. The Compliance Notes Asset is a paragraph-only PDF (no anchors) — when Alice attaches it during the prerequisite step, Bob\'s subsequent Re-Run accordion shows three Assets total (datasheet + test report annotated, compliance notes blank).',
+                  'EVIDENCE → ASSETS rename in the Δ delta info box at the top of the Re-Evaluation flow review surface (V22RunEvaluationModal). This was the missed surface from the Phase 15.1.2 EVIDENCE → ASSET sweep; "Δ EVIDENCE" was the only remaining title-bar-style EVIDENCE token in user-facing copy. The `evidence` AssetNode subtype label config (`SUBTYPE_CFG.evidence.label`) was kept as-is — it labels a node-card subtype not a modal title bar, and no seeded Asset uses that subtype so the string never renders in the live app.',
+                  'Walkthrough doc `docs/PHASE-15-DEMO-SCENARIOS.md` updated — Section 2 (VReg Eval Result Expand) now documents multi-Asset switcher behavior (was single-Asset through 15.2); Section 5a names the Compliance Notes Asset as the canonical amend prerequisite candidate with explanation; Section 5b\'s expected-outcome bullet describes the three-Asset accordion (Datasheet + Test Report annotated, Compliance Notes blank).',
+                  'Disclosure Agreement scope expanded — `daAliceToBobVreg` scope now includes both VReg Datasheet and Test Report Asset IDs so Bob\'s canvas surfaces both pre-existing Assets under full disclosure (mirrors `cVreg.referencedAssetIds`). The Compliance Notes Asset is added to the DA scope dynamically by Alice during the amend prerequisite step.',
+                ]},
                 { version: '0.15.5', date: '2026-05-07', label: 'Phase 15.2', items: [
                   '#172 part 3 of 3: closes the PDF annotation arc. Three deliverables — Download icon button onClick + Tooltip wired, walkthrough guide expanded, legacy /public PDF cleanup.',
                   'Download icon button — Phase 15.1.2 shipped the icon disabled because the spec premise (a pre-existing Phase 13.4 onClick handler ready to bind) was wrong; the original `<DownloadButton>` placeholder has always been disabled with `title="Export coming soon."`. Phase 15.2 introduces the first working Download in the eval-output / poe surfaces. `<DownloadIconButton>` accepts an optional `onClick` prop (drops `disabled` when provided, switches to indigo hover styling); `EvalResultOutputBody` wires `handleDownloadJson` (Blob from `getEvalResultJsonRecord` → transient `<a download="eval-result-<id>.json">` click → revokeObjectURL on next tick). Native `title` attribute replaced by the shared `<Tooltip>` primitive — tooltip text "Download Evaluation Results JSON", `position="auto"` so it lands above the icon and flips below when viewport space is tight. PoE Expand modal Section 1 inherits the working Download via the shared `<EvalResultOutputBody>`.',

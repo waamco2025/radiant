@@ -2673,6 +2673,38 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.3 completion notes (2026-05-07) — Re-Run Demo Seed Enhancement + EVIDENCE Rename Followup
+
+Two corrections from Phase 15.2 QA. Closes demo gaps in the #172 PDF annotation arc.
+
+**Step 1 — EVIDENCE → ASSETS rename in Δ delta info box.** Single-instance rename in `V22RunEvaluationModal.jsx`: the amber-tinted info box at the top of the Re-Evaluation flow's review surface (visible only in Re-Run mode when `priorActiveResult` is present and the Asset diff is non-empty) read "Δ EVIDENCE"; now reads "Δ ASSETS". This was the last surface using "EVIDENCE" as a title-bar-style tag — the Phase 15.1.2 sweep covered eval-output / poe Output tab strips but missed this one because it's specific to the Re-Run review path. Sweep-after-rename: 4 remaining EVIDENCE matches in src/, all non-user-facing — two in the V2App.jsx Changelog modal (historical phase descriptions, intentional), one in `AssetNode.jsx`'s `SUBTYPE_CFG.evidence.label` (V2.1 holdover; no seeded Asset uses subtype `'evidence'` so the string never renders), and code comments. Documented in completion notes.
+
+**Step 2 — VReg Test Report PDF.** Added `microco-vreg-test-report.pdf` to the generator script's PDF_SPECS array. 2 pages, MicroCo branding (green accent), revision Rev 1.0, Generated 2026-02-15. Page 1 covers Power & Thermal Measurements (req-001, req-002, req-003); Page 2 covers Radiation & Regulatory (req-004, req-005). Anchor coordinates auto-recorded by the existing `recordAnchor` flow as the script renders each row. **Value parity** verified at authoring time: every row's `value` string in the test report exactly matches the chain-head `erBobVreg` Eval Result's seed `value` for that requirement (e.g. PDF says `5.0V ±0.4% under load`, seed value is `5.0V ±0.4% under load` — identical). Labels in the PDF use measurement-style framing ("Power output measured", "Thermal dissipation observed", etc.) to read as test-report content while the values stay aligned with the seed.
+
+**Step 3 — VReg Compliance Notes PDF.** Added `microco-vreg-compliance-notes.pdf` to the generator. 1 page, MicroCo branding, Rev 1.0, Generated 2026-02-20. Pure documentation content (compliance program status, ITAR review reference, radiation-effects program note, supplier-of-record summary) rendered as flowing paragraphs. Required a small extension to the generator: the page-spec shape now accepts an optional `paragraphs: [string, ...]` field which renders flowing prose with no row-based anchor capture. Existing `sections[]` path preserved — both can coexist on a single page if needed (none of the current specs uses both, but the affordance is there). The Compliance Notes Asset is intentionally NOT in `PDF_ANCHORS` so consumers don't try to render annotations against it.
+
+**Step 4 — Seed updates in v2_2Data.js.**
+
+- **4a** `aVregTestReport` Asset created (id `asset-vreg-test-report`), owned by Alice, registered 2026-02-15. File metadata pulled from `PDF_FILES['microco-vreg-test-report.pdf']`; localPath `/seed-pdfs/microco-vreg-test-report.pdf`. Added to the global `assets` array. `cVreg.referencedAssetIds` extended from `[aVregDatasheet.id]` to `[aVregDatasheet.id, aVregTestReport.id]`. The `daAliceToBobVreg` Disclosure Agreement scope's `assetIds` extended in lockstep so Bob has full disclosure access to both Assets.
+- **4b** `aVregComplianceNotes` Asset created (id `asset-vreg-compliance-notes`), owned by Alice, registered 2026-02-20. NOT added to any Claim's `referencedAssetIds` from initial seed — sits in Alice's owned-Assets pool ready for the amend flow. Verified: Alice's amend-Claim Asset picker (`candidateAssets` prop on `AmendClaimModal`) consumes the global Asset list filtered by ownership + not-already-referenced, so the Compliance Notes Asset surfaces automatically without a dedicated registration call.
+- **4c** `erBobVreg` (chain-head VReg Eval Result) `results[]` updated — every row's `evidenceAnchors[]` array goes from 1 entry (datasheet only) to 2 entries (datasheet + test report). Each requirement now has `[{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf'][reqId] }, { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf'][reqId] }]`. `evidenceUsed` extended from `[aVregDatasheet.id]` to `[aVregDatasheet.id, aVregTestReport.id]`. Predecessor results (`erBobVregV0`, `erBobVregV1`) deliberately NOT retroactively updated — they predate the Test Report Asset and stay single-Asset, which preserves the chain semantics (the test report only became part of the evaluation universe at the chain head).
+
+**Step 5 — Walkthrough doc updates.** Section 2 (VReg Eval Result Expand) rewritten from single-Asset to multi-Asset — `Asset 1 of 2` counter, `◀ ▶` arrows, both PDFs annotated, cross-Asset row clicks documented. Section 5a (Alice's amend prereq) names the Compliance Notes Asset specifically with the why-this-Asset rationale (Alice owns it, it isn't yet attached, demo determinism). Section 5b's expected-outcome bullet rewritten to describe a three-Asset accordion (Datasheet + Test Report annotated, Compliance Notes blank). At-a-glance scenario table row 2 updated; row 4 description updated to "Multi-Asset annotations carried forward".
+
+**Implementation details surfaced.**
+- `PDF_FILES` map auto-includes the new entries since the script writes both `PDF_ANCHORS` and `PDF_FILES` in lockstep — no extra wiring needed for v2_2Data.js to consume size + hash for the two new files.
+- The Compliance Notes Asset's PDF doesn't appear in `PDF_ANCHORS` (no rows = no anchors recorded) — consumers iterating `PDF_ANCHORS` won't accidentally try to render annotations on it.
+- `daAliceToBobVreg` had its scope expanded but the Compliance Notes Asset is NOT added to the initial seed scope — Alice's amend flow extends the DA dynamically as part of the prereq step, exercising the existing scope-update mechanics from Phase 12.1.
+- The two predecessor VReg Eval Results (V0 superseded with `missing` rows; V1 superseded with `unsatisfactory` radiation row) keep single-Asset anchors — a design call that preserves chain causality (you can't anchor against an Asset that didn't exist when the result was authored). The walkthrough doc notes this explicitly.
+
+**Footer v0.15.5 → v0.15.6.** Architecture spec §17.5 changelog gains a 15.3 bullet referencing the multi-Asset Re-Run demo path. polish-backlog Update Log entry. CLAUDE.md "Current state of the world" updated.
+
+**Runtime verification.** Manual user-path walkthrough required (per Phase 15.0.1 workflow lesson): Bob → click VReg latest Eval Result → Expand → Output → confirm `Asset 1 of 2`, both PDFs annotated, all 5 indicators on each side, value text matches between PDF and right-panel rows. Switch to Alice → amend VReg Claim → confirm Compliance Notes Asset appears in the picker → save. Switch back to Bob → re-run latest Eval Result → confirm 3-Asset accordion with annotations on first two and blank Compliance Notes.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.2 completion notes (2026-05-07) — Download Fix + Walkthrough Guide + Legacy PDF Cleanup (#172 part 3 close)
 
 Three deliverables. Closes the #172 PDF annotation arc.

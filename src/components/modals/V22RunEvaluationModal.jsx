@@ -1324,7 +1324,7 @@ export default function V22RunEvaluationModal({
                     marginBottom: 10, flexShrink: 0,
                   }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-amber)', letterSpacing: '0.06em', marginBottom: 4 }}>
-                      Δ EVIDENCE
+                      Δ ASSETS
                     </div>
                     +{evidenceDiff.added.length} / −{evidenceDiff.removed.length} / {evidenceDiff.superseded.length} superseded
                   </div>

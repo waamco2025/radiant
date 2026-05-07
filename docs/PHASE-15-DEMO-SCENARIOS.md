@@ -20,9 +20,9 @@ left panel auto-flips on cross-Asset interactions.
 | # | Scenario | Role | Key feature exercised |
 |---|----------|------|-----------------------|
 | [1](#scenario-1--multi-rs-eval-result-on-prm-claim-erbobprm) | PRM Eval Result Expand | Bob | Multi-Asset switcher, multi-RS color coding, bidirectional click |
-| [2](#scenario-2--single-rs-eval-result-on-vreg-claim-erbobvreg) | VReg Eval Result Expand | Bob | Single-Asset, single-RS, full chain head |
+| [2](#scenario-2--single-rs-eval-result-on-vreg-claim-erbobvreg) | VReg Eval Result Expand | Bob | Multi-Asset (Datasheet + Test Report), single-RS, full chain head |
 | [3](#scenario-3--poe-expand-modal) | PoE Expand | Bob | Same layout inherited via the wrapped Eval Result |
-| [4](#scenario-4--run-evaluation-re-run-flow) | Re-Run flow Step 2 | Alice → Bob | Annotations rendered inside the Run Evaluation flow |
+| [4](#scenario-4--run-evaluation-re-run-flow) | Re-Run flow Step 2 | Alice → Bob | Multi-Asset annotations carried forward into the Run Evaluation flow |
 
 ### Prerequisites
 
@@ -104,8 +104,10 @@ the most rows. Best opening demo.
 
 ## 3. Scenario 2 — Single-RS Eval Result on VReg Claim (`erBobVreg`)
 
-Single-Asset, single-RS variant. Confirms the layout still reads
-cleanly without the multi-Asset chrome.
+Multi-Asset, single-RS variant (Phase 15.3 update — was single-Asset
+through Phase 15.2). Each requirement row carries anchors on both the
+Datasheet and the Test Report so Asset-switching shows annotations in
+both PDFs.
 
 **Role:** Bob (GovCo).
 
@@ -120,24 +122,32 @@ cleanly without the multi-Asset chrome.
 
 - Modal canonical header: `EVAL RESULT` + name + `Evaluated: ... ·
   Evaluator: GovCo`.
-- Left panel: `ASSET` strip + `microco-vreg-datasheet.pdf`. **No
-  switcher arrows** — single-Asset case (`Asset 1 of 1`).
-- Indicators labeled `1` through `5`, all the same RS color (single
-  RS).
+- Left panel: `ASSET` strip + `microco-vreg-datasheet.pdf` + `◀ ▶`
+  arrows + `Asset 1 of 2` counter (Phase 15.3: VReg now has two
+  pre-existing Assets).
+- Indicators labeled `1` through `5`, all the same RS color
+  (single-RS — MIL-PRF-55681 v1).
 - Right panel: single per-RS results table.
 
 **Try the interactions**
 
-- Row click → PDF scrolls + highlights. Indicator click → row scrolls
-  + highlights. No cross-Asset path here (only one Asset).
+- **Asset switcher** — **click** ▶: PDF flips to
+  `microco-vreg-test-report.pdf` (Asset 2 of 2) with the same five
+  indicators on the test-report side (each requirement row has anchors
+  on both Assets).
+- **Row click** → PDF scrolls + highlights in whichever Asset hosts the
+  primary anchor for that row. **Cross-Asset row click** → switcher
+  auto-flips to the target Asset.
+- **Indicator click** → results table scrolls + row highlights.
 - Status `missing` rows have empty `evidenceAnchors[]` and render an
   empty indicator slot in the row — and no dot on the PDF for that row.
 - Download icon works the same as Scenario 1.
 
-The two `superseded` Eval Results in the VReg chain (V0 + V1) carry the
-same shape but are not the chain head. To inspect them, open the
-chain-head's Detail Panel and use the supersession chain navigation, or
-explore via the Provenance section in Scenario 3's PoE.
+The two `superseded` Eval Results in the VReg chain (V0 + V1) still
+carry single-Asset anchors (datasheet only) — they predate the test
+report Asset and weren't retroactively re-anchored. To inspect them,
+open the chain-head's Detail Panel and use the supersession chain
+navigation, or explore via the Provenance section in Scenario 3's PoE.
 
 ---
 
@@ -195,12 +205,22 @@ added since the prior evaluation. Without this prerequisite step, Bob's
 3. **Click** the Claim → Detail Panel opens.
 4. **Click** "Amend Claim" in the Detail Panel.
 5. In the Amend Claim modal:
-   - **Add a new Asset** — pick any new Asset from Alice's available
-     anchors (any new Asset registers a fresh evidence target).
+   - Add the **"Voltage Regulator IC Compliance Notes"** Asset
+     (pre-seeded for this demo — Alice owns it but it isn't yet
+     attached to the VReg Claim).
    - **Update the DA scope** to include the new Asset so Bob has full
      disclosure access.
-6. **Save** the amendment. Alice's canvas updates; the Claim's
-   referenced-Assets count reflects the new Asset.
+6. **Save** the amendment. Alice's canvas updates; the Claim now
+   references three Assets (Datasheet + Test Report + Compliance
+   Notes).
+
+**Why this Asset specifically:** Phase 15.3 pre-seeded the "VReg
+Compliance Notes" Asset as Alice's owned-but-unattached Asset
+specifically for this demo. Alice could add any of her unattached
+Assets to satisfy the `hasNewAssetsForRerun` gate, but the Compliance
+Notes Asset is named and positioned for this exact prerequisite — it
+represents the kind of supplementary documentation Alice might attach
+when expanding evaluation scope.
 
 ### 5b. Bob runs the re-run
 
@@ -216,23 +236,28 @@ added since the prior evaluation. Without this prerequisite step, Bob's
 
 **Expected outcome at Step 2**
 
-- Left panel: accordion of in-scope evidence Assets. Expand the
-  `microco-vreg-datasheet.pdf` row → PDF renders with annotation
-  indicators labeled `1` through `5` carried forward from the prior
-  Eval Result (`erBobVreg`).
-- The new Asset Alice added (whatever she chose) also appears in the
-  accordion. When expanded, it renders without indicators — fresh
-  evidence has no prior anchor history.
-- Right panel: parsed result rows ready for review, with the same
-  numbered indicators as the PDF.
+- Left panel: Asset accordion with three Assets:
+  - **VReg Datasheet** (originally in scope) — has annotation markers
+    `1` through `5` from the prior evaluation.
+  - **VReg Test Report** (originally in scope, Phase 15.3 addition) —
+    has annotation markers `1` through `5` from the prior evaluation
+    on the bench-measurement values.
+  - **VReg Compliance Notes** (newly added by Alice in Step 5a) — no
+    markers (no prior evaluation context — it's documentation that
+    didn't exist when the prior Eval Result was authored).
+- Right panel: parsed result rows inherited from the prior Eval Result
+  ready for review, with the same numbered indicators on the left of
+  each row.
 
 **Try the interactions**
 
-- **Click** any row indicator → PDF scrolls + highlights (same
-  bidirectional pattern as Scenario 1).
-- **Cross-Asset click** — if the user has flipped the accordion to a
-  different Asset, clicking a row whose anchor is on a different
-  Asset auto-flips the accordion's expanded Asset and scrolls there.
+- **Click** any row indicator → PDF scrolls + highlights in whichever
+  pre-existing Asset hosts the anchor (Datasheet or Test Report).
+- **Cross-Asset row click** — if the accordion is showing the Datasheet
+  and the user clicks a row primarily anchored to the Test Report (or
+  vice versa), the accordion auto-flips its expanded Asset and scrolls
+  there. The Compliance Notes Asset has no anchors so no row click
+  routes to it.
 
 Fresh evaluations triggered via "Run Evaluation" (not Re-Run) similarly
 render PDFs without indicators on first opening — Phase 15 ships

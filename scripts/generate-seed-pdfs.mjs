@@ -17,7 +17,15 @@
 //   - public/seed-pdfs/microco-prm-datasheet.pdf
 //   - public/seed-pdfs/microco-prm-test-report.pdf
 //   - public/seed-pdfs/microco-vreg-datasheet.pdf
+//   - public/seed-pdfs/microco-vreg-test-report.pdf       (Phase 15.3)
+//   - public/seed-pdfs/microco-vreg-compliance-notes.pdf  (Phase 15.3)
 //   - src/v2/data/evidenceAnchors.js  (generated; do not hand-edit)
+//
+// Phase 15.3 extension: a page spec may carry `paragraphs: [string, ...]`
+// instead of (or in addition to) `sections[]`. Paragraph pages render
+// flowing prose with no row-based anchor capture — used for the new
+// compliance-notes Asset which exists purely to satisfy the
+// `hasNewAssetsForRerun` gate during the demo amend prerequisite.
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -286,6 +294,88 @@ const PDF_SPECS = [
       },
     ],
   },
+  // Phase 15.3: VReg Test Report — the second pre-existing Asset on the
+  // VReg Claim. Anchors against the chain-head `erBobVreg` Eval Result's
+  // measured values so the values quoted here exactly match the seed
+  // (no 5.0V±0.5% datasheet/5.0V±0.4% measured visual mismatch).
+  {
+    filename: 'microco-vreg-test-report.pdf',
+    ownerParty: 'MicroCo',
+    accentColor: COLOR_MICROCO,
+    docType: 'VReg-12C · Compliance Test Report',
+    revision: 'Rev 1.0',
+    generated: '2026-02-15',
+    description: 'Bench-measured performance and qualification results for the VReg-12C. Test articles: VReg-12C serial numbers 0211 through 0218 (n=8). All tests performed under ambient lab conditions unless otherwise noted.',
+    pages: [
+      {
+        title: 'Power & Thermal Measurements',
+        intro: 'Steady-state electrical and thermal performance under rated load. Results expressed as worst-case across the test cohort.',
+        sections: [
+          {
+            heading: 'Power Output',
+            rows: [
+              { requirementId: 'req-001', label: 'Power output measured', value: '5.0V ±0.4% under load' },
+            ],
+          },
+          {
+            heading: 'Thermal Performance',
+            rows: [
+              { requirementId: 'req-002', label: 'Thermal dissipation observed', value: '< 1.5W at rated current' },
+            ],
+          },
+          {
+            heading: 'Environmental',
+            rows: [
+              { requirementId: 'req-003', label: 'Temperature qualification verified', value: '-55°C to +125°C' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Radiation & Regulatory',
+        intro: 'Total Ionizing Dose (TID) qualification per MIL-STD-883 Method 1019 and regulatory classification confirmation per export-control review.',
+        sections: [
+          {
+            heading: 'TID Results',
+            rows: [
+              { requirementId: 'req-004', label: 'Radiation tolerance (TID)', value: 'TID > 100 krad(Si)' },
+            ],
+          },
+          {
+            heading: 'Regulatory & Export',
+            rows: [
+              { requirementId: 'req-005', label: 'ITAR classification confirmation', value: 'Category XV, §121.1' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  // Phase 15.3: VReg Compliance Notes — the prerequisite Asset Alice
+  // attaches during the Re-Run demo flow. Pure documentation; no anchored
+  // requirements (paragraph-only page spec).
+  {
+    filename: 'microco-vreg-compliance-notes.pdf',
+    ownerParty: 'MicroCo',
+    accentColor: COLOR_MICROCO,
+    docType: 'VReg-12C · Compliance Documentation',
+    revision: 'Rev 1.0',
+    generated: '2026-02-20',
+    description: 'Supplementary compliance program documentation accompanying the VReg-12C release. References supplier quality, test methodology, and regulatory program status.',
+    pages: [
+      {
+        title: 'Compliance Program Status',
+        intro: 'This memo summarizes the VReg-12C compliance program as of the issue date. Supersedes prior supplier-quality letters Q-2025-187 and Q-2026-012.',
+        paragraphs: [
+          'MicroCo maintains an AS9100D-aligned quality management system covering the VReg-12C IC design, fabrication, and qualification flow. The supplier-quality program is independently audited annually; the most recent audit (2026-01-22) closed without findings.',
+          'All VReg-12C lots issued under Rev 1.2 of the datasheet have been qualified to MIL-STD-883 Class B requirements. Test reports are archived per QMS procedure QP-014 with retention through 2046.',
+          'Export-control classification (ITAR Category XV, §121.1) was verified against the VReg-12C BOM and design files by an independent export-control review on 2026-02-18. The review report is available on request to authorized parties.',
+          'Radiation-effects program: Total Ionizing Dose (TID) qualification was performed per MIL-STD-883 Method 1019 in Q4 2025. Single-Event Effects (SEE) characterization is in progress and will be issued as a supplementary report under document number TR-VReg-SEE-001.',
+          'Supplier of record: MicroCo Semiconductor Division, San Jose, CA. CAGE Code 8H247. Authorized point of contact: VReg compliance program lead, available via the MicroCo customer portal.',
+        ],
+      },
+    ],
+  },
   {
     filename: 'microco-vreg-datasheet.pdf',
     ownerParty: 'MicroCo',
@@ -385,18 +475,33 @@ async function generatePdf(spec) {
       y -= 18
     }
 
-    // Sections.
-    for (const section of pageSpec.sections) {
-      drawSectionHeading(page, fonts, { x: MARGIN, y, text: section.heading })
-      y -= 22
-      for (const row of section.rows) {
-        const anchor = drawSpecRow(page, fonts, {
-          x: MARGIN, y, label: row.label, value: row.value, pageNum,
+    // Phase 15.3: paragraph pages render flowing prose with no row-based
+    // anchor capture. Used for documentation Assets (e.g. compliance
+    // notes) that don't host evaluation evidence.
+    if (Array.isArray(pageSpec.paragraphs) && pageSpec.paragraphs.length > 0) {
+      for (const para of pageSpec.paragraphs) {
+        y = drawParagraph(page, fonts, {
+          x: MARGIN, y, w: PAGE_W - MARGIN * 2,
+          text: para, size: 10, color: COLOR_INK,
         })
-        recordAnchor(spec.filename, row.requirementId, anchor)
-        y -= 22
+        y -= 16
       }
-      y -= 12  // gap between sections
+    }
+
+    // Sections.
+    if (Array.isArray(pageSpec.sections)) {
+      for (const section of pageSpec.sections) {
+        drawSectionHeading(page, fonts, { x: MARGIN, y, text: section.heading })
+        y -= 22
+        for (const row of section.rows) {
+          const anchor = drawSpecRow(page, fonts, {
+            x: MARGIN, y, label: row.label, value: row.value, pageNum,
+          })
+          recordAnchor(spec.filename, row.requirementId, anchor)
+          y -= 22
+        }
+        y -= 12  // gap between sections
+      }
     }
   })
 
