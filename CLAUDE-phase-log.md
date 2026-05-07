@@ -2673,6 +2673,47 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.2 completion notes (2026-05-07) — Download Fix + Walkthrough Guide + Legacy PDF Cleanup (#172 part 3 close)
+
+Three deliverables. Closes the #172 PDF annotation arc.
+
+**Step 1 — Download icon button fix.** The Phase 15.1.2 icon button shipped disabled. The brief premised a pre-existing JSON download handler ("the same one the original full-width 'Download' button used in pre-15.1.2 layouts") — that premise was wrong. The Phase 13.4 placeholder `<DownloadButton>` has always been disabled with the literal `title="Export coming soon."` and never carried an onClick. Phase 15.2 introduces the first working Download in the eval-output / poe surfaces.
+
+The fix:
+- `<DownloadIconButton>` now accepts an optional `onClick` prop. When provided, the button drops `disabled`, enables hover styling (var(--text-secondary) → var(--accent-indigo) on enter; subtle indigo-tint background), and forwards click events. When omitted, the legacy disabled affordance is preserved (no eval-output / poe consumer ships today without the handler, but this guards against future placeholder reuse).
+- Replaced the native `title=""` attribute with a real `<Tooltip>` primitive (the same one used by BadgeChipContainer per Phase 14.3). Tooltip text: `Download Evaluation Results JSON`, `position="auto"` so it lands above the icon and flips below if insufficient viewport top-space.
+- `EvalResultOutputBody` gains a `handleDownloadJson` callback that constructs a Blob from `getEvalResultJsonRecord(evalResult)`, creates a transient `<a>` element with `download="eval-result-<id>.json"`, programmatically clicks it, then schedules `URL.revokeObjectURL` on the next tick. Filename pattern: id-based when `evalResult.id` is present, slug-of-name fallback otherwise.
+- Both surfaces wired since PoE schema renders `<EvalResultOutputBody>` directly per Phase 15.1.2 — same handler, same filename pattern, same tooltip.
+
+**Step 2 — Demo walkthrough guide expanded.** `docs/PHASE-15-DEMO-SCENARIOS.md` rewritten from the Phase 15.0.1 skeleton into a complete walkthrough. Six top-level sections: Overview (with at-a-glance scenario table + prerequisites), Scenarios 1–4 (each with Role, Setup, Navigation, Expected outcome, Try the interactions), and Notes for QA + demos (acceptable warnings, behavior reminders, common gotchas). The Re-Run prerequisite step (Alice amends the VReg Claim before Bob's re-run, gated by `hasNewAssetsForRerun` from Phase 13.3) is documented as Section 5a with explicit role-switch steps and the gate explanation. Format: markdown headings, anchor links in the at-a-glance table, bullet steps for short navigation paths, numbered lists for multi-step flows, bold action verbs.
+
+**Step 3 — Legacy /public PDF cleanup.** Cross-referenced every PDF in `public/` against `src/v2/v2_2Data.js` to identify orphaned files. Five unreferenced legacy PDFs removed:
+- `connectorassembly-datasheet.pdf`
+- `pcbsubstrate-datasheet.pdf`
+- `powerregulationmodule-datasheet.pdf`
+- `thermalinterfacepad-datasheet.pdf`
+- `voltageregulator-datasheet.pdf`
+
+Surface for follow-up: four legacy PDFs in `public/` are STILL referenced by active V2.2 seed data and were therefore retained:
+- `emishielding-datasheet.pdf` — referenced by `aEmiDatasheet`
+- `prm-3a-ic-datasheet.pdf` — referenced by `dPrmIcDatasheet`
+- `prm-3a-ic-qualification-report.pdf` — referenced by `dPrmIcTestReport`
+- `voltage-reference-ic-datasheet.pdf` — referenced by `dVrefDatasheet`
+
+Acceptance criterion #6 ("public/ contains only the three generated MicroCo PDFs in public/seed-pdfs/") was overstated — removing these four would silently break their Asset previews. The right follow-up is either re-generating MicroCo-branded replacements via `scripts/generate-seed-pdfs.mjs` or trimming the seed entries; both are out of scope for 15.2 (this phase closes the #172 annotation arc, not the broader seed-PDF migration). Filing as a backlog candidate ("Phase 15.3 candidate: migrate remaining legacy /public PDFs to seed-pdfs/ MicroCo flow OR remove from seed").
+
+The references in `src/v2/v2Data.js` (the V1/V2.1 legacy data file) to the 5 removed PDFs are dead code — `getDataForRole` is imported by V2App but never called (`grep -cn "getDataForRole(" V2App.jsx` returns 0). Those references were not consulted by the active runtime at any point; safe to leave the dead-data file as-is for future cleanup.
+
+**Step 4 — Documentation.** `architecture-spec.md` §17.5 Changelog gains a 15.2 bullet referencing the demo walkthrough guide. `polish-backlog.md` Update Log entry. `CLAUDE.md` "Current state of the world" + "Active phase queue" updated — Phase 15 arc now closed across parts 1 (15.0), 2 (15.1, plus 15.0.1 hotfix + 15.1.1 + 15.1.2 polish phases), and 3 (15.2).
+
+**Footer v0.15.4 → v0.15.5.** In-app Changelog modal entry prepended.
+
+**Runtime verification.** Manual user-path walkthrough: open Bob's PRM Eval Result → Expand → Output → hover the download icon (tooltip "Download Evaluation Results JSON" appears within ~200ms) → click (JSON file downloads, filename `eval-result-eval-bob-prm.json` or similar). Same flow on PoE expand modal Section 1 (download icon in the wrapped Eval Result's EVALUATION RESULTS strip works, downloads the wrapped Eval Result's JSON). Asset switcher + bidirectional row↔dot interaction + label format + indicator shape all unchanged from 15.1.1/15.1.2. PDF cleanup: dev server boots cleanly, no missing-PDF console errors, all currently-referenced Assets still preview correctly.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.1.2 completion notes (2026-05-07) — Eval Result + PoE Expand Modal Layout Consolidation
 
 Three refinements surfaced during 15.1.1 QA, all chrome cleanup — no architectural shifts.

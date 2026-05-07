@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.4 &middot; Changelog
+          v0.15.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.5', date: '2026-05-07', label: 'Phase 15.2', items: [
+                  '#172 part 3 of 3: closes the PDF annotation arc. Three deliverables — Download icon button onClick + Tooltip wired, walkthrough guide expanded, legacy /public PDF cleanup.',
+                  'Download icon button — Phase 15.1.2 shipped the icon disabled because the spec premise (a pre-existing Phase 13.4 onClick handler ready to bind) was wrong; the original `<DownloadButton>` placeholder has always been disabled with `title="Export coming soon."`. Phase 15.2 introduces the first working Download in the eval-output / poe surfaces. `<DownloadIconButton>` accepts an optional `onClick` prop (drops `disabled` when provided, switches to indigo hover styling); `EvalResultOutputBody` wires `handleDownloadJson` (Blob from `getEvalResultJsonRecord` → transient `<a download="eval-result-<id>.json">` click → revokeObjectURL on next tick). Native `title` attribute replaced by the shared `<Tooltip>` primitive — tooltip text "Download Evaluation Results JSON", `position="auto"` so it lands above the icon and flips below when viewport space is tight. PoE Expand modal Section 1 inherits the working Download via the shared `<EvalResultOutputBody>`.',
+                  '`docs/PHASE-15-DEMO-SCENARIOS.md` rewritten from Phase 15.0.1 skeleton into a complete six-section walkthrough — Overview (with at-a-glance scenario table + prerequisites), Scenarios 1–4 (each with Role, Setup, Navigation, Expected outcome, Try the interactions), and Notes for QA + demos. The Re-Run prerequisite (Alice amends the VReg Claim before Bob\'s re-run, gated by `hasNewAssetsForRerun` from Phase 13.3) is documented as Section 5a with explicit role-switch steps and the gate explanation.',
+                  'Legacy `/public/*.pdf` cleanup — 5 unreferenced files removed: connectorassembly-datasheet, pcbsubstrate-datasheet, powerregulationmodule-datasheet, thermalinterfacepad-datasheet, voltageregulator-datasheet. 4 still-referenced legacy PDFs retained (emishielding, prm-3a-ic-datasheet, prm-3a-ic-qualification-report, voltage-reference-ic-datasheet) — surfaced as a Phase 15.3 candidate to migrate to MicroCo seed-pdfs/ flow OR trim from seed; removing them would silently break their Asset previews.',
+                  '#172 closed. Phase 15 arc complete across parts 1 (15.0), 2 (15.1 + polish: 15.0.1, 15.1.1, 15.1.2), and 3 (15.2). Next cycle: backlog hygiene then transition to a fresh thread.',
+                ]},
                 { version: '0.15.4', date: '2026-05-07', label: 'Phase 15.1.2', items: [
                   'Eval Result + PoE Expand modal Output tab consolidation. Timestamp + party metadata moved into the canonical modal header next to the title — Eval Result shows "Evaluated: [date] · Evaluator: [party]"; PoE shows "Created: [date] · Owner: [party]". Reclaims the vertical space the thin header band previously consumed inside the scrolling Output tab body.',
                   'Download button promoted into the right-panel "EVALUATION RESULTS" title bar as a 24×24 icon button at the right edge (download glyph + tooltip "Download Evaluation Results JSON"). The healthbar block now hosts the aggregate count + 3-segment SAT/UNSAT/MISSING minibar only.',

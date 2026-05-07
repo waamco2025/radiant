@@ -39,6 +39,9 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Backdrop } from './ModalShared.jsx'
+// Phase 15.2 (#172 part 3): real Tooltip primitive for the Download
+// icon button (Phase 15.1.2 used a native `title` attribute as a stub).
+import Tooltip from '../Tooltip.jsx'
 import {
   AssetEvidenceViewer,
   SelectiveDisclosurePanel,
@@ -150,14 +153,23 @@ function TabBar({ active, onChange, hideOutput = false }) {
 
 // Phase 15.1.2: 24×24 download icon-button rendered at the right edge of
 // the EVALUATION RESULTS title bar in eval-output / poe Output tabs.
-// Disabled until #58; the icon-button affordance is here so the wiring
-// shape is final. Tooltip via native `title`.
-function DownloadIconButton({ label = 'Download Evaluation Results JSON' }) {
-  return (
+//
+// Phase 15.2 (#172 part 3): functional onClick + Tooltip primitive.
+// The Phase 13.4 placeholder `<DownloadButton>` was always disabled
+// ("Export coming soon.") and never carried a real handler — the spec
+// premise that 15.1.2 "lost a working onClick" was wrong; Phase 15.2 is
+// the first phase that wires a working JSON download. When `onClick`
+// is null the button keeps the legacy disabled affordance.
+function DownloadIconButton({
+  label = 'Download Evaluation Results JSON',
+  onClick = null,
+}) {
+  const isInteractive = typeof onClick === 'function'
+  const button = (
     <button
       type="button"
-      disabled
-      title={label}
+      onClick={isInteractive ? onClick : undefined}
+      disabled={!isInteractive}
       aria-label={label}
       style={{
         width: 24, height: 24, padding: 0,
@@ -165,10 +177,19 @@ function DownloadIconButton({ label = 'Download Evaluation Results JSON' }) {
         background: 'transparent',
         border: '1px solid var(--border)',
         borderRadius: 4,
-        color: 'var(--text-dim)',
-        cursor: 'not-allowed',
+        color: isInteractive ? 'var(--text-secondary)' : 'var(--text-dim)',
+        cursor: isInteractive ? 'pointer' : 'not-allowed',
         flexShrink: 0,
+        transition: 'color 100ms, background 100ms',
       }}
+      onMouseEnter={isInteractive ? (e) => {
+        e.currentTarget.style.color = 'var(--accent-indigo)'
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
+      } : undefined}
+      onMouseLeave={isInteractive ? (e) => {
+        e.currentTarget.style.color = 'var(--text-secondary)'
+        e.currentTarget.style.background = 'transparent'
+      } : undefined}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
         <path d="M8 2 L8 11 M4 7.5 L8 11.5 L12 7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -176,6 +197,7 @@ function DownloadIconButton({ label = 'Download Evaluation Results JSON' }) {
       </svg>
     </button>
   )
+  return <Tooltip content={label} position="auto">{button}</Tooltip>
 }
 
 // Phase 13.4: a small "Download" button rendered above the active tab body.
@@ -618,6 +640,34 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
     return () => cancelAnimationFrame(handle)
   }, [highlightedAnchorId])
 
+  // Phase 15.2 (#172 part 3): JSON download handler bound to the icon
+  // button in the EVALUATION RESULTS title bar. Uses the same shape as
+  // the JSON tab pre via `getEvalResultJsonRecord`. Filename pattern:
+  // `eval-result-<id>.json` (falls back to a name-derived slug when id
+  // is missing). Triggers a transient anchor click — no library deps.
+  const handleDownloadJson = () => {
+    try {
+      const record = getEvalResultJsonRecord(evalResult)
+      const json = JSON.stringify(record, null, 2)
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const idPart = evalResult.id || (evalResult.name || 'evaluation')
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      const filename = `eval-result-${idPart}.json`
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      // Defer URL revocation so the click event can resolve.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Eval Result JSON download failed:', err)
+    }
+  }
+
   return (
     <LayeredOutputContainer>
       {/* Phase 15.1.2: thin header band removed — eval/poe metadata
@@ -758,7 +808,7 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             }}>
               {evalResult.name || evalResult.id}
             </span>
-            <DownloadIconButton />
+            <DownloadIconButton onClick={handleDownloadJson} />
           </div>
 
           {/* Healthbar block — Phase 15.1.2: Download button promoted to
