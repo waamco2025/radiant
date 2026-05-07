@@ -52,36 +52,82 @@ function formatDateTime(iso) {
   return `${yyyy}-${mm}-${dd} · ${hh}:${min} UTC`
 }
 
-export function AssetEvidenceViewer({
+// Phase 15.1.2: split the legacy single AssetEvidenceViewer into three
+// pieces so consumers (notably ExpandedArtifactModal's eval-output / poe
+// schemas) can rearrange viewer + metadata. The default
+// `AssetEvidenceViewer` export is preserved for every existing call site
+// and still renders metadata-above + viewer + owner/registered-below.
+
+export function AssetFileViewer({
   asset,
   iframeHeight = 400,
   fillHeight = false,
-  // Phase 15.0 (#172 part 1): opt-in to PDF.js rendering (with annotation
-  // overlay) for application/pdf assets. Other MIME types fall back to
-  // iframe regardless. Default false preserves every existing call site.
   usePdfJs = false,
   evidenceAnchors = null,
   assetOrdinal = null,
   rsColorByRsId = null,
-  // Phase 15.1 (#172 part 2): bidirectional interaction.
   highlightedAnchorId = null,
   onAnchorClick = null,
 }) {
   const file = asset?.file || {}
-  const hash = file.hash || ''
-  // Phase 12.6: `fillHeight` switches between the legacy fixed iframe height
-  // (used by ExpandedArtifactModal) and a flex-stretching iframe (used by
-  // the Run Eval / Parse modal left panels for height parity with the
-  // right column). Header + footer stay natural-height; only the iframe /
-  // empty-state placeholder grows.
   const stretchStyle = fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }
-  // Phase 15.0: pick the renderer based on mime + opt-in flag.
   const renderViaPdfJs = usePdfJs && file.mimeType === 'application/pdf' && !!file.localPath
+  if (renderViaPdfJs) {
+    return (
+      <div style={{ ...(fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }) }}>
+        <AnnotatedPdfViewer
+          fileUrl={file.localPath}
+          evidenceAnchors={evidenceAnchors || []}
+          assetOrdinal={assetOrdinal}
+          rsColorByRsId={rsColorByRsId || {}}
+          height={fillHeight ? '100%' : iframeHeight}
+          highlightedAnchorId={highlightedAnchorId}
+          onAnchorClick={onAnchorClick}
+        />
+      </div>
+    )
+  }
+  if (file.localPath) {
+    return (
+      <iframe
+        src={file.localPath}
+        style={{
+          width: '100%', ...stretchStyle, border: '1px solid var(--border)',
+          borderRadius: 6, background: 'var(--bg-deep)',
+        }}
+        title={`Evidence: ${file.filename || asset?.name || 'asset'}`}
+      />
+    )
+  }
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', gap: 14,
-      ...(fillHeight ? { flex: 1, minHeight: 0 } : {}),
+      ...stretchStyle,
+      background: 'var(--bg-deep)',
+      border: '2px dashed var(--border)',
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--text-dim)',
+      fontSize: 12,
+      textAlign: 'center',
+      padding: 24,
     }}>
+      Document preview not available
+    </div>
+  )
+}
+
+// Phase 15.1.2: combined 6-row metadata block (Filename, Size, MIME,
+// Hash, Owner, Registered) used by ExpandedArtifactModal eval-output / poe
+// schemas in the left panel BELOW the file viewer. Other consumers (and
+// the legacy AssetEvidenceViewer) use the prior 4-row file-info card +
+// 2-row tertiary owner/registered row split.
+export function AssetFileMetadata({ asset, variant = 'file-info' }) {
+  const file = asset?.file || {}
+  const hash = file.hash || ''
+  if (variant === 'combined') {
+    return (
       <div style={{
         padding: '12px 14px',
         background: 'var(--bg-deep)',
@@ -103,47 +149,15 @@ export function AssetEvidenceViewer({
         <span style={{ color: 'var(--text-primary)' }}>
           {hash ? <CopyBadge value={hash} truncated /> : '—'}
         </span>
+        <span style={{ color: 'var(--text-tertiary)' }}>Owner</span>
+        <span style={{ color: 'var(--text-secondary)' }}>{asset?.owner || '—'}</span>
+        <span style={{ color: 'var(--text-tertiary)' }}>Registered</span>
+        <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(asset?.registrationDate)}</span>
       </div>
-
-      {renderViaPdfJs ? (
-        <div style={{ ...(fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }) }}>
-          <AnnotatedPdfViewer
-            fileUrl={file.localPath}
-            evidenceAnchors={evidenceAnchors || []}
-            assetOrdinal={assetOrdinal}
-            rsColorByRsId={rsColorByRsId || {}}
-            height={fillHeight ? '100%' : iframeHeight}
-            highlightedAnchorId={highlightedAnchorId}
-            onAnchorClick={onAnchorClick}
-          />
-        </div>
-      ) : file.localPath ? (
-        <iframe
-          src={file.localPath}
-          style={{
-            width: '100%', ...stretchStyle, border: '1px solid var(--border)',
-            borderRadius: 6, background: 'var(--bg-deep)',
-          }}
-          title={`Evidence: ${file.filename || asset?.name || 'asset'}`}
-        />
-      ) : (
-        <div style={{
-          ...stretchStyle,
-          background: 'var(--bg-deep)',
-          border: '2px dashed var(--border)',
-          borderRadius: 6,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--text-dim)',
-          fontSize: 12,
-          textAlign: 'center',
-          padding: 24,
-        }}>
-          Document preview not available
-        </div>
-      )}
-
+    )
+  }
+  if (variant === 'owner-row') {
+    return (
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'auto 1fr',
@@ -157,6 +171,76 @@ export function AssetEvidenceViewer({
         <span>Registered</span>
         <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(asset?.registrationDate)}</span>
       </div>
+    )
+  }
+  // variant === 'file-info' (default): the file-info card alone (no
+  // owner/registered tertiary row).
+  return (
+    <div style={{
+      padding: '12px 14px',
+      background: 'var(--bg-deep)',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      display: 'grid',
+      gridTemplateColumns: 'auto 1fr',
+      gap: '6px 16px',
+      fontSize: 11,
+      flexShrink: 0,
+    }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>Filename</span>
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{file.filename || '—'}</span>
+      <span style={{ color: 'var(--text-tertiary)' }}>Size</span>
+      <span style={{ color: 'var(--text-primary)' }}>{formatBytes(file.size)}</span>
+      <span style={{ color: 'var(--text-tertiary)' }}>MIME</span>
+      <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{file.mimeType || '—'}</span>
+      <span style={{ color: 'var(--text-tertiary)' }}>Hash</span>
+      <span style={{ color: 'var(--text-primary)' }}>
+        {hash ? <CopyBadge value={hash} truncated /> : '—'}
+      </span>
+    </div>
+  )
+}
+
+export function AssetEvidenceViewer({
+  asset,
+  iframeHeight = 400,
+  fillHeight = false,
+  // Phase 15.0 (#172 part 1): opt-in to PDF.js rendering (with annotation
+  // overlay) for application/pdf assets. Other MIME types fall back to
+  // iframe regardless. Default false preserves every existing call site.
+  usePdfJs = false,
+  evidenceAnchors = null,
+  assetOrdinal = null,
+  rsColorByRsId = null,
+  // Phase 15.1 (#172 part 2): bidirectional interaction.
+  highlightedAnchorId = null,
+  onAnchorClick = null,
+}) {
+  // Phase 12.6: `fillHeight` switches between the legacy fixed iframe height
+  // (used by ExpandedArtifactModal) and a flex-stretching iframe (used by
+  // the Run Eval / Parse modal left panels for height parity with the
+  // right column). Header + footer stay natural-height; only the iframe /
+  // empty-state placeholder grows.
+  // Phase 15.1.2: legacy ordering preserved — file-info card above, viewer
+  // in the middle, owner/registered tertiary row below.
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 14,
+      ...(fillHeight ? { flex: 1, minHeight: 0 } : {}),
+    }}>
+      <AssetFileMetadata asset={asset} variant="file-info" />
+      <AssetFileViewer
+        asset={asset}
+        iframeHeight={iframeHeight}
+        fillHeight={fillHeight}
+        usePdfJs={usePdfJs}
+        evidenceAnchors={evidenceAnchors}
+        assetOrdinal={assetOrdinal}
+        rsColorByRsId={rsColorByRsId}
+        highlightedAnchorId={highlightedAnchorId}
+        onAnchorClick={onAnchorClick}
+      />
+      <AssetFileMetadata asset={asset} variant="owner-row" />
     </div>
   )
 }

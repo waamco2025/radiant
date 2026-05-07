@@ -39,7 +39,15 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Backdrop } from './ModalShared.jsx'
-import { AssetEvidenceViewer, SelectiveDisclosurePanel } from '../AssetEvidencePanel.jsx'
+import {
+  AssetEvidenceViewer,
+  SelectiveDisclosurePanel,
+  // Phase 15.1.2: split sub-components let the eval-output / poe Output
+  // tabs render the file viewer first + a combined 6-row metadata block
+  // (Filename, Size, MIME, Hash, Owner, Registered) below it.
+  AssetFileViewer,
+  AssetFileMetadata,
+} from '../AssetEvidencePanel.jsx'
 // Phase 15.0 (#172 part 1): per-Requirements-Set color palette for the
 // annotation overlay dots in the eval-output / poe Output tabs.
 import { buildRsColorMap } from '../../v2/data/rsColors.js'
@@ -137,6 +145,36 @@ function TabBar({ active, onChange, hideOutput = false }) {
         )
       })}
     </div>
+  )
+}
+
+// Phase 15.1.2: 24×24 download icon-button rendered at the right edge of
+// the EVALUATION RESULTS title bar in eval-output / poe Output tabs.
+// Disabled until #58; the icon-button affordance is here so the wiring
+// shape is final. Tooltip via native `title`.
+function DownloadIconButton({ label = 'Download Evaluation Results JSON' }) {
+  return (
+    <button
+      type="button"
+      disabled
+      title={label}
+      aria-label={label}
+      style={{
+        width: 24, height: 24, padding: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: 'transparent',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        color: 'var(--text-dim)',
+        cursor: 'not-allowed',
+        flexShrink: 0,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path d="M8 2 L8 11 M4 7.5 L8 11.5 L12 7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M3 13 L13 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    </button>
   )
 }
 
@@ -582,34 +620,12 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
 
   return (
     <LayeredOutputContainer>
-      {/* Phase 15.1.1: thin header band — name (left) + dates (right).
-          The minibar + aggregate counts + Download button moved INTO
-          the right panel's top section. */}
-      <div style={{
-        padding: '12px 16px', background: 'var(--bg-deep)',
-        border: '1px solid var(--border)', borderRadius: 6,
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-        gap: 16, flexWrap: 'wrap',
-      }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
-          {evalResult.name || evalResult.id}
-        </div>
-        <div style={{
-          display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-secondary)',
-          flexWrap: 'wrap',
-        }}>
-          <span>
-            <span style={{ color: 'var(--text-tertiary)' }}>Evaluated:</span>{' '}
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{formatYMDHM(evalResult.evaluationDate)}</span>
-          </span>
-          <span>
-            <span style={{ color: 'var(--text-tertiary)' }}>Evaluator:</span>{' '}
-            <span style={{ color: 'var(--text-primary)' }}>{evalResult.owner || '—'}</span>
-          </span>
-        </div>
-      </div>
+      {/* Phase 15.1.2: thin header band removed — eval/poe metadata
+          (Evaluated date + Evaluator) now lives in the canonical modal
+          header above the tab bar. Output tab body starts directly with
+          the side-by-side row.
 
-      {/* Phase 15.1 (#172 part 2): side-by-side layout for the Output
+          Phase 15.1 (#172 part 2): side-by-side layout for the Output
           tab. Left column (~60%) hosts the Asset evidence panel + PDF.js
           + annotations. Right column (~40%) hosts per-RS results
           tables. Both columns scroll independently within the modal
@@ -621,7 +637,10 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
         gap: 16,
         alignItems: 'start',
       }}>
-        {/* Left column — evidence panel */}
+        {/* Left column — evidence panel.
+            Phase 15.1.2 layout: [ASSET title bar] → [file viewer] →
+            [combined 6-row metadata block]. Title bar badge renamed
+            EVIDENCE → ASSET. */}
         {displayAsset && (
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 8,
@@ -639,7 +658,7 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
                 padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
                 color: 'var(--accent-amber)',
                 background: 'color-mix(in srgb, var(--accent-amber) 14%, transparent)',
-              }}>EVIDENCE</span>
+              }}>ASSET</span>
               <span style={{
                 flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -686,7 +705,7 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
                 Asset {currentAssetIndex + 1} of {displayableAssets.length}
               </span>
             </div>
-            <AssetEvidenceViewer
+            <AssetFileViewer
               key={displayAsset.id}
               asset={displayAsset}
               iframeHeight={stacked ? 480 : 640}
@@ -702,13 +721,17 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
                 if (match) handleAnchorActivate(match)
               }}
             />
+            <AssetFileMetadata asset={displayAsset} variant="combined" />
           </div>
         )}
-        {/* Right column — title bar + healthbar/download + per-RS results.
-            Phase 15.1.1: title bar matches left panel's EVIDENCE strip;
-            healthbar + Download button now live here (was in the
-            full-width header above). Amber accent kept for both strips
-            so they read as a paired "evidence ↔ results" header row. */}
+        {/* Right column — title bar + healthbar + per-RS results.
+            Phase 15.1.1: title bar matches left panel's ASSET strip;
+            healthbar lives in this panel. Phase 15.1.2: Download button
+            promoted into the title bar as a 24×24 icon button at the
+            right edge — replaces the standalone "Download" button that
+            previously sat in the healthbar block. Amber accent kept for
+            both strips so they read as a paired "ASSET ↔ EVALUATION
+            RESULTS" header row. */}
         <div
           ref={tableScrollContainerRef}
           style={{
@@ -716,7 +739,8 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             minWidth: 0,
           }}
         >
-          {/* Title bar — analog to the EVIDENCE strip on the left. */}
+          {/* Title bar — analog to the ASSET strip on the left, with a
+              Download icon button at the right edge. */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             padding: '8px 12px', borderRadius: 4,
@@ -734,23 +758,20 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             }}>
               {evalResult.name || evalResult.id}
             </span>
+            <DownloadIconButton />
           </div>
 
-          {/* Healthbar block + Download button. */}
+          {/* Healthbar block — Phase 15.1.2: Download button promoted to
+              the title bar above; this block now hosts the aggregate
+              count + 3-segment minibar only. */}
           <div style={{
             padding: '12px 14px', background: 'var(--bg-deep)',
             border: '1px solid var(--border)', borderRadius: 6,
             display: 'flex', flexDirection: 'column', gap: 10,
           }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: 10, flexWrap: 'wrap',
-            }}>
-              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-                {totals.sat} SAT · {totals.unsat} UNSAT · {totals.missing} MISSING
-                {' · across '}{rsCount} Requirements Set{rsCount === 1 ? '' : 's'}
-              </div>
-              <DownloadButton />
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+              {totals.sat} SAT · {totals.unsat} UNSAT · {totals.missing} MISSING
+              {' · across '}{rsCount} Requirements Set{rsCount === 1 ? '' : 's'}
             </div>
             <MinibarBlock totals={totals} />
           </div>
@@ -812,40 +833,16 @@ function PoeOutputBody({ poe, wrappedEvalResult, provenanceChain = [], onSelectE
 
   return (
     <LayeredOutputContainer>
-      {/* PoE header card */}
-      <div style={{
-        padding: '14px 16px', background: 'var(--bg-deep)',
-        border: '1px solid var(--border)', borderRadius: 6,
-        display: 'flex', flexDirection: 'column', gap: 6,
-      }}>
-        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--accent-indigo)', textTransform: 'uppercase' }}>
-          Proof of Evaluation
-        </div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-          {poe?.name || 'Proof of Evaluation'}
-        </div>
-        <div style={{
-          display: 'flex', gap: 18, fontSize: 11, color: 'var(--text-secondary)',
-          flexWrap: 'wrap',
-        }}>
-          <span>
-            <span style={{ color: 'var(--text-tertiary)' }}>Created:</span>{' '}
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{formatYMDHM(poe?.createdDate)}</span>
-          </span>
-          <span>
-            <span style={{ color: 'var(--text-tertiary)' }}>Owner:</span>{' '}
-            <span style={{ color: 'var(--text-primary)' }}>{poe?.owner || '—'}</span>
-          </span>
-        </div>
-      </div>
+      {/* Phase 15.1.2: PoE header card removed — PoE name + Created date
+          + Owner now live in the canonical modal header above the tab
+          bar. "Final Evaluation" section heading also removed; the
+          wrapped Eval Result's own EVALUATION RESULTS title bar makes
+          the context unambiguous. */}
 
-      {/* Section 1: Final Evaluation (the wrapped Eval Result's output) */}
-      <div>
-        <SectionHeading>Final Evaluation</SectionHeading>
-        <EvalResultOutputBody evalResult={wrappedFallback} evidenceAssets={evidenceAssets} />
-      </div>
+      {/* Section 1: wrapped Eval Result content (eval-output layout). */}
+      <EvalResultOutputBody evalResult={wrappedFallback} evidenceAssets={evidenceAssets} />
 
-      {/* Section 2: Evaluation Provenance — full supersession chain */}
+      {/* Section 2: Evaluation Provenance — full supersession chain. */}
       <div>
         <SectionHeading>Evaluation Provenance ({provenanceChain.length || 1})</SectionHeading>
         <ProvenanceList
@@ -1328,6 +1325,20 @@ export default function ExpandedArtifactModal({
 
   const displayTitle = title || artifact?.name || artifact?.id || 'Artifact'
 
+  // Phase 15.1.2: canonical modal header surfaces eval/poe metadata
+  // (date + party) inline with the title — eliminates the thin header
+  // band that previously sat above the side-by-side row.
+  let headerMetadata = null
+  if (schema === 'eval-output' && artifact) {
+    const evDate = formatYMDHM(artifact.evaluationDate)
+    const evParty = artifact.owner || '—'
+    headerMetadata = `Evaluated: ${evDate} · Evaluator: ${evParty}`
+  } else if (schema === 'poe' && artifact) {
+    const cDate = formatYMDHM(artifact.createdDate)
+    const cParty = artifact.owner || '—'
+    headerMetadata = `Created: ${cDate} · Owner: ${cParty}`
+  }
+
   // Output tab body branching.
   let outputBody
   if (schema === 'asset' && isProofOnlyAsset) {
@@ -1474,7 +1485,7 @@ export default function ExpandedArtifactModal({
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           flexShrink: 0,
         }}>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{
               fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
               color: 'var(--text-tertiary)', letterSpacing: '0.1em',
@@ -1484,6 +1495,12 @@ export default function ExpandedArtifactModal({
               display: 'inline-block', marginBottom: 4,
             }}>{headerLabel}</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-bright)' }}>{displayTitle}</div>
+            {headerMetadata && (
+              <div style={{
+                marginTop: 4,
+                fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
+              }}>{headerMetadata}</div>
+            )}
           </div>
           <span
             onClick={onClose}

@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.3 &middot; Changelog
+          v0.15.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.4', date: '2026-05-07', label: 'Phase 15.1.2', items: [
+                  'Eval Result + PoE Expand modal Output tab consolidation. Timestamp + party metadata moved into the canonical modal header next to the title — Eval Result shows "Evaluated: [date] · Evaluator: [party]"; PoE shows "Created: [date] · Owner: [party]". Reclaims the vertical space the thin header band previously consumed inside the scrolling Output tab body.',
+                  'Download button promoted into the right-panel "EVALUATION RESULTS" title bar as a 24×24 icon button at the right edge (download glyph + tooltip "Download Evaluation Results JSON"). The healthbar block now hosts the aggregate count + 3-segment SAT/UNSAT/MISSING minibar only.',
+                  'File info repositioning — left-panel scroll content now renders [ASSET title bar] → [file viewer (PDF.js or iframe)] → [combined 6-row metadata block: Filename, Size, MIME, Hash, Owner, Registered]. Owner + Registered moved up from a tertiary footer into the same metadata card. Other AssetEvidencePanel consumers (Asset Detail Panel preview, Claim referenced-asset preview) keep the legacy ordering.',
+                  'EVIDENCE → ASSET rename in the left-panel title bar of eval-output + poe Output tabs. Amber accent color unchanged; only the badge text. ASSET is the canonical noun across the prototype data model; EVIDENCE was a Phase 12.4 holdover.',
+                  'PoE Output tab cleanup — full-width PROOF OF EVALUATION info box at the top removed (PoE name + Created + Owner already render in the canonical modal header). "Final Evaluation" SectionHeading also dropped — the wrapped Eval Result\'s own EVALUATION RESULTS title bar makes the context unambiguous. PoE Output tab body becomes structurally identical to Eval Result Output tab body, just with the modal header showing PoE metadata instead.',
+                  'AssetEvidencePanel refactored — exposes new `AssetFileViewer` + `AssetFileMetadata` exports for consumers that need to rearrange viewer + metadata. `AssetEvidenceViewer` default export composes them in the legacy order so every existing call site is unaffected.',
+                ]},
                 { version: '0.15.3', date: '2026-05-07', label: 'Phase 15.1.1', items: [
                   'Annotation labels simplified — dropped the `{assetOrdinal}.` prefix; PDF dots, right-panel row indicators, and Run Evaluation review rows now show only `{rowOrdinal}` (per-Requirements-Set, 1-indexed). Same row keeps the same number across Asset switches; RS color coding distinguishes RS membership. The `assetOrdinal` prop is preserved on `AnnotatedPdfViewer` for future compound-label scenarios but no longer renders in the label.',
                   'Annotation shape — rounded rectangles (32×22, borderRadius 6) replace the 26px circles in the PDF overlay. Right-panel row indicators and Run Evaluation review-row indicators follow suit at 28×20 to match the shape language at slightly tighter scale.',

@@ -2673,6 +2673,36 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.1.2 completion notes (2026-05-07) — Eval Result + PoE Expand Modal Layout Consolidation
+
+Three refinements surfaced during 15.1.1 QA, all chrome cleanup — no architectural shifts.
+
+**Step 1 — canonical modal header carries eval/poe metadata.** ExpandedArtifactModal's header (above the tab bar) gains an inline metadata line below the title for `eval-output` and `poe` schemas. Eval Result: `Evaluated: YYYY-MM-DD · HH:MM UTC · Evaluator: <party>`. PoE: `Created: YYYY-MM-DD · HH:MM UTC · Owner: <party>`. Renders in 11px mono var(--text-dim) under the 16px title. Other schemas pass `headerMetadata=null` and the line doesn't render — header height stays as it was.
+
+**Step 2 — thin header band removed from eval-output body.** The Phase 15.1.1 thin band at the top of `EvalResultOutputBody` (name + dates + evaluator inline) is dropped entirely. Body now starts directly with the side-by-side row. Reclaims ~52px of vertical space inside the scrolling Output tab.
+
+**Step 3 — Download button promoted into right-panel title bar.** Replaced the standalone "Download" button (Phase 15.1.1 placement: in the healthbar block) with a 24×24 icon-button at the right edge of the EVALUATION RESULTS strip. Icon: download arrow + horizontal line below (custom inline SVG, 14×14, var(--text-dim) stroke). Tooltip: "Download Evaluation Results JSON". Wires up under #58 — disabled in 15.1.2 like every other Download affordance. The healthbar block now hosts the aggregate count + minibar only (no Download row).
+
+**Step 4 — file info repositioning + Owner/Registered merge.** Left-panel scroll content reordered: `[ASSET title bar]` → `[file viewer]` → `[combined 6-row metadata block]`. Owner + Registered (previously rendered as a tertiary 2-column row below the AssetEvidenceViewer) merge into the same 6-row card alongside Filename, Size, MIME, Hash. AssetEvidencePanel exports two new sub-components — `AssetFileViewer` (just the file render, PDF.js or iframe) + `AssetFileMetadata` (with `variant: 'file-info' | 'combined' | 'owner-row'`). `AssetEvidenceViewer` default export now composes them in the legacy order (`file-info` card → viewer → `owner-row` tertiary footer) so every existing call site is unaffected — Asset Detail Panel preview, Claim referenced-asset preview, ExpandedArtifactModal `asset` schema, V22RunEvaluationModal accordion, V22ParseEvidenceModal accordion all keep their prior layout.
+
+**Step 5 — EVIDENCE → ASSET rename.** The left-panel title bar badge in the eval-output / poe Output tabs reads "ASSET" (was "EVIDENCE" since Phase 15.1). Amber accent color unchanged. The Δ EVIDENCE diff label in V22RunEvaluationModal Re-Run review (a contextually different label about Asset-list deltas between runs) was left as-is — the spec scoped the rename to title-bar treatments only. The `evidence` AssetNode subtype config (`SUBTYPE_CFG.evidence.label`) was also left as-is — that's a node-card subtype label for a legacy Asset classification, not a modal title bar.
+
+**Step 6 — PoE Output tab cleanup.** Removed the full-width PoE info box at the top of `PoeOutputBody` (was: "Proof of Evaluation" eyebrow + name + Created + Owner). After Step 1 the canonical modal header surfaces the same PoE metadata, so the box was redundant. Also removed the "Final Evaluation" `<SectionHeading>` above Section 1 — the wrapped Eval Result's own EVALUATION RESULTS title bar makes the context unambiguous. The PoE Output tab body now reads: `<EvalResultOutputBody>` (the wrapped Eval Result with side-by-side ASSET + EVALUATION RESULTS panels) → `<SectionHeading>Evaluation Provenance (N)</SectionHeading>` → `<ProvenanceList>`. The Provenance section heading stays since it labels a meaningful semantic boundary (the supersession chain is structurally distinct from the wrapped result content).
+
+**Implementation notes.**
+- `AssetFileViewer` `key={displayAsset.id}` preserved — the multi-Asset switcher relies on a fresh PDF mount on Asset flip (Phase 15.0.1 pattern).
+- The combined-metadata card sits below the viewer in the LEFT column's natural flow. With `position: sticky; top: 0` on the left column wrapper, the entire stack (title bar + viewer + metadata) scrolls together inside the modal body; the right column's per-RS results scroll past while the left stays anchored. The metadata card is therefore visible only at the bottom of the left stack, but on tall enough viewports both viewer + metadata fit within the sticky window.
+- `headerMetadata` is computed inline in the modal entry point — no schema-specific render branch needed; just a single conditional `<div>` below the title.
+- The right-panel title bar's `<DownloadIconButton>` shares its disabled-state styling pattern with `<DownloadButton>` (1px border, var(--text-dim) color, cursor not-allowed) — visual continuity with the existing affordance, just compressed to 24×24.
+
+**Footer v0.15.3 → v0.15.4.** Architecture spec §17.5 changelog gains a 15.1.2 bullet. polish-backlog Update Log entry added. CLAUDE.md "Current state of the world" updated.
+
+**Runtime verification.** Manual user-path walkthrough per Phase 15.0.1 workflow lesson — open Bob's PRM Eval Result → Expand → Output to confirm: (a) modal header shows EVAL RESULT badge + name + "Evaluated: ... · Evaluator: ..." line; (b) no thin band above the side-by-side row; (c) left panel reads ASSET strip → PDF (with annotation dots) → combined 6-row metadata card; (d) right panel EVALUATION RESULTS strip with download icon at right edge; (e) healthbar block has aggregate + minibar, no Download. Same flow for PoE → confirm canonical header shows PROOF OF EVALUATION badge + name + "Created: ... · Owner: ..." and no full-width PoE box at top of body.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.1.1 completion notes (2026-05-07) — Annotation Numbering + Shape + Right-Panel Layout
 
 Three contained refinements on top of Phase 15.1's annotation work. Single-component-cluster polish phase; no architectural shifts.
