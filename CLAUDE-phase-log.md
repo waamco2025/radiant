@@ -2673,6 +2673,47 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.1 completion notes (2026-05-07) — Annotation Visual Redesign + Bidirectional Interaction (#172 part 2 of 3)
+
+Five workstreams delivered: visual redesign, side-by-side layout, bidirectional row↔dot interaction, RunEval modal extension, demo path verification (Step 0).
+
+**Step 0 — VReg re-run verification (no seed adjustment).** Probed `buildV22SharedArtifacts()` directly: erBobVreg chain head (`eval-cui6ekou`) is `active`, has 5 rows with anchors, no PoE wrapping. The `hasNewAssetsForRerun` gate returns `false` because `inScopeAssetIds` (asset-vreg-datasheet) matches `evidenceUsed` exactly. Per the brief: "If the issue is a gate that requires Assets to be added to trigger re-run, then VReg re-run can only be tested AFTER Alice amends the Claim with a new Asset. That's an acceptable demo prerequisite — note in Phase 15.2's walkthrough guide." Step 1 (seed adjustment) skipped.
+
+**Step 2 — Annotation visual redesign.** AnnotatedPdfViewer's AnnotationLayer now renders two elements per anchor instead of one. Highlight rectangle: `(x, y, w, h)` in PDF point space translated to canvas pixels via `(x*scale, (pdfH - y - h)*scale, w*scale, h*scale)`, background `color-mix(in srgb, <RS color> 15%, transparent)`, no border, `borderRadius: 2px`, `pointer-events: none`. Numbered indicator: 26px circle (was 20px) at `left: rectLeft - INDICATOR_SIZE - INDICATOR_GAP` (clamped to `INDICATOR_LEFT_CLAMP=4` if anchor is near left edge), vertically centered on the rect's mid-line. Indicator carries the 12px mono bold label (was 10px), 2px white border, `0 1px 4px rgba(0,0,0,0.5)` shadow. Highlighted state: rect bumps to 30% opacity; indicator gains `0 0 0 3px <RS color>` outside the white border. Indicator stamps `data-anchor-id` (synthesized) and gets a click handler when `onAnchorClick` is provided.
+
+**Step 3 — Side-by-side layout in EvalResultOutputBody.** Replaced the prior full-width vertical stack with a CSS grid: `gridTemplateColumns: 'minmax(0, 60fr) minmax(0, 40fr)'` on viewports ≥900px, falls back to `1fr` (single column) below 900px. Left column hosts the EVIDENCE header strip + AssetEvidenceViewer (sticky `top: 0` so the PDF stays visible while the right column scrolls). Right column hosts the per-RS results sections inside a vertical flex stack. Both columns share the modal's existing scroll context. The Asset switcher controls (◀ ▶ + counter) and the multi-Asset key=displayAsset.id forced re-mount stay in the EVIDENCE header per Phase 15.0.1.
+
+**Step 4a — Row indicators in EvalResultsTable.** EvalResultsTable signature gained five props: `assetOrdinal`, `rsColorByRsId`, `highlightedAnchorId`, `rowOrdinalById`, `onAnchorClick`. When `onAnchorClick` is non-null the table renders a 5-column grid (was 4) with a 38px-wide indicator slot leftmost. Each row's primary anchor is picked from `r.evidenceAnchors[]` (preferring one whose synthesized ID matches `highlightedAnchorId`, else `[0]`). Anchors get re-enriched at render time with `(requirementsSetId, requirementId, label, value)` from the row so the synthesized ID matches what the consumer's enriched anchor build produces for the same row. Indicator: 22px circle (smaller than the PDF's 26px since it sits in a tighter row context), same RS color, 11px mono bold label. Rows with empty anchors get a `<span style={{ width: 22, height: 22 }} />` so the column width is preserved. Row gets `data-row-anchor-id` for query selection. When the row's primary anchor matches `highlightedAnchorId`, the entire row tints to `color-mix(in srgb, <RS color> 8%, var(--bg-deep))`.
+
+**Step 4b — Lifted state.** `EvalResultOutputBody` holds `highlightedAnchorId` via `useState(null)` and `currentAssetIndex`. The activate handler `handleAnchorActivate(anchor)` sets the highlighted ID and, if the anchor's `sourceAssetId` differs from the currently displayed Asset, flips `currentAssetIndex` to the matching Asset's index. AnnotatedPdfViewer receives the highlighted ID + an `onAnchorClick` callback that resolves the synthesized ID back to its anchor object via `anchorsForAsset.find(...)` then calls the activate handler. EvalResultsTable rows similarly call the activate handler with their re-enriched anchor.
+
+**Step 4c/d — Scroll into view.** AnnotatedPdfViewer adds a `useEffect` watching `[highlightedAnchorId, loaded, pageMetrics]` that queries `[data-anchor-id="<escaped>"]` inside its container and calls `scrollIntoView({ behavior: 'smooth', block: 'center' })` on the next animation frame (deferred so the AnnotationLayer effect has painted). EvalResultOutputBody mirrors the same pattern via `tableScrollContainerRef` watching `[data-row-anchor-id]`.
+
+**Step 4e — Highlighted state visual.** Indicator gains a 3px outer ring in the RS color via `boxShadow: '0 1px 4px rgba(0,0,0,0.5), 0 0 0 3px <RS color>'`. Highlight rect bumps from 15% to 30% opacity. Results-table row tints at 8% opacity with a 120ms `background` transition for smoothness. No animation on the indicator/dot itself per design decision.
+
+**Step 4f — Run Evaluation modal extension.** ReviewRow gains six new props (`anchor`, `anchorLabel`, `anchorColor`, `anchorRowAnchorId`, `highlighted`, `onAnchorClick`); its layout reorganizes from a column to a row with a 28px indicator slot left + the existing content right. V22RunEvaluationModal holds its own `highlightedAnchorId` state + `handleAnchorActivate` that flips `expandedAssetId` (the accordion expansion) on cross-Asset clicks. AssetEvidencePanel passes `highlightedAnchorId` + the resolver-style `onAnchorClick` through. Each ReviewRow's anchor sources from `priorActiveResult.results` (re-run mode); fresh evals see no anchor on rows so the indicator slot stays empty.
+
+**Anchor ID utility.** New `src/v2/data/anchorIds.js` exports `synthesizeAnchorId(anchor)` returning `${sourceAssetId}|${requirementsSetId}|${requirementId}|${page}|${Math.round(x)}|${Math.round(y)}`. Five-tuple is unique within a single Eval Result; rounding x/y keeps the ID stable across float jitter. Stamping requirementId on enriched anchors (in both ExpandedArtifactModal and V22RunEvaluationModal consumers) was the gotcha — the seed anchor doesn't carry requirementId; consumers must enrich before synthesizing.
+
+**Implementation gotchas / debugging**:
+
+1. **PDF.js worker saturation.** Same pattern as Phase 15.0 — multiple HMR remounts during this phase's edits saturated the worker's queue with stale render tasks, causing page-2's render task promise to never resolve. Resolution: stop the dev server, clear `node_modules/.vite`, restart cleanly. Workflow lesson reinforced: when PDF.js render hangs after edits, suspect the worker queue first.
+2. **Anchor ID mismatch between consumers.** Initial implementation had the row-side ID with empty `requirementId` field (`asset-prm-datasheet|reqset-mil-prf-55681-v1||...`) because the raw seed anchor doesn't carry requirementId. The PDF-side IDs were correct because the consumer's `anchorsForAsset` build enriched them. Fix: enrich row anchors at synthesis time inside EvalResultsTable too. After fix, all 7 PDF dot IDs matched their corresponding row indicator IDs in end-to-end probe.
+
+**Runtime verification (xhigh per CLAUDE.md autonomous workflow)**:
+
+- Standalone PDF.js render after fresh process restart: 73ms ✓.
+- Component-level test (mounted ExpandedArtifactModal directly with seed): 2 page wrappers, 7 PDF dots (req-001 + req-003 + req-005 + req-011..014 on PRM Datasheet) + 9 row indicators (the 9 rows that have anchors), all 7 PDF dot IDs matched their row indicator IDs.
+- Cross-Asset auto-flip: clicked the row indicator for req-002 (anchored on PRM Test Report, Asset 2). Counter flipped Asset 1 of 2 → Asset 2 of 2 ✓; PDF dots replaced with the 2 test-report anchors ✓.
+- Highlighted state visual: dot's box-shadow contained `0 0 0 3px var(--accent-red)` (this Eval Result's RS hashes to red); highlight rect at 30% opacity; row tinted with `color-mix(... var(--accent-red) 8% ...)` ✓.
+- Dot click → row highlight: clicked req-004 dot → row indicator with matching ID picked up the tinted background ✓.
+- Side-by-side layout: at 1400×900 viewport, modal renders PDF left + per-RS tables right via grid `60fr / 40fr` ✓; at 303×1298 viewport (narrow), layout collapses to vertical stack ✓.
+- Build: 0 errors. Cosmetic "Knockout groups not supported" PDF.js warning persists per Phase 15.0.1's documented decision.
+
+**Footer v0.15.1 → v0.15.2.** Architecture spec gains a Phase 15.1 changelog bullet + §17.5 update with the new visual model + lifted-state pattern. polish-backlog #172 part 2 marked Completed; #172 part 3 (walkthrough guide + cleanup) queued for Phase 15.2.
+
+**Status:** [x] Complete.
+
 ### Phase 15.0.1 completion notes (2026-05-06) — Annotation Diagnosis + Layout Fixes + Git Catchup
 
 Five-deliverable phase: git catchup + annotation rendering bug diagnosis & fix + PDF fit-to-width + multi-Asset switcher + demo scenarios doc.

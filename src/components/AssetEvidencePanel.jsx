@@ -63,6 +63,9 @@ export function AssetEvidenceViewer({
   evidenceAnchors = null,
   assetOrdinal = null,
   rsColorByRsId = null,
+  // Phase 15.1 (#172 part 2): bidirectional interaction.
+  highlightedAnchorId = null,
+  onAnchorClick = null,
 }) {
   const file = asset?.file || {}
   const hash = file.hash || ''
@@ -110,6 +113,8 @@ export function AssetEvidenceViewer({
             assetOrdinal={assetOrdinal}
             rsColorByRsId={rsColorByRsId || {}}
             height={fillHeight ? '100%' : iframeHeight}
+            highlightedAnchorId={highlightedAnchorId}
+            onAnchorClick={onAnchorClick}
           />
         </div>
       ) : file.localPath ? (
@@ -246,6 +251,9 @@ export default function AssetEvidencePanel({
   evidenceAnchors = null,
   assetOrdinal = null,
   rsColorByRsId = null,
+  // Phase 15.1 (#172 part 2): bidirectional interaction.
+  highlightedAnchorId = null,
+  onAnchorClick = null,
 }) {
   if (!assetRow) {
     return (
@@ -278,6 +286,8 @@ export default function AssetEvidencePanel({
         evidenceAnchors={evidenceAnchors}
         assetOrdinal={assetOrdinal}
         rsColorByRsId={rsColorByRsId}
+        highlightedAnchorId={highlightedAnchorId}
+        onAnchorClick={onAnchorClick}
       />
     )
   }

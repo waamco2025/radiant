@@ -37,12 +37,15 @@
 // 13.4 renders it disabled with a "Export coming soon" tooltip. Real export
 // wires up under #58 in a future phase.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 import { AssetEvidenceViewer, SelectiveDisclosurePanel } from '../AssetEvidencePanel.jsx'
 // Phase 15.0 (#172 part 1): per-Requirements-Set color palette for the
 // annotation overlay dots in the eval-output / poe Output tabs.
 import { buildRsColorMap } from '../../v2/data/rsColors.js'
+// Phase 15.1 (#172 part 2): synthesized anchor IDs for bidirectional
+// row↔dot interaction.
+import { synthesizeAnchorId } from '../../v2/data/anchorIds.js'
 import {
   getAssetJsonRecord,
   getClaimJsonRecord,
@@ -324,7 +327,17 @@ function MinibarBlock({ totals }) {
   )
 }
 
-function EvalResultsTable({ rows }) {
+function EvalResultsTable({
+  rows,
+  // Phase 15.1 (#172 part 2): row indicators + bidirectional click.
+  // When `onAnchorClick` is null, indicators are not rendered (preserves
+  // legacy behavior for any caller that doesn't need interaction).
+  assetOrdinal = null,
+  rsColorByRsId = {},
+  highlightedAnchorId = null,
+  onAnchorClick = null,
+  rowOrdinalById = null,  // { [`${rsId}|${requirementId}`]: rowOrdinal }
+}) {
   // Phase 13.4 (criterion 6): drop status='na' rows.
   const filtered = rows.filter((r) => r.status !== 'na')
   if (filtered.length === 0) {
@@ -334,6 +347,13 @@ function EvalResultsTable({ rows }) {
       </div>
     )
   }
+  // Phase 15.1: 5-col grid (was 4-col) when interaction is wired —
+  // leftmost column is the row indicator slot (~38px). Falls back to
+  // the legacy 4-col grid when onAnchorClick is null.
+  const interactive = !!onAnchorClick
+  const gridTemplate = interactive
+    ? '38px minmax(180px, 1.6fr) minmax(160px, 2fr) 110px 130px'
+    : 'minmax(180px, 1.6fr) minmax(160px, 2fr) 110px 130px'
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 6,
@@ -341,28 +361,92 @@ function EvalResultsTable({ rows }) {
     }}>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(180px, 1.6fr) minmax(160px, 2fr) 110px 130px',
+        gridTemplateColumns: gridTemplate,
         background: 'var(--bg-raised)',
         borderBottom: '1px solid var(--border)',
         fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
         letterSpacing: '0.1em', color: 'var(--text-tertiary)',
         textTransform: 'uppercase',
       }}>
+        {interactive && <div style={{ padding: '8px 4px', textAlign: 'center' }}>#</div>}
         <div style={{ padding: '8px 12px' }}>Requirement</div>
         <div style={{ padding: '8px 12px' }}>Value</div>
         <div style={{ padding: '8px 12px' }}>Status</div>
         <div style={{ padding: '8px 12px' }}>Confidence</div>
       </div>
-      {filtered.map((r, i) => (
+      {filtered.map((r, i) => {
+        // Phase 15.1: row anchors get enriched with the row's
+        // (requirementsSetId, requirementId) so synthesizeAnchorId
+        // produces the SAME ID the AnnotatedPdfViewer would synthesize
+        // for the same anchor coming from the consumer's enriched build.
+        const rawAnchors = Array.isArray(r.evidenceAnchors) ? r.evidenceAnchors : []
+        const anchors = rawAnchors.map((a) => ({
+          ...a,
+          requirementsSetId: r.requirementsSetId,
+          requirementId: r.requirementId,
+          label: r.label,
+          value: r.value,
+        }))
+        // Pick a primary anchor for the row indicator. Prefer one whose
+        // synthesized ID matches highlightedAnchorId; otherwise first.
+        let primaryAnchor = null
+        if (interactive && anchors.length > 0) {
+          primaryAnchor = anchors.find((a) => synthesizeAnchorId(a) === highlightedAnchorId) || anchors[0]
+        }
+        const primaryAnchorId = primaryAnchor ? synthesizeAnchorId(primaryAnchor) : null
+        // A row is "highlighted" if any of its anchors matches the
+        // highlightedAnchorId. (For a row with anchors in multiple
+        // Assets, highlighting matches whichever side's been clicked.)
+        const isRowHighlighted = !!highlightedAnchorId && anchors.some((a) => synthesizeAnchorId(a) === highlightedAnchorId)
+        const color = rsColorByRsId[r.requirementsSetId] || 'var(--accent-indigo)'
+        const rowKey = `${r.requirementsSetId || ''}-${r.requirementId || r.label || i}`
+        const ordinalKey = `${r.requirementsSetId || ''}|${r.requirementId || ''}`
+        const rowOrdinal = (rowOrdinalById && rowOrdinalById[ordinalKey])
+          ?? (i + 1)
+        const indicatorLabel = `${assetOrdinal ?? '?'}.${rowOrdinal}`
+        return (
         <div
-          key={`${r.requirementsSetId || ''}-${r.requirementId || r.label || i}`}
+          key={rowKey}
+          data-row-anchor-id={primaryAnchorId || undefined}
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(180px, 1.6fr) minmax(160px, 2fr) 110px 130px',
+            gridTemplateColumns: gridTemplate,
             borderTop: i > 0 ? '1px solid var(--border)' : 'none',
-            background: i % 2 === 0 ? 'var(--bg-deep)' : 'color-mix(in srgb, var(--bg-deep) 80%, var(--bg-raised))',
+            background: isRowHighlighted
+              ? `color-mix(in srgb, ${color} 8%, var(--bg-deep))`
+              : (i % 2 === 0 ? 'var(--bg-deep)' : 'color-mix(in srgb, var(--bg-deep) 80%, var(--bg-raised))'),
+            transition: 'background 120ms',
           }}
         >
+          {interactive && (
+            <div style={{ padding: '6px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {primaryAnchor ? (
+                <button
+                  type="button"
+                  aria-label={`Highlight evidence ${indicatorLabel}`}
+                  onClick={() => onAnchorClick(primaryAnchor)}
+                  style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: color,
+                    border: '2px solid #fff',
+                    boxShadow: isRowHighlighted
+                      ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 2px ${color}`
+                      : '0 1px 3px rgba(0,0,0,0.4)',
+                    color: '#fff',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11, fontWeight: 700, lineHeight: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >{indicatorLabel}</button>
+              ) : (
+                // No anchors for this row (e.g., status `missing`) —
+                // empty space holds the column width.
+                <span style={{ width: 22, height: 22 }} />
+              )}
+            </div>
+          )}
           <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
             {r.label || r.requirementId || '—'}
           </div>
@@ -378,19 +462,33 @@ function EvalResultsTable({ rows }) {
           <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center' }}>
             <ConfidenceText confidence={r.confidence} />
           </div>
-        </div>
-      ))}
+        </div>)
+      })}
     </div>
   )
 }
 
 function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
-  // Phase 15.0.1: minimal multi-Asset switcher — local state to flip
-  // between in-scope evidence Assets via Previous/Next arrows. Phase 15.1
-  // will add auto-flip on dot click. Default to first Asset that has a
-  // localPath; arrows hide for single-Asset cases.
+  // Phase 15.0.1: multi-Asset switcher state (Previous/Next arrows).
+  // Phase 15.1 (#172 part 2): also acts as the auto-flip target when the
+  // user clicks a row indicator whose anchor lives in a non-current Asset.
   const displayableAssets = (evidenceAssets || []).filter((a) => a?.file?.localPath)
   const [currentAssetIndex, setCurrentAssetIndex] = useState(0)
+  // Phase 15.1: lifted state for bidirectional row↔dot interaction.
+  // Single source of truth — both the AnnotatedPdfViewer dots and the
+  // EvalResultsTable row indicators read/write this.
+  const [highlightedAnchorId, setHighlightedAnchorId] = useState(null)
+  // Phase 15.1: responsive layout breakpoint. Below 900px the modal
+  // collapses to a vertical stack (full-width PDF + full-width tables).
+  const [stacked, setStacked] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 900 : false
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onResize = () => setStacked(window.innerWidth < 900)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   // Clamp on prop change (e.g. modal reopens with a different eval result).
   useEffect(() => {
     if (currentAssetIndex >= displayableAssets.length) setCurrentAssetIndex(0)
@@ -420,26 +518,62 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
   const rsColorByRsId = buildRsColorMap(rsList.map((rs) => rs.id))
   // Build anchors with rowOrdinal + RS id + label/value for the displayed
   // Asset. rowOrdinal scoped per-RS so each RS's rows enumerate from 1.
-  const anchorsForAsset = (() => {
-    if (!displayAsset) return []
+  // Also build a `rowOrdinalById` map so EvalResultsTable can render the
+  // correct ordinal next to each row regardless of filter state.
+  const { anchorsForAsset, rowOrdinalById } = (() => {
     const out = []
+    const ordById = {}
     const cursors = new Map()
     for (const row of allRows) {
       const ord = (cursors.get(row.requirementsSetId) || 0) + 1
       cursors.set(row.requirementsSetId, ord)
+      ordById[`${row.requirementsSetId || ''}|${row.requirementId || ''}`] = ord
+      if (!displayAsset) continue
       for (const a of (row.evidenceAnchors || [])) {
         if (a.sourceAssetId !== displayAsset.id) continue
         out.push({
           ...a,
           rowOrdinal: ord,
+          // Phase 15.1: stamp requirementsSetId + requirementId so the
+          // synthesized anchor ID is stable + matches what the row
+          // indicator computes from the same row.
           requirementsSetId: row.requirementsSetId,
+          requirementId: row.requirementId,
           label: row.label,
           value: row.value,
         })
       }
     }
-    return out
+    return { anchorsForAsset: out, rowOrdinalById: ordById }
   })()
+
+  // Phase 15.1: row-click handler. If the row's selected anchor is on a
+  // different Asset than the currently displayed one, flip the switcher
+  // first; AnnotatedPdfViewer's scroll-into-view effect picks it up after
+  // the new mount loads. Same handler fires from PDF dot clicks (where
+  // the anchor is by definition for the current Asset, so no flip needed).
+  const handleAnchorActivate = (anchor) => {
+    if (!anchor) return
+    const anchorId = synthesizeAnchorId(anchor)
+    setHighlightedAnchorId(anchorId)
+    if (anchor.sourceAssetId && anchor.sourceAssetId !== displayAsset?.id) {
+      const targetIdx = displayableAssets.findIndex((a) => a.id === anchor.sourceAssetId)
+      if (targetIdx >= 0) setCurrentAssetIndex(targetIdx)
+    }
+  }
+  // Phase 15.1: scroll the highlighted row into view when state changes.
+  // Uses data-row-anchor-id attribute set in EvalResultsTable.
+  const tableScrollContainerRef = useRef(null)
+  useEffect(() => {
+    if (!highlightedAnchorId || !tableScrollContainerRef.current) return
+    const handle = requestAnimationFrame(() => {
+      const target = tableScrollContainerRef.current?.querySelector(
+        `[data-row-anchor-id="${CSS.escape(highlightedAnchorId)}"]`
+      )
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [highlightedAnchorId])
 
   return (
     <LayeredOutputContainer>
@@ -476,112 +610,145 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
         </div>
       </div>
 
-      {/* Phase 15.0 (#172 part 1): Asset evidence with PDF.js + annotation
-          overlay. Renders only when a displayable Asset is in scope; falls
-          back silently when none. */}
-      {displayAsset && (
-        <div style={{
-          display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
+      {/* Phase 15.1 (#172 part 2): side-by-side layout for the Output
+          tab. Left column (~60%) hosts the Asset evidence panel + PDF.js
+          + annotations. Right column (~40%) hosts per-RS results
+          tables. Both columns scroll independently within the modal
+          body. Below 900px viewport width the layout falls back to a
+          vertical stack (full-width PDF + full-width tables). */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: stacked ? '1fr' : 'minmax(0, 60fr) minmax(0, 40fr)',
+        gap: 16,
+        alignItems: 'start',
+      }}>
+        {/* Left column — evidence panel */}
+        {displayAsset && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '8px 12px', borderRadius: 4,
-            background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+            display: 'flex', flexDirection: 'column', gap: 8,
+            position: stacked ? 'static' : 'sticky',
+            top: 0,
+            minWidth: 0,
           }}>
-            <span style={{
-              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
-              color: 'var(--accent-amber)',
-              background: 'color-mix(in srgb, var(--accent-amber) 14%, transparent)',
-            }}>EVIDENCE</span>
-            <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-              {displayAsset.name}
-            </span>
-            {/* Phase 15.0.1: multi-Asset switcher — only render arrows
-                when the eval result references more than one displayable
-                Asset. Counter shows current/total. */}
-            {displayableAssets.length > 1 && (
-              <>
-                <button
-                  type="button"
-                  aria-label="Previous Asset"
-                  disabled={currentAssetIndex === 0}
-                  onClick={() => setCurrentAssetIndex((i) => Math.max(0, i - 1))}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border)',
-                    borderRadius: 3,
-                    color: currentAssetIndex === 0 ? 'var(--text-dim)' : 'var(--text-primary)',
-                    cursor: currentAssetIndex === 0 ? 'default' : 'pointer',
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    opacity: currentAssetIndex === 0 ? 0.4 : 1,
-                  }}
-                >◀</button>
-                <button
-                  type="button"
-                  aria-label="Next Asset"
-                  disabled={currentAssetIndex >= displayableAssets.length - 1}
-                  onClick={() => setCurrentAssetIndex((i) => Math.min(displayableAssets.length - 1, i + 1))}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border)',
-                    borderRadius: 3,
-                    color: currentAssetIndex >= displayableAssets.length - 1 ? 'var(--text-dim)' : 'var(--text-primary)',
-                    cursor: currentAssetIndex >= displayableAssets.length - 1 ? 'default' : 'pointer',
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    opacity: currentAssetIndex >= displayableAssets.length - 1 ? 0.4 : 1,
-                  }}
-                >▶</button>
-              </>
-            )}
-            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-              Asset {currentAssetIndex + 1} of {displayableAssets.length}
-            </span>
-          </div>
-          <AssetEvidenceViewer
-            // Phase 15.0.1: keying on Asset id forces a fresh PDF.js
-            // load + re-mount when the user flips between Assets.
-            key={displayAsset.id}
-            asset={displayAsset}
-            iframeHeight={520}
-            usePdfJs={true}
-            evidenceAnchors={anchorsForAsset}
-            assetOrdinal={assetOrdinal}
-            rsColorByRsId={rsColorByRsId}
-          />
-        </div>
-      )}
-
-      {/* Per-RS section: header + table */}
-      {rsList.map((rs) => {
-        const rsRows = allRows.filter((r) => (r.requirementsSetId || rsList[0]?.id) === rs.id)
-        const renderable = rsRows.filter((r) => r.status !== 'na').length
-        return (
-          <div key={rs.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '8px 12px', borderRadius: 4,
-              background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+              background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
             }}>
               <span style={{
                 fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
-                color: 'var(--accent-indigo)',
-                background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
-              }}>REQUIREMENTS SET</span>
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {rs.name}
+                color: 'var(--accent-amber)',
+                background: 'color-mix(in srgb, var(--accent-amber) 14%, transparent)',
+              }}>EVIDENCE</span>
+              <span style={{
+                flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {displayAsset.name}
               </span>
+              {displayableAssets.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Previous Asset"
+                    disabled={currentAssetIndex === 0}
+                    onClick={() => setCurrentAssetIndex((i) => Math.max(0, i - 1))}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      borderRadius: 3,
+                      color: currentAssetIndex === 0 ? 'var(--text-dim)' : 'var(--text-primary)',
+                      cursor: currentAssetIndex === 0 ? 'default' : 'pointer',
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      opacity: currentAssetIndex === 0 ? 0.4 : 1,
+                    }}
+                  >◀</button>
+                  <button
+                    type="button"
+                    aria-label="Next Asset"
+                    disabled={currentAssetIndex >= displayableAssets.length - 1}
+                    onClick={() => setCurrentAssetIndex((i) => Math.min(displayableAssets.length - 1, i + 1))}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      borderRadius: 3,
+                      color: currentAssetIndex >= displayableAssets.length - 1 ? 'var(--text-dim)' : 'var(--text-primary)',
+                      cursor: currentAssetIndex >= displayableAssets.length - 1 ? 'default' : 'pointer',
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      opacity: currentAssetIndex >= displayableAssets.length - 1 ? 0.4 : 1,
+                    }}
+                  >▶</button>
+                </>
+              )}
               <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-                v{rs.version ?? 1} · {renderable} requirement{renderable === 1 ? '' : 's'}
+                Asset {currentAssetIndex + 1} of {displayableAssets.length}
               </span>
             </div>
-            <EvalResultsTable rows={rsRows} />
+            <AssetEvidenceViewer
+              key={displayAsset.id}
+              asset={displayAsset}
+              iframeHeight={stacked ? 480 : 640}
+              usePdfJs={true}
+              evidenceAnchors={anchorsForAsset}
+              assetOrdinal={assetOrdinal}
+              rsColorByRsId={rsColorByRsId}
+              highlightedAnchorId={highlightedAnchorId}
+              onAnchorClick={(anchorId) => {
+                // Dot click — find matching anchor in current Asset's
+                // anchors and dispatch through the same activate handler.
+                const match = anchorsForAsset.find((a) => synthesizeAnchorId(a) === anchorId)
+                if (match) handleAnchorActivate(match)
+              }}
+            />
           </div>
-        )
-      })}
+        )}
+        {/* Right column — per-RS results sections */}
+        <div
+          ref={tableScrollContainerRef}
+          style={{
+            display: 'flex', flexDirection: 'column', gap: 12,
+            minWidth: 0,
+          }}
+        >
+          {rsList.map((rs) => {
+            const rsRows = allRows.filter((r) => (r.requirementsSetId || rsList[0]?.id) === rs.id)
+            const renderable = rsRows.filter((r) => r.status !== 'na').length
+            return (
+              <div key={rs.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', borderRadius: 4,
+                  background: 'color-mix(in srgb, var(--accent-indigo) 10%, transparent)',
+                }}>
+                  <span style={{
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+                    color: 'var(--accent-indigo)',
+                    background: 'color-mix(in srgb, var(--accent-indigo) 14%, transparent)',
+                  }}>REQUIREMENTS SET</span>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {rs.name}
+                  </span>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                    v{rs.version ?? 1} · {renderable} requirement{renderable === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <EvalResultsTable
+                  rows={rsRows}
+                  assetOrdinal={assetOrdinal}
+                  rsColorByRsId={rsColorByRsId}
+                  highlightedAnchorId={highlightedAnchorId}
+                  rowOrdinalById={rowOrdinalById}
+                  onAnchorClick={handleAnchorActivate}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </LayeredOutputContainer>
   )
 }

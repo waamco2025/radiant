@@ -5,48 +5,45 @@
 // continue to use iframe rendering — opt-in via `AssetEvidencePanel`'s
 // `usePdfJs` prop.
 //
-// Each `evidenceAnchor` provided as a prop renders as a small numbered
-// circular dot positioned over the PDF canvas at the anchor's center
-// `(x + w/2, y + h/2)`. Anchors with `sourceAssetId !== currentAssetId`
-// are filtered out by the consumer (this component renders all anchors
-// it receives — caller decides which Asset is on screen).
+// Phase 15.1 (#172 part 2) — visual redesign + bidirectional interaction:
+//   • Each anchor renders TWO visual elements: a highlight rectangle
+//     drawn over the cited text (RS color at 15% opacity; bumps to 30%
+//     when highlighted) + a numbered indicator placed immediately to
+//     the LEFT of the highlight rect (26px circle, RS color, 12px mono
+//     bold label).
+//   • Indicators are click targets — clicking fires `onAnchorClick`
+//     with the synthesized anchor ID so the consumer can highlight the
+//     matching results row.
+//   • When `highlightedAnchorId` matches an anchor: indicator gets a
+//     3px ring in the RS color, highlight rect bumps to 30% opacity.
+//   • When `highlightedAnchorId` changes, the viewer scrolls the
+//     matching dot into view (smooth, block: 'center').
 //
-// Static rendering only in Phase 15.0; Phase 15.1 will wire bidirectional
-// row-click ↔ dot-click interaction.
+// Implementation note (15.0 — preserved): cleanup deliberately does NOT
+// destroy the PDF doc or cancel render tasks. Under React StrictMode the
+// effect is invoked twice; cancelling the first run's tasks reliably
+// leaves the canvas empty. Simpler: tag each effect run with a `runId`
+// ref, mutate the DOM only when the current runId matches at the moment
+// of paint, and let stale runs finish their render tasks harmlessly.
 //
-// Props:
-//   fileUrl         — URL to the PDF (e.g. asset.file.localPath).
-//   evidenceAnchors — array of { sourceAssetId, page, x, y, w, h,
-//                                requirementsSetId, label, value,
-//                                rowOrdinal }
-//                     The consumer enriches anchors with rowOrdinal +
-//                     requirementsSetId before passing them in. The
-//                     dot's label is `{assetOrdinal}.{rowOrdinal}`.
-//   assetOrdinal    — 1-indexed Asset position within the Claim's
-//                     `referencedAssetIds` (drives the numerator of the
-//                     dot label).
-//   rsColorByRsId   — { [rsId]: cssColor } map — drives dot fill.
-//   height          — viewer height in px (defaults to 480).
-//
-// Implementation note: cleanup deliberately does NOT destroy the PDF doc
-// or cancel render tasks. Under React StrictMode the effect is invoked
-// twice; cancelling the first run's tasks reliably leaves the canvas
-// empty (the second run's tasks complete on a different render token).
-// Simpler: tag each effect run with a `runId` ref, mutate the DOM only
-// when the current runId matches at the moment of paint, and let stale
-// runs finish their render tasks harmlessly. The PDF doc objects are
-// short-lived; GC reclaims them.
+// Implementation note (15.0 — preserved): pdfjs-dist v5 changed the
+// render API to use `canvas` (HTMLCanvasElement) as the primary parameter.
+// Passing the legacy `canvasContext` parameter still paints the canvas
+// but the returned promise never resolves — render task hangs.
 
 import { useEffect, useRef, useState, useMemo } from 'react'
 import pdfjsLib from '../v2/components/pdfJsWorker.js'
+import { synthesizeAnchorId } from '../v2/data/anchorIds.js'
 
 // Phase 15.0.1: derive the render scale from the container width at
 // render time so the canvas fits the column without horizontal scroll.
-// Cap at 1.6 to avoid over-scaling on very wide containers (>1024px).
 const SCALE_CAP = 1.6
-// Padding inside the outer wrapper (12px each side on the scrollable
-// outer + a small margin for the page-wrapper shadow).
 const HOST_HORIZONTAL_PADDING = 28
+
+// Phase 15.1: indicator sizing.
+const INDICATOR_SIZE = 26      // px diameter of the numbered circle
+const INDICATOR_GAP = 6        // px between indicator's right edge and highlight rect's left edge
+const INDICATOR_LEFT_CLAMP = 4 // minimum left offset within page wrapper
 
 export default function AnnotatedPdfViewer({
   fileUrl,
@@ -54,6 +51,9 @@ export default function AnnotatedPdfViewer({
   assetOrdinal = null,
   rsColorByRsId = {},
   height = 480,
+  // Phase 15.1: bidirectional interaction.
+  highlightedAnchorId = null,
+  onAnchorClick = null,
 }) {
   const containerRef = useRef(null)
   const runIdRef = useRef(0)
@@ -62,10 +62,9 @@ export default function AnnotatedPdfViewer({
   const [loaded, setLoaded] = useState(false)
 
   // Load the PDF + render every page to a fresh canvas inside the
-  // container. The runId guard is how we tolerate StrictMode's
-  // mount → unmount → mount double-invocation: only the most recent run
-  // is allowed to mutate the DOM container or set state. Older runs
-  // continue to completion but their results are dropped.
+  // container. The runId guard tolerates StrictMode's mount → unmount →
+  // mount double-invocation: only the most recent run mutates state or
+  // DOM. Older runs continue to completion but their results are dropped.
   useEffect(() => {
     if (!fileUrl) return
     runIdRef.current += 1
@@ -81,15 +80,9 @@ export default function AnnotatedPdfViewer({
         const numPages = doc.numPages
         const container = containerRef.current
         if (!container) return
-        // Wipe prior render artifacts before painting fresh canvases.
         container.innerHTML = ''
         const metrics = []
 
-        // Phase 15.0.1: fit-to-width — pick a render scale based on the
-        // host container's current width so multi-page PDFs don't force
-        // horizontal scroll inside narrow modal columns. Read the host
-        // wrapper (parentElement of containerRef) since the inner
-        // container itself measures content-width and grows with us.
         const hostEl = container.parentElement || container
         const hostWidth = hostEl.clientWidth || 600
 
@@ -97,9 +90,6 @@ export default function AnnotatedPdfViewer({
           const page = await doc.getPage(pageNum)
           if (!isCurrent()) return
           const baseViewport = page.getViewport({ scale: 1 })
-          // Compute a fit-to-width scale per page (PDF page widths can
-          // differ across pages even within one document, though it's
-          // uncommon). Cap to SCALE_CAP for clarity-vs-perf balance.
           const fitScale = Math.max(0.6, (hostWidth - HOST_HORIZONTAL_PADDING) / baseViewport.width)
           const renderScale = Math.min(fitScale, SCALE_CAP)
           const viewport = page.getViewport({ scale: renderScale })
@@ -120,13 +110,8 @@ export default function AnnotatedPdfViewer({
           pageWrap.appendChild(canvas)
           container.appendChild(pageWrap)
 
-          // pdfjs-dist v5 changed the render API: `canvas` is the primary
-          // parameter (was `canvasContext` in v4 and earlier). Passing the
-          // deprecated `canvasContext` parameter still paints the canvas
-          // but the returned promise never resolves on v5 — the render
-          // task hangs indefinitely.
           await page.render({ canvas, viewport }).promise
-          if (!isCurrent()) { console.log('[Pdf]', myRunId, 'stale-after-render', pageNum); return }
+          if (!isCurrent()) return
 
           metrics.push({
             pageNum,
@@ -143,9 +128,6 @@ export default function AnnotatedPdfViewer({
           setLoaded(true)
         }
       } catch (e) {
-        // Stale render tasks may reject with "Rendering cancelled" or
-        // similar; only surface the error if this run is still the
-        // active one.
         if (isCurrent()) setError(e?.message || String(e))
       }
     }
@@ -154,10 +136,8 @@ export default function AnnotatedPdfViewer({
     setError(null)
     setPageMetrics([])
     run()
-    // No destroy/cancel in the cleanup — see header comment.
   }, [fileUrl])
 
-  // Group anchors by page for overlay rendering.
   const anchorsByPage = useMemo(() => {
     const map = new Map()
     for (const a of evidenceAnchors || []) {
@@ -167,6 +147,24 @@ export default function AnnotatedPdfViewer({
     }
     return map
   }, [evidenceAnchors])
+
+  // Phase 15.1: smooth-scroll the highlighted anchor into view once the
+  // PDF has loaded. The dot has `data-anchor-id` so we query for it after
+  // the AnnotationLayer effect has painted.
+  useEffect(() => {
+    if (!loaded || !highlightedAnchorId) return
+    const container = containerRef.current
+    if (!container) return
+    // Defer one frame so AnnotationLayer's effect has painted the dots
+    // for the current pageMetrics + anchor set.
+    const handle = requestAnimationFrame(() => {
+      const target = container.querySelector(`[data-anchor-id="${CSS.escape(highlightedAnchorId)}"]`)
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [highlightedAnchorId, loaded, pageMetrics])
 
   return (
     <div
@@ -205,17 +203,21 @@ export default function AnnotatedPdfViewer({
           anchorsByPage={anchorsByPage}
           assetOrdinal={assetOrdinal}
           rsColorByRsId={rsColorByRsId}
+          highlightedAnchorId={highlightedAnchorId}
+          onAnchorClick={onAnchorClick}
         />
       )}
     </div>
   )
 }
 
-// Annotation overlay portals dots into the per-page wrappers created by
-// the loader effect above. Each dot's pixel position derives from the
-// anchor's PDF point coords + the cached page viewport. Dots are
-// pointer-events: none in 15.0 (no interaction yet — see Phase 15.1).
-function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdinal, rsColorByRsId }) {
+// Phase 15.1 redesign: each anchor renders a highlight rectangle (over
+// the cited text) + a numbered indicator (immediately left of the rect).
+// Indicators are click targets when `onAnchorClick` is provided.
+// Highlighted anchor state is visible as: indicator gets a 3px RS-color
+// ring outside its 2px white border, highlight rect bumps to 30% opacity
+// (was 15%), AND the consumer's results row picks up its own tint.
+function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdinal, rsColorByRsId, highlightedAnchorId, onAnchorClick }) {
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -227,7 +229,6 @@ function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdina
       if (!metric) continue
       const anchors = anchorsByPage.get(pageNum) || []
 
-      // Clear any prior overlay before re-rendering.
       const prior = pageWrap.querySelector('[data-anchor-overlay]')
       if (prior) prior.remove()
 
@@ -239,46 +240,86 @@ function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdina
       pageWrap.appendChild(overlay)
 
       for (const anchor of anchors) {
-        const cx = anchor.x + anchor.w / 2
-        const cy = anchor.y + anchor.h / 2
-        // PDF coords are bottom-left origin; canvas coords top-left.
-        const pxX = cx * metric.scale
-        const pxY = (metric.pdfH - cy) * metric.scale
+        const anchorId = synthesizeAnchorId(anchor)
+        const isHighlighted = anchorId === highlightedAnchorId
         const color = rsColorByRsId[anchor.requirementsSetId] || 'var(--accent-indigo)'
         const label = `${assetOrdinal ?? '?'}.${anchor.rowOrdinal ?? '?'}`
 
-        const dot = document.createElement('div')
-        dot.style.position = 'absolute'
-        dot.style.left = `${pxX}px`
-        dot.style.top = `${pxY}px`
-        dot.style.transform = 'translate(-50%, -50%)'
-        dot.style.width = '20px'
-        dot.style.height = '20px'
-        dot.style.borderRadius = '50%'
-        dot.style.background = color
-        dot.style.border = '2px solid #fff'
-        dot.style.boxShadow = '0 1px 4px rgba(0,0,0,0.5)'
-        dot.style.color = '#fff'
-        dot.style.fontFamily = 'var(--font-mono)'
-        dot.style.fontSize = '10px'
-        dot.style.fontWeight = '700'
-        dot.style.display = 'flex'
-        dot.style.alignItems = 'center'
-        dot.style.justifyContent = 'center'
-        dot.style.pointerEvents = 'none'
-        dot.style.userSelect = 'none'
-        dot.style.lineHeight = '1'
-        dot.textContent = label
-        dot.title = `${label} · ${anchor.label || ''} · ${anchor.value || ''}`
-        overlay.appendChild(dot)
+        // PDF coords are bottom-left origin; canvas coords top-left.
+        // The rect spans (x, y) to (x+w, y+h) in PDF space; flip Y by
+        // computing top from (pdfH - y - h).
+        const rectLeft = anchor.x * metric.scale
+        const rectTop = (metric.pdfH - anchor.y - anchor.h) * metric.scale
+        const rectWidth = anchor.w * metric.scale
+        const rectHeight = anchor.h * metric.scale
+
+        // Highlight rectangle — RS color at 15% (or 30% when highlighted).
+        // Use rgba via a small color-mix for theme parity.
+        const rect = document.createElement('div')
+        rect.style.position = 'absolute'
+        rect.style.left = `${rectLeft}px`
+        rect.style.top = `${rectTop}px`
+        rect.style.width = `${rectWidth}px`
+        rect.style.height = `${rectHeight}px`
+        rect.style.background = isHighlighted
+          ? `color-mix(in srgb, ${color} 30%, transparent)`
+          : `color-mix(in srgb, ${color} 15%, transparent)`
+        rect.style.pointerEvents = 'none'
+        rect.style.borderRadius = '2px'
+        rect.style.zIndex = '1'
+        overlay.appendChild(rect)
+
+        // Indicator — 26px circle to the LEFT of the rect. Vertically
+        // centered on the rect's mid-line. Clamps to INDICATOR_LEFT_CLAMP
+        // when the natural position would push it offscreen-left.
+        const indicatorTop = rectTop + rectHeight / 2 - INDICATOR_SIZE / 2
+        const naturalLeft = rectLeft - INDICATOR_SIZE - INDICATOR_GAP
+        const indicatorLeft = Math.max(INDICATOR_LEFT_CLAMP, naturalLeft)
+
+        const indicator = document.createElement('div')
+        indicator.style.position = 'absolute'
+        indicator.style.left = `${indicatorLeft}px`
+        indicator.style.top = `${indicatorTop}px`
+        indicator.style.width = `${INDICATOR_SIZE}px`
+        indicator.style.height = `${INDICATOR_SIZE}px`
+        indicator.style.borderRadius = '50%'
+        indicator.style.background = color
+        indicator.style.border = '2px solid #fff'
+        // Highlighted state: stack a 3px RS-color ring outside the white
+        // border via box-shadow.
+        indicator.style.boxShadow = isHighlighted
+          ? `0 1px 4px rgba(0,0,0,0.5), 0 0 0 3px ${color}`
+          : '0 1px 4px rgba(0,0,0,0.5)'
+        indicator.style.color = '#fff'
+        indicator.style.fontFamily = 'var(--font-mono)'
+        indicator.style.fontSize = '12px'
+        indicator.style.fontWeight = '700'
+        indicator.style.display = 'flex'
+        indicator.style.alignItems = 'center'
+        indicator.style.justifyContent = 'center'
+        indicator.style.userSelect = 'none'
+        indicator.style.lineHeight = '1'
+        indicator.style.zIndex = '2'
+        indicator.textContent = label
+        indicator.title = `${label} · ${anchor.label || ''} · ${anchor.value || ''}`
+        indicator.dataset.anchorId = anchorId
+        // Click target — pointer-events flips to auto, the overlay parent
+        // stays at 'none' so the rest of the page remains interaction-
+        // transparent.
+        if (onAnchorClick) {
+          indicator.style.pointerEvents = 'auto'
+          indicator.style.cursor = 'pointer'
+          indicator.addEventListener('click', (e) => {
+            e.stopPropagation()
+            onAnchorClick(anchorId)
+          })
+        } else {
+          indicator.style.pointerEvents = 'none'
+        }
+        overlay.appendChild(indicator)
       }
     }
-
-    return () => {
-      // Don't remove dots on cleanup — the next render will replace them
-      // when the page re-renders. Removing here causes flicker.
-    }
-  }, [containerRef, pageMetrics, anchorsByPage, assetOrdinal, rsColorByRsId])
+  }, [containerRef, pageMetrics, anchorsByPage, assetOrdinal, rsColorByRsId, highlightedAnchorId, onAnchorClick])
 
   return null
 }

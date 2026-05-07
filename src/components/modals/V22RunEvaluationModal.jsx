@@ -155,38 +155,85 @@ function StatusChevronPicker({ status, onCycle }) {
 
 // Shared row component — used here for Eval rows and intended for Parse rows
 // in a Phase 6 unification.
-function ReviewRow({ label, description, value, onValueChange, confidence, status, onStatusCycle, humanEdited }) {
+function ReviewRow({
+  label, description, value, onValueChange, confidence, status, onStatusCycle, humanEdited,
+  // Phase 15.1 (#172 part 2): bidirectional row↔dot interaction. When
+  // `anchor` is set the row renders a numbered indicator; clicking it
+  // fires `onAnchorClick(anchor)`. `highlighted` true draws a tinted
+  // background + a 2px outer ring on the indicator.
+  anchor = null,
+  anchorLabel = null,
+  anchorColor = null,
+  anchorRowAnchorId = null,
+  highlighted = false,
+  onAnchorClick = null,
+}) {
   return (
-    <div style={{
-      padding: '12px 14px',
-      borderBottom: '1px solid var(--border-faint)',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1 }}>{label}</span>
-        {/* Phase 9A item 8 sub-3: always render the confidence chip (AWAITING
-            AI when null). Phase 9A item 10: pencil icon when the row's
-            current value differs from the AI's original. */}
-        <ConfidenceBadge confidence={confidence} />
-        {humanEdited && <HumanEditedIcon />}
-        <StatusChevronPicker status={status} onCycle={(dir) => onStatusCycle(dir)} />
+    <div
+      data-row-anchor-id={anchorRowAnchorId || undefined}
+      style={{
+        padding: '12px 14px',
+        borderBottom: '1px solid var(--border-faint)',
+        display: 'flex', flexDirection: 'row', gap: 10,
+        background: highlighted && anchorColor
+          ? `color-mix(in srgb, ${anchorColor} 8%, transparent)`
+          : 'transparent',
+        transition: 'background 120ms',
+      }}
+    >
+      {/* Indicator slot (always renders the column for layout stability). */}
+      <div style={{ width: 28, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 2 }}>
+        {anchor && onAnchorClick ? (
+          <button
+            type="button"
+            aria-label={`Highlight evidence ${anchorLabel}`}
+            onClick={() => onAnchorClick(anchor)}
+            style={{
+              width: 22, height: 22, borderRadius: '50%',
+              background: anchorColor || 'var(--accent-indigo)',
+              border: '2px solid #fff',
+              boxShadow: highlighted
+                ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 2px ${anchorColor || 'var(--accent-indigo)'}`
+                : '0 1px 3px rgba(0,0,0,0.4)',
+              color: '#fff',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11, fontWeight: 700, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >{anchorLabel}</button>
+        ) : (
+          <span style={{ width: 22, height: 22 }} />
+        )}
       </div>
-      {description && (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{description}</div>
-      )}
-      <input
-        type="text"
-        value={value || ''}
-        onChange={(e) => onValueChange(e.target.value)}
-        placeholder="Extracted value"
-        style={{
-          fontSize: 12, fontFamily: 'var(--font-mono)',
-          color: 'var(--text-primary)',
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 4, padding: '6px 10px',
-          outline: 'none',
-        }}
-      />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1 }}>{label}</span>
+          {/* Phase 9A item 8 sub-3: always render the confidence chip (AWAITING
+              AI when null). Phase 9A item 10: pencil icon when the row's
+              current value differs from the AI's original. */}
+          <ConfidenceBadge confidence={confidence} />
+          {humanEdited && <HumanEditedIcon />}
+          <StatusChevronPicker status={status} onCycle={(dir) => onStatusCycle(dir)} />
+        </div>
+        {description && (
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>{description}</div>
+        )}
+        <input
+          type="text"
+          value={value || ''}
+          onChange={(e) => onValueChange(e.target.value)}
+          placeholder="Extracted value"
+          style={{
+            fontSize: 12, fontFamily: 'var(--font-mono)',
+            color: 'var(--text-primary)',
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 4, padding: '6px 10px',
+            outline: 'none',
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -454,6 +501,21 @@ export default function V22RunEvaluationModal({
   const toggleAssetExpanded = (assetId) => {
     setExpandedAssetId((prev) => (prev === assetId ? null : assetId))
   }
+  // Phase 15.1 (#172 part 2): lifted highlightedAnchorId state for
+  // bidirectional row↔dot interaction. Same SoT used in Expand modals.
+  const [highlightedAnchorId, setHighlightedAnchorId] = useState(null)
+  // Activate handler — called from both PDF dot clicks (anchor lives in
+  // currently-displayed Asset) and review-row indicator clicks (anchor
+  // may live in a different Asset, in which case we expand that Asset's
+  // accordion row first).
+  const handleAnchorActivate = (anchor) => {
+    if (!anchor) return
+    const id = `${anchor.sourceAssetId}|${anchor.requirementsSetId}|${anchor.requirementId}|${anchor.page}|${Math.round(anchor.x)}|${Math.round(anchor.y)}`
+    setHighlightedAnchorId(id)
+    if (anchor.sourceAssetId && anchor.sourceAssetId !== expandedAssetId) {
+      setExpandedAssetId(anchor.sourceAssetId)
+    }
+  }
   const disclosureTypeLabel = (t) => {
     if (t === 'owner') return 'Owner'
     if (t === 'full') return 'Full'
@@ -617,6 +679,9 @@ export default function V22RunEvaluationModal({
           ...a,
           rowOrdinal: ord,
           requirementsSetId: rsId,
+          // Phase 15.1: stamp requirementId so the synthesized anchor
+          // ID matches what the row indicator computes.
+          requirementId: row.requirementId,
           label: row.label,
           value: row.value,
         })
@@ -771,6 +836,17 @@ export default function V22RunEvaluationModal({
                       evidenceAnchors={anchorsByAssetId.get(a.id) || []}
                       assetOrdinal={assetOrdinalById.get(a.id) || null}
                       rsColorByRsId={rsColorByRsId}
+                      // Phase 15.1 (#172 part 2): bidirectional row↔dot
+                      // interaction. Dot clicks fire onAnchorClick with the
+                      // synthesized id; the activate handler resolves the
+                      // anchor + flips the accordion if needed.
+                      highlightedAnchorId={highlightedAnchorId}
+                      onAnchorClick={(anchorId) => {
+                        const found = (anchorsByAssetId.get(a.id) || []).find((an) =>
+                          `${an.sourceAssetId}|${an.requirementsSetId}|${an.requirementId}|${an.page}|${Math.round(an.x)}|${Math.round(an.y)}` === anchorId
+                        )
+                        if (found) handleAnchorActivate(found)
+                      }}
                     />
                   </div>
                 )}
@@ -1286,19 +1362,48 @@ export default function V22RunEvaluationModal({
                         }}>v{rs?.version ?? 1} · {rsRows.length} requirement{rsRows.length === 1 ? '' : 's'}</span>
                       </div>
                       <div>
-                        {rsRows.map((r, i) => (
-                          <ReviewRow
-                            key={`${rsId}-${r.requirementId}`}
-                            label={r.label}
-                            description={r.description}
-                            value={r.value}
-                            onValueChange={(v) => updateValue(rsId, i, v)}
-                            confidence={r.confidence}
-                            status={r.status}
-                            onStatusCycle={(dir) => cycleStatus(rsId, i, dir)}
-                            humanEdited={r._aiOriginalValue != null && r.value !== r._aiOriginalValue}
-                          />
-                        ))}
+                        {rsRows.map((r, i) => {
+                          // Phase 15.1 (#172 part 2): per-row indicator
+                          // from priorActiveResult anchors. Returns null
+                          // for fresh evals (no prior result) or rows
+                          // where prior had no anchor for this requirement.
+                          const priorRow = (priorActiveResult?.results || []).find(
+                            (pr) => pr.requirementsSetId === rsId && pr.requirementId === r.requirementId
+                          )
+                          const priorAnchor = (priorRow?.evidenceAnchors || [])[0] || null
+                          const enriched = priorAnchor ? {
+                            ...priorAnchor,
+                            requirementsSetId: rsId,
+                            requirementId: r.requirementId,
+                          } : null
+                          const anchorRowAnchorId = enriched
+                            ? `${enriched.sourceAssetId}|${enriched.requirementsSetId}|${enriched.requirementId}|${enriched.page}|${Math.round(enriched.x)}|${Math.round(enriched.y)}`
+                            : null
+                          // Compute rowOrdinal within this RS for the label.
+                          const ord = i + 1
+                          const ordinalNum = assetOrdinalById.get(enriched?.sourceAssetId) || null
+                          const anchorLabel = (enriched && ordinalNum) ? `${ordinalNum}.${ord}` : null
+                          const anchorColor = enriched ? (rsColorByRsId[rsId] || 'var(--accent-indigo)') : null
+                          return (
+                            <ReviewRow
+                              key={`${rsId}-${r.requirementId}`}
+                              label={r.label}
+                              description={r.description}
+                              value={r.value}
+                              onValueChange={(v) => updateValue(rsId, i, v)}
+                              confidence={r.confidence}
+                              status={r.status}
+                              onStatusCycle={(dir) => cycleStatus(rsId, i, dir)}
+                              humanEdited={r._aiOriginalValue != null && r.value !== r._aiOriginalValue}
+                              anchor={enriched}
+                              anchorLabel={anchorLabel}
+                              anchorColor={anchorColor}
+                              anchorRowAnchorId={anchorRowAnchorId}
+                              highlighted={!!highlightedAnchorId && anchorRowAnchorId === highlightedAnchorId}
+                              onAnchorClick={handleAnchorActivate}
+                            />
+                          )
+                        })}
                       </div>
                     </div>
                   )

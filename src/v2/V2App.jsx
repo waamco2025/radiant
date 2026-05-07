@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.1 &middot; Changelog
+          v0.15.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.2', date: '2026-05-07', label: 'Phase 15.1', items: [
+                  '#172 part 2 of 3: annotation visual redesign + bidirectional row↔dot interaction. Each evidence anchor now renders TWO visual elements: a translucent highlight rectangle (RS color, 15% opacity) drawn over the cited text in the PDF + a numbered indicator (26px circle, 12px mono bold label) placed immediately to the left of the highlight rect. When highlighted, the rect bumps to 30% opacity and the indicator picks up a 3px ring in the RS color outside its 2px white border.',
+                  'Side-by-side layout for the Expand modal Output tab (eval-output + poe schemas). Two-column grid: PDF + indicators on the left (~60%), per-Requirements-Set results tables on the right (~40%). Sticky left column so the PDF stays visible while scrolling the results. Below 900px viewport width the layout collapses to a vertical stack.',
+                  'Per-RS results tables gain a numbered indicator column on the left of each row. Indicator color matches the RS, label uses {assetOrdinal}.{rowOrdinal}, click highlights the matching dot in the PDF. Rows with empty evidenceAnchors (e.g. status `missing`) get an empty indicator slot.',
+                  'Bidirectional interaction: clicking a row indicator scrolls the PDF to the matching dot + applies the highlighted state. Clicking a PDF dot scrolls the results table to the matching row + applies the highlighted state. Cross-Asset clicks auto-flip the multi-Asset switcher first, then highlight + scroll once the new PDF mounts.',
+                  'Same row↔dot interaction extended to the Run Evaluation modal Step 2/3 review surface. The accordion left panel\'s expanded Asset is the auto-flip target on cross-Asset row clicks (parallel to the Asset switcher in the Expand modal).',
+                  'Synthesized anchor IDs (`{sourceAssetId}|{requirementsSetId}|{requirementId}|{page}|{x}|{y}`) shared between dot and row consumers via a new `src/v2/data/anchorIds.js` utility module.',
+                  'Step 0 outcome: VReg re-run is gated by `hasNewAssetsForRerun` until Alice amends the Claim with a new Asset. Per the Phase 15.0.1 demo scenarios doc, this is an acceptable demo prerequisite — no seed adjustment required for Phase 15.1.',
+                ]},
                 { version: '0.15.1', date: '2026-05-06', label: 'Phase 15.0.1', items: [
                   'Bug fix — annotation dots not rendering despite Phase 15.0 wiring being in place. Root cause: the `makeEvaluationResult` factory\'s `results.map((r) => ({ … }))` block in src/v2/v2_2Data.js explicitly preserved only specific result-row fields (requirementsSetId, requirementId, label, value, status, confidence, _aiOriginalValue) and silently dropped `evidenceAnchors` even though every Phase 15.0 seed call passed it. The factory now preserves `evidenceAnchors` (cloned per-anchor for safety). All four target surfaces (eval flow, Eval Result expand Output, PoE expand Output, Re-Run flow Step 2) now show dots correctly.',
                   'Layout — PDF fit-to-width. AnnotatedPdfViewer derives the render scale at load time from the host container\'s `clientWidth` (capped at 1.6× base scale on very wide containers). Eliminates horizontal scroll inside the modal evidence column; PDFs scale up cleanly on wider screens.',
