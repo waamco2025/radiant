@@ -73,39 +73,18 @@ export const PDF_ANCHORS = {
     }
   },
   "microco-vreg-test-report.pdf": {
-    "req-001": {
+    "req-006": {
       "page": 1,
       "x": 278,
-      "y": 539,
-      "w": 120.5,
+      "y": 525,
+      "w": 170.6,
       "h": 15
     },
-    "req-002": {
+    "req-007": {
       "page": 1,
       "x": 278,
-      "y": 483,
-      "w": 122.9,
-      "h": 15
-    },
-    "req-003": {
-      "page": 1,
-      "x": 278,
-      "y": 427,
-      "w": 85.9,
-      "h": 15
-    },
-    "req-004": {
-      "page": 2,
-      "x": 278,
-      "y": 539,
-      "w": 96.6,
-      "h": 15
-    },
-    "req-005": {
-      "page": 2,
-      "x": 278,
-      "y": 483,
-      "w": 107.5,
+      "y": 469,
+      "w": 181.3,
       "h": 15
     }
   },
@@ -164,10 +143,10 @@ export const PDF_FILES = {
     "pages": 2
   },
   "microco-vreg-test-report.pdf": {
-    "size": 2764,
-    "hash": "sha256:95ddaae280b4e2a0",
+    "size": 1764,
+    "hash": "sha256:aaa79356b18cbaaa",
     "ownerParty": "MicroCo",
-    "pages": 2
+    "pages": 1
   },
   "microco-vreg-datasheet.pdf": {
     "size": 2612,

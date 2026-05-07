@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.7 &middot; Changelog
+          v0.15.8 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.8', date: '2026-05-07', label: 'Phase 15.5', items: [
+                  'VReg Re-Run demo simplified into a coherent narrative arc: prior eval shows 5 SAT + 2 MISSING criteria → Alice amends with Test Report → Bob\'s re-run "discovers" values for the missing rows in the new evidence → save → 7/7 SAT → create PoE.',
+                  'VReg Eval Result chain (V0/V1/V_main from Phase 13.2) collapsed to a single standalone Eval Result. The chain contradicted the "Bob\'s first evaluation" framing the new demo arc needs. `erBobVregV0` and `erBobVregV1` definitions removed; supersession patches removed; `evaluationResults` registry trimmed; chain DAs (`daProofBobVregV0/V1`, `daOwnEvalBobVregV0/V1`) removed; `disclosureAgreements` registry trimmed; Phase 13.2 chain comment removed (Carol\'s EMI Eval Result is unwrapped + standalone, so the chain-DA pattern is no longer exercised by the current seed).',
+                  'New criteria added to MIL-PRF-55681 v1: req-006 (Single Event Latch-up immunity) and req-007 (Burn-in qualification). Both are MISSING in the prior eval (Datasheet doesn\'t cover them) with anchors pre-stamped on the Test Report — Phase 15.5 demo trick narrowed to req-006/007 only (was req-001-005 in 15.4). The 5 SAT rows reference Datasheet exclusively.',
+                  'req-004 value updated from "TID > 100 krad(Si)" to "TID ~ 80 krad(Si)" (status stays SAT). Matches the Datasheet PDF\'s on-page text; the prototype RS doesn\'t encode threshold logic so the SAT status is a label-only outcome.',
+                  'Test Report PDF rewritten: 1 page, 2 sections (SEL Immunity + Burn-in Qualification), 2 anchored values (`> 75 MeV·cm²/mg LET threshold` and `168 hours at 125°C · 0/100 failures`). Replaces the Phase 15.3/15.4 Test Report which had redundant req-001-005 sections that duplicated the Datasheet. evidenceAnchors.js auto-regenerated — PDF_ANCHORS["microco-vreg-test-report.pdf"] now contains only req-006 + req-007 entries.',
+                  'Walkthrough doc Section 3 (Scenario 2) rewritten as "VReg Eval Result with missing criteria" — single Eval Result, 5 SAT + 2 MISSING. Section 5 (Scenario 4) rewritten as "find missing criteria from new evidence" with explicit Bob-updates-the-missing-rows-then-saves narrative leading to 7/7 SAT and PoE creation. At-a-glance scenario table updated.',
+                ]},
                 { version: '0.15.7', date: '2026-05-07', label: 'Phase 15.4', items: [
                   'Re-Run demo seed corrected. Phase 15.3 over-eagerly attached the Test Report Asset to the VReg Claim from initial seed AND added a separate Compliance Notes Asset for the amend prerequisite — that conflated the demo goals (VReg Expand modal stayed multi-Asset; the amend prereq used a different Asset; PRM was supposed to be the canonical multi-Asset Expand surface). Phase 15.4 reverts: VReg Claim initial seed back to single-Asset (Datasheet only); VReg Eval Result Expand modal shows Asset 1 of 1 again. PRM remains the canonical multi-Asset Expand modal demo path.',
                   'Compliance Notes Asset retired entirely. The amend prereq uses Test Report directly — Alice attaches the Test Report (now the single floating VReg Asset in her inventory) which both satisfies the `hasNewAssetsForRerun` gate AND, via a deliberate seed demo trick, displays annotation markers in Bob\'s subsequent re-run accordion.',

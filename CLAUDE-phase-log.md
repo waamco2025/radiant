@@ -2673,6 +2673,42 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.5 completion notes (2026-05-07) — VReg Re-Run Demo Simplification
+
+VReg evaluation seed redesigned into a coherent demo narrative arc: prior eval shows 5 SAT + 2 MISSING → Alice amends with Test Report → Bob's re-run discovers values for the missing rows in the new evidence → save → 7/7 SAT → create PoE.
+
+**Step 1 — Chain collapsed to a single Eval Result.** Phase 13.2 (#177) seeded a 3-Eval-Result supersession chain on Bob's VReg evaluation (V0 → V1 → V_main) to demonstrate chain rendering. With the Phase 15.5 narrative ("Bob's first evaluation discovers gaps that re-run resolves"), the chain contradicted the framing — V0 and V1 implied prior evaluations had already happened. Both `erBobVregV0` and `erBobVregV1` definitions deleted from `v2_2Data.js`. Supersession-patch lines (`erBobVregV0.supersededBy = erBobVregV1.id`; `erBobVregV1.supersededBy = erBobVreg.id`) removed. `evaluationResults` registry collapsed from `[..., erBobVregV0, erBobVregV1, erBobVreg, ...]` to `[..., erBobVreg, ...]`. The chain-rendering code path is no longer exercised by current seed; the rendering logic itself stays available for future scenarios.
+
+**Step 2 — Chain DAs removed.** Phase 13.2 also seeded auto-disclosure DAs for each chain ancestor — `daProofBobVregV0`, `daProofBobVregV1` (proof-of-eval DAs targeting V0/V1) plus `daOwnEvalBobVregV0`, `daOwnEvalBobVregV1` (internal ownership DAs). All four definitions deleted; `disclosureAgreements` registry trimmed. The Phase 13.2 chain comment ("chain-ancestor auto-disclosure DAs ... edge derivation reroutes the edge target to the ancestor's chain-successor ...") removed since the pattern is no longer exercised — Carol's EMI Eval Result is unwrapped + standalone, so no other VReg-style chain remains in the current seed.
+
+**Step 3 — `erBobVreg` becomes 7 rows: 5 SAT + 2 MISSING.**
+
+- Five existing requirements (req-001 through req-005) all SAT with Datasheet-only anchors. Values match the Datasheet PDF exactly: req-001 `5.0V ±0.5% under load`, req-002 `< 1.7W at rated current`, req-003 `-55°C to +125°C`, req-004 `TID ~ 80 krad(Si)` (changed from chain-head's prior `TID > 100 krad(Si)` for visual coherence with the Datasheet PDF — the prototype's RS doesn't encode threshold logic so the SAT label is independent of the value content), req-005 `Category XV, §121.1`.
+- Two new requirements added: req-006 **Single Event Latch-up (SEL) immunity** + req-007 **Burn-in qualification**. Both have status `missing`, value `Pending verification`, and (the demo trick) anchors pre-stamped on Test Report despite Test Report not being in `evidenceUsed`.
+- `evidenceUsed` stays `[aVregDatasheet.id]` — what was actually evaluated. Test Report wasn't in scope until Alice's amend prereq.
+
+The two MISSING rows establish the Re-Run narrative: there are gaps in the prior evaluation; new evidence (Test Report, attached during the amend prereq) holds the values; Bob's re-run loads them in.
+
+**Step 4 — Demo trick scoped down.** The Phase 15.4 demo trick over-stamped Test Report anchors on all 5 SAT rows (req-001-005) even though the SAT rows had genuine Datasheet anchors. Phase 15.5 narrows the trick to req-006 and req-007 only. Inline comment block in `v2_2Data.js` immediately above the `results[]` array updated to flag the narrower scope. The trick still violates the anchors-must-reference-evidenceUsed-Assets invariant but at minimal scope; production implementations would need either Asset-intrinsic anchor support OR a re-run-time anchor authoring path.
+
+**Step 5 — Test Report PDF rewritten.** The Phase 15.3/15.4 Test Report had two pages with sections covering req-001 through req-005 — content that duplicated the Datasheet. Phase 15.5 replaces it with a focused 1-page document containing ONLY the two SUPPLEMENTARY criteria (SEL Immunity + Burn-in Qualification). New `docType: 'VReg-12C · Supplementary Test Report'`. Two anchored rows: req-006 `> 75 MeV·cm²/mg LET threshold`, req-007 `168 hours at 125°C · 0/100 failures`. Generator regenerated — `evidenceAnchors.js` auto-rebuilt with new `PDF_ANCHORS['microco-vreg-test-report.pdf']` map containing req-006 + req-007 only (req-001 through req-005 entries removed).
+
+**Implementation notes.**
+- Build verified after Step 1+2 (no broken references) before continuing to Step 3+4 — the V0/V1 deletion was the highest-risk part of the sweep because seven distinct call sites referenced those identifiers.
+- Sweep verified: `grep "erBobVregV"` after Step 2 returned only comments (no live references). `grep "daProofBobVregV0|daProofBobVregV1|daOwnEvalBobVregV0|daOwnEvalBobVregV1"` returned zero matches in the live code paths.
+- The Datasheet PDF is intentionally unchanged (per the brief); `microco-vreg-datasheet.pdf` retains its 5-row content keyed to req-001 through req-005. Hash unchanged: c2f9e90f6d315a8d. Determinism preserved.
+- The new req-004 seed value `TID ~ 80 krad(Si)` matches the Datasheet PDF's on-page text (which has always read `TID ~ 80 krad(Si)` since Phase 15.0). This makes the on-PDF annotation rectangle visually consistent with the right-panel results-row value — a parity fix that was deferred through Phases 15.3 + 15.4 but resolved now as part of the broader rewrite.
+
+**Walkthrough doc updates.** Section 3 (Scenario 2) rewritten as "VReg Eval Result with missing criteria" — single Eval Result, 5 SAT + 2 MISSING. The chain references and "active chain head" language removed. Section 5 (Scenario 4) rewritten as "find missing criteria from new evidence" — explicit "Bob updates the missing rows" sub-section with the values to enter (req-006 `> 75 MeV·cm²/mg LET threshold`, req-007 `168 hours at 125°C · 0/100 failures`), then "Save", then "7/7 SAT" expected outcome, then "create PoE" as the happy-path conclusion. At-a-glance scenario table updated for both rows.
+
+**Footer v0.15.7 → v0.15.8.** Architecture spec §17.5 changelog gains a 15.5 bullet documenting the demo-trick scope narrowing + the simpler Re-Run narrative. polish-backlog Update Log entry. CLAUDE.md "Current state of the world" updated. Filed prototype shortcut: the prototype's RS artifact is reference-only `{ id, name, version }`; requirement definitions materialize as result rows on Eval Results — production would need a canonical RS template. (Existing known shortcut, not new to 15.5; surfaced in the spec for completeness.)
+
+**Runtime verification.** Manual user-path walkthrough required (per Phase 15.0.1 workflow lesson): (a) Bob → VReg Eval Result → Expand → Output → confirm `Asset 1 of 1`, 5 SAT markers `1`-`5` on Datasheet, 7 rows in right panel with healthbar 5 SAT · 0 UNSAT · 2 MISSING, req-004 highlight rect on Datasheet matches right-panel value `TID ~ 80 krad(Si)`. (b) Switch to Alice → amend VReg Claim → confirm Test Report visible in picker → save. (c) Switch to Bob → Re-Run on the Eval Result → Step 2 → confirm 2-Asset accordion (Datasheet markers `1`-`5`, Test Report markers `6` + `7`), 7 rows in right panel. (d) Bob updates req-006 + req-007 to SAT with the Test Report values → Continue → Save → confirm new Eval Result has 7/7 SAT and supersedes prior. (e) Create PoE → confirm flow works.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.4 completion notes (2026-05-07) — Re-Run Demo Seed Correction + PDF Value Parity
 
 Two corrections from Phase 15.3 QA. The 15.3 ship conflated two separate demo goals (VReg Expand modal multi-Asset vs. amend-then-rerun multi-Asset) and added a Compliance Notes Asset that wasn't strictly needed.

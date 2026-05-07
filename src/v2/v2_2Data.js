@@ -2153,68 +2153,30 @@ export function buildV22SharedArtifacts() {
   // Bob has a Full DA + EA on Alice's VReg Claim but no PoE — Create-PoE
   // surfaces as an action button on this Eval Result on first interaction.
   // Carol gets a parallel unwrapped Eval Result via a second EA on EMI.
-  // Phase 13.2 (#177): seed a 3-Eval-Result chain on Bob's VReg evaluation
-  // (V0 → V1 → V_main, with V0 + V1 superseded). Demonstrates supersession
-  // chain rendering on the netgraph and exercises chain edges through PoE-
-  // less Eval Results. erBobVreg stays unwrapped so the Create-PoE flow
-  // remains exercisable on the chain head.
-  const erBobVregV0 = makeEvaluationResult({
-    id: makeArtifactId('eval', 'govco-vreg-v0'),
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    evaluationAgreementId: eaBobOnVreg.id,
-    claimId: cVreg.id,
-    granteeAssetId: bAvionics.id,
-    requirementsSets: [
-      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
-    ],
-    // Phase 15.0: Status `missing` rows have empty evidenceAnchors[] — by
-    // definition the evaluator couldn't extract a value from the document.
-    // Other rows anchor in the VReg Datasheet PDF.
-    results: [
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.6% under load', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-001'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: 'Unknown', status: 'missing', evidenceAnchors: [] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-003'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'Pending verification', status: 'missing', evidenceAnchors: [] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-005'] }] },
-    ],
-    evidenceUsed: [aVregDatasheet.id],
-    evaluationDate: '2026-03-08T09:15:00Z',
-    status: 'superseded',
-    supersededBy: null, // patched below — id resolves to the next ER once that's built
-    priorEvalResultId: null,
-  })
-  const erBobVregV1 = makeEvaluationResult({
-    id: makeArtifactId('eval', 'govco-vreg-v1'),
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    evaluationAgreementId: eaBobOnVreg.id,
-    claimId: cVreg.id,
-    granteeAssetId: bAvionics.id,
-    requirementsSets: [
-      { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
-    ],
-    results: [
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.5% under load', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-001'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.7W at rated current', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-002'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-003'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID ~ 80 krad(Si)', status: 'unsatisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-004'] }] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory',
-        evidenceAnchors: [{ sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-005'] }] },
-    ],
-    evidenceUsed: [aVregDatasheet.id],
-    evaluationDate: '2026-03-10T10:30:00Z',
-    status: 'superseded',
-    supersededBy: null, // patched below
-    priorEvalResultId: erBobVregV0.id,
-  })
+  // Phase 15.5: VReg evaluation simplified to a single Eval Result.
+  // erBobVreg is Bob's standalone evaluation of the VReg Claim against
+  // MIL-PRF-55681 v1 (7 requirements). 5 SAT from the Datasheet (the
+  // only Asset in scope at evaluation time); 2 MISSING (req-006 SEL
+  // immunity, req-007 Burn-in qualification) which the Datasheet
+  // doesn't cover. Bob's Re-Run after Alice attaches the Test Report
+  // discovers values for the missing rows from the new evidence.
+  //
+  // Demo trick (narrowed in 15.5): req-006 and req-007's
+  // evidenceAnchors[] reference the Test Report Asset even though
+  // Test Report wasn't in evidenceUsed at evaluation time. When
+  // Alice amends the Claim to attach Test Report (the Re-Run demo
+  // prereq), Bob's re-run displays anchors for the missing rows on
+  // the newly-visible Test Report PDF — narrative: "the AI evaluation
+  // finds the missing values in the new evidence Alice provided." In
+  // production this would require Asset-intrinsic anchor support; for
+  // prototype demo purposes the trick is accepted at narrow scope
+  // (only req-006/007). The 5 SAT rows reference Datasheet only.
+  // Documented in CLAUDE-phase-log.md Phase 15.5 notes.
+  //
+  // Phase 15.5: chain Eval Results (erBobVregV0/V1) removed entirely;
+  // they contradicted the "Bob's first evaluation" narrative the
+  // Re-Run demo arc needs. Their related chain DAs (daProofBobVregV0/
+  // V1, daOwnEvalBobVregV0/V1) also removed.
   const erBobVreg = makeEvaluationResult({
     id: makeArtifactId('eval', 'govco-vreg-bundle'),
     owner: bob.party,
@@ -2225,59 +2187,52 @@ export function buildV22SharedArtifacts() {
     requirementsSets: [
       { id: 'reqset-mil-prf-55681-v1', name: 'MIL-PRF-55681 Compliance', version: 1 },
     ],
-    // Phase 15.4 demo trick: erBobVreg chain-head is a single-Asset
-    // evaluation (evidenceUsed = [Datasheet]). The VReg Test Report
-    // wasn't in scope at evaluation time. However, evidenceAnchors[]
-    // on each result row pre-stamps anchors for the Test Report so
-    // that when Alice later amends the Claim to include the Test
-    // Report (the Re-Run demo prereq), Bob's re-run displays
-    // annotations on both Assets in the accordion.
-    //
-    // In production this would be a data inconsistency — anchors
-    // shouldn't reference Assets outside `evidenceUsed`. For prototype
-    // demo purposes we accept the inconsistency to enable the
-    // amend-then-rerun-with-annotations demo path.
-    // Documented in CLAUDE-phase-log.md Phase 15.4 notes.
     results: [
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.4% under load', status: 'satisfactory',
+      // 5 SAT rows — Datasheet anchors only.
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-001', label: 'Power output stability', value: '5.0V ±0.5% under load', status: 'satisfactory',
         evidenceAnchors: [
           { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-001'] },
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-001'] },
         ] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.5W at rated current', status: 'satisfactory',
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-002', label: 'Thermal dissipation', value: '< 1.7W at rated current', status: 'satisfactory',
         evidenceAnchors: [
           { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-002'] },
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-002'] },
         ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-003', label: 'Operating temperature range', value: '-55°C to +125°C', status: 'satisfactory',
         evidenceAnchors: [
           { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-003'] },
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-003'] },
         ] },
-      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID > 100 krad(Si)', status: 'satisfactory',
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-004', label: 'Radiation tolerance', value: 'TID ~ 80 krad(Si)', status: 'satisfactory',
         evidenceAnchors: [
           { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-004'] },
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-004'] },
         ] },
       { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-005', label: 'ITAR classification', value: 'Category XV, §121.1', status: 'satisfactory',
         evidenceAnchors: [
           { sourceAssetId: aVregDatasheet.id, ...PDF_ANCHORS['microco-vreg-datasheet.pdf']['req-005'] },
-          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-005'] },
+        ] },
+      // 2 MISSING rows — Test Report anchors stamped (demo trick — see
+      // comment block above this results array). When Alice's amend
+      // prereq attaches the Test Report, Bob's re-run renders these
+      // markers on the newly-visible PDF.
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-006', label: 'Single Event Latch-up (SEL) immunity', value: 'Pending verification', status: 'missing',
+        evidenceAnchors: [
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-006'] },
+        ] },
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', requirementId: 'req-007', label: 'Burn-in qualification', value: 'Pending verification', status: 'missing',
+        evidenceAnchors: [
+          { sourceAssetId: aVregTestReport.id, ...PDF_ANCHORS['microco-vreg-test-report.pdf']['req-007'] },
         ] },
     ],
-    // Phase 15.4: evidenceUsed reverted to single-Asset (Datasheet only).
-    // The Test Report wasn't in scope at evaluation time. The
-    // evidenceAnchors[] arrays above intentionally reference the Test
-    // Report anyway — see demo-trick comment block above.
+    // Phase 15.5: evidenceUsed is single-Asset (Datasheet only) — what
+    // was actually evaluated. Test Report wasn't in scope until Alice's
+    // Re-Run prerequisite amendment. The req-006/req-007 anchors above
+    // reference Test Report regardless (demo trick — see comment block
+    // above this results array).
     evidenceUsed: [aVregDatasheet.id],
     evaluationDate: '2026-03-12T11:45:00Z',
     status: 'active',
     supersededBy: null,
-    priorEvalResultId: erBobVregV1.id,
+    priorEvalResultId: null,
   })
-  // Patch the supersededBy pointers now that the chain head ids are known.
-  erBobVregV0.supersededBy = erBobVregV1.id
-  erBobVregV1.supersededBy = erBobVreg.id
   // Carol's second EA + Eval Result (unwrapped) — Alice → Carol on EMI.
   const daAliceToCarolEmi = makeDisclosureAgreement({
     id: makeArtifactId('da', 'microco-auditco-emi'),
@@ -2333,7 +2288,9 @@ export function buildV22SharedArtifacts() {
     supersededBy: null,
   })
   // Phase 13.2: chain ancestors for the VReg supersession sequence.
-  const evaluationResults = [erBobPrm, erCarolPrm, erBobVregV0, erBobVregV1, erBobVreg, erCarolEmi]
+  // Phase 15.5: chain Eval Results (erBobVregV0/V1) removed; VReg is now
+  // a single standalone Eval Result.
+  const evaluationResults = [erBobPrm, erCarolPrm, erBobVreg, erCarolEmi]
 
   // Phase 13.1 (#168a): PoEs wrap exactly one Eval Result. Bob's PRM PoE
   // wraps the bundled (multi-RS) Eval Result; Carol's PRM PoE wraps her
@@ -2396,30 +2353,10 @@ export function buildV22SharedArtifacts() {
     evaluationResultId: erBobVreg.id,
     terms: { createdDate: erBobVreg.evaluationDate },
   })
-  // Phase 13.2 (#177): chain-ancestor auto-disclosure DAs. Each ancestor in
-  // the supersession chain gets its own auto-disclosure DA targeting itself
-  // (subject.kind='evalResult'). Edge derivation reroutes the edge target
-  // to the ancestor's chain-successor (rather than the Claim) so the chain
-  // reads Asset → V0 → V1 → V_main → Claim. The DAs themselves stay
-  // active as historical artifacts; only the rendered edge is rerouted.
-  const daProofBobVregV0 = makeProofOfEvalDisclosureAgreement({
-    id: makeArtifactId('da-proof', 'govco-vreg-eval-v0'),
-    evaluator: bob.party,
-    evaluatorDot: bob.partyDot,
-    claimOwner: alice.party,
-    claimOwnerDot: alice.partyDot,
-    evaluationResultId: erBobVregV0.id,
-    terms: { createdDate: erBobVregV0.evaluationDate },
-  })
-  const daProofBobVregV1 = makeProofOfEvalDisclosureAgreement({
-    id: makeArtifactId('da-proof', 'govco-vreg-eval-v1'),
-    evaluator: bob.party,
-    evaluatorDot: bob.partyDot,
-    claimOwner: alice.party,
-    claimOwnerDot: alice.partyDot,
-    evaluationResultId: erBobVregV1.id,
-    terms: { createdDate: erBobVregV1.evaluationDate },
-  })
+  // Phase 15.5: VReg chain-ancestor auto-disclosure DAs (Phase 13.2)
+  // removed alongside the V0/V1 Eval Results. Carol's EMI Eval Result
+  // is unwrapped + standalone (no chain), so the chain-DA pattern is
+  // not exercised by the current seed.
   const daProofCarolEmi = makeProofOfEvalDisclosureAgreement({
     id: makeArtifactId('da-proof', 'auditco-emi-eval'),
     evaluator: carol.party,
@@ -2490,26 +2427,8 @@ export function buildV22SharedArtifacts() {
     scope: { assetIds: [bAvionics.id] },
     terms: { createdDate: erBobVreg.evaluationDate },
   })
-  // Phase 13.2 (#177): ownership DAs for chain ancestors. Each ancestor
-  // also has an internal ownership DA — edge derivation skips the Asset→ER
-  // edge for ancestors (only the chain origin emits Asset→ER); the DA
-  // artifact persists as ownership audit but produces no canvas edge.
-  const daOwnEvalBobVregV0 = makeInternalDisclosureAgreement({
-    id: makeArtifactId('da-own', erBobVregV0.id),
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    subject: { kind: 'evalResult', id: erBobVregV0.id },
-    scope: { assetIds: [bAvionics.id] },
-    terms: { createdDate: erBobVregV0.evaluationDate },
-  })
-  const daOwnEvalBobVregV1 = makeInternalDisclosureAgreement({
-    id: makeArtifactId('da-own', erBobVregV1.id),
-    owner: bob.party,
-    ownerDot: bob.partyDot,
-    subject: { kind: 'evalResult', id: erBobVregV1.id },
-    scope: { assetIds: [bAvionics.id] },
-    terms: { createdDate: erBobVregV1.evaluationDate },
-  })
+  // Phase 15.5: VReg chain ownership DAs (Phase 13.2) removed alongside
+  // V0/V1 Eval Results.
   const daOwnEvalCarolEmi = makeInternalDisclosureAgreement({
     id: makeArtifactId('da-own', erCarolEmi.id),
     owner: carol.party,
@@ -2544,15 +2463,11 @@ export function buildV22SharedArtifacts() {
     daProofBobPrm,
     daProofCarolPrm,
     daProofBobVreg,
-    daProofBobVregV0,
-    daProofBobVregV1,
     daProofCarolEmi,
     daAliceToDavePrmProof,
     daOwnEvalBob,
     daOwnEvalCarol,
     daOwnEvalBobVreg,
-    daOwnEvalBobVregV0,
-    daOwnEvalBobVregV1,
     daOwnEvalCarolEmi,
   ]
 

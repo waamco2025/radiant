@@ -295,57 +295,35 @@ const PDF_SPECS = [
       },
     ],
   },
-  // Phase 15.3: VReg Test Report — the second pre-existing Asset on the
-  // VReg Claim. Anchors against the chain-head `erBobVreg` Eval Result's
-  // measured values so the values quoted here exactly match the seed
-  // (no 5.0V±0.5% datasheet/5.0V±0.4% measured visual mismatch).
+  // Phase 15.5: VReg Test Report — focused supplementary document
+  // covering only the criteria not present in the Datasheet (req-006
+  // SEL immunity, req-007 Burn-in qualification). Generated as
+  // standalone, becomes relevant when Alice attaches it to the VReg
+  // Claim during the Re-Run demo prereq — Bob's re-run "discovers" the
+  // values for the previously-MISSING criteria.
   {
     filename: 'microco-vreg-test-report.pdf',
     ownerParty: 'MicroCo',
     accentColor: COLOR_MICROCO,
-    docType: 'VReg-12C · Compliance Test Report',
+    docType: 'VReg-12C · Supplementary Test Report',
     revision: 'Rev 1.0',
     generated: '2026-02-15',
-    description: 'Bench-measured performance and qualification results for the VReg-12C. Test articles: VReg-12C serial numbers 0211 through 0218 (n=8). All tests performed under ambient lab conditions unless otherwise noted.',
+    description: 'Bench-measured radiation immunity and reliability qualification results supplementing the VReg-12C Datasheet. Test articles: VReg-12C serial numbers 0211 through 0218 (n=8). Radiation testing performed at TRIUMF; burn-in performed in-house under MIL-STD-883 Method 1015 conditions.',
     pages: [
       {
-        title: 'Power & Thermal Measurements',
-        intro: 'Steady-state electrical and thermal performance under rated load. Results expressed as worst-case across the test cohort.',
+        title: 'Radiation & Reliability Qualification',
+        intro: 'Single Event Latch-up (SEL) immunity per JEDEC JESD57 + extended burn-in qualification per MIL-STD-883 Method 1015. Results extend the Datasheet\'s baseline qualification claims with bench-measured supplementary evidence.',
         sections: [
           {
-            heading: 'Power Output',
+            heading: 'SEL Immunity',
             rows: [
-              { requirementId: 'req-001', label: 'Power output measured', value: '5.0V ±0.4% under load' },
+              { requirementId: 'req-006', label: 'Single Event Latch-up immunity', value: '> 75 MeV·cm²/mg LET threshold' },
             ],
           },
           {
-            heading: 'Thermal Performance',
+            heading: 'Burn-in Qualification',
             rows: [
-              { requirementId: 'req-002', label: 'Thermal dissipation observed', value: '< 1.5W at rated current' },
-            ],
-          },
-          {
-            heading: 'Environmental',
-            rows: [
-              { requirementId: 'req-003', label: 'Temperature qualification verified', value: '-55°C to +125°C' },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Radiation & Regulatory',
-        intro: 'Total Ionizing Dose (TID) qualification per MIL-STD-883 Method 1019 and regulatory classification confirmation per export-control review.',
-        sections: [
-          {
-            heading: 'TID Results',
-            rows: [
-              { requirementId: 'req-004', label: 'Radiation tolerance (TID)', value: 'TID > 100 krad(Si)' },
-            ],
-          },
-          {
-            heading: 'Regulatory & Export',
-            rows: [
-              { requirementId: 'req-005', label: 'ITAR classification confirmation', value: 'Category XV, §121.1' },
+              { requirementId: 'req-007', label: 'Burn-in qualification', value: '168 hours at 125°C · 0/100 failures' },
             ],
           },
         ],

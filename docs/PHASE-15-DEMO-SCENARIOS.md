@@ -20,9 +20,9 @@ left panel auto-flips on cross-Asset interactions.
 | # | Scenario | Role | Key feature exercised |
 |---|----------|------|-----------------------|
 | [1](#scenario-1--multi-rs-eval-result-on-prm-claim-erbobprm) | PRM Eval Result Expand | Bob | Multi-Asset switcher, multi-RS color coding, bidirectional click |
-| [2](#scenario-2--single-rs-eval-result-on-vreg-claim-erbobvreg) | VReg Eval Result Expand | Bob | Single-Asset, single-RS, full chain head |
+| [2](#scenario-2--vreg-eval-result-with-missing-criteria) | VReg Eval Result with missing criteria | Bob | Single Eval Result, 5 SAT + 2 MISSING |
 | [3](#scenario-3--poe-expand-modal) | PoE Expand | Bob | Same layout inherited via the wrapped Eval Result |
-| [4](#scenario-4--run-evaluation-re-run-flow) | Re-Run flow Step 2 | Alice → Bob | Amend-then-rerun-with-annotations on a newly-attached Asset |
+| [4](#scenario-4--run-evaluation-re-run-flow-find-missing-criteria-from-new-evidence) | Re-Run flow (find missing) | Alice → Bob | Amend with new evidence → re-run resolves missing criteria → save → PoE |
 
 ### Prerequisites
 
@@ -102,22 +102,24 @@ the most rows. Best opening demo.
 
 ---
 
-## 3. Scenario 2 — Single-RS Eval Result on VReg Claim (`erBobVreg`)
+## 3. Scenario 2 — VReg Eval Result with missing criteria
 
-Single-Asset, single-RS variant. Confirms the layout still reads
-cleanly without the multi-Asset chrome. (The VReg Test Report Asset
-exists in Alice's inventory but is intentionally unattached at initial
-seed — it's the deferred candidate for the Re-Run amend prerequisite
-demonstrated in Scenario 4.)
+Single Eval Result, 7 requirements: 5 SAT (sourced from the Datasheet)
++ 2 MISSING (Single Event Latch-up immunity + Burn-in qualification —
+criteria the Datasheet doesn't cover). Sets up the Re-Run demo arc in
+Scenario 4 where Alice attaches the Test Report and Bob's re-run
+"discovers" values for the missing rows.
 
 **Role:** Bob (GovCo).
 
+**Starting point:** On Bob's canvas, locate the Eval Result node
+connected to Alice's "Voltage Regulator IC" Claim. There is exactly
+one Eval Result (no supersession chain).
+
 **Navigation**
 
-1. On Bob's canvas, find the **active** chain head Eval Result on
-   Alice's "Voltage Regulator IC" Claim — the most recent one, not
-   marked SUPERSEDED.
-2. **Click** → Detail Panel → **click** Expand → Output tab.
+1. **Click** the Eval Result node → Detail Panel opens.
+2. **Click** "Expand" → Output tab.
 
 **Expected outcome**
 
@@ -125,22 +127,24 @@ demonstrated in Scenario 4.)
   Evaluator: GovCo`.
 - Left panel: `ASSET` strip + `microco-vreg-datasheet.pdf`. **No
   switcher arrows** — single-Asset case (`Asset 1 of 1`).
-- Indicators labeled `1` through `5`, all the same RS color (single
-  RS — MIL-PRF-55681 v1).
-- Right panel: single per-RS results table.
+- Indicators labeled `1` through `5` on the Datasheet for the SAT
+  requirements (Power output, Thermal dissipation, Operating
+  temperature range, Radiation tolerance, ITAR classification).
+- Right-panel results table shows 7 requirements: 5 SATISFACTORY
+  (with markers matching the PDF) + 2 MISSING (Single Event Latch-up
+  immunity, Burn-in qualification). MISSING rows render an empty
+  indicator slot — the Datasheet has no anchor for those criteria.
+- Healthbar shows 5 SAT · 0 UNSAT · 2 MISSING.
 
 **Try the interactions**
 
-- Row click → PDF scrolls + highlights. Indicator click → row scrolls
-  + highlights. No cross-Asset path here (only one Asset displayed).
-- Status `missing` rows have empty `evidenceAnchors[]` and render an
-  empty indicator slot in the row — and no dot on the PDF for that row.
+- Click any of the 5 SAT row indicators → Datasheet PDF scrolls +
+  highlights. Indicator click on the PDF → results row scrolls +
+  highlights.
+- The 2 MISSING rows have no on-PDF marker (the Datasheet doesn't
+  cover those criteria). They wait for the Re-Run flow in
+  Scenario 4 to be resolved.
 - Download icon works the same as Scenario 1.
-
-The two `superseded` Eval Results in the VReg chain (V0 + V1) carry
-the same shape but are not the chain head. To inspect them, open the
-chain-head's Detail Panel and use the supersession chain navigation,
-or explore via the Provenance section in Scenario 3's PoE.
 
 ---
 
@@ -177,11 +181,12 @@ jump to specific Eval Results in the chain.
 
 ---
 
-## 5. Scenario 4 — Run Evaluation re-run flow
+## 5. Scenario 4 — Run Evaluation re-run flow (find missing criteria from new evidence)
 
-The only scenario with a setup prerequisite. Confirms annotations
-render inside the Run Evaluation modal Step 2/3 review surface (not
-just the Expand modal).
+This scenario demonstrates re-evaluation discovering values for
+previously-missing criteria when new evidence is attached to the
+Claim. Coherent demo arc: prior eval shows gaps → amend with new
+evidence → re-run resolves gaps → save → create PoE.
 
 **Roles:** Alice (MicroCo) → then Bob (GovCo).
 
@@ -205,24 +210,21 @@ added since the prior evaluation. Without this prerequisite step, Bob's
 6. **Save** the amendment. Alice's canvas updates; the Claim now
    references two Assets (Datasheet + Test Report).
 
-**Why this Asset specifically:** Phase 15.4 pre-seeded the VReg Test
-Report as Alice's owned-but-unattached Asset. The seed's prior Eval
-Result was contrived to include anchors for this Asset — a deliberate
-demo trick documented in `CLAUDE-phase-log.md` Phase 15.4 notes — so
-when Bob re-runs after Alice's amendment, the newly-added Asset
-displays annotation markers in the accordion. The trick demonstrates
-that re-evaluation of an expanded Asset scope can surface annotations
-on freshly-added evidence; in production this would require the
-prior eval's `evidenceAnchors[]` to genuinely reference the new Asset,
-which only happens when the new Asset was already in `evidenceUsed`.
-For prototype demo purposes the inconsistency (anchors reference an
-Asset outside `evidenceUsed`) is accepted.
+**Why this Asset specifically:** The Test Report contains values for
+the 2 criteria the Datasheet doesn't cover (Single Event Latch-up
+immunity + Burn-in qualification). When Bob re-evaluates with the
+Test Report in scope, those previously-MISSING requirements get
+satisfied. Phase 15.5 narrowed the demo trick — only req-006 + req-007
+have anchors pre-stamped on Test Report in the seed (Phase 15.4 had
+all 5 SAT rows over-stamped); the trick remains a prototype
+inconsistency (`evidenceAnchors[]` references an Asset outside
+`evidenceUsed`) accepted for demo purposes only.
 
 ### 5b. Bob runs the re-run
 
 1. **Switch to Bob** — user menu → Switch User → Bob.
-2. On Bob's canvas, find the latest VReg Eval Result (now sitting on
-   the amended Claim).
+2. On Bob's canvas, find the VReg Eval Result (now sitting on the
+   amended Claim).
 3. **Click** the Eval Result → Detail Panel.
 4. **Click** "Re-Run Evaluation" in the footer (now enabled since new
    Assets exist).
@@ -232,24 +234,42 @@ Asset outside `evidenceUsed`) is accepted.
 
 **Expected outcome at Step 2**
 
-- Left panel: Asset accordion with two Assets:
-  - **VReg Datasheet** (originally in scope) — has annotation markers
-    `1` through `5` from the prior evaluation.
-  - **VReg Test Report** (newly added by Alice in Step 5a) — also has
-    annotation markers `1` through `5`, sourced from anchors
-    pre-stamped on the prior eval seed (the demo trick — see Section
-    5a's "Why this Asset specifically").
-- Right panel: parsed result rows inherited from the prior Eval Result
-  ready for review, with the same numbered indicators on the left of
-  each row.
+- Left panel: Asset accordion with TWO Assets:
+  - **VReg Datasheet** (originally in scope) — annotation markers
+    `1` through `5` for the SAT criteria.
+  - **VReg Test Report** (newly added by Alice in Step 5a) —
+    annotation markers `6` and `7` for the previously-MISSING
+    criteria, sourced from anchors pre-stamped on the prior Eval
+    Result.
+- Right panel: 7 requirement rows carried forward — 5 SAT
+  (anchored on Datasheet), 2 MISSING (anchored on Test Report,
+  ready to be reviewed).
 
-**Try the interactions**
+**Bob updates the missing rows**
+
+7. Bob expands the **VReg Test Report** in the accordion → confirms
+   the values found there:
+   - req-006 (SEL immunity): `> 75 MeV·cm²/mg LET threshold`
+   - req-007 (Burn-in qualification): `168 hours at 125°C · 0/100 failures`
+8. In the right panel, Bob updates req-006 + req-007 from MISSING to
+   SATISFACTORY with the values from the Test Report.
+9. **Click** "Continue" → Step 3 → review final values.
+10. **Save**.
+
+**Expected after save**
+
+- New Eval Result created with **7/7 SATISFACTORY**. Supersedes prior
+  `erBobVreg`.
+- Bob can create a Proof of Evaluation (PoE) on the new Eval Result.
+  Happy path complete.
+
+**Try the interactions during Step 2**
 
 - **Click** any row indicator → PDF scrolls + highlights in whichever
   Asset the accordion is currently showing.
 - **Cross-Asset row click** — if the accordion is showing the
-  Datasheet and the user clicks a row whose primary anchor is on the
-  Test Report (or vice versa), the accordion auto-flips its expanded
+  Datasheet and the user clicks a row whose anchor is on the Test
+  Report (or vice versa), the accordion auto-flips its expanded
   Asset and scrolls there.
 
 Fresh evaluations triggered via "Run Evaluation" (not Re-Run) similarly
