@@ -78,6 +78,10 @@ CAC login → Prime Radiant 3D → golden ripple → network build animation. Se
 - **In-app Changelog modal** entries go in `src/v2/V2App.jsx`'s Changelog releases array, prepended above the previous version. Footer version constant in V2App.jsx is also bumped.
 - **Cross-role notification fan-out** is documented in `architecture-spec.md` §7.4 as new rows in the notification table.
 
+### Git workflow
+
+**Phase commits go directly to `main`. Do not create feature branches for prototype work.** Worktree-based agent sessions must fast-forward into `main` and push at the phase boundary; the side branch (if any) is deleted afterward. This is the established workflow for this prototype — every phase from 12.4 through 15.1.1 has shipped this way.
+
 ---
 
 ## Current state of the world
