@@ -18,23 +18,31 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Backdrop } from './ModalShared.jsx'
 import BadgeShieldIcon from '../../v2/BadgeShieldIcon.jsx'
+// Phase 14.6 (#189): shared Tooltip primitive for the disabled-row
+// hover affordance — auto-flips below when viewport top-space is tight.
+import Tooltip from '../Tooltip.jsx'
 
-function TemplateRow({ template, isSuggested, isLatest, onClick }) {
-  return (
+function TemplateRow({ template, isSuggested, isLatest, disabledReason = null, onClick }) {
+  // Phase 14.6 (#189): when `disabledReason` is non-null the row enters
+  // a greyed-out, non-interactive state — no hover background change,
+  // no click handler, SUGGESTED badge suppressed. The whole row gets
+  // wrapped in a Tooltip (below) explaining the gate.
+  const isDisabled = !!disabledReason
+  const row = (
     <div
-      onClick={onClick}
+      onClick={isDisabled ? undefined : onClick}
       style={{
         padding: '10px 12px', marginBottom: 6, borderRadius: 6,
         background: 'var(--bg-deep)', border: '1px solid var(--border)',
-        cursor: 'pointer',
+        cursor: isDisabled ? 'not-allowed' : 'pointer',
         transition: 'background 100ms, border-color 100ms',
-        opacity: isLatest ? 1 : 0.7,
+        opacity: isDisabled ? 0.45 : (isLatest ? 1 : 0.7),
       }}
-      onMouseEnter={(e) => {
+      onMouseEnter={isDisabled ? undefined : (e) => {
         e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, var(--bg-deep))'
         e.currentTarget.style.borderColor = 'var(--accent-indigo)'
       }}
-      onMouseLeave={(e) => {
+      onMouseLeave={isDisabled ? undefined : (e) => {
         e.currentTarget.style.background = 'var(--bg-deep)'
         e.currentTarget.style.borderColor = 'var(--border)'
       }}
@@ -44,7 +52,10 @@ function TemplateRow({ template, isSuggested, isLatest, onClick }) {
         <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {template.name}
         </span>
-        {isSuggested && (
+        {/* Phase 14.6 (#189): SUGGESTED label suppressed when the row
+            is disabled — matches the Phase 13.3 pattern of hiding the
+            suggestion affordance on rows the user can't act on. */}
+        {isSuggested && !isDisabled && (
           <span style={{
             fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.06em',
             padding: '1px 5px', borderRadius: 3, flexShrink: 0,
@@ -72,6 +83,16 @@ function TemplateRow({ template, isSuggested, isLatest, onClick }) {
       </div>
     </div>
   )
+  if (!isDisabled) return row
+  // Phase 14.6 (#189): Tooltip's wrapper span breaks the row's
+  // marginBottom flow if it doesn't claim the same outer block-level
+  // shape. wrapperStyle: { display: 'block' } keeps the row's vertical
+  // spacing intact.
+  return (
+    <Tooltip content={disabledReason} position="auto" wrapperStyle={{ display: 'block' }}>
+      {row}
+    </Tooltip>
+  )
 }
 
 export default function IssueBadgeModal({
@@ -81,6 +102,18 @@ export default function IssueBadgeModal({
   targetClaim,
   activeParty,
   badgeTemplates = [],
+  // Phase 14.6 (#189): RS-coverage gate inputs.
+  //   • `coveredRsIds`: Set<string> of RS ids covered by at least one
+  //     ACTIVE PoE on the target Claim (V2App walks PoE → wrapped Eval
+  //     Result → requirementsSets[].id). Empty Set when the Claim has
+  //     no PoE coverage at all.
+  //   • `requirementSetNameById`: Map<string, string> for tooltip text
+  //     when the gate fails — translates missing RS ids to display
+  //     names (falls back to the id when not found).
+  // Defaults are forgiving: a caller that omits these props still gets
+  // the previous behavior (no gating).
+  coveredRsIds = new Set(),
+  requirementSetNameById = new Map(),
   onIssue,
   onClose,
 }) {
@@ -162,12 +195,32 @@ export default function IssueBadgeModal({
     const lid = template.lineageId || template.id
     const isLatest = !template.supersededBy
     const isSuggested = isLatest && latestByLineage.get(lid)?.id === template.id
+    // Phase 14.6 (#189): RS-coverage gate. Compute `disabledReason`
+    // per-template — null when every required RS id is covered, else
+    // a tooltip string. Two failure shapes:
+    //   • Claim has no PoE at all: generic "no Proof of Evaluation"
+    //     wording (don't list every RS the template references — the
+    //     missing-list is meaningless when nothing is covered).
+    //   • Claim has SOME PoE but not all required RSes: list the
+    //     missing RS names so the issuer knows what to evaluate.
+    const requiredRsIds = template.referencedRequirementsSetIds || []
+    const missingRsIds = requiredRsIds.filter((rsId) => !coveredRsIds.has(rsId))
+    let disabledReason = null
+    if (missingRsIds.length > 0) {
+      if (coveredRsIds.size === 0) {
+        disabledReason = 'Cannot issue: target Claim has no Proof of Evaluation.'
+      } else {
+        const missingNames = missingRsIds.map((rsId) => requirementSetNameById.get(rsId) || rsId)
+        disabledReason = `Cannot issue: target Claim has no Proof of Evaluation covering ${missingNames.join(', ')}.`
+      }
+    }
     return (
       <TemplateRow
         key={template.id}
         template={template}
         isSuggested={isSuggested}
         isLatest={isLatest}
+        disabledReason={disabledReason}
         onClick={() => {
           setSelectedTemplateId(template.id)
           setStep(2)

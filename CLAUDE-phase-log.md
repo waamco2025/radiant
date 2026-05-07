@@ -2673,6 +2673,39 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 14.6 completion notes (2026-05-07) — Badge Polish Trio (#187, #188, #189)
+
+Backtrack ship from Phase 15.6. Closes the badge polish trio that got deprioritized when Phase 15 took over (the trio was filed during Phase 15.1.1 QA and queued in #187 / #188 / #189 during the Phase 15 closing sweep). Three items, single sub-phase, single commit.
+
+**#187 — Active Issuances rows show Claim label + Owner.** Phase 14.2 (#169a) migrated the badge data model from `targetPoeId` → `targetClaimId` but the Active Issuances rendering surfaces in `BadgesPanel` (Library right-panel) and `V22BadgeTemplatePanel` (forward-looking Detail Panel — Badge Template nodes aren't materialized on the canvas yet) were not migrated alongside. They still read `b.targetPoeId` + `poeNameLookup`, which meant the rows rendered undefined-ish values (the field doesn't exist on post-14.2 issuance objects). This phase completes the migration:
+
+- `ViewDetails` in `BadgesPanel.jsx` (lines 186-192 area) — signature parameter renamed `poeNameLookup = {}` → `claimNameLookup = {}`. Each entry shape: `{ name: <claim label>, ownerParty: <claim grantor party> }`.
+- Active Issuances row rendering — read `b.targetClaimId` (was `b.targetPoeId`); pull `claimLabel` + `ownerParty` from `claimNameLookup`; render Claim label on line 1, ownerParty + date on line 2 (matches the existing pattern but with the Claim's owner party as the second-line label, which is the badge recipient).
+- `BadgesPanel` default-export signature — replaced `proofsOfEvaluation = []` with `allClaims = []`; the lookup builder near line 749 swaps `for (const p of proofsOfEvaluation)` for `for (const c of allClaims)` building `claimNameLookup[c.id] = { name: c.name, ownerParty: c.owner || c.ownerParty }`.
+- `V22BadgeTemplatePanel` — same migration: signature renamed `poeNameLookup` → `claimNameLookup`; row rendering reads `b.targetClaimId` and pulls from `claimNameLookup`. Forward-looking surface (Badge Template nodes aren't materialized on the canvas per Phase 14.0 — the `'BADGE TEMPLATE'` router case is scaffolding) but fixed for spec consistency and to prevent regression when canvas materialization ships.
+- `LibraryModal.jsx` — pass-through prop renamed `proofsOfEvaluation` → `allClaims`.
+- V2App's LibraryModal mount — dropped the now-unused `proofsOfEvaluation={...}` IIFE prop (the merged-dataset `allClaims={...}` IIFE prop already existed alongside it from earlier work).
+
+**#188 — Globe icon on own-Published RSes in the Badge Template create form.** Scope corrected during planning. The original framing assumed Published Standards were missing from the picker entirely; on inspection the Published Standards section already exists (lines 547-561 of `BadgesPanel.jsx`'s `EditorForm`). The actual gap was the visual-marker on own-RSes that the actor also published — the `externalPublished` filter (line 421: `!ownRsList.some((o) => o.id === p.id)`) excludes own-published copies from the dedicated Published Standards section, so when Bob (who authors all 3 Published Standards in seed) opens the create form his Published Standards appear ONLY in `YOUR REQUIREMENTS SETS` without any indication they're also published. This phase fixes that:
+
+- Added a `publishedRsIdSet` membership Set built once via `useMemo` from `(publishedRequirementSets || []).map((p) => p.id)`.
+- `renderRsRow` extended: the existing globe-render predicate `fromSection === 'published'` becomes `(fromSection === 'published' || (fromSection === 'own' && publishedRsIdSet.has(rs.id)))`. Closure over `publishedRsIdSet` from the parent scope; no parameter chaining.
+- No section reshuffle — own-but-also-published RSes stay in the YOUR REQUIREMENTS SETS section per the design call. The globe icon is the marker.
+
+**#189 — Issuance enforcement gating (RS-coverage).** The previous `handleV22IssueBadge` enforced only the self-issuance gate (silent return when `recipientParty === activeRole.party`). The picker UI did not pre-block templates whose RSes weren't covered by the target Claim's PoEs. Per the brief's scope confirmation: no duplicate-issuance gate; RS-coverage gate by exact RS ID (no lineage matching — badges reference frozen RS versions); active PoEs only (only PoE-wrapped Eval Results count toward coverage); no self-issuance picker gating (handled upstream + by IssueBadgeModal's mount-time error state).
+
+Implementation:
+
+- **Data layer (defense in depth)** — `handleV22IssueBadge` extended after the self-issuance guard. Pulls the merged dataset via `mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)` so PoEs/Eval Results created during the session count toward coverage. Walks active PoEs targeting this Claim → resolves the wrapped Eval Result via a Map → unions `requirementsSets[].id` into a `coveredRsIds` Set. Computes `missingRsIds = template.referencedRequirementsSetIds.filter((rsId) => !coveredRsIds.has(rsId))`. If non-empty, silent return + `console.warn('[handleV22IssueBadge] RS-coverage gate failed; issuance rejected.', {targetClaimId, badgeTemplateId, missingRsIds, missingNames})`. Earlier `template` lookup reused for the downstream notification (avoided duplicate `find`).
+- **V2App IssueBadgeModal mount** — extended the IIFE around `<IssueBadgeModal>` to compute the same `targetClaimCoveredRsIds: Set<string>` (mirrors the data-layer walk) plus a `requirementSetNameById: Map<string, string>` for tooltip text. Passed both as new props to `<IssueBadgeModal>`.
+- **`IssueBadgeModal.jsx`** — signature gains `coveredRsIds = new Set()` and `requirementSetNameById = new Map()` props (forgiving defaults). `renderRow` computes `missingRsIds` per template; sets `disabledReason` to `null` on pass, generic "no Proof of Evaluation" string on `coveredRsIds.size === 0`, or "no Proof of Evaluation covering …" with names list on partial coverage. `TemplateRow` extended with a `disabledReason` prop: when set, the row gets `opacity: 0.45`, `cursor: 'not-allowed'`, no hover state, no click handler; SUGGESTED label suppressed; row wrapped in a `<Tooltip content={disabledReason} position="auto" wrapperStyle={{ display: 'block' }}>` from `src/components/Tooltip.jsx`. Tooltip auto-flips below when viewport top-space is tight (existing primitive behavior).
+
+**Versioning quirk.** Phase 14.6 is a backtrack ship — Phase 15.6 (v0.15.9) is the most recent forward-going phase. Per the brief's instruction the footer constant continues to display `v0.15.9 · Changelog` (NOT rolled back); v0.14.6 is inserted into the Changelog modal entries array in chronological/phase order between v0.15.0 (2026-05-06) and v0.14.5 (2026-05-06). The Changelog modal's last entry (top of the list) reads from the `0.15.9` Phase 15.6 entry; the new v0.14.6 entry appears further down the list. This versioning shape is documented in CLAUDE.md "Active phase queue" — the latest-phase indicator stays at 15.6, with Phase 14.6 noted as a backtrack insertion.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.6 completion notes (2026-05-07) — Re-Run Auto-Fill from New Asset Evidence (#172 closing scope)
 
 Closes the #172 PDF annotation demo arc with a complete end-to-end happy-path. Re-run carry-forward now auto-populates MISSING rows from `discoveredValue` metadata on anchors pointing to newly-in-scope Assets — the narrative shifts from "user manually fills forms" to "AI evaluation reads new evidence and fills in the gaps."

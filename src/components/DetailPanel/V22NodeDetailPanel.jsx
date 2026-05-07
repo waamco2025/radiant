@@ -2205,9 +2205,12 @@ function V22BadgeTemplatePanel({
   // (caller filters by `issuance.badgeTemplateId === template.id`).
   // `lineageActiveIssuanceCount` is the total across ALL versions in the
   // template's lineage (for the subtext line).
+  // Phase 14.6 (#187): `claimNameLookup` replaces `poeNameLookup` — issuances
+  // reference Claims (post-Phase-14.2). Forward-looking surface; Badge
+  // Template nodes aren't materialized on the canvas yet.
   activeIssuances = [],
   lineageActiveIssuanceCount = 0,
-  poeNameLookup = {},
+  claimNameLookup = {},
   onSelectBadgeIssuance,
 }) {
   if (!template) return null
@@ -2308,8 +2311,12 @@ function V22BadgeTemplatePanel({
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {activeIssuances.map((b) => {
-                  const poeName = poeNameLookup[b.targetPoeId] || b.targetPoeId
-                  const recipientParty = poeNameLookup[`__owner__${b.targetPoeId}`] || null
+                  // Phase 14.6 (#187): post-14.2 migration. Read
+                  // targetClaimId (was targetPoeId) and pull Claim
+                  // label + ownerParty from the new claimNameLookup.
+                  const lookupEntry = claimNameLookup[b.targetClaimId] || null
+                  const claimLabel = lookupEntry?.name || b.targetClaimId
+                  const ownerParty = lookupEntry?.ownerParty || null
                   const clickable = !!onSelectBadgeIssuance
                   return (
                     <div
@@ -2331,13 +2338,13 @@ function V22BadgeTemplatePanel({
                       } : undefined}
                     >
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {poeName}
+                        {claimLabel}
                       </div>
                       <div style={{
                         fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2,
                         display: 'flex', gap: 6,
                       }}>
-                        {recipientParty && <><span>{recipientParty}</span><span>·</span></>}
+                        {ownerParty && <><span>{ownerParty}</span><span>·</span></>}
                         <span>{(b.createdDate || '').slice(0, 10)}</span>
                       </div>
                     </div>

@@ -3285,12 +3285,66 @@ export default function V2App() {
   // The PoE-anchored entry points still work — they pass the parent
   // Claim's id (derived from the PoE's claimId field) as targetClaimId.
   const handleV22IssueBadge = useCallback((targetClaimId, badgeTemplateId, description) => {
-    const seed = buildV22SharedArtifacts()
-    const sharedClaims = seed.claims || []
+    // Phase 14.6 (#189): use the merged dataset (seed + provisional
+    // mutations) so the RS-coverage gate sees fresh PoEs / Eval Results
+    // created during this session. Self-issuance guard remains
+    // first-line defense.
+    const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const sharedClaims = merged.claims || []
     const targetClaim = sharedClaims.find((c) => c.id === targetClaimId)
     if (!targetClaim) return
     const recipientParty = targetClaim.owner || targetClaim.ownerParty
     if (recipientParty === activeRole.party) return  // self-issuance guard
+    // Phase 14.6 (#189): RS-coverage gate. Every RS id in the template's
+    // referencedRequirementsSetIds[] must appear in the wrapped Eval
+    // Result of at least one ACTIVE PoE on the target Claim. Exact RS
+    // id match (no lineage matching — badges reference frozen RS
+    // versions). Defense-in-depth: the picker UI greys out templates
+    // that fail this gate; this re-check rejects bypass attempts with
+    // a console warning so the failure is debuggable.
+    const template = badgeTemplates.find((t) => t.id === badgeTemplateId)
+    if (!template) return
+    const requiredRsIds = template.referencedRequirementsSetIds || []
+    if (requiredRsIds.length > 0) {
+      // Phase 14.6 (#189): build coveredRsIds + a name lookup from RS
+      // snapshots embedded in Eval Result `requirementsSets[]` entries
+      // (each snapshot carries `{ id, name, version }`). This avoids
+      // closing over the `requirementSets` useMemo which is declared
+      // below this useCallback in V2App's body — referencing it in the
+      // deps array would be a temporal-dead-zone violation that the
+      // build doesn't catch but blows up at first render.
+      const evalResultsById = new Map((merged.evaluationResults || []).map((er) => [er.id, er]))
+      const coveredRsIds = new Set()
+      const rsNameById = new Map()
+      for (const er of (merged.evaluationResults || [])) {
+        const rsList = er.requirementsSets || (er.requirementsSet ? [er.requirementsSet] : [])
+        for (const rs of rsList) if (rs?.id) rsNameById.set(rs.id, rs.name || rs.id)
+      }
+      for (const rs of (publishedRequirementSets || [])) {
+        if (rs?.id) rsNameById.set(rs.id, rs.name || rs.id)
+      }
+      for (const poe of (merged.proofsOfEvaluation || [])) {
+        if (poe.status && poe.status !== 'active') continue
+        if (poe.targetClaimId !== targetClaimId && poe.claimId !== targetClaimId) continue
+        const wrapped = evalResultsById.get(poe.wrappedEvalResultId)
+        if (!wrapped) continue
+        const rsList = wrapped.requirementsSets
+          || (wrapped.requirementsSet ? [wrapped.requirementsSet] : [])
+        for (const rs of rsList) if (rs?.id) coveredRsIds.add(rs.id)
+      }
+      const missingRsIds = requiredRsIds.filter((rsId) => !coveredRsIds.has(rsId))
+      if (missingRsIds.length > 0) {
+        const missingNames = missingRsIds.map((rsId) => rsNameById.get(rsId) || rsId)
+        // eslint-disable-next-line no-console
+        console.warn('[handleV22IssueBadge] RS-coverage gate failed; issuance rejected.', {
+          targetClaimId,
+          badgeTemplateId,
+          missingRsIds,
+          missingNames,
+        })
+        return
+      }
+    }
     const id = makeArtifactId('badge', `${targetClaimId}-${badgeTemplateId}-${Date.now()}`)
     const issuance = makeBadgeIssuance({
       id,
@@ -3304,8 +3358,9 @@ export default function V2App() {
     setBadgeIssuances((prev) => [...prev, issuance])
     setV22IssueBadgeContext(null)
     // Fire notification on the Claim owner's inbox.
+    // Phase 14.6 (#189): `template` already resolved above for the
+    // RS-coverage gate; reuse it here instead of re-finding.
     const recipientRole = ROLES.find((r) => r.party === recipientParty)
-    const template = badgeTemplates.find((t) => t.id === badgeTemplateId)
     if (recipientRole) {
       enqueueV22NotificationForRequester(recipientRole.id, {
         id: `v22-badge-issued-${id}`,
@@ -3322,7 +3377,7 @@ export default function V2App() {
         date: new Date().toISOString().slice(0, 10),
       })
     }
-  }, [activeRole.party, activeRole.partyDot, badgeTemplates, enqueueV22NotificationForRequester])
+  }, [activeRole.party, activeRole.partyDot, badgeTemplates, publishedRequirementSets, v22Provisionals, enqueueV22NotificationForRequester])
 
   const handleV22RevokeBadge = useCallback((badgeIssuanceId, reason) => {
     let revokedIssuance = null
@@ -6388,6 +6443,26 @@ export default function V2App() {
           const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const targetClaim = (merged.claims || []).find((c) => c.id === v22IssueBadgeContext.targetClaimId)
           if (!targetClaim) return null
+          // Phase 14.6 (#189): RS-coverage data for the picker's
+          // disabled-row gate. Walk active PoEs on this Claim → wrapped
+          // Eval Result → requirementsSets[].id; union into a Set. Build
+          // a Map of every known RS id → display name for tooltip text
+          // when the gate fails.
+          const evalResultsById = new Map((merged.evaluationResults || []).map((er) => [er.id, er]))
+          const targetClaimCoveredRsIds = new Set()
+          for (const poe of (merged.proofsOfEvaluation || [])) {
+            if (poe.status && poe.status !== 'active') continue
+            if (poe.targetClaimId !== targetClaim.id && poe.claimId !== targetClaim.id) continue
+            const wrapped = evalResultsById.get(poe.wrappedEvalResultId)
+            if (!wrapped) continue
+            const rsList = wrapped.requirementsSets
+              || (wrapped.requirementsSet ? [wrapped.requirementsSet] : [])
+            for (const rs of rsList) if (rs?.id) targetClaimCoveredRsIds.add(rs.id)
+          }
+          const requirementSetNameById = new Map()
+          for (const rs of [...(requirementSets || []), ...(publishedRequirementSets || [])]) {
+            if (rs?.id) requirementSetNameById.set(rs.id, rs.name || rs.id)
+          }
           return (
             <IssueBadgeModal
               targetClaim={{
@@ -6397,6 +6472,8 @@ export default function V2App() {
               }}
               activeParty={activeRole.party}
               badgeTemplates={badgeTemplates}
+              coveredRsIds={targetClaimCoveredRsIds}
+              requirementSetNameById={requirementSetNameById}
               onIssue={handleV22IssueBadge}
               onClose={() => setV22IssueBadgeContext(null)}
             />
@@ -7788,6 +7865,12 @@ export default function V2App() {
                   '2-Asset / 2-RS demo scenario: Bob\'s PRM Eval Result references both PRM Datasheet (Asset 1) and PRM Test Report (Asset 2). MIL-PRF requirements anchor in either PDF depending on whether the value is published spec (Datasheet) or measured (Test Report). System Integration requirements anchor in the Datasheet.',
                   'Static rendering only in 15.0 — dots are decorative. Phase 15.1 will wire bidirectional row-click ↔ dot-click interaction; Phase 15.2 will ship the walkthrough markdown + final polish.',
                 ]},
+                { version: '0.14.6', date: '2026-05-07', label: 'Phase 14.6', items: [
+                  '#187: Badge Template Active Issuances rows now display the target Claim label + Owner alongside the issuance date. Phase 14.2\'s data-model migration from `targetPoeId` → `targetClaimId` had left the row rendering on stale field reads in both the BadgesPanel right-panel ViewDetails and the V22BadgeTemplatePanel forward-looking surface; both are now consistent. The BadgesPanel + LibraryModal prop signatures swapped `proofsOfEvaluation` for `allClaims`; V2App\'s LibraryModal mount drops the now-unused `proofsOfEvaluation` pass-through.',
+                  '#188: Badge Template create + new-version forms — RS picker rows in the YOUR REQUIREMENTS SETS section now render the globe icon when the listed RS is also a Published Standard authored by the active actor. Bob (the only role authoring Published Standards in seed) previously saw his published RSes in his own section without any visual indication of their published status; the globe marker resolves this without moving the rows between sections. The fix introduces a `publishedRsIdSet` membership Set built once per render and consulted from `renderRsRow`.',
+                  '#189: IssueBadgeModal picker enforces an RS-coverage gate. Each Badge Template row evaluates whether the target Claim has active Proof-of-Evaluation coverage for every RS in the template\'s `referencedRequirementsSetIds` (exact RS ID match — RS-lineage matching is not used; badges reference frozen RS versions). Templates that fail render greyed-out (opacity 0.45, not-allowed cursor, no hover state) with a hover Tooltip listing missing RS names; SUGGESTED label is suppressed on greyed rows. The no-PoE case (Claim has no PoE at all) renders all templates greyed with a "no Proof of Evaluation" tooltip. Defense-in-depth: `handleV22IssueBadge` re-checks the gate at the data layer and silently rejects with a console warning if bypassed (e.g. via direct state manipulation). The gate honors `mergeProvisionals(seed, v22Provisionals)` so PoEs created during the session count toward coverage immediately.',
+                  'Phase 14.6 is a backtrack ship from Phase 15.6 — closes the badge polish trio that got deprioritized when Phase 15 took over. The footer continues to display `v0.15.9 · Changelog` (NOT rolled back). v0.14.6 is inserted into the Changelog modal in chronological/phase order between v0.15.0 (2026-05-06) and v0.14.5 (2026-05-06).',
+                ]},
                 { version: '0.14.5', date: '2026-05-06', label: 'Phase 14.5', items: [
                   '#176c: Badge chip container visual tuning. Each shield gains a 2px halo stroked in the rectangle\'s exact background color, so adjacent overlapping shields now show the recognizable negative-space cut that reads as the classic overlapping-tokens look. Shields shrink 20px → 18px (size after halo), STEP_IDLE 15 → 12 (more pronounced overlap), STEP_FAN drops to 22 (matches 18 + 4px gap). Container height adjusts 26px → 24px. Shields vertically centered against the rectangle midline. Single-shield case (no overflow): the rectangle becomes a 24×24 square with the lone shield centered both horizontally and vertically. Container background, border, shadow, fan-out animation timing, and tooltip behavior unchanged.',
                 ]},
@@ -8443,10 +8526,6 @@ export default function V2App() {
             publishedRequirementSets={publishedRequirementSets}
             badgeTemplates={badgeTemplates}
             badgeIssuances={badgeIssuances}
-            proofsOfEvaluation={(() => {
-              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
-              return merged.proofsOfEvaluation || []
-            })()}
             allClaims={(() => {
               const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
               return merged.claims || []

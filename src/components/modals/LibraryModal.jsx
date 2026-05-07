@@ -252,8 +252,11 @@ export default function LibraryModal({
   // `activeParty` prop drives the own-vs-other gating in BadgesPanel.
   badgeTemplates = [],
   // Phase 14.1 (#169 part 2): Active Issuances data + handlers.
+  // Phase 14.6 (#187): replaced `proofsOfEvaluation` with `allClaims` —
+  // post-14.2 issuances reference Claims, so the Active Issuances rows
+  // need a Claim-keyed lookup instead of a PoE-keyed one.
   badgeIssuances = [],
-  proofsOfEvaluation = [],
+  allClaims = [],
   onSelectBadgeIssuance,
   onSavePepTemplate,
   onSaveRequirementSet,
@@ -355,7 +358,7 @@ export default function LibraryModal({
             requirementSets={requirementSets}
             publishedRequirementSets={publishedRequirementSets}
             badgeIssuances={badgeIssuances}
-            proofsOfEvaluation={proofsOfEvaluation}
+            allClaims={allClaims}
             onSelectBadgeIssuance={onSelectBadgeIssuance}
             activeParty={activeParty}
             onSave={onSaveBadgeTemplate}

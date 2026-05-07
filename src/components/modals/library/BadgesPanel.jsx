@@ -186,9 +186,12 @@ function TemplateList({ templates, activeParty, selectedId, onSelect }) {
 function ViewDetails({
   template, allRequirementSets, isOwn, isLatest, onNewVersion, onSelectRequirementsSet, onExpand,
   // Phase 14.1 (#169 part 2): Active Issuances populated.
+  // Phase 14.6 (#187): renamed from `poeNameLookup` to `claimNameLookup`
+  // to complete the Phase 14.2 `targetPoeId` → `targetClaimId` migration.
+  // Each entry: `{ name: <claim label>, ownerParty: <claim grantor party> }`.
   activeIssuances = [],
   lineageActiveIssuanceCount = 0,
-  poeNameLookup = {},
+  claimNameLookup = {},
   onSelectBadgeIssuance,
 }) {
   return (
@@ -353,8 +356,14 @@ function ViewDetails({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {activeIssuances.map((b) => {
-            const poeName = poeNameLookup[b.targetPoeId] || b.targetPoeId
-            const recipientParty = poeNameLookup[`__owner__${b.targetPoeId}`] || null
+            // Phase 14.6 (#187): post-14.2 migration. Read targetClaimId
+            // (was targetPoeId) and pull Claim label + ownerParty from
+            // the new claimNameLookup. Falls back to bare id when the
+            // Claim isn't resolvable (defensive — shouldn't happen at
+            // runtime).
+            const lookupEntry = claimNameLookup[b.targetClaimId] || null
+            const claimLabel = lookupEntry?.name || b.targetClaimId
+            const ownerParty = lookupEntry?.ownerParty || null
             const clickable = !!onSelectBadgeIssuance
             return (
               <div
@@ -376,13 +385,13 @@ function ViewDetails({
                 } : undefined}
               >
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {poeName}
+                  {claimLabel}
                 </div>
                 <div style={{
                   fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2,
                   display: 'flex', gap: 6,
                 }}>
-                  {recipientParty && <><span>{recipientParty}</span><span>·</span></>}
+                  {ownerParty && <><span>{ownerParty}</span><span>·</span></>}
                   <span>{(b.createdDate || '').slice(0, 10)}</span>
                 </div>
               </div>
@@ -420,6 +429,17 @@ function EditorForm({
   const externalPublished = useMemo(() => {
     return (publishedRequirementSets || []).filter((p) => !ownRsList.some((o) => o.id === p.id))
   }, [publishedRequirementSets, ownRsList])
+  // Phase 14.6 (#188): membership set for own-RSes that are ALSO in the
+  // Published Standards pool. Used to render the globe icon on own-RS
+  // rows so the user can see at a glance which of their own sets are
+  // also publicly published. Without this, an actor who authors all
+  // Published Standards (e.g. Bob in seed) sees no published-marker on
+  // his own rows because the published copies are filtered out of the
+  // PUBLISHED STANDARDS section by `externalPublished` above.
+  const publishedRsIdSet = useMemo(
+    () => new Set((publishedRequirementSets || []).map((p) => p.id)),
+    [publishedRequirementSets],
+  )
 
   const toggleRs = useCallback((id) => {
     setEditRsIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
@@ -457,7 +477,12 @@ function EditorForm({
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {rs.name}
         </span>
-        {fromSection === 'published' && <GlobeIcon size={11} />}
+        {/* Phase 14.6 (#188): globe icon also renders on own-RS rows
+            whose RS is in the Published Standards pool. Lets the user
+            see at a glance which of their own sets are publicly
+            published — previously only the dedicated PUBLISHED
+            STANDARDS section showed the marker. */}
+        {(fromSection === 'published' || (fromSection === 'own' && publishedRsIdSet.has(rs.id))) && <GlobeIcon size={11} />}
         <span style={{
           fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
           padding: '1px 5px', borderRadius: 3, flexShrink: 0,
@@ -609,8 +634,10 @@ export default function BadgesPanel({
   onSave,
   initialSelectedId = null,
   // Phase 14.1 (#169 part 2): Active Issuances data + handlers.
+  // Phase 14.6 (#187): replaced `proofsOfEvaluation` with `allClaims` to
+  // complete the Phase 14.2 migration — issuances reference Claims now.
   badgeIssuances = [],
-  proofsOfEvaluation = [],
+  allClaims = [],
   onSelectBadgeIssuance,
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId)
@@ -746,10 +773,15 @@ export default function BadgesPanel({
     const lineageActiveIssuanceCount = badgeIssuances.filter((b) =>
       b.status === 'active' && lineageVersionIds.has(b.badgeTemplateId),
     ).length
-    const poeNameLookup = {}
-    for (const p of proofsOfEvaluation) {
-      poeNameLookup[p.id] = p.name
-      poeNameLookup[`__owner__${p.id}`] = p.owner || p.ownerParty
+    // Phase 14.6 (#187): build a Claim-keyed lookup for the Active
+    // Issuances rows. Each entry carries the Claim's display name + its
+    // owner party (which is the badge recipient — the Claim grantor).
+    const claimNameLookup = {}
+    for (const c of allClaims) {
+      claimNameLookup[c.id] = {
+        name: c.name,
+        ownerParty: c.owner || c.ownerParty,
+      }
     }
     rightContent = (
       <ViewDetails
@@ -764,7 +796,7 @@ export default function BadgesPanel({
         onExpand={() => setExpandedOpen(true)}
         activeIssuances={activeIssuances}
         lineageActiveIssuanceCount={lineageActiveIssuanceCount}
-        poeNameLookup={poeNameLookup}
+        claimNameLookup={claimNameLookup}
         onSelectBadgeIssuance={onSelectBadgeIssuance}
       />
     )
