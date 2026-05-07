@@ -18,14 +18,15 @@
 //   - public/seed-pdfs/microco-prm-test-report.pdf
 //   - public/seed-pdfs/microco-vreg-datasheet.pdf
 //   - public/seed-pdfs/microco-vreg-test-report.pdf       (Phase 15.3)
-//   - public/seed-pdfs/microco-vreg-compliance-notes.pdf  (Phase 15.3)
 //   - src/v2/data/evidenceAnchors.js  (generated; do not hand-edit)
 //
 // Phase 15.3 extension: a page spec may carry `paragraphs: [string, ...]`
 // instead of (or in addition to) `sections[]`. Paragraph pages render
-// flowing prose with no row-based anchor capture — used for the new
-// compliance-notes Asset which exists purely to satisfy the
-// `hasNewAssetsForRerun` gate during the demo amend prerequisite.
+// flowing prose with no row-based anchor capture. (The compliance-notes
+// Asset that originally motivated this affordance was retired in 15.4
+// when the Re-Run demo path was redesigned to use the Test Report Asset
+// directly. The paragraphs[] hook stays on the generator for future
+// documentation-style PDFs.)
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -351,31 +352,10 @@ const PDF_SPECS = [
       },
     ],
   },
-  // Phase 15.3: VReg Compliance Notes — the prerequisite Asset Alice
-  // attaches during the Re-Run demo flow. Pure documentation; no anchored
-  // requirements (paragraph-only page spec).
-  {
-    filename: 'microco-vreg-compliance-notes.pdf',
-    ownerParty: 'MicroCo',
-    accentColor: COLOR_MICROCO,
-    docType: 'VReg-12C · Compliance Documentation',
-    revision: 'Rev 1.0',
-    generated: '2026-02-20',
-    description: 'Supplementary compliance program documentation accompanying the VReg-12C release. References supplier quality, test methodology, and regulatory program status.',
-    pages: [
-      {
-        title: 'Compliance Program Status',
-        intro: 'This memo summarizes the VReg-12C compliance program as of the issue date. Supersedes prior supplier-quality letters Q-2025-187 and Q-2026-012.',
-        paragraphs: [
-          'MicroCo maintains an AS9100D-aligned quality management system covering the VReg-12C IC design, fabrication, and qualification flow. The supplier-quality program is independently audited annually; the most recent audit (2026-01-22) closed without findings.',
-          'All VReg-12C lots issued under Rev 1.2 of the datasheet have been qualified to MIL-STD-883 Class B requirements. Test reports are archived per QMS procedure QP-014 with retention through 2046.',
-          'Export-control classification (ITAR Category XV, §121.1) was verified against the VReg-12C BOM and design files by an independent export-control review on 2026-02-18. The review report is available on request to authorized parties.',
-          'Radiation-effects program: Total Ionizing Dose (TID) qualification was performed per MIL-STD-883 Method 1019 in Q4 2025. Single-Event Effects (SEE) characterization is in progress and will be issued as a supplementary report under document number TR-VReg-SEE-001.',
-          'Supplier of record: MicroCo Semiconductor Division, San Jose, CA. CAGE Code 8H247. Authorized point of contact: VReg compliance program lead, available via the MicroCo customer portal.',
-        ],
-      },
-    ],
-  },
+  // Phase 15.4: Compliance Notes spec entry retired (Re-Run demo path
+  // redesigned to use Test Report Asset directly). The paragraphs[]
+  // page-spec affordance added for that PDF is preserved on the
+  // generator for future documentation-style PDFs.
   {
     filename: 'microco-vreg-datasheet.pdf',
     ownerParty: 'MicroCo',

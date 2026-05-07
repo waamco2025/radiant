@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.6 &middot; Changelog
+          v0.15.7 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.7', date: '2026-05-07', label: 'Phase 15.4', items: [
+                  'Re-Run demo seed corrected. Phase 15.3 over-eagerly attached the Test Report Asset to the VReg Claim from initial seed AND added a separate Compliance Notes Asset for the amend prerequisite — that conflated the demo goals (VReg Expand modal stayed multi-Asset; the amend prereq used a different Asset; PRM was supposed to be the canonical multi-Asset Expand surface). Phase 15.4 reverts: VReg Claim initial seed back to single-Asset (Datasheet only); VReg Eval Result Expand modal shows Asset 1 of 1 again. PRM remains the canonical multi-Asset Expand modal demo path.',
+                  'Compliance Notes Asset retired entirely. The amend prereq uses Test Report directly — Alice attaches the Test Report (now the single floating VReg Asset in her inventory) which both satisfies the `hasNewAssetsForRerun` gate AND, via a deliberate seed demo trick, displays annotation markers in Bob\'s subsequent re-run accordion.',
+                  'Demo trick: erBobVreg chain-head\'s `evidenceUsed` reverts to single-Asset (Datasheet only — what was actually evaluated at chain-head time), but its `evidenceAnchors[]` arrays intentionally retain references to BOTH Datasheet and Test Report. In production this would be a data inconsistency (anchors shouldn\'t reference Assets outside `evidenceUsed`); for prototype demo purposes the inconsistency is accepted because it enables the amend-then-rerun-with-annotations demo path. Inline comment block in `v2_2Data.js` flags the trick; CLAUDE-phase-log.md Phase 15.4 notes document the rationale.',
+                  '`daAliceToBobVreg` Disclosure Agreement scope reverts to single-Asset (Datasheet only) — Alice extends the DA scope as part of the same amend prereq step that attaches the Test Report.',
+                  'PDF generator script: `microco-vreg-compliance-notes.pdf` spec entry retired (paragraphs[] page-spec affordance preserved on the generator for future documentation-style PDFs). The PDF file deleted from `public/seed-pdfs/`. evidenceAnchors.js regenerated without the Compliance Notes entry.',
+                  'PDF value parity verified: microco-vreg-test-report.pdf already shipped Phase 15.3 with `TID > 100 krad(Si)` for req-004 (matches the chain-head\'s SAT value). The Phase 15.4 brief flagged a "TID ~ 80 krad(Si)" mismatch — that string lives only in the VReg Datasheet PDF (which represents the published spec) and the V1 superseded Eval Result\'s value (which the evaluator originally measured before re-running). The chain-head Eval Result and the Test Report PDF are at parity.',
+                  'Walkthrough doc Section 2 reverts to single-Asset VReg Expand. Section 5a names "Voltage Regulator IC Test Report" as the amend candidate with the demo-trick rationale. Section 5b describes a 2-Asset accordion (Datasheet + Test Report, both annotated). Compliance Notes references removed throughout.',
+                ]},
                 { version: '0.15.6', date: '2026-05-07', label: 'Phase 15.3', items: [
                   'Re-Run flow demo enhanced — VReg Claim now seeded with TWO pre-existing Assets (Datasheet + Test Report), both anchored against the chain-head Eval Result so opening the Re-Run flow shows annotations across multiple pre-existing PDFs instead of just one. The chain-head erBobVreg now carries `evidenceAnchors: [datasheet, testreport]` (2 entries per row) for all five MIL-PRF-55681 v1 requirements; values authored to match the seed exactly so PDF text and seed values stay in sync.',
                   'Phase 15.0 PDF generator script extended with a third PDF spec (`microco-vreg-test-report.pdf`) plus a new optional `paragraphs[]` page-spec field for documentation Assets that don\'t host anchored requirements. `evidenceAnchors.js` regenerates with anchors for the test report\'s req-001 through req-005.',

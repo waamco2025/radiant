@@ -169,12 +169,6 @@ export const PDF_FILES = {
     "ownerParty": "MicroCo",
     "pages": 2
   },
-  "microco-vreg-compliance-notes.pdf": {
-    "size": 2408,
-    "hash": "sha256:fa752932b1bb5325",
-    "ownerParty": "MicroCo",
-    "pages": 1
-  },
   "microco-vreg-datasheet.pdf": {
     "size": 2612,
     "hash": "sha256:c2f9e90f6d315a8d",

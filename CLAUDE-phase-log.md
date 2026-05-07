@@ -2673,6 +2673,40 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 15.4 completion notes (2026-05-07) — Re-Run Demo Seed Correction + PDF Value Parity
+
+Two corrections from Phase 15.3 QA. The 15.3 ship conflated two separate demo goals (VReg Expand modal multi-Asset vs. amend-then-rerun multi-Asset) and added a Compliance Notes Asset that wasn't strictly needed.
+
+**Step 1-2 — Seed structure corrected.** The 15.3 ship pre-attached `aVregTestReport` to `cVreg.referencedAssetIds` AND extended `daAliceToBobVreg.scope.assetIds` to include both Datasheet + Test Report at initial seed time. That left VReg's Expand modal showing `Asset 1 of 2` from first boot — duplicating PRM's multi-Asset role. Phase 15.4 reverts both to single-Asset initial seed:
+
+- `cVreg.referencedAssetIds`: `[aVregDatasheet.id, aVregTestReport.id]` → `[aVregDatasheet.id]`.
+- `daAliceToBobVreg.scope.assetIds`: `[aVregDatasheet.id, aVregTestReport.id]` → `[aVregDatasheet.id]`.
+
+PRM remains the canonical multi-Asset Expand modal demo. VReg's Expand modal goes back to `Asset 1 of 1` (single-Asset, no switcher arrows). The Test Report Asset stays defined and stays in the global `assets` array — but now it's Alice-owned-but-unattached, surfacing in her amend Asset picker as the named candidate for the Re-Run prereq.
+
+**Step 3 — Demo trick: anchors reference an Asset outside evidenceUsed.** `erBobVreg.evidenceUsed` reverts to `[aVregDatasheet.id]` — reflecting what was actually evaluated at chain-head time. But its `results[].evidenceAnchors[]` arrays deliberately RETAIN both Datasheet and Test Report references (each row has 2 anchor entries — one per Asset). When Alice attaches the Test Report during the amend prereq, Bob's subsequent Re-Run accordion shows the Test Report with annotations rendered against those pre-stamped anchors.
+
+In production this is a data inconsistency — anchors shouldn't reference Assets outside `evidenceUsed`. For prototype demo purposes the inconsistency is accepted because it enables the amend-then-rerun-with-annotations narrative without requiring a contrived prior eval that already used the Test Report. An inline comment block in `v2_2Data.js` immediately above the chain-head's `results[]` array flags the trick. The architecture spec §17.5 changelog documents the prototype convention.
+
+**Step 4 — Compliance Notes Asset retired.** The 15.3 ship added `aVregComplianceNotes` (Alice-owned, unattached, paragraph-only PDF) specifically as the amend-prereq candidate. With Step 3's demo trick, Test Report serves both as the prereq Asset AND as the multi-Asset annotation target — Compliance Notes is no longer needed:
+
+- `aVregComplianceNotes` Asset definition deleted from `v2_2Data.js`.
+- `microco-vreg-compliance-notes.pdf` deleted from `public/seed-pdfs/` (was Phase 15.3 generated).
+- `microco-vreg-compliance-notes.pdf` spec entry removed from `scripts/generate-seed-pdfs.mjs` PDF_SPECS array (the `paragraphs[]` page-spec affordance added to support that PDF stays on the generator for future documentation-style PDFs).
+- `evidenceAnchors.js` regenerated without the Compliance Notes entry. PDF_FILES no longer carries a Compliance Notes record, so the deleted Asset definition's `PDF_FILES['microco-vreg-compliance-notes.pdf']` references would now throw — but since the Asset definition is also deleted, no consumer references the missing key.
+
+**Step 5 — PDF value parity flagged-but-already-correct.** The 15.4 brief flagged a Radiation tolerance value parity issue — "TID ~ 80 krad(Si)" in the test report would be UNSAT against the seed's "TID > 100 krad(Si)" SAT chain-head value. Verified at the script source: `microco-vreg-test-report.pdf` req-004 was already shipped Phase 15.3 with `'TID > 100 krad(Si)'`. The "TID ~ 80 krad(Si)" string lives in two other places and both are correct: the VReg Datasheet PDF (`microco-vreg-datasheet.pdf` req-004 — represents the published spec) and `erBobVregV1`'s value (the V1 superseded Eval Result that recorded `'TID ~ 80 krad(Si)'` with `unsatisfactory` status before the test campaign was rerun and the chain head landed `'TID > 100 krad(Si)'` SAT). No changes needed. Script regenerated all PDFs anyway to ensure deterministic state after the Compliance Notes spec removal — sha256 hashes for the three retained PDFs match prior bytes (`microco-prm-datasheet.pdf` 3c7124fab824bf5f, `microco-prm-test-report.pdf` f65f47b347a4cad1, `microco-vreg-datasheet.pdf` c2f9e90f6d315a8d) confirming determinism.
+
+**Walkthrough doc updated.** Section 2 (VReg Eval Result Expand) reverts to single-Asset prose (was multi-Asset in 15.3). At-a-glance scenario table row 2 reverts to "Single-Asset, single-RS, full chain head"; row 4 description updated to "Amend-then-rerun-with-annotations on a newly-attached Asset". Section 5a names "Voltage Regulator IC Test Report" as the canonical amend candidate with the demo-trick rationale ("anchors reference an Asset outside evidenceUsed — accepted for prototype demo purposes"). Section 5b describes a 2-Asset accordion (Datasheet + Test Report, both with annotation markers) — Compliance Notes references removed.
+
+**Footer v0.15.6 → v0.15.7.** Architecture spec §17.5 changelog gains a 15.4 bullet documenting the prior-eval-anchors-may-reference-non-evidenceUsed-Assets prototype convention. polish-backlog Update Log entry. CLAUDE.md "Current state of the world" updated.
+
+**Runtime verification.** Manual user-path walkthrough required: Bob → VReg latest Eval Result → Expand → Output → confirm `Asset 1 of 1`, no arrows, only Datasheet visible. Switch to Alice → amend VReg Claim → confirm Test Report appears in the picker (single VReg candidate now that Compliance Notes is gone). Save. Switch back to Bob → re-run → Step 2 → confirm 2-Asset accordion (Datasheet + Test Report) both with annotation markers.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 15.3 completion notes (2026-05-07) — Re-Run Demo Seed Enhancement + EVIDENCE Rename Followup
 
 Two corrections from Phase 15.2 QA. Closes demo gaps in the #172 PDF annotation arc.
