@@ -403,7 +403,10 @@ function EvalResultsTable({
         const ordinalKey = `${r.requirementsSetId || ''}|${r.requirementId || ''}`
         const rowOrdinal = (rowOrdinalById && rowOrdinalById[ordinalKey])
           ?? (i + 1)
-        const indicatorLabel = `${assetOrdinal ?? '?'}.${rowOrdinal}`
+        // Phase 15.1.1: drop the `{assetOrdinal}.` prefix — the row's
+        // number is stable across Asset switches; RS color distinguishes
+        // RS membership.
+        const indicatorLabel = `${rowOrdinal}`
         return (
         <div
           key={rowKey}
@@ -426,7 +429,9 @@ function EvalResultsTable({
                   aria-label={`Highlight evidence ${indicatorLabel}`}
                   onClick={() => onAnchorClick(primaryAnchor)}
                   style={{
-                    width: 22, height: 22, borderRadius: '50%',
+                    // Phase 15.1.1: rounded rectangle (was 22px circle)
+                    // matching the PDF dot shape language.
+                    width: 28, height: 20, borderRadius: 6,
                     background: color,
                     border: '2px solid #fff',
                     boxShadow: isRowHighlighted
@@ -443,7 +448,7 @@ function EvalResultsTable({
               ) : (
                 // No anchors for this row (e.g., status `missing`) —
                 // empty space holds the column width.
-                <span style={{ width: 22, height: 22 }} />
+                <span style={{ width: 28, height: 20 }} />
               )}
             </div>
           )}
@@ -577,26 +582,20 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
 
   return (
     <LayeredOutputContainer>
-      {/* Header: name + aggregate + minibar + date + evaluator */}
+      {/* Phase 15.1.1: thin header band — name (left) + dates (right).
+          The minibar + aggregate counts + Download button moved INTO
+          the right panel's top section. */}
       <div style={{
-        padding: '14px 16px', background: 'var(--bg-deep)',
+        padding: '12px 16px', background: 'var(--bg-deep)',
         border: '1px solid var(--border)', borderRadius: 6,
-        display: 'flex', flexDirection: 'column', gap: 12,
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        gap: 16, flexWrap: 'wrap',
       }}>
-        <div style={{
-          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>
-            {evalResult.name || evalResult.id}
-          </div>
-          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
-            {totals.sat} SAT · {totals.unsat} UNSAT · {totals.missing} MISSING
-            {' · across '}{rsCount} Requirements Set{rsCount === 1 ? '' : 's'}
-          </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
+          {evalResult.name || evalResult.id}
         </div>
-        <MinibarBlock totals={totals} />
         <div style={{
-          display: 'flex', gap: 18, fontSize: 11, color: 'var(--text-secondary)',
+          display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-secondary)',
           flexWrap: 'wrap',
         }}>
           <span>
@@ -705,7 +704,11 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             />
           </div>
         )}
-        {/* Right column — per-RS results sections */}
+        {/* Right column — title bar + healthbar/download + per-RS results.
+            Phase 15.1.1: title bar matches left panel's EVIDENCE strip;
+            healthbar + Download button now live here (was in the
+            full-width header above). Amber accent kept for both strips
+            so they read as a paired "evidence ↔ results" header row. */}
         <div
           ref={tableScrollContainerRef}
           style={{
@@ -713,6 +716,45 @@ function EvalResultOutputBody({ evalResult, evidenceAssets = [] }) {
             minWidth: 0,
           }}
         >
+          {/* Title bar — analog to the EVIDENCE strip on the left. */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px', borderRadius: 4,
+            background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+          }}>
+            <span style={{
+              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em',
+              color: 'var(--accent-amber)',
+              background: 'color-mix(in srgb, var(--accent-amber) 14%, transparent)',
+            }}>EVALUATION RESULTS</span>
+            <span style={{
+              flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {evalResult.name || evalResult.id}
+            </span>
+          </div>
+
+          {/* Healthbar block + Download button. */}
+          <div style={{
+            padding: '12px 14px', background: 'var(--bg-deep)',
+            border: '1px solid var(--border)', borderRadius: 6,
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 10, flexWrap: 'wrap',
+            }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>
+                {totals.sat} SAT · {totals.unsat} UNSAT · {totals.missing} MISSING
+                {' · across '}{rsCount} Requirements Set{rsCount === 1 ? '' : 's'}
+              </div>
+              <DownloadButton />
+            </div>
+            <MinibarBlock totals={totals} />
+          </div>
+
           {rsList.map((rs) => {
             const rsRows = allRows.filter((r) => (r.requirementsSetId || rsList[0]?.id) === rs.id)
             const renderable = rsRows.filter((r) => r.status !== 'na').length
@@ -1456,9 +1498,12 @@ export default function ExpandedArtifactModal({
 
         <TabBar active={tab} onChange={setTab} />
 
-        {/* Tab content */}
+        {/* Tab content. Phase 15.1.1: suppress the global Download header
+            for eval-output / poe Output tabs — the right panel hosts
+            its own contextual Download button instead. JSON tab keeps
+            the global Download for all schemas. */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px 24px' }}>
-          <TabHeaderActions />
+          {!(tab === 'output' && (schema === 'eval-output' || schema === 'poe')) && <TabHeaderActions />}
           {tab === 'output' && outputBody}
           {tab === 'json' && (
             <pre style={{

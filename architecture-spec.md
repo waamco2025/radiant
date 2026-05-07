@@ -1409,7 +1409,7 @@ via iframe. The opt-in default preserves every existing call site.
 Empty `evidenceAnchors: []` is valid (some rows — e.g. status `missing`
 or `na` — have no PDF-anchorable evidence by definition).
 
-### Annotation visual model (Phase 15.1)
+### Annotation visual model (Phase 15.1, refined Phase 15.1.1)
 
 Each evidence anchor renders TWO visual elements over the PDF canvas:
 
@@ -1419,20 +1419,24 @@ Each evidence anchor renders TWO visual elements over the PDF canvas:
    RS color at 15% opacity (`color-mix(in srgb, <RS color> 15%,
    transparent)`); pointer-events: none.
 2. **Numbered indicator** placed immediately to the LEFT of the
-   highlight rect. 26px circle, RS color background, 2px white border,
-   12px mono bold label `{assetOrdinal}.{rowOrdinal}`. Vertically
-   centered on the rect's mid-line. Clamps to `left: 4` if naturally
-   negative (anchor near left page edge). Click target.
+   highlight rect. **Phase 15.1.1: rounded rectangle 32×22, border-
+   radius 6** (was a 26px circle in 15.1). RS color background, 2px
+   white border, 12px mono bold label `{rowOrdinal}` (was
+   `{assetOrdinal}.{rowOrdinal}` in 15.1). Vertically centered on the
+   rect's mid-line. Clamps to `left: 4` if naturally negative (anchor
+   near left page edge). Click target.
 
 When `highlightedAnchorId` matches an anchor, the highlight rect bumps
 to 30% opacity and the indicator gains a 3px ring in the RS color
 outside its 2px white border (`boxShadow: 0 1px 4px rgba(0,0,0,0.5),
 0 0 0 3px <RS color>`).
 
-`assetOrdinal` is the 1-indexed Asset position within the parent
-Claim's `referencedAssetIds[]` (or, for the eval flow, within the
-in-scope `evidenceAssets`). `rowOrdinal` is the 1-indexed row position
-within its Requirements Set's row sequence.
+`rowOrdinal` is the 1-indexed row position within its Requirements
+Set's row sequence — stable across Asset switches. RS color coding
+distinguishes which Requirements Set a row belongs to. The
+`assetOrdinal` prop on `AnnotatedPdfViewer` is preserved in the API
+for future compound-label scenarios but no longer renders in the
+label as of 15.1.1.
 
 Per-Requirements-Set color coding via `getRsColor(rsId)` (`src/v2/data/
 rsColors.js`). Same RS resolves to the same color across all Assets;
@@ -1613,6 +1617,7 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§17.5 — Phase 15.1.1:** Annotation labels simplified to `{rowOrdinal}` (per-RS, 1-indexed; was `{assetOrdinal}.{rowOrdinal}` in 15.1) — the row's number is stable across Asset switches, RS color coding distinguishes RS membership. Annotation shape: rounded rectangle 32×22 with `borderRadius: 6` (was 26px circle). Right-panel row indicators + Run Evaluation review-row indicators picked up the rounded-rectangle treatment at 28×20 to match the shape language at slightly tighter scale. Eval Result Expand modal Output tab layout reorganized: healthbar (SAT/UNSAT/MISSING minibar + aggregate count) and Download button moved out of the full-width header into the right panel's top section; the thin header band above the side-by-side row keeps only the Eval Result name + Evaluated date + Evaluator. Right panel gains a new "EVALUATION RESULTS" title bar mirroring the left panel's "EVIDENCE" strip (amber accent, same height + padding). Same layout reorganization applies to PoE Expand modal Section 1 automatically (it calls `<EvalResultOutputBody>`). Global `<TabHeaderActions>` Download button suppressed on the Output tab for `eval-output` and `poe` schemas — the right-panel Download is the canonical export trigger for those schemas; JSON tab keeps the global Download for all schemas. The `assetOrdinal` prop on `AnnotatedPdfViewer` preserved in the API but no longer renders in the label.
 - **§17.5 — Phase 15.1 (#172 part 2):** Annotation visual redesigned — each anchor now renders a translucent highlight rectangle (RS color, 15% opacity) over the cited text + a numbered indicator (26px circle, 12px mono bold label) immediately to the LEFT of the rect (clamped to `left: 4` if naturally negative). Highlighted state: rect bumps to 30% opacity, indicator gains `0 0 0 3px <RS color>` outside its 2px white border, results-table row tints at 8% RS color. Side-by-side layout for Expand modal Output tab (eval-output + poe schemas): 60/40 grid (PDF-favored), sticky left, vertical-stack fallback below 900px viewport. Per-RS results tables gain a 38px indicator column on the left of each row; rows with empty `evidenceAnchors[]` get an empty slot. Bidirectional row↔dot interaction with auto-flip Asset switcher on cross-Asset clicks: row click → setHighlightedAnchorId + setCurrentAssetIndex (if cross-Asset) → AnnotatedPdfViewer's `key={displayAsset.id}` forces a fresh PDF mount → next-frame `scrollIntoView` lands the user at the highlighted dot. Dot click is the inverse direction. Same interaction wired to V22RunEvaluationModal Step 2/3 review surface (accordion's expanded Asset is the auto-flip target). New `src/v2/data/anchorIds.js` utility synthesizes stable IDs `{sourceAssetId}|{requirementsSetId}|{requirementId}|{page}|{x}|{y}` shared between dot + row consumers. Implementation note: row anchors must be enriched with `(requirementsSetId, requirementId, label, value)` from the row at synthesis time — the seed anchor only carries `(sourceAssetId, page, x, y, w, h)`, so without enrichment the synthesized ID would have empty `||` fields and not match the PDF-side ID.
 - **§17.5 — Phase 15.0.1 (annotation rendering hotfix):** `makeEvaluationResult` factory in `src/v2/v2_2Data.js` silently dropped `evidenceAnchors` from each result row's `results.map((r) => ({ … }))` projection. The Phase 15.0 seed authoring populated `evidenceAnchors: [...]` correctly on every row, but the factory's explicit field-preserve list excluded it; result rows reaching the consumer showed zero anchors and the overlay layer rendered nothing. Factory now preserves `evidenceAnchors`, cloned per-anchor for safety. AnnotatedPdfViewer also gains fit-to-width — render scale derived from the host container's `clientWidth` at load time (capped 1.6× base scale) so PDFs no longer force horizontal scroll inside narrow modal columns. EvalResultOutputBody gains a minimal multi-Asset switcher (Previous/Next arrows + per-Asset render via `key={displayAsset.id}`) — Phase 15.1 will add auto-flip on dot click. New `docs/PHASE-15-DEMO-SCENARIOS.md` captures the four QA scenarios.
 - **§Workflow lessons — Phase 15.0.1:** Runtime probes verify components, not integration. Phase 15.0 shipped with `<AnnotatedPdfViewer>` standalone-tested via dynamic import + mocked anchors — both PDFs rendered, both dots positioned correctly. But the actual user path (open Detail Panel → click Expand → Output tab) was never exercised end-to-end with seed data. The factory bug surfaced on the very first such walkthrough during 15.0.1 diagnosis. Going forward, any phase that touches a shared seed factory should add an explicit user-path walkthrough verification step before declaring complete: drive the actual UI flow that consumes the factory output, screenshot the expected outcome, confirm visually.

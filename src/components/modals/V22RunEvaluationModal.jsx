@@ -181,15 +181,17 @@ function ReviewRow({
         transition: 'background 120ms',
       }}
     >
-      {/* Indicator slot (always renders the column for layout stability). */}
-      <div style={{ width: 28, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 2 }}>
+      {/* Indicator slot (always renders the column for layout stability).
+          Phase 15.1.1: rounded rectangle (was 22px circle) matching the
+          PDF dot shape language. */}
+      <div style={{ width: 32, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 2 }}>
         {anchor && onAnchorClick ? (
           <button
             type="button"
             aria-label={`Highlight evidence ${anchorLabel}`}
             onClick={() => onAnchorClick(anchor)}
             style={{
-              width: 22, height: 22, borderRadius: '50%',
+              width: 28, height: 20, borderRadius: 6,
               background: anchorColor || 'var(--accent-indigo)',
               border: '2px solid #fff',
               boxShadow: highlighted
@@ -204,7 +206,7 @@ function ReviewRow({
             }}
           >{anchorLabel}</button>
         ) : (
-          <span style={{ width: 22, height: 22 }} />
+          <span style={{ width: 28, height: 20 }} />
         )}
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1380,9 +1382,12 @@ export default function V22RunEvaluationModal({
                             ? `${enriched.sourceAssetId}|${enriched.requirementsSetId}|${enriched.requirementId}|${enriched.page}|${Math.round(enriched.x)}|${Math.round(enriched.y)}`
                             : null
                           // Compute rowOrdinal within this RS for the label.
+                          // Phase 15.1.1: drop the `{assetOrdinal}.`
+                          // prefix — label is `{rowOrdinal}` only, stable
+                          // across Asset switches; RS color distinguishes
+                          // RS membership.
                           const ord = i + 1
-                          const ordinalNum = assetOrdinalById.get(enriched?.sourceAssetId) || null
-                          const anchorLabel = (enriched && ordinalNum) ? `${ordinalNum}.${ord}` : null
+                          const anchorLabel = enriched ? `${ord}` : null
                           const anchorColor = enriched ? (rsColorByRsId[rsId] || 'var(--accent-indigo)') : null
                           return (
                             <ReviewRow

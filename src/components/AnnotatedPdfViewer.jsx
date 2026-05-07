@@ -9,8 +9,7 @@
 //   • Each anchor renders TWO visual elements: a highlight rectangle
 //     drawn over the cited text (RS color at 15% opacity; bumps to 30%
 //     when highlighted) + a numbered indicator placed immediately to
-//     the LEFT of the highlight rect (26px circle, RS color, 12px mono
-//     bold label).
+//     the LEFT of the highlight rect.
 //   • Indicators are click targets — clicking fires `onAnchorClick`
 //     with the synthesized anchor ID so the consumer can highlight the
 //     matching results row.
@@ -18,6 +17,18 @@
 //     3px ring in the RS color, highlight rect bumps to 30% opacity.
 //   • When `highlightedAnchorId` changes, the viewer scrolls the
 //     matching dot into view (smooth, block: 'center').
+//
+// Phase 15.1.1 — annotation label + shape refinements:
+//   • Label scheme dropped the `{assetOrdinal}.` prefix; indicators now
+//     show only `{rowOrdinal}` (per-RS, 1-indexed). Same row keeps the
+//     same number across Asset switches; RS color coding distinguishes
+//     RS membership.
+//   • Indicator shape: rounded rectangle (32×22, borderRadius 6)
+//     instead of a 26px circle. Wider footprint accommodates 2-digit
+//     row ordinals if RSes ever exceed 9 rows.
+//   • `assetOrdinal` prop preserved in the API but no longer renders
+//     in the label — reserved for future compound-label scenarios
+//     (multi-Asset disambiguation tooltips, etc.).
 //
 // Implementation note (15.0 — preserved): cleanup deliberately does NOT
 // destroy the PDF doc or cancel render tasks. Under React StrictMode the
@@ -40,8 +51,10 @@ import { synthesizeAnchorId } from '../v2/data/anchorIds.js'
 const SCALE_CAP = 1.6
 const HOST_HORIZONTAL_PADDING = 28
 
-// Phase 15.1: indicator sizing.
-const INDICATOR_SIZE = 26      // px diameter of the numbered circle
+// Phase 15.1.1: indicator sizing — rounded rectangle (was 26px circle).
+const INDICATOR_WIDTH = 32     // px width of the numbered rounded rectangle
+const INDICATOR_HEIGHT = 22    // px height of the numbered rounded rectangle
+const INDICATOR_RADIUS = 6     // px border-radius (rounded but not pill-shaped)
 const INDICATOR_GAP = 6        // px between indicator's right edge and highlight rect's left edge
 const INDICATOR_LEFT_CLAMP = 4 // minimum left offset within page wrapper
 
@@ -243,7 +256,9 @@ function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdina
         const anchorId = synthesizeAnchorId(anchor)
         const isHighlighted = anchorId === highlightedAnchorId
         const color = rsColorByRsId[anchor.requirementsSetId] || 'var(--accent-indigo)'
-        const label = `${assetOrdinal ?? '?'}.${anchor.rowOrdinal ?? '?'}`
+        // Phase 15.1.1: label is `{rowOrdinal}` only — per-RS, stable
+        // across Asset switches. RS color distinguishes RS membership.
+        const label = `${anchor.rowOrdinal ?? '?'}`
 
         // PDF coords are bottom-left origin; canvas coords top-left.
         // The rect spans (x, y) to (x+w, y+h) in PDF space; flip Y by
@@ -269,20 +284,21 @@ function AnnotationLayer({ containerRef, pageMetrics, anchorsByPage, assetOrdina
         rect.style.zIndex = '1'
         overlay.appendChild(rect)
 
-        // Indicator — 26px circle to the LEFT of the rect. Vertically
-        // centered on the rect's mid-line. Clamps to INDICATOR_LEFT_CLAMP
-        // when the natural position would push it offscreen-left.
-        const indicatorTop = rectTop + rectHeight / 2 - INDICATOR_SIZE / 2
-        const naturalLeft = rectLeft - INDICATOR_SIZE - INDICATOR_GAP
+        // Phase 15.1.1: rounded-rectangle indicator (32×22, radius 6) to
+        // the LEFT of the rect. Vertically centered on the rect's
+        // mid-line. Clamps to INDICATOR_LEFT_CLAMP when the natural
+        // position would push it offscreen-left.
+        const indicatorTop = rectTop + rectHeight / 2 - INDICATOR_HEIGHT / 2
+        const naturalLeft = rectLeft - INDICATOR_WIDTH - INDICATOR_GAP
         const indicatorLeft = Math.max(INDICATOR_LEFT_CLAMP, naturalLeft)
 
         const indicator = document.createElement('div')
         indicator.style.position = 'absolute'
         indicator.style.left = `${indicatorLeft}px`
         indicator.style.top = `${indicatorTop}px`
-        indicator.style.width = `${INDICATOR_SIZE}px`
-        indicator.style.height = `${INDICATOR_SIZE}px`
-        indicator.style.borderRadius = '50%'
+        indicator.style.width = `${INDICATOR_WIDTH}px`
+        indicator.style.height = `${INDICATOR_HEIGHT}px`
+        indicator.style.borderRadius = `${INDICATOR_RADIUS}px`
         indicator.style.background = color
         indicator.style.border = '2px solid #fff'
         // Highlighted state: stack a 3px RS-color ring outside the white

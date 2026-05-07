@@ -7661,7 +7661,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.2 &middot; Changelog
+          v0.15.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7708,6 +7708,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.15.3', date: '2026-05-07', label: 'Phase 15.1.1', items: [
+                  'Annotation labels simplified — dropped the `{assetOrdinal}.` prefix; PDF dots, right-panel row indicators, and Run Evaluation review rows now show only `{rowOrdinal}` (per-Requirements-Set, 1-indexed). Same row keeps the same number across Asset switches; RS color coding distinguishes RS membership. The `assetOrdinal` prop is preserved on `AnnotatedPdfViewer` for future compound-label scenarios but no longer renders in the label.',
+                  'Annotation shape — rounded rectangles (32×22, borderRadius 6) replace the 26px circles in the PDF overlay. Right-panel row indicators and Run Evaluation review-row indicators follow suit at 28×20 to match the shape language at slightly tighter scale.',
+                  'Eval Result Expand modal Output tab layout reorganized — the healthbar (SAT/UNSAT/MISSING minibar + aggregate count) and the Download button moved out of the full-width header into the right panel\'s top section. The thin header band above the side-by-side row now contains only the Eval Result name + Evaluated date + Evaluator.',
+                  'Right-panel title bar — new "EVALUATION RESULTS" strip mirrors the left panel\'s "EVIDENCE" strip (amber accent, same height + padding, eval result name in place of the Asset filename). Strips read as a paired header row across the side-by-side layout.',
+                  'PoE Expand modal Section 1 (the wrapped Eval Result rendering) inherits the same layout reorganization automatically — Section 1 calls `<EvalResultOutputBody>` which now embeds the right-panel title bar + healthbar + Download.',
+                ]},
                 { version: '0.15.2', date: '2026-05-07', label: 'Phase 15.1', items: [
                   '#172 part 2 of 3: annotation visual redesign + bidirectional row↔dot interaction. Each evidence anchor now renders TWO visual elements: a translucent highlight rectangle (RS color, 15% opacity) drawn over the cited text in the PDF + a numbered indicator (26px circle, 12px mono bold label) placed immediately to the left of the highlight rect. When highlighted, the rect bumps to 30% opacity and the indicator picks up a 3px ring in the RS color outside its 2px white border.',
                   'Side-by-side layout for the Expand modal Output tab (eval-output + poe schemas). Two-column grid: PDF + indicators on the left (~60%), per-Requirements-Set results tables on the right (~40%). Sticky left column so the PDF stays visible while scrolling the results. Below 900px viewport width the layout collapses to a vertical stack.',
