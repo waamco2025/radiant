@@ -2673,6 +2673,39 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 14.6.1 completion notes (2026-05-07) — Hotfix sub-phase
+
+Backtrack-hotfix from 14.6. Two bugs surfaced during 14.6 QA + two trivial backlog rollups; one of the rollups (#183) reverted to investigation-only after dependency analysis surfaced heavy downstream chains.
+
+**Bug A — Badge Library narrowed to own-only.** Phase 14.0's `BadgesPanel` was designed with network-wide visibility (sectioned list grouping templates by `ownerParty`: own first, then other parties' templates in alphabetical sections). This conflicts with the canonical rule that badge templates are private to their owner — only Published Standards (RSes) are cross-actor referenceable. Phase 14.6.1 narrows to own-only:
+
+- New `ownTemplates` memo at the parent level: `useMemo(() => badgeTemplates.filter((t) => t.ownerParty === activeParty), [badgeTemplates, activeParty])`. Toolbar count + `<TemplateList templates={...}>` input both consume this filtered list.
+- `TemplateList` simplified: dropped the `otherByParty` Map + `others` derivation + the rendering branch that iterated other parties' sections. Kept the "MY BADGES · N" header for visual structure even with one section. Empty state copy ("No badge templates yet.") preserved.
+- The full `badgeTemplates` list stays the source for `selectedTemplate` resolution (`badgeTemplates.find((t) => t.id === selectedId)`) and `handleNewVersion`'s lineage walk (`maxVersion` computation across the lineage). Those flows may reference templates by id at lookup time independent of ownership; pre-filtering would break id-based jumps from notifications or cross-role contexts.
+
+**Behavioral check:** From Bob's view: 2 templates (Aerospace Grade A v2 + v1 SUPERSEDED). From Alice: 1 (Component Quality Assured). From Carol: 1 (Audit Verified). From Dave: 0 (empty-state). Toolbar count reflects the filtered count.
+
+**Bug B — Chip fan-out gap reduction.** Phase 14.5 set `STEP_FAN = 22` (= `SHIELD_SIZE` 18 + 4px gap). Andrew's QA measured the visual gap as ~10px during fan-out. Root cause: the visible shield footprint exceeds the 18px `SHIELD_SIZE` constant due to the halo + SVG stroke geometry from Phase 14.5's "2px halo stroked in the rectangle's exact background color" treatment. The mathematical 4px-gap target was correct on paper but missed visually. Phase 14.6.1 retunes `STEP_FAN` from 22 to **16** — empirically chosen to land the on-screen gap close to the 4px target. Comment block on the constant updated to flag the empirical rationale so future chip work surfaces the same halo-geometry pitfall. `STEP_IDLE`, `SHIELD_SIZE`, `HEIGHT`, container padding, animation timing all unchanged. `idleInner` and `fanInner` calculations automatically pick up the new constant; the 180ms ease-out width transition is unaffected.
+
+**#184 — V2.1 holdover `evidence` subtype config entry purged.** The `evidence: { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' }` entry in `CATEGORY_CONFIG` (`src/v2/AssetNode.jsx`) was V2.1-era classification dead code — no current seed Asset uses subtype `'evidence'` so the string never rendered in the live app. Surfaced during the Phase 15.3 EVIDENCE → ASSET rename sweep but left untouched then; cleared in 14.6.1.
+
+Defense-in-depth grep before deletion confirmed: AssetNode consumes the map via `CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product` (lines 370, 1126, 1284 — three render paths) — the `|| CATEGORY_CONFIG.product` fallback handles missing entries gracefully. So even if some straggler V2.1 data path were ever exercised, AssetNode would render with the `product` config (◆ blue PRODUCT label) — not crash, just visually wrong for that one orphan node. `src/v2/V2Canvas.jsx` has multiple `c.category === 'evidence'` filter checks (lines 221, 315, 352, 557, 1678) that read the data flag to classify children for layout; in V2.2 the filter returns empty arrays since no node carries the flag. Those filter checks are themselves V2.1-holdover dead code and will be cleaned up under the broader #50 sweep alongside the `c.isEvidence` flag pattern. The single config-entry deletion is sufficient for this hotfix's scope.
+
+**#183 — Legacy /public PDF cleanup investigation; trim deferred.** Path B (trim) was attempted per the brief, but the dependency check surfaced extensive downstream chains for all four parent Assets:
+
+- `aEmiDatasheet` (Alice's EMI shielding datasheet) → `cEmi` Claim (only Asset on it), `prEmiDatasheet` Parse Result, `daAlicePublicEmi` + `daAliceToCarolEmi` DAs, `erCarolEmi` Eval Result.
+- `dPrmIcDatasheet` (ChipCo's PRM IC datasheet) → ChipCo PRM-IC Assembly Claim's `referencedAssetIds`, parse result, `daveOwnAssets`, ChipCo→Bob disclosure DA scope, granteeAssetId on a DA.
+- `dPrmIcTestReport` → same Claim's `referencedAssetIds` (alongside the datasheet), `daveOwnAssets`, DA scope.
+- `dVrefDatasheet` → ChipCo Voltage Reference IC Claim's `referencedAssetIds` (only Asset), `daveOwnAssets`.
+
+Cascade-trimming would destroy three demo arcs (Alice→Carol→EMI auditing scenario; ChipCo PRM-IC Assembly demo; ChipCo voltage-reference demo). Per the brief's explicit "STOP and surface" rule for non-orphan Assets, the trim was deferred without code changes. The backlog entry for #183 was updated to reflect the investigation outcome and surface the dependency chains so Andrew can pick per-Asset between (a) keep the unbranded PDF, (b) cascade-trim the dependency chain, or (c) substitute a generated MicroCo / ChipCo-branded PDF via additions to `scripts/generate-seed-pdfs.mjs`. Recommendation in the backlog entry: path (a) is cleanest given the demo-narrative cost of (b); path (c) is the proper long-term fix.
+
+**Versioning quirk** (mirrors 14.6 pattern). v0.14.6.1 inserted into the Changelog modal entries array between v0.15.0 (newer in the rendered list) and v0.14.6 (older). Footer constant remains `v0.15.9 · Changelog` — NOT rolled back. The latest-phase indicator stays at 15.6.
+
+**Build clean** (0 errors).
+
+**Status:** [x] Complete. (#183 left Open with investigation captured; the other three items closed.)
+
 ### Phase 14.6 completion notes (2026-05-07) — Badge Polish Trio (#187, #188, #189)
 
 Backtrack ship from Phase 15.6. Closes the badge polish trio that got deprioritized when Phase 15 took over (the trio was filed during Phase 15.1.1 QA and queued in #187 / #188 / #189 during the Phase 15 closing sweep). Three items, single sub-phase, single commit.

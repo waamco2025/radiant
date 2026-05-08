@@ -26,7 +26,7 @@ import Tooltip from '../components/Tooltip.jsx'
 
 const SHIELD_SIZE = 18
 const STEP_IDLE = 12  // ~33% overlap; the 2px halo cuts adjacent shields visually
-const STEP_FAN = 22   // SHIELD_SIZE + 4px gap (no overlap during fan-out)
+const STEP_FAN = 16   // Phase 14.6.1 (Bug B): empirically tuned for ~4px visible gap during fan-out. Visible shield footprint exceeds SHIELD_SIZE due to halo + SVG stroke geometry from Phase 14.5, so the prior 22 (SHIELD_SIZE + 4) measured ~10px on screen. 16 lands the on-screen gap close to the 4px target.
 const PADDING = 3
 const HEIGHT = SHIELD_SIZE + PADDING * 2  // 24
 const OVERFLOW_TEXT_W = 20

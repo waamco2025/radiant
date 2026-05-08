@@ -1,10 +1,17 @@
-// BadgesPanel — Phase 14.0 (#169 part 1).
+// BadgesPanel — Phase 14.0 (#169 part 1), narrowed Phase 14.6.1.
 //
 // Library tab for Badge Templates. Parallel to RequirementsPanel: split
-// left/right layout, sectioned list (own vs other Actors'), versioning UI.
+// left/right layout, own templates only, versioning UI.
 // Saves through `onSave(template, { isNewVersion, priorTemplateId })` so
 // V2App's `handleSaveBadgeTemplate` can update `supersededBy` on the prior
 // version when applicable.
+//
+// Phase 14.6.1 (Bug A): narrowed from network-wide visibility to own-only.
+// Original 14.0 design surfaced other parties' templates in alphabetical
+// sections, but the canonical rule is that badge templates are private to
+// their owner — only Published Standards (RSes) are cross-actor
+// referenceable. Other actors' templates are now filtered out at the
+// parent level before being passed to TemplateList.
 //
 // 14.0 ships the template + CRUD surface. Phase 14.1 layers Badge
 // Issuance on top — that work surfaces issuance counts + actions in this
@@ -44,30 +51,17 @@ function BadgeShieldGlyph({ size = 18, color = 'var(--accent-indigo)' }) {
   )
 }
 
-/* ─── Sectioned list (own + other Actors' templates) ─── */
+/* ─── Own templates list ─── */
+// Phase 14.6.1 (Bug A): templates passed in are already pre-filtered to
+// the active actor's own templates at the parent level. This list still
+// renders the "MY BADGES · N" header for visual structure, but no longer
+// renders cross-actor sections.
 function TemplateList({ templates, activeParty, selectedId, onSelect }) {
-  // Group by owner: own first, then others by party (alphabetical).
-  const { own, others } = useMemo(() => {
-    const own = []
-    const otherByParty = new Map()
-    for (const t of templates) {
-      if (t.ownerParty === activeParty) {
-        own.push(t)
-      } else {
-        if (!otherByParty.has(t.ownerParty)) otherByParty.set(t.ownerParty, [])
-        otherByParty.get(t.ownerParty).push(t)
-      }
-    }
-    // Sort own templates by lineage (latest first), then version desc.
-    own.sort((a, b) => (b.version || 1) - (a.version || 1))
-    // Sort other parties alphabetically; templates within each party newest-first.
-    const others = [...otherByParty.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([party, items]) => ({
-        party,
-        items: items.sort((a, b) => (b.version || 1) - (a.version || 1)),
-      }))
-    return { own, others }
+  // Sort own templates by version (latest first within each lineage).
+  const own = useMemo(() => {
+    const list = templates.filter((t) => t.ownerParty === activeParty)
+    list.sort((a, b) => (b.version || 1) - (a.version || 1))
+    return list
   }, [templates, activeParty])
 
   const renderRow = (t) => {
@@ -133,12 +127,14 @@ function TemplateList({ templates, activeParty, selectedId, onSelect }) {
       borderRight: '1px solid var(--border)', overflow: 'hidden',
     }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        {templates.length === 0 && (
+        {own.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.7 }}>
             No badge templates yet.
           </div>
         )}
-        {/* Own section */}
+        {/* Phase 14.6.1 (Bug A): own templates only — cross-actor sections
+            removed. The "MY BADGES · N" header still renders so the list
+            has visible structure even with one section. */}
         {own.length > 0 && (
           <>
             <div style={{
@@ -151,28 +147,6 @@ function TemplateList({ templates, activeParty, selectedId, onSelect }) {
             {own.map(renderRow)}
           </>
         )}
-        {/* Others — one section per party */}
-        {others.map((group, idx) => (
-          <div
-            key={group.party}
-            style={{
-              marginTop: idx === 0 && own.length > 0 ? 14 : (idx > 0 ? 14 : 0),
-              borderTop: (own.length > 0 || idx > 0) ? '1px solid var(--border)' : 'none',
-              paddingTop: (own.length > 0 || idx > 0) ? 12 : 0,
-            }}
-          >
-            <div style={{
-              fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              letterSpacing: '0.1em', color: 'var(--text-tertiary)',
-              textTransform: 'uppercase', padding: '4px 4px 8px',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <GlobeIcon size={10} color="var(--accent-blue)" />
-              <span>{group.party} · {group.items.length}</span>
-            </div>
-            {group.items.map(renderRow)}
-          </div>
-        ))}
       </div>
     </div>
   )
@@ -667,6 +641,17 @@ export default function BadgesPanel({
     [badgeTemplates, selectedId],
   )
 
+  // Phase 14.6.1 (Bug A): own templates only at the rendering layer.
+  // Toolbar count + TemplateList input both consume this filtered list.
+  // The full `badgeTemplates` list stays the source for `selectedTemplate`
+  // resolution and the lineage walk in `handleNewVersion` (`maxVersion`
+  // computation), since those flows may reference templates by id
+  // independent of ownership at lookup time.
+  const ownTemplates = useMemo(
+    () => badgeTemplates.filter((t) => t.ownerParty === activeParty),
+    [badgeTemplates, activeParty],
+  )
+
   const allRequirementSets = useMemo(
     () => [...requirementSets, ...publishedRequirementSets],
     [requirementSets, publishedRequirementSets],
@@ -824,7 +809,7 @@ export default function BadgesPanel({
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
       }}>
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-          {badgeTemplates.length} badge template{badgeTemplates.length !== 1 ? 's' : ''}
+          {ownTemplates.length} badge template{ownTemplates.length !== 1 ? 's' : ''}
         </div>
         {!isEditing && (
           <span
@@ -845,7 +830,7 @@ export default function BadgesPanel({
       {/* Two-panel body */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <TemplateList
-          templates={badgeTemplates}
+          templates={ownTemplates}
           activeParty={activeParty}
           selectedId={selectedId}
           onSelect={handleSelect}

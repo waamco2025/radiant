@@ -37,7 +37,13 @@ const CATEGORY_CONFIG = {
   process:    { icon: '◎', color: 'var(--accent-amber)',  label: 'PROCESS' },
   product:    { icon: '■', color: 'var(--accent-blue)',   label: 'PRODUCT' },
   party:      { icon: '⬡', color: 'var(--accent-indigo)', label: 'PARTY' },
-  evidence:   { icon: '◧', color: 'var(--accent-orange, #fb923c)', label: 'EVIDENCE' },
+  // Phase 14.6.1 (#184): the legacy `evidence` subtype config entry
+  // was dropped here (V2.1 holdover; no current seed Asset uses
+  // subtype `'evidence'` so the string never rendered). Lookups via
+  // `CATEGORY_CONFIG[node.category] || CATEGORY_CONFIG.product` provide
+  // graceful fallback for any straggler V2.1 data still carrying
+  // `category: 'evidence'`. Broader SUBTYPE_CFG audit deferred to the
+  // future #50 V2.1 cleanup sweep.
   parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
   evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
   claim:      { icon: '◇', color: 'var(--accent-teal, #2dd4bf)', label: 'CLAIM' },
