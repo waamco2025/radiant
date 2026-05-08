@@ -7739,7 +7739,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.15.9 &middot; Changelog
+          v0.16.1.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7786,6 +7786,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.0', date: '2026-05-08', label: 'Phase 16.1.0', items: [
+                  'Phase 16.1.0 — Three.js migration for Directory Layer. Dot matrix grid + Claim/RFP dots migrated to Three.js (Points + InstancedMesh, single draw call across all dots); pan (drag) + zoom (wheel) controls added matching the parent-layer canvas. HTML overlays (tooltip card, label pillboxes, Actor squares, SVG umbrella edges) project via worldToScreen and track camera moves via the same RAF loop that drives Three.js renders.',
+                  'Footer version convention corrected — backtrack-hotfix exception removed; forward phases now roll the footer constant forward. Footer reads v0.16.1.0 (was frozen at v0.15.9 across the 16.0.x backtrack-hotfix cycle).',
+                  'Bug fix — one-grid-cell buffer between amber (umbrella) and indigo (public) dots within a cluster. Phase 16.0.3 introduced the buffer in the HTML implementation; the migration preserves it in world-coordinate computation (lastUmbrella.col + 2 starting position for public subset).',
+                  'Bug fix — strict grid alignment for all Claim and RFP dots. World coordinates are integer multiples of the DOT_GRID = 12 stride; the background grid Points use the same spacing so dot centers and grid intersections coincide automatically.',
+                ]},
                 { version: '0.16.0.3', date: '2026-05-08', label: 'Phase 16.0.3', items: [
                   'Fix 16.0.1 leftover — "RADIANT NETWORK" header pillbox repositioned below the top chrome bar so it actually renders.',
                   'Umbrella DA edge from corner card to Actor square now renders as a smooth horizontal-exit / horizontal-entry cubic bezier curve, matching the visual character of parent-layer full-disclosure edges.',
