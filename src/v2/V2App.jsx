@@ -237,9 +237,11 @@ export default function V2App() {
   const [v22DirectoryWipeOrigin, setV22DirectoryWipeOrigin] = useState(null)
   // Phase 11B: when the user clicks the ChipCo cluster in the Directory,
   // we materialize one of ChipCo's Claims as a card on top of the cluster
-  // and open the Detail Panel for it. Shape: { claim, anchor: { xPct, yPct } }
-  // or null. Cleared when the panel closes or the Directory closes.
-  const [v22DirectoryMaterializedClaim, setV22DirectoryMaterializedClaim] = useState(null)
+  // Phase 16.0: per-dot Directory click → opens the Detail Panel for the
+  // selected Claim. Replaces Phase 11B's `v22DirectoryMaterializedClaim`
+  // state machine (which materialized a Claim card on top of a cluster
+  // hit-area). Setting null dismisses both the tooltip pin and the panel.
+  const [v22DirectorySelectedClaim, setV22DirectorySelectedClaim] = useState(null)
   const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
@@ -289,21 +291,21 @@ export default function V2App() {
   // for the warm-path notification path. Shape: { eaId } where eaId is the
   // provisional EA the grantor is responding to.
   const [v22RespondingToEaOnly, setV22RespondingToEaOnly] = useState(null)
-  // Phase 11B.1: Esc closes the directory-materialized Detail Panel when
-  // it's open AND no modal is sitting on top of it. The ExpandedArtifactModal
-  // has its own Esc handler; we defer to it via a state check rather than
-  // event-ordering tricks (both listeners would fire on the same Esc
-  // otherwise, dismissing two layers at once).
+  // Phase 16.0 (was 11B.1): Esc closes the directory-selected Claim's
+  // Detail Panel when it's open AND no modal is sitting on top of it.
+  // The ExpandedArtifactModal has its own Esc handler; we defer to it
+  // via a state check rather than event-ordering tricks (both listeners
+  // would fire on the same Esc otherwise, dismissing two layers at once).
   useEffect(() => {
-    if (!v22DirectoryMaterializedClaim) return
+    if (!v22DirectorySelectedClaim) return
     const handleEsc = (e) => {
       if (e.key !== 'Escape') return
-      if (v22ExpandedArtifact) return // let the modal's Esc handler close it first
-      setV22DirectoryMaterializedClaim(null)
+      if (v22ExpandedArtifact) return
+      setV22DirectorySelectedClaim(null)
     }
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
-  }, [v22DirectoryMaterializedClaim, v22ExpandedArtifact])
+  }, [v22DirectorySelectedClaim, v22ExpandedArtifact])
   // Phase 9D.2 (#124): node id currently running the unravel keyframe.
   // Set by playUnravelAnimation right before its CSS stage; cleared when
   // the primitive resolves. AssetNode reads `_unraveling` (stamped via
@@ -4205,7 +4207,7 @@ export default function V2App() {
                   // the corner.
                   setV22DirectoryWipeOrigin(null)
                   setV22DirectoryOpen((open) => {
-                    if (open) setV22DirectoryMaterializedClaim(null)
+                    if (open) setV22DirectorySelectedClaim(null)
                     return !open
                   })
                 }}
@@ -5683,6 +5685,10 @@ export default function V2App() {
           <DirectoryLayer
             open={v22DirectoryOpen}
             activeParty={activeRole.party}
+            // Phase 16.0: roleId + provisionals threaded so DirectoryLayer
+            // can compute the per-role view (`buildV22DirectoryDataForRole`).
+            roleId={roleId}
+            v22Provisionals={v22Provisionals}
             // Phase 11.8 #44: route the circular wipe through the screen-space
             // origin captured when the Radiant Network actor node was
             // double-clicked. Null falls back to the chrome globe-button corner.
@@ -5690,42 +5696,31 @@ export default function V2App() {
             onOpenAIShopper={() => setV22AIShopperOpen(true)}
             onClose={() => {
               setV22DirectoryOpen(false)
-              setV22DirectoryMaterializedClaim(null)
+              setV22DirectorySelectedClaim(null)
             }}
-            // Phase 11B: ChipCo cluster click → materialize the warm-path
-            // Claim card + open its Detail Panel. The seeded warm-path is
-            // `claim-chipco-prm-ic`; if the user has already accepted an EA
-            // for it via Phase 11C, that flow will own the Claim's
-            // visibility on the parent canvas instead.
-            onClusterClick={(cluster) => {
-              if (cluster.partyName !== 'ChipCo') return
-              const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
-              const claim = shared.claims.find(c => c.id === 'claim-chipco-prm-ic')
-              if (!claim) return
-              setV22DirectoryMaterializedClaim({
-                claim,
-                anchor: { xPct: cluster.center.xPct, yPct: cluster.center.yPct },
-              })
-            }}
-            materializedClaim={v22DirectoryMaterializedClaim}
-            onCloseMaterializedClaim={() => setV22DirectoryMaterializedClaim(null)}
+            // Phase 16.0: per-dot click. Replaces Phase 11B's onClusterClick
+            // + materializedClaim props. The DirectoryLayer pins its own
+            // tooltip; here we just stash the selected Claim so the Detail
+            // Panel mount path picks it up. Null = dismiss.
+            onClaimDotClick={(claim) => setV22DirectorySelectedClaim(claim)}
           />
         )}
 
-        {/* Phase 11B: Detail Panel for the materialized directory Claim.
+        {/* Phase 16.0: Detail Panel for the directory-selected Claim.
             Mounted alongside the DirectoryLayer (not inside it) so the
             existing Detail Panel z-index ordering and panel-shell styling
             apply. The panel reuses V22NodeDetailPanel's standard CLAIM
             rendering path; the claim is never on the parent canvas, so a
-            synthetic node is built via buildClaimNodeForDirectoryMaterialization.
-            "Request Evaluation Agreement" footer button is intentionally
-            NOT wired in 11B — that's Phase 11C. The non-owner branch of
-            V22ClaimPanel doesn't render Amend/Self-Evaluate; Run Evaluation
-            requires an EA which Bob doesn't have for this Claim, so the
-            footer is empty by design. */}
-        {v22DirectoryOpen && v22DirectoryMaterializedClaim && (() => {
+            synthetic node is built via buildClaimNodeForDirectoryMaterialization
+            (function name is a Phase 11B holdover — kept to limit blast
+            radius; rename deferred). The non-owner branch of V22ClaimPanel
+            doesn't render Amend/Self-Evaluate; Run Evaluation requires an
+            EA. The Phase 11C warm-path "Request Evaluation Agreement"
+            entry is wired below for non-owner cases with an active DA
+            but no EA. */}
+        {v22DirectoryOpen && v22DirectorySelectedClaim && (() => {
           const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
-          const claim = v22DirectoryMaterializedClaim.claim
+          const claim = v22DirectorySelectedClaim
           const syntheticNode = buildClaimNodeForDirectoryMaterialization(claim, sharedForPanel.evaluationResults || [])
           // Build the in-scope referenced-Asset rows (same shape as the
           // standard panel mount). For non-owners, scope-filter to Assets
@@ -5820,7 +5815,7 @@ export default function V2App() {
               <V22NodeDetailPanel
                 node={syntheticNode}
                 activeParty={activeRole.party}
-                onClose={() => setV22DirectoryMaterializedClaim(null)}
+                onClose={() => setV22DirectorySelectedClaim(null)}
                 referencedAssetNames={refAssetRows}
                 claimIsProofOnlyOnly={claimIsProofOnlyOnlyDir}
                 onExpandAsset={(row) => {
@@ -5876,7 +5871,7 @@ export default function V2App() {
                       })
                       // Close directory + materialized panel — the EA request
                       // modal becomes the foreground UI.
-                      setV22DirectoryMaterializedClaim(null)
+                      setV22DirectorySelectedClaim(null)
                       setV22DirectoryOpen(false)
                     },
                   }
@@ -6748,7 +6743,7 @@ export default function V2App() {
                     setForcePanelTab(null)
                     setForceExpandSda(null)
                     setV22DirectoryOpen(false)
-                    setV22DirectoryMaterializedClaim(null)
+                    setV22DirectorySelectedClaim(null)
                     setV22DirectoryWipeOrigin(null)
                     setV22ResetConfirmOpen(false)
                   }}
@@ -7702,6 +7697,10 @@ export default function V2App() {
       </div>
 
       {/* Footer */}
+      {/* Phase 16.0.3 Item 4: footer raised to zIndex 300 (parent-layer
+          chrome z-level) so it stays visible when the Directory Layer
+          (zIndex 150) is open. `position: relative` is required for
+          zIndex to take effect on this flex child. */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -7710,6 +7709,8 @@ export default function V2App() {
         borderTop: '1px solid var(--border)',
         flexShrink: 0,
         background: 'var(--bg-deep)',
+        position: 'relative',
+        zIndex: 300,
       }}>
         <div
           ref={footerTipRef}
@@ -7785,6 +7786,33 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.0.3', date: '2026-05-08', label: 'Phase 16.0.3', items: [
+                  'Fix 16.0.1 leftover — "RADIANT NETWORK" header pillbox repositioned below the top chrome bar so it actually renders.',
+                  'Umbrella DA edge from corner card to Actor square now renders as a smooth horizontal-exit / horizontal-entry cubic bezier curve, matching the visual character of parent-layer full-disclosure edges.',
+                  'One-dot-width buffer between amber (umbrella-private) and indigo (public) dot subsets within a cluster, so the L-shaped amber border has visual breathing room from the public dots.',
+                  'Hover tooltip card mirrors the parent-layer AssetNodeDot pattern — CLAIM badge tight to the top of the card (no excess padding), tooltip anchored to the dot\'s right-center (not top-left), with a viewport-edge flip if the tooltip would overflow.',
+                  'App footer (Connected to AWS S3 · v0.15.9 · Changelog) restored on the Directory view via z-index promotion to 300 (same as top chrome).',
+                  'Strict dot-matrix grid alignment enforced for all dots, Actor squares, RFP placeholders, and label pillboxes via a `DOT_GRID = 12` constant. Setup for Phase 16.1\'s scaling pass.',
+                ]},
+                { version: '0.16.0.2', date: '2026-05-08', label: 'Phase 16.0.2', items: [
+                  'PDF.js worker resolution fix — switched from Vite `?url` import to a static `public/pdf.worker.mjs` path. Root cause: when the dev server runs from a git worktree with an empty `node_modules`, the `?url` import resolves to `/@fs/<absolute>/node_modules/...` outside Vite\'s `server.fs.allow` boundary, producing a 404 + "Setting up fake worker failed" runtime error. The static `/pdf.worker.mjs` path is served directly from project root in dev AND production. Manual upgrade step: re-copy `node_modules/pdfjs-dist/build/pdf.worker.mjs` to `public/` after `pdfjs-dist` updates.',
+                  'Duplicate React key warning fix — Changelog modal entry iteration keyed on `release.version` alone, but multiple historical phases share the same version string (e.g. v0.10.0 covers 8 entries). Switched to composite key `${release.version}-${release.label}`.',
+                  'Documentation cleanup — Phase 11B-era "materialized directory Claim" comment block on the Detail Panel mount IIFE updated to reflect Phase 16.0\'s per-dot click flow. The leftover `v22DirectoryMaterializedClaim` references reported in the brief were already cleared during the Phase 16.0 ship; only a comment-level historical reference remains.',
+                ]},
+                { version: '0.16.0.1', date: '2026-05-08', label: 'Phase 16.0.1', items: [
+                  'Directory Layer layout polish — header banner replaced with a centered "Radiant Network" pillbox; "2 clusters · 17 Claims" subtitle removed; in-canvas "Launch AI Shopper" button removed (chrome bar entry remains).',
+                  'Claim dots resized from 8×8 to 6×6. Cluster layout switched to row-aligned grid (max 6 dots per row, dot-matrix-grid-aligned with one-dot-width gaps). ChipCo\'s 14 dots from Bob\'s view now render as 6+6+2 rows; the umbrella subset (first 7 dots) is wrapped in an L-shaped amber border.',
+                  'Actor squares reduced to dot size (6×6 hollow) with party labels lifted to pillbox-styled labels above each square. Pillboxes fade when an underlying dot is hovered, letting the dot glow white in the foreground.',
+                  'Cluster anchors moved to vertical center of canvas; Bob\'s RFP green dot anchored directly above his corner card.',
+                ]},
+                { version: '0.16.0', date: '2026-05-08', label: 'Phase 16.0', items: [
+                  'Phase 16.0 — Directory Layer foundations. Replaces the Phase 7 / 11A / 11B Directory scaffolding with a new visual model: dot matrix background, per-Actor clusters with hollow indigo Actor squares at center, deterministic seeded layout, per-role view filtering. Mock supplier clusters (NovaFab, ElectroGrid, Precision Components) and the standalone ChipCo cluster removed.',
+                  '#43 — Clickable Directory Layer dots. Each Claim dot is hoverable (whitens on direct hover, cluster brightens) and clickable (pins a tooltip + opens the Detail Panel). RFP dots render as non-functional placeholders; activate in Phase 17.',
+                  '#45 — Real dot-cloud data sourcing. Cluster contents derive from per-role disclosure visibility via the new `buildV22DirectoryDataForRole` helper. Bob sees Dave\'s catalog through the umbrella DA (mix of amber umbrella-private dots + indigo public dots, with an amber-bordered region around the umbrella subset and an indigo umbrella edge from his corner card to Dave\'s Actor square). Alice and Carol see only public Claims; Dave sees his own catalog as indigo.',
+                  'Seed expansion — Dave/ChipCo grows from 2 Claims to 14, mixing publicly disclosed and umbrella-private DAs to demonstrate the per-role view computation.',
+                  'RFP factory placeholder — `makeRfp(...)` factory introduced; one Bob-owned RFP seeded for Phase 17 buildout (Sentinel-4 RF Module Compliance, MIL-PRF-55681 v2 + System Integration Requirements).',
+                  'Architecture spec §8.2 + §8.5 rewritten to match the new model.',
+                ]},
                 { version: '0.15.9', date: '2026-05-07', label: 'Phase 15.6', items: [
                   '#172 closing scope: Re-Run auto-fill from new Asset evidence. The PDF annotation demo arc is now end-to-end happy-path — prior eval shows gaps → Alice amends with Test Report → Bob\'s re-run auto-populates the missing rows with values discovered from the new evidence → save → 7/7 SAT → create PoE. The narrative becomes "AI evaluation reads new evidence and fills in the gaps" rather than "user manually fills forms."',
                   'Schema addition: anchor entries gain an optional `discoveredValue: string` field. When the Asset hosting the anchor becomes newly in scope (via amend) and the corresponding result row is MISSING, re-run carry-forward auto-populates the row with `discoveredValue` and flips status to `satisfactory`. No badge, hint, or status indicator distinguishes auto-populated rows — by design (transparent AI assistance).',
@@ -7864,6 +7892,13 @@ export default function V2App() {
                   'Opt-in PDF.js rendering via a new `usePdfJs` prop on AssetEvidencePanel. Default false preserves iframe behaviour everywhere except the three target surfaces: Run Evaluation modal Step 1 evidence panel, Eval Result expand modal Output tab, and PoE expand modal Output tab. Asset Detail Panel previews + Claim referenced-asset previews continue to use iframe rendering.',
                   '2-Asset / 2-RS demo scenario: Bob\'s PRM Eval Result references both PRM Datasheet (Asset 1) and PRM Test Report (Asset 2). MIL-PRF requirements anchor in either PDF depending on whether the value is published spec (Datasheet) or measured (Test Report). System Integration requirements anchor in the Datasheet.',
                   'Static rendering only in 15.0 — dots are decorative. Phase 15.1 will wire bidirectional row-click ↔ dot-click interaction; Phase 15.2 will ship the walkthrough markdown + final polish.',
+                ]},
+                { version: '0.14.6.2', date: '2026-05-07', label: 'Phase 14.6.2', items: [
+                  'Library Badges tab count now respects the active actor\'s own-templates filter (per 14.6.1 Bug A). Bob sees "Badges 2", Alice "Badges 1", Carol "Badges 1", Dave "Badges 0".',
+                  'BadgesPanel toolbar minimum height set to 50px so the row no longer shrinks when toggling from list view (with "+ Create New Badge" button) to create view (button hidden).',
+                  'Button label "+ Create new badge" → "+ Create New Badge"; create form title "Create Badge Template" → "Create New Badge". Title-case + simplified terminology.',
+                  'Referenced Requirements Sets list (right-panel ViewDetails) now displays the RS owner attribution per row, replacing the technical RS id on line 2.',
+                  'Claim and PoE card action bar Issue Badge icon switched from a star glyph (★) to the canonical BadgeShieldIcon SVG, matching the badge chip stack rendering.',
                 ]},
                 { version: '0.14.6.1', date: '2026-05-07', label: 'Phase 14.6.1', items: [
                   'Bug fix — Badge Library filtered to the active actor\'s own templates only. The original Phase 14.0 design surfaced other parties\' templates in alphabetical sections, but the canonical rule is that badge templates are private to their owner — only Published Standards (RSes) are cross-actor referenceable. The toolbar count + TemplateList input both consume a new `ownTemplates` memo; full `badgeTemplates` stays the source for `selectedTemplate` resolution + the new-version lineage walk so id-based lookups still work. Library now shows zero templates for actors who haven\'t authored any (empty state copy unchanged).',
@@ -8483,7 +8518,13 @@ export default function V2App() {
                   'Role switching between Bob@GovCo and Alice@MicroCo',
                 ]},
               ].map(release => (
-                <div key={release.version} style={{ marginBottom: 24 }}>
+                // Phase 16.0.2: composite key — multiple historical phases
+                // share the same `version` string (e.g. v0.10.0 covers
+                // Phase 10.1 through 11B), so `key={release.version}` alone
+                // produced duplicate-key React warnings. `label` is unique
+                // per entry (it's the phase number) so the composite is
+                // stable + collision-free.
+                <div key={`${release.version}-${release.label}`} style={{ marginBottom: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     <span style={{
                       fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,

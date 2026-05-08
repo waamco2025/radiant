@@ -288,7 +288,12 @@ export default function LibraryModal({
     parsing: pepTemplates.length,
     requirements: requirementSets.length,
     published: publishedRequirementSets.length,
-    badges: badgeTemplates.length,
+    // Phase 14.6.2 Item 1 — match BadgesPanel's own-only filter so the tab
+    // count parallels the panel toolbar count (Bug A from 14.6.1 covered the
+    // panel; this covers the tab strip).
+    badges: activeParty
+      ? badgeTemplates.filter((t) => t.ownerParty === activeParty).length
+      : badgeTemplates.length,
   }
 
   const content = (

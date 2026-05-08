@@ -9,6 +9,9 @@ import { UNRAVEL_DURATIONS } from './animations/unravel.js'
 // Phase 14.3 (#176a): card-chip rendering lives in BadgeChipContainer —
 // single rounded rectangle with hover fan-out + per-shield/+N tooltips.
 import BadgeChipContainer from './BadgeChipContainer.jsx'
+// Phase 14.6.2 Item 6: action-bar Issue Badge icon swap from `★` to the
+// canonical shield silhouette so the entry-point matches the chip stack.
+import BadgeShieldIcon from './BadgeShieldIcon.jsx'
 
 // Inject reveal animation keyframes once
 if (typeof document !== 'undefined' && !document.getElementById('reveal-keyframes')) {
@@ -1060,8 +1063,10 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
         // Gate: any non-owner can issue (badges target Claims now). Visible
         // alongside any other non-owner actions (Run Evaluation, Request
         // Eval Agreement) — independent affordance.
+        // Phase 14.6.2 Item 6: icon swapped from `★` to the canonical
+        // BadgeShieldIcon so it matches the badge chip stack rendering.
         if (!isOwner) {
-          buttons.push({ icon: '★', tooltip: 'Issue Badge', onClick: fire('issueBadge') })
+          buttons.push({ icon: <BadgeShieldIcon size={13} color="currentColor" />, tooltip: 'Issue Badge', onClick: fire('issueBadge') })
         }
       }
       break
@@ -1098,7 +1103,8 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           ? activeParty === claimOwnerParty
           : isOwner   // fallback when stamp missing
         if (!blocked) {
-          buttons.push({ icon: '★', tooltip: 'Issue Badge', onClick: fire('issueBadge') })
+          // Phase 14.6.2 Item 6: see Claim case above.
+          buttons.push({ icon: <BadgeShieldIcon size={13} color="currentColor" />, tooltip: 'Issue Badge', onClick: fire('issueBadge') })
         }
       }
       break

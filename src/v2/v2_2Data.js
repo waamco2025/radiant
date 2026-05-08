@@ -1269,6 +1269,48 @@ export function getBadgesForRecipient(actorParty, allBadgeIssuances = [], allCla
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// RFP — Phase 16.0 (skeletal placeholder, full feature in Phase 17)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// An RFP (Request For Proposal) is a buyer-side artifact: a public posting
+// of "we're seeking suppliers for X requirements set". The Directory Layer
+// renders open RFPs as green dots clustered around the posting Actor's
+// square (or the active Actor's corner card for own RFPs).
+//
+// Phase 16 ships only the data-model placeholder + one Bob-owned seed RFP
+// so the Directory dot rendering has something to show. Full RFP lifecycle
+// (post / open / close / response artifacts / buyer review) lands in
+// Phase 17 (#192). The factory shape is intentionally minimal — Phase 17
+// will extend it with response references, lifecycle metadata, etc.
+
+export function makeRfp({
+  id,
+  owner,
+  ownerDot,
+  name,
+  description,
+  requirementsSetIds = [],
+  status = 'open',
+  createdDate,
+}) {
+  if (!id) throw new Error('makeRfp: id is required')
+  if (!owner) throw new Error('makeRfp: owner is required')
+  if (!name) throw new Error('makeRfp: name is required')
+  return {
+    id,
+    artifactType: 'rfp',
+    type: 'rfp',
+    owner,
+    ownerDot: ownerDot || makeDot(owner),
+    name,
+    description: description || '',
+    requirementsSetIds: [...requirementsSetIds],
+    status,
+    createdDate: createdDate || new Date().toISOString(),
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SHARED ARTIFACT COLLECTION
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -1779,7 +1821,160 @@ export function buildV22SharedArtifacts() {
     createdDate: '2026-02-28T09:30:00Z',
     amendments: [],
   })
-  const claims = [cPrm, cVreg, cEmi, cChipcoPrmIc, cChipcoVref]
+  // Phase 16.0: ChipCo's catalog expansion. 12 additional Claims spanning
+  // public-only, umbrella-only, and dual-disclosure (public + umbrella to
+  // Bob) so the Directory's per-role view computation has substance to
+  // demonstrate. See §8.2.5. Phase 16 doesn't materialize Assets for
+  // these — Detail Panel handles empty `referencedAssetIds` gracefully;
+  // future phases can give them real Assets if needed.
+  const cChipcoOpAmp = makeClaim({
+    id: 'claim-chipco-opamp',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Op-Amp ICA-340 Linearity Spec',
+    description: 'Precision op-amp ICA-340 linearity and offset spec.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-20T09:00:00Z' },
+    ],
+    createdDate: '2026-02-20T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoBuckReg = makeClaim({
+    id: 'claim-chipco-buckreg',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Buck Regulator BCR-110 Compliance',
+    description: 'Buck-converter regulator BCR-110 qualified to MIL-PRF-55681 v2.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-21T09:00:00Z' },
+    ],
+    createdDate: '2026-02-21T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoTimingIc = makeClaim({
+    id: 'claim-chipco-timing-ic',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Timing IC TMG-225 Datasheet',
+    description: 'Real-time clock + watchdog timing IC TMG-225.',
+    referencedAssetIds: [],
+    createdDate: '2026-02-22T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoLdoReg = makeClaim({
+    id: 'claim-chipco-ldoreg',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'LDO Regulator LDO-440 Spec',
+    description: 'Low-dropout regulator LDO-440 — radiation-tolerant variant.',
+    referencedAssetIds: [],
+    createdDate: '2026-02-23T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoMixedSig = makeClaim({
+    id: 'claim-chipco-mixedsig',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Mixed-Signal IC MSI-180 Compliance',
+    description: 'Mixed-signal MSI-180 conditioning IC qualified to MIL-PRF-55681 v1.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v1', addedDate: '2026-02-24T09:00:00Z' },
+    ],
+    createdDate: '2026-02-24T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoBandgap = makeClaim({
+    id: 'claim-chipco-bandgap',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Bandgap Reference BGR-095 Spec',
+    description: 'Precision bandgap voltage reference BGR-095.',
+    referencedAssetIds: [],
+    createdDate: '2026-02-25T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoFlashMem = makeClaim({
+    id: 'claim-chipco-flashmem',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Flash Memory FMM-512 Qualification',
+    description: 'Radiation-hardened flash memory FMM-512 qualification spec.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-26T09:00:00Z' },
+    ],
+    createdDate: '2026-02-26T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoSramCtl = makeClaim({
+    id: 'claim-chipco-sramctl',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'SRAM Controller SCM-1024 Qualification',
+    description: 'High-density SRAM controller SCM-1024 with EDAC.',
+    referencedAssetIds: [],
+    createdDate: '2026-02-27T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoAdcDac = makeClaim({
+    id: 'claim-chipco-adcdac',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'ADC/DAC Combo ADC-820 Spec',
+    description: '12-bit ADC/DAC combo ADC-820 with integrated reference.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-28T09:00:00Z' },
+    ],
+    createdDate: '2026-02-28T09:00:00Z',
+    amendments: [],
+  })
+  const cChipcoMpu = makeClaim({
+    id: 'claim-chipco-mpu',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Microcontroller MCU-440 Compliance',
+    description: 'Microcontroller MCU-440 qualified to MIL-PRF-55681 v2.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-26T11:00:00Z' },
+    ],
+    createdDate: '2026-02-26T11:00:00Z',
+    amendments: [],
+  })
+  const cChipcoSerdes = makeClaim({
+    id: 'claim-chipco-serdes',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'SerDes Interface SDX-650 Spec',
+    description: 'High-speed SerDes interface SDX-650 datasheet + jitter spec.',
+    referencedAssetIds: [],
+    createdDate: '2026-02-27T11:00:00Z',
+    amendments: [],
+  })
+  const cChipcoPowerMgmt = makeClaim({
+    id: 'claim-chipco-pmic',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Power Management IC PMIC-330 Spec',
+    description: 'Multi-rail PMIC-330 system-level power management spec.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-28T11:00:00Z' },
+    ],
+    createdDate: '2026-02-28T11:00:00Z',
+    amendments: [],
+  })
+  const claims = [
+    cPrm, cVreg, cEmi, cChipcoPrmIc, cChipcoVref,
+    // Phase 16.0 expansion: Dave's catalog grows from 2 → 14 Claims.
+    cChipcoOpAmp, cChipcoBuckReg, cChipcoTimingIc, cChipcoLdoReg,
+    cChipcoMixedSig, cChipcoBandgap, cChipcoFlashMem, cChipcoSramCtl,
+    cChipcoAdcDac, cChipcoMpu, cChipcoSerdes, cChipcoPowerMgmt,
+  ]
 
   // ── Disclosure Agreements ─────────────────────────────────────────────
   // Ownership/internal: Actor → each of their Assets (Full, implicit).
@@ -1827,7 +2022,13 @@ export function buildV22SharedArtifacts() {
       terms: { createdDate: a.registrationDate },
     }),
   )
-  const daveOwnClaims = [cChipcoPrmIc, cChipcoVref].map((c) =>
+  // Phase 16.0: ownership DAs cover all 14 of Dave's Claims.
+  const daveOwnClaims = [
+    cChipcoPrmIc, cChipcoVref,
+    cChipcoOpAmp, cChipcoBuckReg, cChipcoTimingIc, cChipcoLdoReg,
+    cChipcoMixedSig, cChipcoBandgap, cChipcoFlashMem, cChipcoSramCtl,
+    cChipcoAdcDac, cChipcoMpu, cChipcoSerdes, cChipcoPowerMgmt,
+  ].map((c) =>
     makeInternalDisclosureAgreement({
       id: `da-own-${c.id}`,
       owner: dave.party,
@@ -2021,6 +2222,174 @@ export function buildV22SharedArtifacts() {
       autoRenew: false,
     },
   })
+
+  // Phase 16.0: ChipCo's expanded directory presence.
+  // Public DAs (Dave/ChipCo → Radiant Network) — appear as indigo dots
+  // in every Actor's Directory view. Mix of full + selective so the
+  // disclosure-type variety surfaces in the Detail Panel.
+  const daChipcoPublicVref = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-vref',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoVref.id },
+    type: 'full',
+    scope: { assetIds: [dVrefDatasheet.id], includeDerivatives: true },
+    terms: { createdDate: '2026-02-28T10:00:00Z' },
+  })
+  const daChipcoPublicOpAmp = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-opamp',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoOpAmp.id },
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-02-20T10:00:00Z' },
+  })
+  const daChipcoPublicBuckReg = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-buckreg',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoBuckReg.id },
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-02-21T10:00:00Z' },
+  })
+  const daChipcoPublicTimingIc = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-timing-ic',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoTimingIc.id },
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-02-22T10:00:00Z' },
+  })
+  const daChipcoPublicLdoReg = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-ldoreg',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoLdoReg.id },
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-02-23T10:00:00Z' },
+  })
+  const daChipcoPublicMixedSig = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-mixedsig',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoMixedSig.id },
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-02-24T10:00:00Z' },
+  })
+  const daChipcoPublicBandgap = makePublicDirectoryDisclosureAgreement({
+    id: 'da-pub-chipco-bandgap',
+    grantor: dave.party,
+    grantorDot: dave.partyDot,
+    subject: { kind: 'claim', id: cChipcoBandgap.id },
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-02-25T10:00:00Z' },
+  })
+
+  // Umbrella DAs (Dave/ChipCo → Bob/GovCo) — render as amber dots in
+  // Bob's view (or indigo when also publicly disclosed; public takes
+  // precedence per §8.2.2). Mix of full / selective / proofonly to
+  // demonstrate the per-Claim disclosure-type variability noted in
+  // the §8.2.4 prototype shortcut.
+  const daChipcoToBobOpAmp = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-opamp'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoOpAmp.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-12T14:05:00Z', expires: '2027-03-12T14:05:00Z', autoRenew: false },
+  })
+  const daChipcoToBobBuckReg = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-buckreg'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoBuckReg.id },
+    granteeAssetId: bAvionics.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-12T14:10:00Z', expires: '2027-03-12T14:10:00Z', autoRenew: false },
+  })
+  const daChipcoToBobFlashMem = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-flashmem'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoFlashMem.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-12T14:15:00Z', expires: '2027-03-12T14:15:00Z', autoRenew: false },
+  })
+  const daChipcoToBobSramCtl = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-sramctl'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoSramCtl.id },
+    granteeAssetId: bAvionics.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-12T14:20:00Z', expires: '2027-03-12T14:20:00Z', autoRenew: false },
+  })
+  const daChipcoToBobAdcDac = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-adcdac'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoAdcDac.id },
+    granteeAssetId: bAvionics.id,
+    type: 'proofonly',
+    scope: { includeDerivatives: false },
+    terms: { createdDate: '2026-03-12T14:25:00Z', expires: '2027-03-12T14:25:00Z', autoRenew: false },
+  })
+  const daChipcoToBobMpu = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-mpu'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoMpu.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-12T14:30:00Z', expires: '2027-03-12T14:30:00Z', autoRenew: false },
+  })
+  const daChipcoToBobSerdes = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-serdes'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoSerdes.id },
+    granteeAssetId: bAvionics.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-12T14:35:00Z', expires: '2027-03-12T14:35:00Z', autoRenew: false },
+  })
+  const daChipcoToBobPowerMgmt = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-govco-pmic'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cChipcoPowerMgmt.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-12T14:40:00Z', expires: '2027-03-12T14:40:00Z', autoRenew: false },
+  })
+
+  // Phase 16.0: Bob's seeded RFP. Phase 16 renders the dot only; full
+  // RFP feature lives in Phase 17.
+  const rfpBobSentinel4 = makeRfp({
+    id: 'rfp-bob-sentinel4-rfm',
+    owner: bob.party,
+    ownerDot: bob.partyDot,
+    name: 'Sentinel-4 RF Module Compliance',
+    description: 'Seeking suppliers for RF modules meeting MIL-PRF-55681 v2 + System Integration Requirements for the Sentinel-4 satellite program.',
+    requirementsSetIds: ['reqset-mil-prf-55681-v2', 'reqset-system-integration-v1'],
+    status: 'open',
+    createdDate: '2026-04-15T09:00:00Z',
+  })
+  const rfps = [rfpBobSentinel4]
 
   // ── Evaluation Agreements (paired with explicit inter-party DAs) ──────
   const eaBobOnPrm = makeEvaluationAgreement({
@@ -2470,6 +2839,23 @@ export function buildV22SharedArtifacts() {
     daAliceToCarolPrm,
     daAliceToCarolEmi,
     daChipcoToBobPrmIc,
+    // Phase 16.0: ChipCo public DAs (indigo dots cross-Actor).
+    daChipcoPublicVref,
+    daChipcoPublicOpAmp,
+    daChipcoPublicBuckReg,
+    daChipcoPublicTimingIc,
+    daChipcoPublicLdoReg,
+    daChipcoPublicMixedSig,
+    daChipcoPublicBandgap,
+    // Phase 16.0: ChipCo umbrella DAs to Bob (amber-dot subset).
+    daChipcoToBobOpAmp,
+    daChipcoToBobBuckReg,
+    daChipcoToBobFlashMem,
+    daChipcoToBobSramCtl,
+    daChipcoToBobAdcDac,
+    daChipcoToBobMpu,
+    daChipcoToBobSerdes,
+    daChipcoToBobPowerMgmt,
     daAlicePublicPrm,
     daAlicePublicVreg,
     daAlicePublicEmi,
@@ -2621,6 +3007,8 @@ export function buildV22SharedArtifacts() {
     // Phase 14.1 (#169 part 2): Badge Issuances. Network-wide, single-source-
     // of-truth recipient (derived from target PoE owner at render time).
     badgeIssuances,
+    // Phase 16.0: RFPs. Skeletal placeholder; Phase 17 owns lifecycle.
+    rfps,
   }
 }
 
@@ -3121,6 +3509,134 @@ export function getV22DataForRole(roleId, provisionals) {
   if (roleId === 'carol-auditco') return buildCarolView(shared)
   if (roleId === 'dave-chipco') return buildDaveView(shared)
   return buildBobView(shared)
+}
+
+/**
+ * Phase 16.0 — Per-role Directory Layer view.
+ *
+ * Returns the structured per-role data DirectoryLayer needs to render:
+ * the active Actor's own publicly-disclosed Claims (around the corner
+ * card), other Actors' clusters with mixed indigo (public) + amber
+ * (umbrella-to-active) Claim sets, umbrella edges from the active Actor
+ * to umbrella grantors, and the all-Actor RFP set.
+ *
+ * Visibility math (per spec §8.2.5):
+ *   • A Claim is publicly-disclosed if any active DA grants it to the
+ *     `Radiant Network` party with `subject.kind === 'claim'`.
+ *   • A Claim is umbrella-disclosed-to-active if any active DA grants
+ *     it to the active Actor's party from a non-active Actor with
+ *     `subject.kind === 'claim'`.
+ *   • The active Actor's own Claims appear in `ownClaims` only when at
+ *     least one public DA exists (per §8.2.5 — only public outputs
+ *     cluster around the corner card; private internal claims don't
+ *     surface on the Directory).
+ *   • `otherClusters` is one entry per non-active Actor with at least
+ *     one Claim visible to the active Actor (public OR umbrella).
+ *   • `umbrellaEdges` is the set of non-active Actors who grant an
+ *     umbrella DA to the active Actor (one edge per source Actor).
+ *
+ * Shape:
+ *   {
+ *     activeParty: string,
+ *     ownClaims: Claim[],                 // active Actor's own publicly-disclosed Claims
+ *     ownRfps: RFP[],                     // active Actor's own open RFPs
+ *     otherClusters: [{
+ *       ownerParty: string,
+ *       publicClaims: Claim[],            // indigo dots
+ *       umbrellaClaims: Claim[],          // amber dots — present only when active is umbrella grantee
+ *     }],
+ *     umbrellaEdges: [{ targetParty: string }],
+ *     otherRfps: RFP[],                   // non-active-Actor RFPs (status === 'open')
+ *   }
+ */
+export function buildV22DirectoryDataForRole(roleId, provisionals) {
+  const shared = mergeProvisionals(buildV22SharedArtifacts(), provisionals)
+  const actor = (shared.actors || []).find((a) => a.id === roleId)
+  const activeParty = actor?.party || null
+
+  const allDas = shared.disclosureAgreements || []
+  const activeDas = allDas.filter((d) => !d._declineMeta && !d._revokedMeta && d.type !== 'provisional')
+  const claimsById = new Map((shared.claims || []).map((c) => [c.id, c]))
+
+  // Public DAs: subject kind=claim, grantee=Radiant Network.
+  const publicClaimIds = new Set()
+  for (const da of activeDas) {
+    if (da.subject?.kind !== 'claim') continue
+    if (da.grantee?.party === 'Radiant Network') publicClaimIds.add(da.subject.id)
+  }
+
+  // Umbrella DAs to the active Actor: subject kind=claim, grantee=activeParty,
+  // grantor is a non-active, non-network party.
+  const umbrellaClaimIdsByGrantor = new Map()
+  for (const da of activeDas) {
+    if (da.subject?.kind !== 'claim') continue
+    if (!activeParty) continue
+    if (da.grantee?.party !== activeParty) continue
+    const grantor = da.grantor?.party
+    if (!grantor || grantor === activeParty || grantor === 'Radiant Network') continue
+    if (!umbrellaClaimIdsByGrantor.has(grantor)) umbrellaClaimIdsByGrantor.set(grantor, new Set())
+    umbrellaClaimIdsByGrantor.get(grantor).add(da.subject.id)
+  }
+
+  // Active Actor's own publicly-disclosed Claims.
+  const ownClaims = []
+  for (const id of publicClaimIds) {
+    const c = claimsById.get(id)
+    if (c && c.owner === activeParty) ownClaims.push(c)
+  }
+
+  // Other Actors' clusters: one entry per non-active Actor with any
+  // Claim visible to the active Actor. A Claim that's both public AND
+  // umbrella-to-active goes in publicClaims (public takes precedence
+  // per §8.2.2; the amber border still wraps the actually-umbrella-only
+  // subset).
+  const clustersByOwner = new Map()
+  const upsertCluster = (owner) => {
+    if (!clustersByOwner.has(owner)) clustersByOwner.set(owner, { ownerParty: owner, publicClaims: [], umbrellaClaims: [] })
+    return clustersByOwner.get(owner)
+  }
+  for (const id of publicClaimIds) {
+    const c = claimsById.get(id)
+    if (!c || c.owner === activeParty) continue
+    upsertCluster(c.owner).publicClaims.push(c)
+  }
+  for (const [grantor, idSet] of umbrellaClaimIdsByGrantor.entries()) {
+    for (const id of idSet) {
+      if (publicClaimIds.has(id)) continue // public takes precedence — already added as public
+      const c = claimsById.get(id)
+      if (!c) continue
+      upsertCluster(grantor).umbrellaClaims.push(c)
+    }
+  }
+  const otherClusters = Array.from(clustersByOwner.values())
+
+  // Dave-style "own catalog as indigo regardless of public" (per §8.2.5):
+  // if the active Actor owns Claims that aren't publicly disclosed, they
+  // still appear in ownClaims when viewed by their own role. Add any of
+  // the active Actor's own Claims (regardless of public DA presence).
+  const ownClaimIds = new Set(ownClaims.map((c) => c.id))
+  for (const c of (shared.claims || [])) {
+    if (c.owner === activeParty && !ownClaimIds.has(c.id)) {
+      ownClaims.push(c)
+      ownClaimIds.add(c.id)
+    }
+  }
+
+  // Umbrella edges render only for Actors whose umbrella subset has at
+  // least one amber-rendered Claim — i.e. at least one umbrella-to-active
+  // Claim that ISN'T also publicly disclosed. If every umbrella DA's
+  // subject is also public, the visual amber subset is empty and
+  // drawing the umbrella edge would imply private access that doesn't
+  // visually exist.
+  const umbrellaEdges = otherClusters
+    .filter((c) => c.umbrellaClaims.length > 0)
+    .map((c) => ({ targetParty: c.ownerParty }))
+
+  const allRfps = (shared.rfps || []).filter((r) => r.status === 'open')
+  const ownRfps = allRfps.filter((r) => r.owner === activeParty)
+  const otherRfps = allRfps.filter((r) => r.owner !== activeParty)
+
+  return { activeParty, ownClaims, ownRfps, otherClusters, umbrellaEdges, otherRfps }
 }
 
 /**
