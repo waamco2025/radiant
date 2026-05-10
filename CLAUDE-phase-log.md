@@ -2673,6 +2673,57 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.1.3 completion notes (2026-05-09) — Directory Layer parent-parity fixes + color scheme
+
+Nine items shipped in one Claude Code session, single commit on the worktree branch (Andrew's external merge-to-main step is the canonical ship path). Andrew's instruction this phase: slow + meticulous on bug fixes + parity before scaling seed or adding RFP functionality. Items 1, 4, 5, 6, 7 are parity fixes; Items 2, 3, 9 are visual fidelity / overlap fixes; Item 8 is a semantic color realignment.
+
+**Item 1 — First-transition dot lifecycle (proper fix).** Phase 16.1.2's fix (InstancedMesh persisting across data changes + `mesh.count` updates) addressed mesh recreation but didn't fully solve the render-timing race. Phase 16.1.3 hardens further:
+- InstancedMesh population moved from `useEffect` to `useLayoutEffect` so it runs synchronously after DOM mutations, BEFORE browser paint. Without this, the React commit phase can yield to the browser between `useEffect` registration and the actual effect body execution, leaving a paint window with an empty mesh.
+- Pre-allocated mesh capacity (MAX_DOTS = 10000, MAX_SQUARES = 64, MAX_RFPS = 256). The mesh is created once during scene init with full capacity; `mesh.count` controls how many instances draw. No mesh recreation on layout change.
+- New `transitionend` listener on the wipe container fires when the `clip-path` animation completes. The listener calls `renderer.render(scene, camera)` + `updateOverlayRef.current()`. This guarantees a final render after the wipe so the user sees the populated dots once the layer is fully visible — even if the populate-render happened during the wipe and was visually clipped.
+- Explicit `renderer.render(scene, camera)` after each mesh population (kept from Phase 16.1.2 for belt-and-suspenders).
+
+**Item 2 — Actor square hollow ShapeGeometry.** Replaced `THREE.LineSegments` (which renders lines with fixed pixel width via the rasterizer, NOT scaling with camera zoom) with `THREE.Mesh` using `THREE.ShapeGeometry`. The shape is an outer 6×6 square with an inner 4×4 hole (`ACTOR_BORDER = 1` world unit thickness). All Actor squares share one `InstancedMesh` (per-instance position via `setMatrixAt`, color set globally on the material since all squares are indigo). Because the geometry IS the visible border, camera zoom multiplies the visible thickness proportionally — at 4× zoom, the border looks 4× thicker than at 1×.
+
+**Item 3 — squareCell reservation.** New `squareCell = { row, col }` computed BEFORE umbrella/public/RFP placement. Algorithm: `squareCol = floor(MAX_COLS / 2) = 3`. `squareRow` depends on whether umbrella exists: for umbrella clusters, row 2 (mid of the umbrella + post-umbrella region); for non-umbrella, row 0. Both umbrella placement AND public+RFP scan placement add `squareCell` to a `reservedSet` and skip it. The Actor square's world position is computed from `(squareRow, squareCol)` via the same anchor math as dots — so it sits ON the dot grid exactly at the reserved cell. Eliminates the MicroCo dot-on-square overlap visible in earlier QA screenshots.
+
+**Item 4 — Zoom controls vertical position.** Bumped from `top: 12` to `top: 73`. The chrome bar is 61px tall; parent layer V2Canvas mounts BELOW the chrome (within the flex layout), so its `top: 12` zoom controls appear 73px from viewport top in absolute terms. Directory mounts at `position: fixed; inset: 0` so to match the visual position, `top: 73` is needed (61 + 12).
+
+**Item 5 — Detail Panel height.** Changed `bottom: 0` to `bottom: 28` in the Directory Detail Panel mount (V2App.jsx). The 28px clears the v0.16.x app footer (6px padding × 2 + 11px font + 1px border ≈ 28px effective height + a slight margin). The "REQUEST EVALUATION AGREEMENT" button in the panel footer is now fully visible above the app footer.
+
+**Item 6 — Click pans to center.** New `animatedPanToWithZoom(worldX, worldY, zoom, duration)` ref in DirectoryLayer (mirrors V2Canvas line 1582). Uses the same cubic-ease formula. Called from `handleMouseUp` after a click on a dot: target = `(d.x + panelOffsetWorld, d.y)` where `panelOffsetWorld = (PANEL_W / 2) / zoom`. The PANEL_W constant is 480 (matches V2App's `PANEL_W`). The offset shifts the camera target to the RIGHT so the dot ends up at the horizontal center of the visible area (left of the Detail Panel), not under the panel.
+
+**Item 7 — Request EA modal close stays on Directory.** Removed `setV22DirectorySelectedClaim(null)` and `setV22DirectoryOpen(false)` from the `onRequestEvaluationAgreement` callback in V2App.jsx (around line 5882). The callback now only sets `v22EaRequestContext` to open the modal; Directory + Detail Panel persist underneath the modal. Closing or submitting the modal leaves Directory + Detail Panel intact. The previous behavior forced a return to parent layer on modal close, which lost the user's navigation context.
+
+**Item 8 — Disclosure-type-based dot colors.** Color now derived from the disclosure TYPE of the DA granting access:
+- `full` → `var(--accent-indigo)`
+- `selective` → `var(--accent-amber)`
+- `proofonly` → `var(--accent-green)`
+
+Resolution order: umbrella DA (active actor as grantee) takes precedence over public DA (Radiant Network as grantee). DirectoryLayer's `useMemo` for `directoryData` extends the base `buildV22DirectoryDataForRole` output with `publicTypeByClaimId` + `umbrellaTypeByClaimId` lookup tables, walked inline from the shared DA set via `buildV22SharedArtifacts` + `mergeProvisionals`. The cluster's `publicTypeByClaimId` / `umbrellaTypeByClaimId` are then consumed by `buildCluster` to set each cell's `disclosureType`, which `disclosureTypeToColorVar` maps to a CSS var, resolved to a `THREE.Color` for the InstancedMesh `setColorAt`.
+
+Seed types diversified for visible color variety:
+- `daAlicePublicEmi`: full → proofonly
+- `daChipcoPublicTimingIc`: full → proofonly
+- `daChipcoPublicMixedSig`: full → proofonly
+- `daChipcoToBobOpAmp`: full → selective
+- `daChipcoToBobFlashMem`: full → proofonly
+
+L-shape umbrella boundary changed from amber-stroked + amber-tinted to neutral grey: stroke `color-mix(in srgb, var(--text-secondary) 60%, transparent)`, fill `color-mix(in srgb, var(--text-secondary) 6%, transparent)`. The boundary still delimits the umbrella subset visually but no longer color-codes by visibility scope (since amber is now reserved for selective disclosure semantics).
+
+**Item 9 — RFP hollow circle in cyan.** Replaced filled green dot (`MeshBasicMaterial` on a `CircleGeometry`) with hollow circle (`MeshBasicMaterial` on a `ShapeGeometry` built from an outer circle + an inner circular hole via `THREE.Shape` + `Path`). Color: `var(--accent-cyan)` (#22d3ee dark / #0891b2 light). Renders via separate `THREE.InstancedMesh` (`rfpMesh`) alongside the dots mesh. Hollow geometry means border thickness scales with zoom (matches Item 2 pattern). RFP dots are also raycast-excluded from hover/click (the raycaster only intersects `dotsMesh`, not `rfpMesh`).
+
+**Footer.** v0.16.1.2 → v0.16.1.3 per the forward-roll convention.
+
+**Branch handling.** Ships to `claude/peaceful-chatelet-c63ee1`. Andrew's external merge:
+```bash
+git checkout main && git merge claude/peaceful-chatelet-c63ee1 && git push origin main
+```
+
+**Verification.** Build clean. Runtime probe via dev server confirmed: footer reads v0.16.1.3; layer mounts; cyan RFP InstancedMesh attached; per-instance color updates fire. Manual visual verification of Items 1 (hard reload + 10 cycles + rapid succession), 2 (zoom-scale visible), 5 (button visibility), 6 (pan animation), 8 (color variety), 9 (cyan hollow visual) is the canonical path per the V2Canvas raycaster + headless 0×0 viewport limitations.
+
+**Status:** [x] Complete.
+
 ### Phase 16.1.2 completion notes (2026-05-09) — Directory Layer spatial model rewrite + bug fixes
 
 Andrew's design pivot. Eight items shipped in one Claude Code session, single commit on the worktree branch (Andrew's external merge-to-main step is the canonical ship path). Items 1–5 are cohesive — they're one architectural change to the spatial model: removing the user's own corner card and treating the user's own cluster as a regular world-coord cluster, with Actor squares now rendered in Three.js so they scale with the camera. Items 6–8 are independent fixes.

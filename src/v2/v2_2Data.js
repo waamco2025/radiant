@@ -2190,7 +2190,9 @@ export function buildV22SharedArtifacts() {
     grantor: alice.party,
     grantorDot: alice.partyDot,
     subject: { kind: 'claim', id: cEmi.id },
-    type: 'full',
+    // Phase 16.1.3 Item 8: vary disclosure types so cluster dots paint a
+    // mix of indigo (full) + amber (selective) + green (proof-only).
+    type: 'proofonly',
     scope: { assetIds: [aEmiDatasheet.id], includeDerivatives: true },
     terms: { createdDate: '2026-02-10T15:30:00Z' },
   })
@@ -2259,7 +2261,8 @@ export function buildV22SharedArtifacts() {
     grantor: dave.party,
     grantorDot: dave.partyDot,
     subject: { kind: 'claim', id: cChipcoTimingIc.id },
-    type: 'full',
+    // Phase 16.1.3 Item 8: type variety across cluster.
+    type: 'proofonly',
     scope: { assetIds: [], includeDerivatives: true },
     terms: { createdDate: '2026-02-22T10:00:00Z' },
   })
@@ -2277,7 +2280,8 @@ export function buildV22SharedArtifacts() {
     grantor: dave.party,
     grantorDot: dave.partyDot,
     subject: { kind: 'claim', id: cChipcoMixedSig.id },
-    type: 'full',
+    // Phase 16.1.3 Item 8: type variety.
+    type: 'proofonly',
     scope: { assetIds: [], includeDerivatives: true },
     terms: { createdDate: '2026-02-24T10:00:00Z' },
   })
@@ -2302,7 +2306,10 @@ export function buildV22SharedArtifacts() {
     grantee: { party: bob.party, dot: bob.partyDot },
     subject: { kind: 'claim', id: cChipcoOpAmp.id },
     granteeAssetId: bAvionics.id,
-    type: 'full',
+    // Phase 16.1.3 Item 8: umbrella-DA disclosure-type variety. This dot
+    // is amber on Bob's view (selective DA takes precedence over the
+    // public DA — see DirectoryLayer's color-resolution rule).
+    type: 'selective',
     scope: { assetIds: [], includeDerivatives: true },
     terms: { createdDate: '2026-03-12T14:05:00Z', expires: '2027-03-12T14:05:00Z', autoRenew: false },
   })
@@ -2322,7 +2329,8 @@ export function buildV22SharedArtifacts() {
     grantee: { party: bob.party, dot: bob.partyDot },
     subject: { kind: 'claim', id: cChipcoFlashMem.id },
     granteeAssetId: bAvionics.id,
-    type: 'full',
+    // Phase 16.1.3 Item 8: type variety.
+    type: 'proofonly',
     scope: { assetIds: [], includeDerivatives: true },
     terms: { createdDate: '2026-03-12T14:15:00Z', expires: '2027-03-12T14:15:00Z', autoRenew: false },
   })

@@ -5816,7 +5816,11 @@ export default function V2App() {
               position: 'fixed',
               top: 61, // chrome height — measured from getBoundingClientRect
               right: 0,
-              bottom: 0,
+              // Phase 16.1.3 Item 5: bottom: 28 so the panel ends ABOVE the
+              // app footer (footer ≈ 28px tall at z-300). Previously
+              // bottom: 0 made the Detail Panel extend behind the footer,
+              // cutting off the "Request Evaluation Agreement" button.
+              bottom: 28,
               width: 480,
               zIndex: 200,
             }}>
@@ -5877,10 +5881,14 @@ export default function V2App() {
                           ? { id: activeDa.granteeAssetId, name: (sharedForPanel.assets || []).find(a => a.id === activeDa.granteeAssetId)?.name || activeDa.granteeAssetId }
                           : null,
                       })
-                      // Close directory + materialized panel — the EA request
-                      // modal becomes the foreground UI.
-                      setV22DirectorySelectedClaim(null)
-                      setV22DirectoryOpen(false)
+                      // Phase 16.1.3 Item 7: do NOT close Directory or clear
+                      // the selected Claim. The Request EA modal opens on
+                      // top of Directory + Detail Panel; closing/cancelling
+                      // the modal should leave Directory + Detail Panel
+                      // intact. Previous behavior (closing Directory here)
+                      // forced a return to parent layer when the user
+                      // cancelled the modal, losing their navigation
+                      // context.
                     },
                   }
                 })()}
@@ -7747,7 +7755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.2 &middot; Changelog
+          v0.16.1.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7794,6 +7802,19 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.3', date: '2026-05-09', label: 'Phase 16.1.3', items: [
+                  'Phase 16.1.3 — Directory Layer parent-parity fixes + color scheme realignment. Nine items.',
+                  'Item 1: first-transition dot lifecycle hardened. InstancedMesh population moved to `useLayoutEffect` (runs synchronously after DOM mutations, before paint). Transition-end listener on the wipe container forces a render after the clip-path animation completes. Combined with the existing sync-render-after-attach, dots paint reliably on hard reload + first open, across rapid open/close cycles, and after zoom interactions.',
+                  'Item 2: Actor square migrated from `LineSegments` to `Mesh` with `ShapeGeometry` (outer 6×6 square + inner 4×4 hole). Border thickness now scales with camera zoom — at 4× zoom, borders are visibly thicker; at 0.5× zoom, thinner. Matches Item 9 RFP pattern.',
+                  'Item 3: Actor square cell is reserved in the cluster grid before umbrella/public/RFP placement. No more node overlaps (MicroCo\'s Actor square no longer sits atop a Claim dot).',
+                  'Item 4: zoom controls vertical position bumped to `top: 73` (was 12), aligned with parent layer\'s apparent position below the 61px chrome bar.',
+                  'Item 5: Directory Detail Panel `bottom: 0 → 28` so the panel ends ABOVE the app footer. The "REQUEST EVALUATION AGREEMENT" button is now fully visible.',
+                  'Item 6: clicking a Claim dot animates the camera to center the dot in the visible area, with panel-aware offset (target X shifted right by PANEL_W/2 in world units) so the dot lands at the visible-area horizontal center, not under the Detail Panel. Mirrors V2Canvas\'s `animatedPanToWithZoom` pattern with the same easing.',
+                  'Item 7: closing the Request Evaluation Agreement modal now keeps the user on Directory + Detail Panel. Previously the modal\'s open handler called `setV22DirectoryOpen(false)` + cleared the selected Claim; both removed so Directory + panel persist across modal open/close.',
+                  'Item 8: dot colors now map to disclosure TYPE (full → indigo, selective → amber, proof-only → green), matching the parent-layer LegendBar\'s edge-color semantics. Umbrella DA takes precedence over public DA when both exist. Seed types diversified: Alice\'s `da-pub-emi` flipped to `proofonly`; ChipCo\'s `da-pub-chipco-timing-ic` + `da-pub-chipco-mixedsig` flipped to `proofonly`; ChipCo→Bob umbrella DAs for OpAmp flipped to `selective` + FlashMem flipped to `proofonly`. L-shape boundary around the umbrella subset changed from amber to neutral grey (amber is now reserved for selective disclosure semantics).',
+                  'Item 9: RFP visual switched from filled green dot to a hollow circle (cyan, `var(--accent-cyan)`). Rendered as `THREE.Mesh` with `ShapeGeometry` (outer circle + inner hole), so the border thickness scales with camera zoom. Bob\'s seeded RFP green dot is replaced by this new cyan hollow circle.',
+                  'Footer rolls forward to v0.16.1.3.',
+                ]},
                 { version: '0.16.1.2', date: '2026-05-09', label: 'Phase 16.1.2', items: [
                   'Phase 16.1.2 — Directory Layer spatial model rewrite + bug fixes. Eight items.',
                   'Item 1: corner card removed from Directory. The user\'s own representation is now a regular cluster, no longer a viewport-fixed HTML overlay.',
