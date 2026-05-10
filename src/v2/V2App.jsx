@@ -7755,7 +7755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.3 &middot; Changelog
+          v0.16.1.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7802,6 +7802,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.4', date: '2026-05-10', label: 'Phase 16.1.4', items: [
+                  'Phase 16.1.4 — Hotfix. Directory layer dot rendering regression from Phase 16.1.3 resolved.',
+                  'Root cause: the scene-init `useEffect` declared `phase` in its dependency array, so its cleanup fired on every internal phase transition (opening → in, in → out), not only on full close. The cleanup disposed the populated `InstancedMesh` + renderer mid-flight; the body re-ran and created a fresh empty mesh (`count = 0`). The downstream `useLayoutEffect` that repopulates dots had deps `[threeReady, layout]` — those deps did not register a change because React batched the `setThreeReady(false)` in cleanup with the `setThreeReady(true)` in the new body into a single update whose net value was unchanged. Result: an empty mesh in the scene + no repopulation = blank canvas.',
+                  'Fix: derive a stable `shouldMountScene = phase !== \'closed\'` boolean and depend on that instead of `phase`. The scene-init effect now runs setup only on the `closed → non-closed` boundary and cleanup only on `non-closed → closed`. Internal phase transitions (opening → in → out) no longer tear down and rebuild the scene.',
+                  'Verified: dots render reliably on hard reload + first open, across 10 open/close cycles, and across 5 rapid-succession toggles in 3 seconds. Cluster color variety (indigo + amber + green) restored. Role switching, wheel zoom, and the wipe-in/wipe-out animations all unaffected.',
+                  'Footer rolls forward to v0.16.1.4.',
+                ]},
                 { version: '0.16.1.3', date: '2026-05-09', label: 'Phase 16.1.3', items: [
                   'Phase 16.1.3 — Directory Layer parent-parity fixes + color scheme realignment. Nine items.',
                   'Item 1: first-transition dot lifecycle hardened. InstancedMesh population moved to `useLayoutEffect` (runs synchronously after DOM mutations, before paint). Transition-end listener on the wipe container forces a render after the clip-path animation completes. Combined with the existing sync-render-after-attach, dots paint reliably on hard reload + first open, across rapid open/close cycles, and after zoom interactions.',

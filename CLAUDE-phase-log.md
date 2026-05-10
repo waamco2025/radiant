@@ -2673,6 +2673,45 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.1.4 completion notes (2026-05-10) — Hotfix: Directory layer dot rendering regression from 16.1.3
+
+Single-issue hotfix. Phase 16.1.3 shipped with a regression: dots no longer appeared on the Directory layer at all (no console errors; canvas visually empty). Reproduced reliably on hard-reload + first open of Directory.
+
+**Diagnosis (Suspect C variant — Phase 16.1.3 brief's lifecycle category).** Browser probe with temporary diagnostic `console.log` statements (later reverted before commit) traced the lifecycle:
+
+1. `phase: closed → opening`: scene-init `useEffect` runs (deps `[phase, updateCamera]`). Renderer, scene, and all three `InstancedMesh`es created with `count = 0`. `setThreeReady(true)`.
+2. Re-render with `threeReady=true`: `useLayoutEffect` populates `dotsMesh` (count=17), renders explicitly. Dots visible (transiently).
+3. `phase: opening → in` (raf chain in the entry/exit state machine): `phase` dep changed → React fires the scene-init effect's **cleanup**. Cleanup disposes geometries + materials + renderer, sets refs to `null`, calls `setThreeReady(false)`.
+4. New scene-init effect body runs with `phase='in'`: creates a **fresh empty mesh** (`count = 0`). `setThreeReady(true)`.
+5. **`useLayoutEffect` does NOT re-run**: deps `[threeReady, layout]` show no change because React batched the `setThreeReady(false)` (step 3) with the `setThreeReady(true)` (step 4) into a single update whose net value was unchanged. Object.is comparison sees no change → effect skipped.
+
+Result: a fresh empty mesh sits in the scene; the previously populated mesh was disposed; no repopulation runs → blank canvas.
+
+The console-log diagnostic confirmed the sequence directly — after the `scene-init CLEANUP running, phase was= opening` + `scene-init done, setting threeReady=true, phase= in` log pair, **no further `useLayoutEffect run` lines appeared**. The populate code was not running against the new mesh.
+
+**Fix.** Derive a stable `shouldMountScene = phase !== 'closed'` boolean and depend on that instead of `phase`. The scene-init effect now:
+- Runs setup only on the `closed → non-closed` boundary (`shouldMountScene` flips `false → true`).
+- Runs cleanup only on the `non-closed → closed` boundary (`shouldMountScene` flips `true → false`).
+- Does NOT re-run on internal `opening → in → out` transitions because `shouldMountScene` stays `true` throughout.
+
+The mesh is built once on first open and persists across the full lifecycle of the open state. The downstream `useLayoutEffect` runs once when `threeReady` first becomes true (populating the mesh) and re-runs when `layout` changes (which doesn't happen during open). No more dispose-rebuild churn.
+
+**Verification (browser).**
+- **Cold reload → first open**: dots render immediately on hard reload + ESTABLISH SESSION + globe click. Three clusters visible (MicroCo / ChipCo / GovCo for Bob); color variety visible in ChipCo (indigo + amber + green); RFP shows as cyan hollow circle next to GovCo Actor square; grey L-shape boundary around ChipCo's umbrella subset.
+- **10 open/close cycles**: every cycle opens with dots visible (data probe confirmed `[data-v22-directory-layer]` present + canvas attached on each open).
+- **5 rapid-succession toggles in 3 seconds**: end state shows dots correctly populated.
+- **Role switch (Bob → Alice)**: Alice's view renders with her own MicroCo cluster (center-bottom-third) + ChipCo cluster (visible to her) + correct color variety.
+- **Wheel zoom**: works (36% → 38% after wheel event).
+- **Build clean**: 112 modules transformed, 0 errors.
+
+**Visual verification (real browser preview).** All "Dots appear", "10 cycles", "5 rapid succession", "Color variety", "L-shape grey", "RFP cyan circle", "Role switch", "Wheel zoom", "Wipe animation" items confirmed with screenshots + DOM probes. Interactive items requiring 3D raycaster events (hover whiten, dot-click → Detail Panel + camera pan, Detail Panel bottom button visibility, Modal close stays on Directory) are code-verified-only — the V2Canvas raycaster does not respond to DOM-dispatched events (documented CLAUDE.md limitation since Phase 9A.6); these code paths were untouched by the 16.1.4 fix, which is solely on the scene-init effect's dependency array.
+
+**Documentation updates.** Footer rolls forward `v0.16.1.3 → v0.16.1.4` in `V2App.jsx`. Changelog modal gains a v0.16.1.4 entry above v0.16.1.3 with diagnosis + fix summary. Architecture spec gains a §8.5 Phase 16.1.4 changelog bullet. polish-backlog.md gets a Phase 16.1.4 Update Log entry. CLAUDE.md "Current state of the world" + "Last shipped phase" + "Active phase queue" updated.
+
+**Files changed:** `src/v2/DirectoryLayer.jsx` (the actual fix — three-line change: introduce `shouldMountScene` constant, swap `phase` for it in the early-return guard, swap `phase` for it in the effect's dep array), `src/v2/V2App.jsx` (footer version constant + Changelog modal entry), `architecture-spec.md`, `polish-backlog.md`, `CLAUDE-phase-log.md`, `CLAUDE.md`.
+
+**Status:** [x] Complete.
+
 ### Phase 16.1.3 completion notes (2026-05-09) — Directory Layer parent-parity fixes + color scheme
 
 Nine items shipped in one Claude Code session, single commit on the worktree branch (Andrew's external merge-to-main step is the canonical ship path). Andrew's instruction this phase: slow + meticulous on bug fixes + parity before scaling seed or adding RFP functionality. Items 1, 4, 5, 6, 7 are parity fixes; Items 2, 3, 9 are visual fidelity / overlap fixes; Item 8 is a semantic color realignment.

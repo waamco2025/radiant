@@ -742,9 +742,17 @@ export default function DirectoryLayer({
     }
   }, [layout, worldToScreen])
 
-  // ─── Three.js scene init (stable lifecycle from Phase 16.1.2) ────────
+  // ─── Three.js scene init (Phase 16.1.4: depend on a stable boolean,
+  //     not on `phase`, so the scene is built once on first open and torn
+  //     down only on full close. With `phase` in the deps, the cleanup
+  //     fired on every internal transition (opening → in, in → out),
+  //     disposing the populated mesh while the `useLayoutEffect` that
+  //     repopulates didn't re-run — its `[threeReady, layout]` deps were
+  //     unchanged after React batched the false/true threeReady toggle,
+  //     leaving the canvas empty.) ───────────────────────────────────
+  const shouldMountScene = phase !== 'closed'
   useEffect(() => {
-    if (phase === 'closed') return
+    if (!shouldMountScene) return
     const container = containerRef.current
     const canvas = canvasRef.current
     if (!container || !canvas) return
@@ -861,7 +869,7 @@ export default function DirectoryLayer({
       rfpMeshRef.current = null
       setThreeReady(false)
     }
-  }, [phase, updateCamera])
+  }, [shouldMountScene, updateCamera])
 
   // ─── Phase 16.1.3 Item 1: useLayoutEffect for dots + squares + RFPs. ─
   // Runs synchronously after DOM mutations, before browser paint, so the
