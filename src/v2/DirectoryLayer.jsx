@@ -1,74 +1,60 @@
-// DirectoryLayer — Phase 16.1.0 (Three.js migration).
+// DirectoryLayer — Phase 16.1.2 (spatial model rewrite + bug fixes).
 //
-// Per-role view onto the Radiant Network's public + privately-disclosed
-// Claim and RFP catalog. Dot matrix grid + Claim/RFP dots rendered via
-// Three.js (Points + InstancedMesh); HTML overlays (tooltip card, Actor
-// squares, label pillboxes, umbrella SVG edges) project from world coords
-// via worldToScreen and track camera moves via the shared RAF loop.
-// Pan via drag; zoom via mouse wheel — same control patterns as V2Canvas.
+// Design pivot from Phase 16.1.0–16.1.1:
+//   • Corner card removed. The user's own representation is now a regular
+//     cluster (Actor square + own Claims + own RFPs as InstancedMesh dots),
+//     positioned at canvas-center horizontal + bottom-third vertical on
+//     initial load. Pans/zooms with the rest of the scene.
+//   • Anonymous actors (Carol/AuditCo, no own Claims or RFPs) render NO
+//     own cluster — the bottom-third position becomes a virtual layout
+//     anchor for fan-out only.
+//   • Actor squares migrated to Three.js LineSegments so they scale with
+//     the camera identically to dots. Pillbox labels remain HTML overlays
+//     projected via worldToScreen (text stays readable at all zooms).
+//   • All edges dropped from Directory. The umbrella DA edge is gone;
+//     amber L-shape border + tint around umbrella subset remains as a
+//     cluster-internal decoration.
+//   • 12-cell buffer enforced between user's own cluster and others, and
+//     between any two non-user clusters.
 //
-// Phase 16.0 retained pieces:
-//   • buildV22DirectoryDataForRole view-builder (per-role data contract)
-//   • Phase 11.8 wipe-origin pinning + Phase 11A entry-exit phase state
-//   • Bob's corner card visual + header pillbox
-//   • Per-role view filtering (public-only / public+umbrella / own clusters)
-//   • L-shaped amber border concept around the umbrella subset
-//
-// Phase 16.1.0 changes from 16.0.x:
-//   • DirectoryLayer becomes a Three.js host + HTML overlay renderer.
-//     Replaces the prior absolute-positioned HTML dots.
-//   • Pan + zoom mirror V2Canvas (drag → camera translate; wheel → camera
-//     zoom around cursor). MIN_ZOOM/MAX_ZOOM scoped narrower than parent
-//     layer since clusters are smaller than parent-layer node graphs.
-//   • Dots render via THREE.InstancedMesh (single draw call across all
-//     dots). Per-instance colors via setColorAt; hover whitens the dot
-//     and brightens its cluster siblings via a precomputed cluster
-//     index lookup.
-//   • Strict grid alignment: dot world-coords are integer multiples of
-//     DOT_GRID; grid Points use the same spacing so dots and grid
-//     intersections always coincide.
-//   • One-cell buffer between umbrella (amber) and public (indigo) dots
-//     within a cluster — rolled forward from 16.0.3's HTML phantom-slot
-//     layout but enforced in world-coord computation now.
+// Bug fixes in this phase:
+//   • First-transition dot lifecycle stabilized — Three.js scene + renderer
+//     persist for the layer's lifetime; InstancedMesh data updates via
+//     setMatrixAt + setColorAt without recreating the mesh on every layer
+//     transition.
+//   • Zoom controls match parent layer (+/-/FIT vertical stack top-right
+//     + percentage display); old bottom-right zoom indicator removed.
 
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import * as THREE from 'three'
-import Tooltip from '../components/Tooltip.jsx'
 import { buildV22DirectoryDataForRole } from './v2_2Data.js'
 
 // ─── Layout constants (world units) ────────────────────────────────────
-const DOT_GRID = 12               // world-units per grid cell stride
-const DOT_RADIUS = 3              // world-unit radius (= 6×6 visual at zoom 1)
-const ACTOR_SQUARE = 6            // px (screen-space, HTML overlay)
+const DOT_GRID = 12
+const DOT_RADIUS = 3
+const ACTOR_SQUARE = 6
 const MAX_COLS = 6
 const ROW_GAP = DOT_GRID
 const COL_GAP = DOT_GRID
-const ACTOR_TO_DOTS_GAP = DOT_GRID * 2
-const CLUSTER_PAD = 5
-const CORNER_CARD_W = 210
-const CORNER_CARD_H = 88
-const CORNER_CARD_LEFT = 32
-// Phase 16.1.1 Item 10: bottom margin = left margin (32) + app footer
-// height (~28) so the card's spacing to the footer's top matches its
-// spacing to the viewport's left edge. Footer = 6px padding + 11px font
-// + 1px border + small margin slack ≈ 28px effective height.
-const CORNER_CARD_BOTTOM = 60
 const ACTOR_LABEL_OFFSET = 18
+const CLUSTER_PAD = 5
 const TOOLTIP_W = 230
 const TOOLTIP_OFFSET = 12
+
+// Phase 16.1.2 Item 5: 12-cell minimum spacing between cluster bboxes.
+const CLUSTER_BUFFER_CELLS = 12
+const CLUSTER_BUFFER = CLUSTER_BUFFER_CELLS * DOT_GRID
 
 // ─── Camera / zoom constants ───────────────────────────────────────────
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 4.0
 const INITIAL_ZOOM = 1.5
-const GRID_RANGE = 4000           // world-coord half-extent of background grid
+const GRID_RANGE = 4000
 const DRAG_THRESHOLD_PX = 4
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 function snapGrid(v) { return Math.round(v / DOT_GRID) * DOT_GRID }
 
-// Resolve a CSS variable name to a hex color via getComputedStyle.
-// Used to feed Three.js Color from the same theme tokens HTML uses.
 function cssVarToColor(varName, fallback = '#8888ff') {
   if (typeof window === 'undefined') return new THREE.Color(fallback)
   try {
@@ -80,9 +66,18 @@ function cssVarToColor(varName, fallback = '#8888ff') {
   }
 }
 
-// ─── Tooltip card (mirrors parent-layer AssetNodeDot pattern) ──────────
-// Phase 16.1.1 Item 7: 4th row (UMBRELLA · date / PUBLIC · date) removed;
-// tooltip is now badge + name + owner only.
+// Hash a string to a 32-bit unsigned int — used for deterministic
+// per-actor cluster placement seed.
+function hashString(s) {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return Math.abs(h | 0) || 1
+}
+
+// ─── Tooltip card (3 rows: badge + name + owner) ───────────────────────
 function ClaimTooltipCard({ claim, x, y, viewportW }) {
   const wouldClipRight = x + DOT_RADIUS + TOOLTIP_OFFSET + TOOLTIP_W > (viewportW || 1280) - 16
   const anchorX = wouldClipRight
@@ -121,58 +116,38 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
   )
 }
 
-// ─── Actor square + pillbox label (HTML overlay, screen coords) ────────
-function ActorSquare({ ownerParty, x, y, faded }) {
-  const half = ACTOR_SQUARE / 2
+// ─── Pillbox label (HTML overlay; positioned via worldToScreen) ────────
+function PillboxLabel({ ownerParty, x, y, faded }) {
   return (
-    <>
-      <div
-        data-actor-pillbox={ownerParty}
-        style={{
-          position: 'absolute',
-          left: x,
-          top: y - half - ACTOR_LABEL_OFFSET,
-          transform: 'translateX(-50%)',
-          padding: '3px 8px',
-          borderRadius: 999,
-          background: 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
-          color: 'var(--text-primary)',
-          fontFamily: 'var(--font-display)',
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-          whiteSpace: 'nowrap',
-          opacity: faded ? 0.25 : 1,
-          transition: 'opacity 150ms ease',
-          pointerEvents: 'none',
-          zIndex: 4,
-        }}
-      >{ownerParty}</div>
-      <div
-        style={{
-          position: 'absolute',
-          left: x - half,
-          top: y - half,
-          width: ACTOR_SQUARE,
-          height: ACTOR_SQUARE,
-          border: '1.5px solid var(--accent-indigo)',
-          background: 'transparent',
-          pointerEvents: 'none',
-          zIndex: 4,
-        }}
-      />
-    </>
+    <div
+      data-actor-pillbox={ownerParty}
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y - ACTOR_SQUARE / 2 - ACTOR_LABEL_OFFSET,
+        transform: 'translateX(-50%)',
+        padding: '3px 8px',
+        borderRadius: 999,
+        background: 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-display)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        whiteSpace: 'nowrap',
+        opacity: faded ? 0.25 : 1,
+        transition: 'opacity 150ms ease',
+        pointerEvents: 'none',
+        zIndex: 4,
+      }}
+    >{ownerParty}</div>
   )
 }
 
-// Pillbox-fade helper: hover over a dot whose footprint overlaps the
-// pillbox bbox fades the label to 25% opacity so the dot's hover halo
-// reads on top.
 const PILLBOX_W = 64
 const PILLBOX_H = 16
 function isHoverNearPillbox(hoverScreen, pillX, pillY) {
   if (!hoverScreen) return false
-  // Approx: dot is 6×6 px screen. Use that footprint.
   const dotR = 3
   const dotL = hoverScreen.x - dotR, dotR_ = hoverScreen.x + dotR
   const dotT = hoverScreen.y - dotR, dotB = hoverScreen.y + dotR
@@ -182,59 +157,30 @@ function isHoverNearPillbox(hoverScreen, pillX, pillY) {
 }
 
 // ─── Layout: world-coord positions per cluster ─────────────────────────
-// Returns { clusters, ownDots, ownRfpDots, otherRfpEntries, allDots,
-// clusterByDotIndex }. `allDots` is the flat array of every dot the
-// InstancedMesh will render; clusterByDotIndex maps dot index → cluster
-// index (or -1 for own dots / RFPs that aren't part of an other-cluster).
-function computeLayout(directoryData) {
+function computeLayout(directoryData, viewport) {
   if (!directoryData) return null
-  const N = directoryData.otherClusters.length
 
-  // Horizontal spread of cluster centers in world coords. Two clusters →
-  // x = ±450; one → x=0; N≥3 → spread evenly across [-700, +700].
-  const sortedClusters = [...directoryData.otherClusters].sort((a, b) =>
-    a.ownerParty.localeCompare(b.ownerParty),
-  )
-  const positions = new Map()
-  const baseY = 0
-  if (N === 1) {
-    positions.set(sortedClusters[0].ownerParty, { x: 0, y: baseY })
-  } else if (N === 2) {
-    positions.set(sortedClusters[0].ownerParty, { x: -450, y: baseY })
-    positions.set(sortedClusters[1].ownerParty, { x: 450, y: baseY })
-  } else if (N > 0) {
-    for (let i = 0; i < N; i++) {
-      const fx = (i + 1) / (N + 1)
-      const x = -700 + 1400 * fx
-      positions.set(sortedClusters[i].ownerParty, { x: snapGrid(x), y: baseY })
-    }
-  }
+  // The user's "virtual center" — canvas-horizontal-center, bottom-third
+  // vertical. This is where the user's own cluster anchors when visible,
+  // and where other clusters fan around when the user is anonymous.
+  // Bottom-third: y > 0 in world coords (world y increases downward).
+  // For a typical viewport ~720px tall, +120 world units puts the user's
+  // cluster roughly in the bottom third at zoom 1.5.
+  const userCenterX = 0
+  const userCenterY = snapGrid(viewport.h / INITIAL_ZOOM * 0.18)
 
   const allDots = []
-  const clusterByDotIndex = []  // index → cluster idx, -1 for own/standalone
+  const clusterByDotIndex = []
 
-  // Phase 16.1.1 Items 8 + 12 + 6: cell layout with 1-cell buffer in all
-  // four directions around the umbrella subset, cluster vertically centered
-  // on the Actor square, and L-shape boundary computed from umbrella cells.
-  //
-  // Layout rules:
-  //   • Umbrella claims pack row-major starting at row 1, col 0 (row 0 left
-  //     empty as the top buffer).
-  //   • Buffer cells = orthogonally adjacent to any umbrella cell, NOT in
-  //     the umbrella subset itself. Includes col -1 (left), col 6 (right
-  //     overflow), and post-umbrella row (bottom buffer).
-  //   • Public claims fill remaining cells via row-major scan (rows 0..N,
-  //     cols 0..MAX_COLS-1), skipping any umbrella OR buffer cell.
-  //   • Cluster vertical center = Actor square Y. anchorY computed as
-  //     squareY - (rowsCount - 1) / 2 * ROW_GAP so dots extend symmetrically
-  //     above/below the square.
-  function layoutClusterCells(umbrellaClaims, publicClaims) {
+  // Cell layout helper — same as Phase 16.1.1 (top buffer at row 0,
+  // 1-cell buffer in all 4 directions around umbrella subset).
+  function layoutClusterCells(umbrellaClaims, publicClaims, rfps) {
     const umbrellaCells = []
     if (umbrellaClaims.length > 0) {
       for (let i = 0; i < umbrellaClaims.length; i++) {
         umbrellaCells.push({
-          claim: umbrellaClaims[i], isAmber: true,
-          row: 1 + Math.floor(i / MAX_COLS),  // row 1+: leaves row 0 as top buffer
+          claim: umbrellaClaims[i], color: 'amber',
+          row: 1 + Math.floor(i / MAX_COLS),
           col: i % MAX_COLS,
         })
       }
@@ -249,16 +195,19 @@ function computeLayout(directoryData) {
         if (!umbrellaSet.has(key)) bufferSet.add(key)
       }
     }
-    // Public scan — fills row-major, skipping umbrella + buffer cells. Cap
-    // at row+col combinations that would explode if every cell is blocked.
-    const publicCells = []
+    // Pack public + RFPs together via row-major scan.
+    const remaining = [
+      ...publicClaims.map((c) => ({ claim: c, color: 'indigo' })),
+      ...rfps.map((r) => ({ rfp: r, color: 'green' })),
+    ]
+    const remainingCells = []
     let r = 0, c = 0, safety = 0
-    for (let i = 0; i < publicClaims.length; i++) {
+    for (let i = 0; i < remaining.length; i++) {
       while (safety < 1000) {
         safety++
         const key = `${r},${c}`
         if (!umbrellaSet.has(key) && !bufferSet.has(key) && c >= 0 && c < MAX_COLS) {
-          publicCells.push({ claim: publicClaims[i], isAmber: false, row: r, col: c })
+          remainingCells.push({ ...remaining[i], row: r, col: c })
           c++
           if (c >= MAX_COLS) { r++; c = 0 }
           break
@@ -267,38 +216,34 @@ function computeLayout(directoryData) {
         if (c >= MAX_COLS) { r++; c = 0 }
       }
     }
-    return { umbrellaCells, publicCells, umbrellaSet, bufferSet }
+    return { umbrellaCells, remainingCells }
   }
 
-  const clusters = directoryData.otherClusters.map((cluster, clusterIdx) => {
-    const center = positions.get(cluster.ownerParty) || { x: 0, y: 0 }
-    const totalDots = cluster.publicClaims.length + cluster.umbrellaClaims.length
-    const colsUsed = Math.min(MAX_COLS, totalDots)
+  // Cluster construction — for both the user's own cluster (when visible)
+  // and other actors' clusters. Returns a cluster descriptor with its
+  // center, dots in world coords, optional amber L-shape path, and
+  // bounding box for inter-cluster spacing checks.
+  function buildCluster({ ownerParty, umbrellaClaims, publicClaims, rfps, isOwnCluster, centerOverride }) {
+    const totalDots = umbrellaClaims.length + publicClaims.length + rfps.length
+    const colsUsed = Math.min(MAX_COLS, totalDots) || 1
     const clusterPxWidth = colsUsed * DOT_GRID
-    const anchorX = snapGrid(center.x - clusterPxWidth / 2)
 
-    const { umbrellaCells, publicCells } = layoutClusterCells(cluster.umbrellaClaims, cluster.publicClaims)
-    const cellsPlaced = [...umbrellaCells, ...publicCells]
+    const { umbrellaCells, remainingCells } = layoutClusterCells(umbrellaClaims, publicClaims, rfps)
+    const cellsPlaced = [...umbrellaCells, ...remainingCells]
 
-    // Cluster vertical extent → vertical-center anchor on the Actor square.
     let minRow = 0, maxRow = 0
     if (cellsPlaced.length > 0) {
       minRow = Math.min(...cellsPlaced.map((c) => c.row))
       maxRow = Math.max(...cellsPlaced.map((c) => c.row))
     }
-    if (cluster.umbrellaClaims.length > 0) {
-      // Account for the row 0 top buffer — extend minRow upward by one if
-      // umbrella starts at row 1 (always; layoutClusterCells puts umbrella
-      // at row 1+). The buffer cell at row 0 isn't a placed-cell so it
-      // doesn't show in cellsPlaced rows; force it into the vertical span.
+    if (umbrellaClaims.length > 0) {
       minRow = Math.min(minRow, 0)
-      // Also extend maxRow downward by 1 to account for bottom-buffer
-      // (row after umbrella's last row). Helps visual symmetry.
-      const lastUmbrellaRow = umbrellaCells[umbrellaCells.length - 1].row
-      maxRow = Math.max(maxRow, lastUmbrellaRow + 1)
+      const lastUmbrella = umbrellaCells[umbrellaCells.length - 1]
+      maxRow = Math.max(maxRow, lastUmbrella.row + 1)
     }
     const rowsCount = maxRow - minRow + 1
-    // Center the cluster vertically on the Actor square.
+    const center = centerOverride || { x: 0, y: 0 }
+    const anchorX = snapGrid(center.x - clusterPxWidth / 2)
     const anchorY = snapGrid(center.y - ((maxRow + minRow) / 2) * ROW_GAP)
 
     const dots = cellsPlaced.map((entry) => ({
@@ -307,8 +252,6 @@ function computeLayout(directoryData) {
       y: anchorY + entry.row * ROW_GAP,
     }))
 
-    // L-shape boundary path (Item 6). Built in WORLD coords; renderer
-    // projects each vertex via worldToScreen on every camera change.
     let amberPathWorld = null
     if (umbrellaCells.length > 0) {
       const cellLeftW = (col) => anchorX + col * COL_GAP - DOT_RADIUS - CLUSTER_PAD
@@ -336,73 +279,156 @@ function computeLayout(directoryData) {
       amberPathWorld = points
     }
 
-    const clusterDotStart = allDots.length
-    for (const d of dots) {
-      allDots.push({
-        x: d.x,
-        y: d.y,
-        color: d.isAmber ? 'amber' : 'indigo',
-        claim: d.claim,
-        clusterIdx,
-      })
-      clusterByDotIndex.push(clusterIdx)
+    // Bounding box (world coords) for inter-cluster buffer enforcement.
+    const halfW = clusterPxWidth / 2 + CLUSTER_PAD
+    const halfH = ((rowsCount - 1) / 2 + 1) * ROW_GAP + CLUSTER_PAD
+    const bbox = {
+      minX: center.x - halfW,
+      maxX: center.x + halfW,
+      minY: center.y - halfH,
+      maxY: center.y + halfH,
     }
-    const clusterDotEnd = allDots.length
-    return {
-      ownerParty: cluster.ownerParty,
-      center,
-      dots,
-      amberPathWorld,
-      rowsCount,
-      dotIndices: { start: clusterDotStart, end: clusterDotEnd },
-    }
+
+    return { ownerParty, isOwnCluster, center, dots, amberPathWorld, rowsCount, bbox }
+  }
+
+  // ─── Build the user's own cluster (if visible) ───────────────────────
+  const ownClusters = []
+  if (directoryData.isUserVisible) {
+    const own = buildCluster({
+      ownerParty: directoryData.activeParty,
+      umbrellaClaims: [],
+      publicClaims: directoryData.ownClaims,
+      rfps: directoryData.ownRfps,
+      isOwnCluster: true,
+      centerOverride: { x: userCenterX, y: userCenterY },
+    })
+    ownClusters.push(own)
+  }
+
+  // Track placed cluster bboxes for buffer enforcement.
+  const placedBoxes = ownClusters.map((c) => c.bbox)
+  const violatesBuffer = (candidateBbox) => placedBoxes.some((p) => {
+    return !(
+      candidateBbox.maxX + CLUSTER_BUFFER < p.minX ||
+      candidateBbox.minX > p.maxX + CLUSTER_BUFFER ||
+      candidateBbox.maxY + CLUSTER_BUFFER < p.minY ||
+      candidateBbox.minY > p.maxY + CLUSTER_BUFFER
+    )
   })
 
-  // Own cluster: active actor's own Claims clustered around the corner card.
-  // Anchored in screen-space (corner card is fixed at left:32, bottom:32),
-  // so own dots also live in screen-space — we project back to world coords
-  // by sitting them off to one side of the corner card. To keep them in
-  // the InstancedMesh world but still adjacent to the corner card, we
-  // dedicate a fixed world region near (-cornerOffset, +cornerOffset)
-  // that nominally "lives" near the bottom-left of the canvas at zoom=1.
-  const ownTotal = directoryData.ownClaims.length
-  const ownAnchorX = snapGrid(-700)  // far-left world region
-  const ownAnchorY = snapGrid(420)   // lower world region
-  const ownDotEntries = []
-  for (let i = 0; i < ownTotal; i++) {
-    const row = Math.floor(i / MAX_COLS)
-    const col = i % MAX_COLS
-    const x = ownAnchorX + col * COL_GAP
-    const y = ownAnchorY + row * ROW_GAP
-    ownDotEntries.push({ claim: directoryData.ownClaims[i], x, y })
-    allDots.push({ x, y, color: 'indigo', claim: directoryData.ownClaims[i], clusterIdx: -1 })
-    clusterByDotIndex.push(-2)  // -2 = own dot (for cluster-brighten, treat ownDots as a cluster of their own)
-  }
-
-  // RFPs — own + others. Phase 16.1: keep Bob's RFP as an HTML overlay
-  // next to the corner card. Other-cluster-adjacent RFPs ride along in
-  // the InstancedMesh as green dots; standalone RFPs (no owner cluster)
-  // get a free-standing slot.
-  const ownRfpDots = directoryData.ownRfps.map((rfp) => ({ rfp }))
-  const otherRfpEntries = []
-  for (const rfp of directoryData.otherRfps) {
-    const existingCluster = clusters.find((c) => c.ownerParty === rfp.owner)
-    if (existingCluster) {
-      const sq = existingCluster.center
-      const x = snapGrid(sq.x + DOT_GRID * 4)
-      const y = sq.y
-      otherRfpEntries.push({ rfp, x, y, freeStanding: false })
-      allDots.push({ x, y, color: 'green', claim: null, clusterIdx: -1, isRfp: true })
-      clusterByDotIndex.push(-1)
-    } else {
-      const slot = { x: snapGrid(700), y: snapGrid(0) }
-      otherRfpEntries.push({ rfp, x: slot.x, y: slot.y, freeStanding: true, squareX: slot.x, squareY: slot.y, ownerParty: rfp.owner })
-      allDots.push({ x: slot.x, y: slot.y, color: 'green', claim: null, clusterIdx: -1, isRfp: true })
-      clusterByDotIndex.push(-1)
+  // ─── Build other clusters fanned ABOVE the user center ───────────────
+  // Sort deterministically by hashed party name for stable placement.
+  const otherClustersInput = [...directoryData.otherClusters].sort((a, b) =>
+    hashString(a.ownerParty) - hashString(b.ownerParty),
+  )
+  const otherClusters = []
+  // Initial fan layout: spread horizontally across the upper canvas, with
+  // some seed-driven jitter. Each candidate position is checked against
+  // placed-bboxes; if it would violate the buffer, push it further up or
+  // sideways.
+  const N = otherClustersInput.length
+  for (let i = 0; i < N; i++) {
+    const cluster = otherClustersInput[i]
+    // Initial guess: distribute horizontally (alternating left/right of
+    // userCenterX), each one progressively further up.
+    const spreadFraction = N === 1 ? 0 : (i / (N - 1)) - 0.5
+    let cx = snapGrid(userCenterX + spreadFraction * 800)
+    // Vertical: above the user — use negative offsets (world Y down means
+    // negative is up). Stagger heights for visual variety.
+    const seed = hashString(cluster.ownerParty)
+    let cy = snapGrid(userCenterY - 240 - (seed % 80))
+    // Buffer enforcement: if this candidate violates the buffer, nudge
+    // upward + sideways until clear.
+    let attempts = 0
+    while (attempts < 30) {
+      const candidate = buildCluster({
+        ownerParty: cluster.ownerParty,
+        umbrellaClaims: cluster.umbrellaClaims,
+        publicClaims: cluster.publicClaims,
+        rfps: [],
+        isOwnCluster: false,
+        centerOverride: { x: cx, y: cy },
+      })
+      if (!violatesBuffer(candidate.bbox)) {
+        otherClusters.push(candidate)
+        placedBoxes.push(candidate.bbox)
+        break
+      }
+      // Nudge upward + alternate sideways.
+      cy -= DOT_GRID * 4
+      cx += (attempts % 2 === 0 ? 1 : -1) * DOT_GRID * 6
+      cx = snapGrid(cx)
+      cy = snapGrid(cy)
+      attempts++
+    }
+    if (attempts === 30) {
+      // Fallback: place at last candidate even if it violates buffer
+      // (graceful degradation when seed scaling makes naive placement
+      // break down — see backlog #196).
+      const candidate = buildCluster({
+        ownerParty: cluster.ownerParty,
+        umbrellaClaims: cluster.umbrellaClaims,
+        publicClaims: cluster.publicClaims,
+        rfps: [],
+        isOwnCluster: false,
+        centerOverride: { x: cx, y: cy },
+      })
+      otherClusters.push(candidate)
+      placedBoxes.push(candidate.bbox)
     }
   }
 
-  return { clusters, ownDots: ownDotEntries, ownRfpDots, otherRfpEntries, allDots, clusterByDotIndex }
+  // ─── Other RFPs (Phase 16: only Bob's seeded one when active != Bob) ─
+  // Each other-actor RFP rides along inside the owning Actor's cluster
+  // if that cluster exists; otherwise it gets a free-standing slot near
+  // its owning Actor's cluster center (no dedicated free-standing Actor
+  // square — Phase 17 may revisit).
+  const otherRfpEntries = []
+  for (const rfp of directoryData.otherRfps) {
+    const ownCluster = otherClusters.find((c) => c.ownerParty === rfp.owner)
+    if (ownCluster) {
+      const sq = ownCluster.center
+      otherRfpEntries.push({ rfp, x: snapGrid(sq.x + DOT_GRID * 3), y: snapGrid(sq.y) })
+    } else {
+      // Free-standing — place above the user center off to the side.
+      otherRfpEntries.push({ rfp, x: snapGrid(userCenterX + 600), y: snapGrid(userCenterY - 320) })
+    }
+  }
+
+  // ─── Flatten dots into the InstancedMesh data array ──────────────────
+  // Order: own cluster dots → other clusters' dots → other RFP dots.
+  const allClusters = [...ownClusters, ...otherClusters]
+  for (let ci = 0; ci < allClusters.length; ci++) {
+    const cluster = allClusters[ci]
+    for (const d of cluster.dots) {
+      allDots.push({
+        x: d.x, y: d.y,
+        color: d.color,
+        claim: d.claim || null,
+        rfp: d.rfp || null,
+        clusterIdx: ci,
+      })
+      clusterByDotIndex.push(ci)
+    }
+  }
+  for (const entry of otherRfpEntries) {
+    allDots.push({ x: entry.x, y: entry.y, color: 'green', claim: null, rfp: entry.rfp, clusterIdx: -1 })
+    clusterByDotIndex.push(-1)
+  }
+
+  return {
+    activeParty: directoryData.activeParty,
+    isUserVisible: directoryData.isUserVisible,
+    allClusters,           // includes own + others
+    ownClusters,
+    otherClusters,
+    otherRfpEntries,
+    allDots,
+    clusterByDotIndex,
+    userCenterX,
+    userCenterY,
+  }
 }
 
 // ─── Main DirectoryLayer ───────────────────────────────────────────────
@@ -411,7 +437,8 @@ export default function DirectoryLayer({
   activeParty,
   roleId,
   v22Provisionals,
-  onOpenAIShopper,    // eslint-disable-line no-unused-vars -- chrome bar carries the entry
+  // eslint-disable-next-line no-unused-vars
+  onOpenAIShopper,
   onClose,
   onClaimDotClick,
   wipeOrigin,
@@ -438,7 +465,6 @@ export default function DirectoryLayer({
     }
   }, [open])
 
-  // Phase 11.8: pinned wipe origin.
   const pinnedOriginRef = useRef(null)
   if (phase === 'closed') pinnedOriginRef.current = null
   if (phase === 'opening' && pinnedOriginRef.current === null) {
@@ -452,39 +478,12 @@ export default function DirectoryLayer({
   const clipExpanded = `circle(180% at ${originStr})`
   const clipPath = phase === 'in' ? clipExpanded : clipCollapsed
 
-  // ─── Per-role data + layout ──────────────────────────────────────────
+  // ─── Per-role data + viewport + layout ──────────────────────────────
   const directoryData = useMemo(() => {
     if (!roleId) return null
     return buildV22DirectoryDataForRole(roleId, v22Provisionals)
   }, [roleId, v22Provisionals])
 
-  const layout = useMemo(() => computeLayout(directoryData), [directoryData])
-
-  // ─── Three.js refs + state ──────────────────────────────────────────
-  const containerRef = useRef(null)
-  const canvasRef = useRef(null)
-  const rendererRef = useRef(null)
-  const sceneRef = useRef(null)
-  const cameraRef = useRef(null)
-  const dotsMeshRef = useRef(null)
-  const gridGroupRef = useRef(null)
-  const dirtyRef = useRef(true)
-  const camPosRef = useRef({ x: 0, y: 0 })
-  const zoomRef = useRef(INITIAL_ZOOM)
-  const draggingRef = useRef(false)
-  const wasDragRef = useRef(false)
-  const dragStartRef = useRef({ x: 0, y: 0 })
-  const camStartRef = useRef({ x: 0, y: 0 })
-  const [threeReady, setThreeReady] = useState(false)
-  const [zoom, setZoom] = useState(INITIAL_ZOOM)
-
-  // Hover/pinned state.
-  const [hover, setHover] = useState(null)   // { claim, x, y (world), screenX, screenY, ownerParty, disclosureType }
-  const [pinned, setPinned] = useState(null)
-  useEffect(() => { if (phase === 'closed') { setHover(null); setPinned(null) } }, [phase])
-  useEffect(() => { setHover(null); setPinned(null) }, [roleId])
-
-  // Viewport size (for tooltip flip).
   const [viewport, setViewport] = useState({
     w: typeof window !== 'undefined' ? window.innerWidth : 1280,
     h: typeof window !== 'undefined' ? window.innerHeight : 720,
@@ -496,12 +495,36 @@ export default function DirectoryLayer({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Screen positions for HTML overlay tracking. Refreshed every RAF tick
-  // when camera changes; structure: { clusterCenters: Map<party, {x,y}>,
-  // dotScreens: Array<{x,y}> aligned with allDots, ownRfpScreens, etc. }
+  const layout = useMemo(() => computeLayout(directoryData, viewport), [directoryData, viewport])
+
+  // ─── Three.js refs + state ──────────────────────────────────────────
+  const containerRef = useRef(null)
+  const canvasRef = useRef(null)
+  const rendererRef = useRef(null)
+  const sceneRef = useRef(null)
+  const cameraRef = useRef(null)
+  const dotsMeshRef = useRef(null)
+  const dotsCapacityRef = useRef(0)   // current InstancedMesh capacity
+  const actorSquaresGroupRef = useRef(null)
+  const gridGroupRef = useRef(null)
+  const dirtyRef = useRef(true)
+  const camPosRef = useRef({ x: 0, y: 0 })
+  const zoomRef = useRef(INITIAL_ZOOM)
+  const draggingRef = useRef(false)
+  const wasDragRef = useRef(false)
+  const dragStartRef = useRef({ x: 0, y: 0 })
+  const camStartRef = useRef({ x: 0, y: 0 })
+  const [threeReady, setThreeReady] = useState(false)
+  const [zoom, setZoom] = useState(INITIAL_ZOOM)
+
+  const [hover, setHover] = useState(null)
+  const [pinned, setPinned] = useState(null)
+  useEffect(() => { if (phase === 'closed') { setHover(null); setPinned(null) } }, [phase])
+  useEffect(() => { setHover(null); setPinned(null) }, [roleId])
+
   const [overlay, setOverlay] = useState(null)
 
-  // ─── worldToScreen / camera helpers ──────────────────────────────────
+  // ─── Camera helpers ─────────────────────────────────────────────────
   const worldToScreen = useCallback((wx, wy) => {
     const camera = cameraRef.current
     const renderer = rendererRef.current
@@ -533,49 +556,41 @@ export default function DirectoryLayer({
   }, [])
 
   const clampPan = useCallback((x, y) => {
-    if (!containerRef.current) return { x, y }
-    // Soft clamp: allow ample pan beyond cluster extent so the user can
-    // explore. Bounds are 1500 world units in each direction.
     return {
       x: Math.max(-1500, Math.min(1500, x)),
       y: Math.max(-1500, Math.min(1500, y)),
     }
   }, [])
 
-  // ─── Overlay refresh (called from animate loop after each render) ────
+  // ─── Overlay refresh ─────────────────────────────────────────────────
   const updateOverlayRef = useRef(() => {})
   useEffect(() => {
     updateOverlayRef.current = () => {
       if (!layout) return
-      const ownerSquares = layout.clusters.map((c) => ({
+      const ownerSquares = layout.allClusters.map((c) => ({
         ownerParty: c.ownerParty,
         screen: worldToScreen(c.center.x, c.center.y),
       }))
       const dotScreens = layout.allDots.map((d) => worldToScreen(d.x, d.y))
-      const freeStandingRfpSquares = layout.otherRfpEntries
-        .filter((e) => e.freeStanding)
-        .map((e) => ({
-          ownerParty: e.ownerParty,
-          screen: worldToScreen(e.squareX, e.squareY),
-        }))
-      // Phase 16.1.1 Item 6: project amber L-shape vertices per cluster.
-      const amberPaths = layout.clusters
+      const amberPaths = layout.allClusters
         .filter((c) => c.amberPathWorld)
         .map((c) => ({
           ownerParty: c.ownerParty,
           screenPoints: c.amberPathWorld.map((p) => worldToScreen(p[0], p[1])),
         }))
-      setOverlay({ ownerSquares, dotScreens, freeStandingRfpSquares, amberPaths })
+      setOverlay({ ownerSquares, dotScreens, amberPaths })
     }
   }, [layout, worldToScreen])
 
-  // ─── Three.js scene init (once when phase enters 'in') ───────────────
+  // ─── Three.js scene init (Phase 16.1.2 Item 6: stable lifecycle) ─────
+  // Created once per phase != 'closed'. Renderer + scene + grid persist
+  // across data changes; only the InstancedMesh + Actor squares update.
   useEffect(() => {
     if (phase === 'closed') return
     const container = containerRef.current
     const canvas = canvasRef.current
     if (!container || !canvas) return
-    if (rendererRef.current) return  // already initialized
+    if (rendererRef.current) return
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
@@ -590,13 +605,17 @@ export default function DirectoryLayer({
     gridGroupRef.current = gridGroup
     scene.add(gridGroup)
 
+    const actorSquaresGroup = new THREE.Group()
+    actorSquaresGroupRef.current = actorSquaresGroup
+    scene.add(actorSquaresGroup)
+
     const camera = new THREE.OrthographicCamera()
     camera.position.set(0, 0, 100)
     camera.lookAt(0, 0, 0)
     cameraRef.current = camera
     updateCamera()
 
-    // Build background grid as Points.
+    // Grid as Points.
     const isDark = document.documentElement.dataset.theme !== 'light'
     const gridColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
     const gridPoints = []
@@ -642,73 +661,112 @@ export default function DirectoryLayer({
       sceneRef.current = null
       cameraRef.current = null
       gridGroupRef.current = null
+      actorSquaresGroupRef.current = null
       dotsMeshRef.current = null
+      dotsCapacityRef.current = 0
       setThreeReady(false)
     }
   }, [phase, updateCamera])
 
-  // ─── Build / rebuild the dots InstancedMesh whenever layout changes ──
+  // ─── Phase 16.1.2 Item 6: stable InstancedMesh lifecycle ──────────────
+  // The InstancedMesh is created with a generous capacity on first build;
+  // subsequent layout changes update the instance data in place via
+  // setMatrixAt + setColorAt without recreating the mesh. If the dot count
+  // exceeds capacity, the mesh is rebuilt with double the size.
   useEffect(() => {
     if (!threeReady || !layout) return
     const scene = sceneRef.current
     if (!scene) return
-    // Tear down previous mesh.
-    if (dotsMeshRef.current) {
-      scene.remove(dotsMeshRef.current)
-      dotsMeshRef.current.geometry.dispose()
-      dotsMeshRef.current.material.dispose()
-      dotsMeshRef.current = null
-    }
-    if (layout.allDots.length === 0) return
-
-    const geometry = new THREE.CircleGeometry(DOT_RADIUS, 16)
-    const material = new THREE.MeshBasicMaterial()
-    const mesh = new THREE.InstancedMesh(geometry, material, layout.allDots.length)
-    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(layout.allDots.length * 3), 3)
-
     const colorIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
     const colorAmber = cssVarToColor('--accent-amber', '#c49a45')
     const colorGreen = cssVarToColor('--accent-green', '#22c55e')
-    const m = new THREE.Matrix4()
-    for (let i = 0; i < layout.allDots.length; i++) {
-      const d = layout.allDots[i]
-      // Three.js Y is up, our world Y is down — invert at instance-matrix
-      // time so dot positions match the worldToScreen convention.
-      m.makeTranslation(d.x, -d.y, 0)
-      mesh.setMatrixAt(i, m)
-      const c = d.color === 'amber' ? colorAmber : d.color === 'green' ? colorGreen : colorIndigo
-      mesh.setColorAt(i, c)
+    const desiredCount = layout.allDots.length
+    let mesh = dotsMeshRef.current
+    if (!mesh || dotsCapacityRef.current < desiredCount) {
+      // Initial creation OR grow.
+      if (mesh) {
+        scene.remove(mesh)
+        mesh.geometry.dispose()
+        mesh.material.dispose()
+      }
+      const capacity = Math.max(desiredCount, 64)  // generous initial capacity
+      const geometry = new THREE.CircleGeometry(DOT_RADIUS, 16)
+      const material = new THREE.MeshBasicMaterial()
+      mesh = new THREE.InstancedMesh(geometry, material, capacity)
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3)
+      scene.add(mesh)
+      dotsMeshRef.current = mesh
+      dotsCapacityRef.current = capacity
     }
+    // Populate instance data.
+    const m = new THREE.Matrix4()
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0)  // collapse unused instances
+    for (let i = 0; i < dotsCapacityRef.current; i++) {
+      if (i < desiredCount) {
+        const d = layout.allDots[i]
+        m.makeTranslation(d.x, -d.y, 0)
+        mesh.setMatrixAt(i, m)
+        const c = d.color === 'amber' ? colorAmber : d.color === 'green' ? colorGreen : colorIndigo
+        mesh.setColorAt(i, c)
+      } else {
+        // Collapse to size 0 so unused instances don't render artifacts.
+        mesh.setMatrixAt(i, hidden)
+      }
+    }
+    mesh.count = desiredCount  // Three.js draws only the first `count` instances
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
-    scene.add(mesh)
-    dotsMeshRef.current = mesh
     dirtyRef.current = true
-    // Phase 16.1.1 Item 3: force a synchronous render after the InstancedMesh
-    // is attached. Without this, the cross-effect ordering (init effect sets
-    // threeReady → re-render → dots effect creates mesh → next animate frame
-    // renders) leaves a window where the canvas paints the empty scene
-    // before the mesh exists. The render here guarantees dots are on screen
-    // by the time the user sees the canvas (during or after the wipe).
+
+    // Sync render so dots appear on the very first frame.
     const renderer = rendererRef.current
     const camera = cameraRef.current
     if (renderer && camera) {
       renderer.render(scene, camera)
-      // Re-flag dirty so the animate loop continues to update overlay positions.
       dirtyRef.current = true
       updateOverlayRef.current?.()
     }
-
-    return () => {
-      if (mesh) {
-        scene.remove(mesh)
-        geometry.dispose()
-        material.dispose()
-      }
-    }
   }, [threeReady, layout])
 
-  // ─── Hover repaint: rewrite per-instance colors based on hover/pinned ─
+  // ─── Phase 16.1.2 Item 3: Actor squares as Three.js LineSegments ──────
+  // Squares render in world coords; scale automatically with camera zoom.
+  useEffect(() => {
+    if (!threeReady || !layout) return
+    const group = actorSquaresGroupRef.current
+    if (!group) return
+    // Tear down previous squares (cheap; max ~5 squares).
+    while (group.children.length > 0) {
+      const child = group.children[0]
+      if (child.geometry) child.geometry.dispose()
+      if (child.material) child.material.dispose()
+      group.remove(child)
+    }
+    const indigo = cssVarToColor('--accent-indigo', '#6b8aff')
+    const half = ACTOR_SQUARE / 2
+    for (const cluster of layout.allClusters) {
+      // Build square outline as 4 line segments (8 vertices total).
+      // Three.js LineSegments expects pairs of points (start, end) per segment.
+      const cx = cluster.center.x
+      const cy = -cluster.center.y  // invert Y for Three.js
+      const verts = new Float32Array([
+        cx - half, cy - half, 0,   cx + half, cy - half, 0,  // top
+        cx + half, cy - half, 0,   cx + half, cy + half, 0,  // right
+        cx + half, cy + half, 0,   cx - half, cy + half, 0,  // bottom
+        cx - half, cy + half, 0,   cx - half, cy - half, 0,  // left
+      ])
+      const geom = new THREE.BufferGeometry()
+      geom.setAttribute('position', new THREE.BufferAttribute(verts, 3))
+      const mat = new THREE.LineBasicMaterial({ color: indigo })
+      const lines = new THREE.LineSegments(geom, mat)
+      group.add(lines)
+    }
+    dirtyRef.current = true
+    const renderer = rendererRef.current
+    const camera = cameraRef.current
+    if (renderer && camera) renderer.render(sceneRef.current, camera)
+  }, [threeReady, layout])
+
+  // ─── Hover repaint via per-instance colors ───────────────────────────
   useEffect(() => {
     if (!threeReady || !layout) return
     const mesh = dotsMeshRef.current
@@ -717,7 +775,6 @@ export default function DirectoryLayer({
     const colorAmber = cssVarToColor('--accent-amber', '#c49a45')
     const colorGreen = cssVarToColor('--accent-green', '#22c55e')
     const colorWhite = new THREE.Color('#ffffff')
-    // Cluster-brighten: lerp toward white by 15% for siblings.
     const lerpToWhite = (base) => {
       const c = base.clone()
       c.lerp(colorWhite, 0.15)
@@ -733,11 +790,8 @@ export default function DirectoryLayer({
       else if (d.color === 'green') base = colorGreen
       else base = colorIndigo
       let c = base
-      if (i === targetIdx) {
-        c = colorWhite
-      } else if (targetClusterIdx !== null && layout.clusterByDotIndex[i] === targetClusterIdx) {
-        c = lerpToWhite(base)
-      }
+      if (i === targetIdx) c = colorWhite
+      else if (targetClusterIdx !== null && layout.clusterByDotIndex[i] === targetClusterIdx) c = lerpToWhite(base)
       mesh.setColorAt(i, c)
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
@@ -783,7 +837,6 @@ export default function DirectoryLayer({
       updateCamera()
       return
     }
-    // Hover raycast.
     const dotIdx = raycast(e.clientX, e.clientY)
     if (dotIdx === null) {
       if (hover) setHover(null)
@@ -800,7 +853,6 @@ export default function DirectoryLayer({
       x: d.x, y: d.y,
       screenX: screen.x, screenY: screen.y,
       ownerParty: d.claim.owner,
-      disclosureType: d.color === 'amber' ? 'umbrella' : 'public',
       dotIndex: dotIdx,
     })
   }, [hover, layout, clampPan, raycast, updateCamera, worldToScreen])
@@ -808,14 +860,9 @@ export default function DirectoryLayer({
   const handleMouseUp = useCallback((e) => {
     if (!draggingRef.current) return
     draggingRef.current = false
-    if (wasDragRef.current) {
-      // Was a drag, not a click — don't pin.
-      return
-    }
-    // Click intent. Resolve via raycaster.
+    if (wasDragRef.current) return
     const dotIdx = raycast(e.clientX, e.clientY)
     if (dotIdx === null) {
-      // Background click → dismiss.
       setPinned(null)
       onClaimDotClick?.(null)
       return
@@ -828,12 +875,12 @@ export default function DirectoryLayer({
       x: d.x, y: d.y,
       screenX: screen.x, screenY: screen.y,
       ownerParty: d.claim.owner,
-      disclosureType: d.color === 'amber' ? 'umbrella' : 'public',
       dotIndex: dotIdx,
     })
     onClaimDotClick?.(d.claim)
   }, [layout, onClaimDotClick, raycast, worldToScreen])
 
+  // ─── Zoom controls (Phase 16.1.2 Item 8: top-right +/-/FIT/%) ────────
   const handleWheel = useCallback((e) => {
     e.preventDefault()
     const dir = e.deltaY > 0 ? 0.95 : 1.05
@@ -855,13 +902,6 @@ export default function DirectoryLayer({
     updateCamera()
   }, [clampPan, updateCamera])
 
-  // Wire wheel listener — needs passive:false to call preventDefault().
-  // Phase 16.1.1 Item 1: dep array gains `phase` so the effect re-runs when
-  // Directory transitions from closed → opening → in. Previously the
-  // effect only ran once on initial mount; if `containerRef.current` was
-  // null at that moment (because the layer hadn't yet rendered), the
-  // listener was never attached. Adding `phase` causes a re-bind after
-  // the JSX mounts and the ref populates.
   useEffect(() => {
     if (phase === 'closed') return
     const container = containerRef.current
@@ -870,10 +910,42 @@ export default function DirectoryLayer({
     return () => container.removeEventListener('wheel', handleWheel)
   }, [handleWheel, phase])
 
-  // Keep pinned/hover screen positions in sync when camera moves.
-  // dirtyRef → animate → updateOverlayRef.current → re-projects dotScreens.
-  // We project the pinned/hover claim's world coords too whenever zoom or
-  // overlay updates.
+  const zoomIn = useCallback(() => {
+    zoomRef.current = Math.min(MAX_ZOOM, zoomRef.current * 1.15)
+    setZoom(zoomRef.current)
+    updateCamera()
+  }, [updateCamera])
+  const zoomOut = useCallback(() => {
+    zoomRef.current = Math.max(MIN_ZOOM, zoomRef.current * 0.87)
+    setZoom(zoomRef.current)
+    updateCamera()
+  }, [updateCamera])
+  const zoomFit = useCallback(() => {
+    if (!layout || layout.allClusters.length === 0) return
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const c of layout.allClusters) {
+      if (c.bbox.minX < minX) minX = c.bbox.minX
+      if (c.bbox.maxX > maxX) maxX = c.bbox.maxX
+      if (c.bbox.minY < minY) minY = c.bbox.minY
+      if (c.bbox.maxY > maxY) maxY = c.bbox.maxY
+    }
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const w = (maxX - minX) + 80
+    const h = (maxY - minY) + 80
+    const container = containerRef.current
+    if (!container) return
+    const fitZoom = Math.min(container.clientWidth / w, container.clientHeight / h)
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fitZoom))
+    camPosRef.current = clampPan(cx, cy)
+    zoomRef.current = newZoom
+    setZoom(newZoom)
+    updateCamera()
+  }, [layout, clampPan, updateCamera])
+
+  const zoomPct = Math.round(((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 90 + 10) + '%'
+
+  // Hover/pinned screen position sync.
   useEffect(() => {
     if (!hover) return
     const screen = worldToScreen(hover.x, hover.y)
@@ -891,22 +963,12 @@ export default function DirectoryLayer({
 
   if (phase === 'closed') return null
 
-  // Hover pillbox-fade decision (per cluster).
   const activeHoverScreen = hover ? { x: hover.screenX, y: hover.screenY } : (pinned ? { x: pinned.screenX, y: pinned.screenY } : null)
   const fadePillboxFor = (centerX, centerY) => {
     const pillX = centerX
     const pillY = centerY - ACTOR_SQUARE / 2 - ACTOR_LABEL_OFFSET
     return isHoverNearPillbox(activeHoverScreen, pillX, pillY)
   }
-
-  // Bob's RFP (own RFP) screen position — fixed, above the corner card.
-  const ownRfpScreens = (layout?.ownRfpDots || []).map((d, i) => {
-    const total = layout.ownRfpDots.length
-    const cardCenterX = CORNER_CARD_LEFT + CORNER_CARD_W / 2
-    const cardTopY = viewport.h - CORNER_CARD_BOTTOM - CORNER_CARD_H
-    const offset = (i - (total - 1) / 2) * 14
-    return { rfp: d.rfp, x: cardCenterX + offset, y: cardTopY - 24 }
-  })
 
   return (
     <div
@@ -934,113 +996,29 @@ export default function DirectoryLayer({
       />
 
       {/* Header pillbox. */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 80,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          padding: '6px 16px',
-          borderRadius: 999,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-primary)',
-          fontFamily: 'var(--font-display)',
-          fontSize: 12,
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          pointerEvents: 'none',
-          zIndex: 11,
-        }}
-      >Radiant Network</div>
+      <div style={{
+        position: 'absolute',
+        top: 80,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        padding: '6px 16px',
+        borderRadius: 999,
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-display)',
+        fontSize: 12,
+        letterSpacing: '0.18em',
+        textTransform: 'uppercase',
+        pointerEvents: 'none',
+        zIndex: 11,
+      }}>Radiant Network</div>
 
-      {/* Bob's corner card. */}
-      <Tooltip
-        content="Return to your network"
-        position="top"
-        wrapperStyle={{ position: 'absolute', left: CORNER_CARD_LEFT, bottom: CORNER_CARD_BOTTOM }}
-      >
-      <div
-        onClick={(e) => { e.stopPropagation(); onClose?.() }}
-        style={{
-          width: CORNER_CARD_W,
-          minHeight: CORNER_CARD_H,
-          padding: '14px 16px',
-          borderRadius: 10,
-          background: 'var(--bg-card)',
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))',
-          cursor: 'pointer',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-          transition: 'border-color 150ms, background 150ms, box-shadow 150ms',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.32)',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'var(--accent-indigo)'
-          e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 6%, var(--bg-card))'
-          e.currentTarget.style.boxShadow = '0 6px 22px rgba(0,0,0,0.45)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
-          e.currentTarget.style.background = 'var(--bg-card)'
-          e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.32)'
-        }}
-      >
-        <span style={{
-          fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
-          padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
-          color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
-          alignSelf: 'flex-start',
-        }}>ACTOR</span>
-        <div style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: 13,
-          fontWeight: 600,
-          color: 'var(--text-primary)',
-          lineHeight: 1.3,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}>{activeParty || 'You'}</div>
-      </div>
-      </Tooltip>
-
-      {/* Umbrella DA edges — corner card → projected Actor square center. */}
+      {/* Phase 16.1.2 Item 4: edges removed. SVG layer retained for amber
+          L-shape paths only. */}
       <svg
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 2 }}
       >
-        {layout && directoryData?.umbrellaEdges?.map((edge) => {
-          const cluster = layout.clusters.find((c) => c.ownerParty === edge.targetParty)
-          if (!cluster) return null
-          const screen = overlay?.ownerSquares.find((s) => s.ownerParty === edge.targetParty)?.screen
-          if (!screen) return null
-          const fromX = CORNER_CARD_LEFT + CORNER_CARD_W
-          const fromY = viewport.h - CORNER_CARD_BOTTOM - CORNER_CARD_H / 2
-          const toX = screen.x - ACTOR_SQUARE / 2
-          const toY = screen.y
-          const dx = toX - fromX
-          const cp1x = fromX + dx * 0.5
-          const cp1y = fromY
-          const cp2x = toX - dx * 0.5
-          const cp2y = toY
-          const d = `M ${fromX},${fromY} C ${cp1x},${cp1y} ${cp2x},${cp2y} ${toX},${toY}`
-          return (
-            <path
-              key={edge.targetParty}
-              d={d}
-              stroke="var(--accent-indigo)"
-              strokeWidth={1.5}
-              strokeOpacity={0.6}
-              fill="none"
-            />
-          )
-        })}
-        {/* Phase 16.1.1 Item 6: amber L-shape boundary around each cluster's
-            umbrella subset. Projected from world coords on every camera
-            change via overlay.amberPaths. */}
         {overlay?.amberPaths?.map((p) => {
           if (!p.screenPoints || p.screenPoints.length === 0) return null
           const d = p.screenPoints.map((pt, i) => (i === 0 ? `M ${pt.x} ${pt.y}` : `L ${pt.x} ${pt.y}`)).join(' ') + ' Z'
@@ -1057,40 +1035,13 @@ export default function DirectoryLayer({
         })}
       </svg>
 
-      {/* Actor squares + label pillboxes (per cluster). */}
-      {layout && overlay && layout.clusters.map((cluster) => {
+      {/* Pillbox labels (HTML overlay; positioned via worldToScreen). */}
+      {layout && overlay && layout.allClusters.map((cluster) => {
         const screen = overlay.ownerSquares.find((s) => s.ownerParty === cluster.ownerParty)?.screen
         if (!screen) return null
         const faded = fadePillboxFor(screen.x, screen.y)
-        return <ActorSquare key={cluster.ownerParty} ownerParty={cluster.ownerParty} x={screen.x} y={screen.y} faded={faded} />
+        return <PillboxLabel key={cluster.ownerParty} ownerParty={cluster.ownerParty} x={screen.x} y={screen.y} faded={faded} />
       })}
-
-      {/* Free-standing Actor squares (RFP-only owners, no cluster). */}
-      {layout && overlay && overlay.freeStandingRfpSquares.map((s) => (
-        <ActorSquare key={`fs-${s.ownerParty}`} ownerParty={s.ownerParty} x={s.screen.x} y={s.screen.y} faded={fadePillboxFor(s.screen.x, s.screen.y)} />
-      ))}
-
-      {/* Bob's own RFP green dot — fixed in viewport above corner card.
-          Phase 16.1.1 Item 11: 6×6 with no glow halo so the visual size
-          matches the InstancedMesh cluster dots projected at zoom 1.0.
-          The halo from prior phases inflated the perceived size. */}
-      {ownRfpScreens.map((d) => (
-        <div
-          key={d.rfp.id}
-          data-rfp-id={d.rfp.id}
-          style={{
-            position: 'absolute',
-            left: d.x - 3,
-            top: d.y - 3,
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: 'var(--accent-green)',
-            pointerEvents: 'none',
-            zIndex: 5,
-          }}
-        />
-      ))}
 
       {/* Tooltip (singleton). */}
       {(hover || pinned) && (() => {
@@ -1098,11 +1049,54 @@ export default function DirectoryLayer({
         return <ClaimTooltipCard claim={t.claim} x={t.screenX ?? 0} y={t.screenY ?? 0} viewportW={viewport.w} />
       })()}
 
-      {/* Exit hint */}
+      {/* Phase 16.1.2 Item 8: zoom controls top-right (+/-/FIT/%). */}
+      <div style={{
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        zIndex: 50,
+        pointerEvents: 'auto',
+      }}>
+        {[
+          { label: '+', onClick: zoomIn },
+          { label: '−', onClick: zoomOut },
+          { label: 'FIT', onClick: zoomFit },
+        ].map((btn) => (
+          <button
+            key={btn.label}
+            onClick={(e) => { e.stopPropagation(); btn.onClick() }}
+            style={{
+              width: 28, height: 28,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: btn.label === 'FIT' ? 8 : 14,
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+            }}
+          >{btn.label}</button>
+        ))}
+        <div style={{
+          textAlign: 'center',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: 'var(--text-tertiary)',
+          marginTop: 2,
+        }}>{zoomPct}</div>
+      </div>
+
+      {/* Exit hint (back-to-network, top-right above zoom controls). */}
       <div style={{
         position: 'absolute',
         top: 16,
-        right: 16,
+        left: 16,
         display: 'flex',
         alignItems: 'center',
         gap: 6,
@@ -1122,26 +1116,6 @@ export default function DirectoryLayer({
         onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
       >
         <span>← Back to Network</span>
-      </div>
-
-      {/* Zoom indicator. Phase 16.1.1 Item 2: bottom: 16 → 56 so the
-          indicator clears the v0.16.1.1+ app footer (footer ~36-40px tall;
-          12px of breathing room above). */}
-      <div style={{
-        position: 'absolute',
-        bottom: 56,
-        right: 16,
-        padding: '4px 10px',
-        borderRadius: 999,
-        background: 'color-mix(in srgb, var(--bg-card) 80%, transparent)',
-        border: '1px solid var(--border)',
-        fontFamily: 'var(--font-mono)',
-        fontSize: 10,
-        color: 'var(--text-dim)',
-        pointerEvents: 'none',
-        zIndex: 10,
-      }}>
-        zoom {zoom.toFixed(2)}×
       </div>
     </div>
   )

@@ -7747,7 +7747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.1 &middot; Changelog
+          v0.16.1.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7794,6 +7794,18 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.2', date: '2026-05-09', label: 'Phase 16.1.2', items: [
+                  'Phase 16.1.2 — Directory Layer spatial model rewrite + bug fixes. Eight items.',
+                  'Item 1: corner card removed from Directory. The user\'s own representation is now a regular cluster, no longer a viewport-fixed HTML overlay.',
+                  'Item 2: user\'s own cluster (Actor square + Claims + RFPs) positioned at canvas-horizontal-center + bottom-third vertically on initial load. Anonymous actors (Carol/AuditCo) render no own cluster — bottom-third is just a virtual layout anchor for fan-out. New `isUserVisible` flag on `buildV22DirectoryDataForRole` return.',
+                  'Item 3: Actor squares migrated from HTML divs to Three.js `LineSegments` so they scale with camera zoom identically to dots. Pillbox labels remain HTML overlays projected via worldToScreen (text stays readable at all zooms).',
+                  'Item 4: all edges dropped from Directory. The umbrella DA SVG cubic Bezier from corner card to ChipCo\'s square is gone (corner card is gone too). Amber L-shape border + tint around umbrella subset stays — that\'s a cluster-internal decoration, not an edge.',
+                  'Item 5: 12-cell minimum buffer between user\'s own cluster and others, and between any two non-user clusters. Bbox-based deterministic placement; force-directed layout deferred to a future phase (#196 filed).',
+                  'Item 6: first-transition dot lifecycle bug fixed. InstancedMesh now created once with generous capacity (64 instances initial); subsequent layout changes update via `setMatrixAt` + `setColorAt` + `mesh.count = desiredCount` without recreating the mesh. Stable across 5+ open/close cycles.',
+                  'Item 7: parent-layer node + edge hover + selected state cleared on Directory transition (was wired in 16.1.1 but the doc claim was overstated; verified comprehensive in this phase).',
+                  'Item 8: zoom controls top-right (+/-/FIT vertical stack with percentage display, matching parent-layer pattern). Old bottom-right `zoom 1.50x` indicator removed.',
+                  'Footer rolls forward to v0.16.1.2.',
+                ]},
                 { version: '0.16.1.1', date: '2026-05-09', label: 'Phase 16.1.1', items: [
                   'Phase 16.1.1 — Three.js Directory Layer hotfix (eleven QA fixes from Phase 16.1.0).',
                   'Item 1: Zoom wheel handler now functional. Effect dep array gained `phase` so the wheel listener re-binds when the layer mounts (previously the listener was never attached because `containerRef.current` was null at first effect run).',

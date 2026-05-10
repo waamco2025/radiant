@@ -3628,15 +3628,21 @@ export function buildV22DirectoryDataForRole(roleId, provisionals) {
   // subject is also public, the visual amber subset is empty and
   // drawing the umbrella edge would imply private access that doesn't
   // visually exist.
-  const umbrellaEdges = otherClusters
-    .filter((c) => c.umbrellaClaims.length > 0)
-    .map((c) => ({ targetParty: c.ownerParty }))
+  // Phase 16.1.2 Item 4: edges dropped from Directory. Field retained for
+  // backwards compatibility (any consumer iterating it sees an empty array).
+  const umbrellaEdges = []
 
   const allRfps = (shared.rfps || []).filter((r) => r.status === 'open')
   const ownRfps = allRfps.filter((r) => r.owner === activeParty)
   const otherRfps = allRfps.filter((r) => r.owner !== activeParty)
 
-  return { activeParty, ownClaims, ownRfps, otherClusters, umbrellaEdges, otherRfps }
+  // Phase 16.1.2 Item 2: `isUserVisible` flag — true when the active actor
+  // has at least one own publicly-disclosed Claim or own RFP. False for
+  // anonymous actors (e.g. Carol/AuditCo in the seed). DirectoryLayer
+  // consumes this to decide whether to render the user's own cluster +
+  // Actor square.
+  const isUserVisible = ownClaims.length > 0 || ownRfps.length > 0
+  return { activeParty, isUserVisible, ownClaims, ownRfps, otherClusters, umbrellaEdges, otherRfps }
 }
 
 /**
