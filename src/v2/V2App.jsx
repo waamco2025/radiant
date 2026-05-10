@@ -7755,7 +7755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.4 &middot; Changelog
+          v0.16.1.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7802,6 +7802,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.5', date: '2026-05-10', label: 'Phase 16.1.5', items: [
+                  'Phase 16.1.5 — Hotfix. Two QA issues surfaced in 16.1.4, both downstream of the lifecycle change: (1) dots disappeared at zoom > ~60%; (2) dot clicks no longer opened the Detail Panel.',
+                  'Root cause for both — `InstancedMesh.boundingSphere` is auto-computed from the underlying geometry vertices, which sit at world origin because instance positions live in per-instance matrices, not the geometry. The first computed sphere ended up tiny (radius = `DOT_RADIUS = 3`, centred at origin) and was cached on the mesh. The rendering frustum check (`Frustum.intersectsObject`) and the raycast pre-filter (`InstancedMesh.raycast` → `raycaster.ray.intersectsSphere(_sphere)`) both consult this cached sphere — the tiny origin-sphere fell outside the camera frustum at high zoom and outside the click ray at any zoom, so the entire mesh was rejected before per-instance work ran. Phase 16.1.4 stabilized the scene lifecycle but didn\'t touch the bounding-sphere caching, so both symptoms surfaced once the lifecycle stopped masking them.',
+                  'Fix: on each InstancedMesh (dots + Actor squares + RFP), set `frustumCulled = false` and override `boundingSphere = new THREE.Sphere(origin, Infinity)`. The first opts out of the renderer frustum check entirely (no perceptible perf cost at our scale). The second forces the raycast pre-filter to always pass; per-instance raycast then runs correctly against the proper per-instance bounding spheres at the `Mesh.raycast` level.',
+                  'The brief\'s alternate Item 2 diagnosis (\"closure staleness in event listeners attached in the scene-init effect\") did not match the actual code — mouse handlers in DirectoryLayer.jsx are React JSX event props bound via `useCallback` with full deps, not `addEventListener` calls inside a long-lived effect. No handler refactor was required; the bounding-sphere fix addressed the click symptom directly via the shared raycast pre-filter.',
+                  'Verified: dots render at zoom factor 4.0 (UI 100%) when the camera is positioned on a cluster (verified by wheel-zoom-on-cluster and by directly setting camera world position to a known cluster centre). Click on a dot opens the Detail Panel with the correct Claim content + pans the camera to centre the clicked dot. Click works after role switch (Bob → Alice → Alice\'s view of Power Regulation Module Assembly with AMEND CLAIM button visible). Click works after close + reopen.',
+                  'Footer rolls forward to v0.16.1.5.',
+                ]},
                 { version: '0.16.1.4', date: '2026-05-10', label: 'Phase 16.1.4', items: [
                   'Phase 16.1.4 — Hotfix. Directory layer dot rendering regression from Phase 16.1.3 resolved.',
                   'Root cause: the scene-init `useEffect` declared `phase` in its dependency array, so its cleanup fired on every internal phase transition (opening → in, in → out), not only on full close. The cleanup disposed the populated `InstancedMesh` + renderer mid-flight; the body re-ran and created a fresh empty mesh (`count = 0`). The downstream `useLayoutEffect` that repopulates dots had deps `[threeReady, layout]` — those deps did not register a change because React batched the `setThreeReady(false)` in cleanup with the `setThreeReady(true)` in the new body into a single update whose net value was unchanged. Result: an empty mesh in the scene + no repopulation = blank canvas.',

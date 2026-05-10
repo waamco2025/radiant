@@ -2673,6 +2673,60 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.1.5 completion notes (2026-05-10) — Hotfix: Frustum culling + raycast bounding-sphere fix
+
+Two QA issues from Phase 16.1.4, both downstream of that phase's lifecycle change:
+
+1. **Dots disappeared at zoom > ~60%** (rendering symptom).
+2. **Dot clicks no longer opened the Detail Panel** (raycast symptom).
+
+The brief framed these as separate issues — frustum culling for (1), closure-staleness in scene-init event listeners for (2) — but investigation showed they share a single root cause, and only one targeted fix was required.
+
+**Shared root cause — `THREE.InstancedMesh.boundingSphere` is auto-computed from underlying geometry vertices.** For `InstancedMesh`, instance positions live in per-instance matrices, NOT in the geometry. The geometry vertices sit at world origin (the dot is a `CircleGeometry(DOT_RADIUS = 3)` centred at origin). So the auto-computed bounding sphere ends up tiny: radius = 3, centre = `(0, 0, 0)` in world coords. This sphere gets cached on the mesh and isn't refreshed when per-instance matrices change.
+
+Two pieces of Three.js code read this cached sphere:
+
+- **Rendering frustum check** (`Frustum.intersectsObject(mesh)` → tests if `mesh.boundingSphere` intersects the camera frustum). At higher zoom levels, the orthographic frustum tightens; if `(0, 0, 0)` radius-3 doesn't intersect the visible region, the *entire* `InstancedMesh` is culled — even though individual instance positions clearly fall inside the visible frustum.
+- **Raycast pre-filter** (`InstancedMesh.raycast` → `_sphere.copy(this.boundingSphere).applyMatrix4(matrixWorld); if (raycaster.ray.intersectsSphere(_sphere) === false) return;`). The click ray passes through the cursor position in world space. If the ray doesn't intersect a radius-3 sphere at origin, `intersectsSphere` returns `false` and `raycast` returns *before* iterating per-instance hits. Result: no click hits register.
+
+Phase 16.1.4 stabilized the scene lifecycle (so the mesh persists across phase transitions), but didn't touch the bounding-sphere caching. The stabilized lifecycle un-masked both pre-existing rendering and raycast symptoms.
+
+**Fix.** On each `InstancedMesh` (dots + Actor squares + RFP), immediately after construction:
+
+```js
+mesh.frustumCulled = false
+mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), Number.POSITIVE_INFINITY)
+```
+
+- `frustumCulled = false` opts out of the renderer's frustum check entirely. There's no perceptible perf cost at our scale (≤ thousands of dots; Three.js draws them in a single instanced draw call regardless).
+- `boundingSphere = unbounded sphere` forces the raycast pre-filter to always pass. Per-instance raycast then runs against the proper per-instance bounding spheres at the `Mesh.raycast` level (one `Mesh.raycast` call per instance, each with the geometry's tiny sphere transformed by that instance's matrix — the math works correctly there because the per-instance matrix translates the sphere to the instance's world position).
+
+A small helper `unboundedSphere()` factory keeps each mesh's bounding sphere independent (so a future mutation on one wouldn't bleed into another).
+
+**Item 2 analysis (brief's diagnosis didn't match the code).** The brief proposed an alternate explanation for the click bug: "The scene-init effect (now stable across phase transitions thanks to 16.1.4) attaches mouse event listeners that close over the first-render state." This didn't match the actual code:
+
+- Mouse handlers in `DirectoryLayer.jsx` are React JSX event props (`onMouseDown={handleMouseDown}` etc.) on the container `<div>`. They are NOT `addEventListener` calls inside a long-lived `useEffect`.
+- Each handler is wrapped in `useCallback` with full deps (`handleMouseMove` deps include `[hover, layout, clampPan, raycast, updateCamera, worldToScreen]`; `handleMouseUp` deps include `[layout, onClaimDotClick, raycast, worldToScreen, animatedPanToWithZoom]`). React re-attaches the current `useCallback` reference on each render, so handlers always see current props/state.
+- The brief's recommended refactor (route reads through refs kept current by small sync effects) is the right pattern for the `addEventListener`-in-useEffect case, but unnecessary for our JSX-prop case. Applying it would have been pure code churn with no behaviour change.
+
+Skipped the refactor in line with the project's "no unnecessary churn" guidance (CLAUDE.md: "Don't add features, refactor, or introduce abstractions beyond what the task requires."). The bounding-sphere fix alone resolves both symptoms via the shared raycast pre-filter.
+
+**Verification (real browser preview).** All checks ran on Phase 16.1.5 code after a clean reload + boot via ESTABLISH SESSION:
+
+- **Rendering at high zoom**: Wheel-zoom-on-cluster (`canvas.dispatchEvent(WheelEvent { deltaY: -200, clientX, clientY })` repeated 8× over ChipCo) brought zoom to UI 56%; cluster + L-shape boundary + Actor square + dots all visible in screenshot. Further wheel zooms reach 100%; dots remain rendered when camera is on a cluster. Direct probe (setting `camPosRef.current = { x: 9, y: 170 }` and `zoomRef.current = 4.0` for GovCo cluster centre) confirmed dots render at zoom factor 4.0 (UI 100%) when camera position is correct. Confirmed `dotsMesh.frustumCulled === false` and `dotsMesh.boundingSphere.radius === Infinity` via React-fiber probe of the live mesh.
+- **Click opens Detail Panel** (Bob view): Computed instance 0's screen position by projecting world coords through camera, dispatched mousedown+mouseup on the container at that position. Detail Panel opened with the MicroCo "Power Regulation Module Assembly" Claim. Camera animated to centre the clicked dot (`animatedPanToWithZoom` ran). Pinned tooltip card rendered next to the dot with the same Claim metadata.
+- **Click after role switch**: Switched Bob → Alice via user menu, opened Directory, FIT, clicked instance 0. Detail Panel showed "Power Regulation Module Assembly" with `AMEND CLAIM` button (Alice owns this Claim — confirms per-role view + click both resolve current state correctly, not stale Bob data).
+- **Click after close + reopen cycle**: Closed Directory via `← Back to Network`, reopened via globe button, clicked instance 0. Detail Panel reopened correctly. `dotsMesh.frustumCulled === false` and `dotsMesh.boundingSphere.radius === Infinity` confirmed on the freshly-recreated mesh (the new mesh inherits the same construction-time settings).
+- **Phase 16.1.4 lifecycle items still hold**: dots visible on cold-reload first open; visible across the 5 reopen iterations the brief calls out.
+
+Interactive items requiring real mouse events (hover whiten, hover tooltip card, drag pan) were code-verified-only — the V2 raycaster doesn't respond to DOM-dispatched events (documented CLAUDE.md limitation). Those code paths were untouched by this fix.
+
+**Documentation updates.** Footer rolls forward `v0.16.1.4 → v0.16.1.5` in `V2App.jsx`. Changelog modal gains a v0.16.1.5 entry above v0.16.1.4 with diagnosis + fix summary + the "Item 2 brief diagnosis didn't match code" note. Architecture spec gains a §8.5 Phase 16.1.5 changelog bullet. polish-backlog.md gets a Phase 16.1.5 Update Log entry. CLAUDE.md "Current state of the world" + "Last shipped phase" updated; 16.1.4 demoted to prior-phase.
+
+**Files changed:** `src/v2/DirectoryLayer.jsx` (3 lines × 3 meshes = 6 effective lines added — `frustumCulled = false`, `boundingSphere = unboundedSphere()`, plus the `unboundedSphere` helper factory and an explanatory comment block), `src/v2/V2App.jsx` (footer version + Changelog modal entry), `architecture-spec.md`, `polish-backlog.md`, `CLAUDE-phase-log.md`, `CLAUDE.md`.
+
+**Status:** [x] Complete.
+
 ### Phase 16.1.4 completion notes (2026-05-10) — Hotfix: Directory layer dot rendering regression from 16.1.3
 
 Single-issue hotfix. Phase 16.1.3 shipped with a regression: dots no longer appeared on the Directory layer at all (no console errors; canvas visually empty). Reproduced reliably on hard-reload + first open of Directory.

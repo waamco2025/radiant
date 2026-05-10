@@ -795,11 +795,27 @@ export default function DirectoryLayer({
 
     // Phase 16.1.3 Items 1 + 2 + 9: pre-create InstancedMeshes with generous
     // capacity. Population happens in subsequent useLayoutEffects.
+    // Phase 16.1.5 Item 1: `frustumCulled = false` on every InstancedMesh.
+    // Three.js auto-culls meshes whose bounding sphere falls outside the
+    // camera frustum. For InstancedMesh, the auto-computed bounding sphere
+    // comes from the underlying GEOMETRY vertices — which sit at origin
+    // because instance positions live in per-instance matrices, not in the
+    // geometry. At high zoom, the camera frustum tightens; the
+    // origin-centred bounding sphere falls outside the frustum and Three.js
+    // culls the entire mesh — even though individual instances are clearly
+    // inside the visible area. Disabling frustum culling is the simplest
+    // fix; there's no perceptible perf cost at our scale (≤ thousands of
+    // dots). Also override `boundingSphere` to an unbounded sphere so the
+    // raycast pre-filter (which also consults the bounding sphere) never
+    // rejects the mesh outright at high zoom.
+    const unboundedSphere = () => new THREE.Sphere(new THREE.Vector3(0, 0, 0), Number.POSITIVE_INFINITY)
     const dotGeometry = new THREE.CircleGeometry(DOT_RADIUS, 16)
     const dotMaterial = new THREE.MeshBasicMaterial()
     const dotsMesh = new THREE.InstancedMesh(dotGeometry, dotMaterial, MAX_DOTS)
     dotsMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DOTS * 3), 3)
     dotsMesh.count = 0  // empty until populated
+    dotsMesh.frustumCulled = false
+    dotsMesh.boundingSphere = unboundedSphere()
     scene.add(dotsMesh)
     dotsMeshRef.current = dotsMesh
 
@@ -807,6 +823,8 @@ export default function DirectoryLayer({
     const squareMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-indigo', '#6b8aff') })
     const squaresMesh = new THREE.InstancedMesh(squareGeometry, squareMaterial, MAX_SQUARES)
     squaresMesh.count = 0
+    squaresMesh.frustumCulled = false
+    squaresMesh.boundingSphere = unboundedSphere()
     scene.add(squaresMesh)
     actorSquaresMeshRef.current = squaresMesh
 
@@ -814,6 +832,8 @@ export default function DirectoryLayer({
     const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-cyan', '#22d3ee') })
     const rfpMesh = new THREE.InstancedMesh(rfpGeometry, rfpMaterial, MAX_RFPS)
     rfpMesh.count = 0
+    rfpMesh.frustumCulled = false
+    rfpMesh.boundingSphere = unboundedSphere()
     scene.add(rfpMesh)
     rfpMeshRef.current = rfpMesh
 
