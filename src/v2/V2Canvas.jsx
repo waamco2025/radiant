@@ -2058,6 +2058,15 @@ const V2Canvas = forwardRef(function V2Canvas({
     setUnraveling: (flag) => {
       unravelingRef.current = !!flag
     },
+    // Phase 16.1.1 Item 5: clear all parent-layer hover state. V2App
+    // calls this when transitioning to the Directory layer so any
+    // edge tooltip / node hover that was open on the parent layer
+    // doesn't persist behind the Directory clip-path wipe.
+    clearHoverState: () => {
+      setHoveredEdge(null)
+      setEdgeTooltipPos(null)
+      setHoveredEdgeSdaType(null)
+    },
     // Phase 9D.2: lookups + edge-retract animation for the unravel primitive.
     // getNodeWorldPos resolves a nodeId to its world-space (x,y) on the
     // current layer; null if not found or coords are non-finite (e.g.

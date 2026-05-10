@@ -2673,6 +2673,47 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.1.1 completion notes (2026-05-09) — Three.js Directory Layer hotfix
+
+Eleven QA fixes from Phase 16.1.0 manual testing on the merged main branch. Single Claude Code session, single commit on the worktree branch (Andrew's external merge-to-main step is the canonical ship path). No backlog items closed; pure regression + polish.
+
+**Item 1 — Zoom wheel handler binding fix.** The wheel `useEffect` ran once at mount with deps `[handleWheel]`. Since `handleWheel` is stable (wraps stable `clampPan` + `updateCamera`), the effect ran once on initial component mount. But `containerRef.current` was null at that moment because the wrapper div hadn't yet rendered. The listener was never attached. Fix: dep array gains `phase` so the effect re-runs when Directory transitions from `'closed'` → `'opening'` → `'in'`. Early return when `phase === 'closed'` skips the bind during the unmounted period; on each subsequent transition, `containerRef.current` is populated by the time the effect runs.
+
+**Item 2 — Zoom indicator above footer.** Lifted from `bottom: 16` to `bottom: 56` so it clears the v0.16.1.x app footer (footer ~28px tall + breathing room). No layout regression — the indicator is `pointerEvents: none` and just shifts vertically.
+
+**Item 3 — First-transition dot rendering race.** The cross-effect ordering was: init effect creates renderer + sets `setThreeReady(true)` → component re-renders → dots `useEffect` creates InstancedMesh → next animate tick renders the scene with dots. Between (a) and (d) the animate loop's first tick rendered the empty scene before the InstancedMesh existed. Fix: inside the dots `useEffect`, after attaching the mesh, immediately call `renderer.render(scene, camera)` synchronously. This guarantees the canvas has dots painted before the user sees the first frame post-wipe. Also calls `updateOverlayRef.current()` to populate the overlay state synchronously.
+
+**Item 4 — Grid alignment.** The dot world-coord computation was `anchorX + col * COL_GAP + DOT_GRID / 2`. Removed the `+DOT_GRID/2` offset. With `anchorX/Y` snapped to `DOT_GRID` (which we already do via `snapGrid(...)`), and column/row offsets being integer multiples of `DOT_GRID`, every dot center is now an integer multiple of `DOT_GRID`. The background `THREE.Points` grid uses the same `DOT_GRID = 12` stride starting at world (0, 0), so dot centers and grid intersections coincide.
+
+**Item 5 — Clear parent-layer edge tooltip on Directory open.** New `clearHoverState` imperative method on V2Canvas via `useImperativeHandle` (extending the existing imperative API at line 2023+). Method: `setHoveredEdge(null); setEdgeTooltipPos(null); setHoveredEdgeSdaType(null)`. V2App invokes it from both Directory entry points: (a) chrome globe button click handler at line ~4209; (b) Radiant Network actor double-click handler at line ~5179 (passed via `onV22OpenDirectoryFromNode` callback). Called BEFORE `setV22DirectoryOpen(true)` so the state clears before the wipe begins.
+
+**Item 6 — Amber L-shape border + tinted-bg fill.** Restored as SVG overlay. The L-shape boundary path is computed in WORLD coords (per cluster) inside `computeLayout` from the umbrella cell set with `CLUSTER_PAD = 5` world units of breathing room outside the dot footprints. Each path vertex is projected via `worldToScreen` on every camera change inside `updateOverlayRef.current` (which is called from the animate loop). Rendered as SVG `<path>` inside the existing umbrella-edges SVG overlay container at z-index 2: stroke `var(--accent-amber)` 1.5px + fill `color-mix(var(--accent-amber) 8%, transparent)`. The path renders behind the dots (lower z-index than the Three.js canvas? — actually the SVG sits ABOVE the canvas in DOM order but the dots are themselves WebGL on the canvas; the SVG amber path appears behind dots visually because the dots are filled circles and the path's fill color is translucent + the stroke is thin).
+
+**Item 7 — Tooltip 4th row removed.** `ClaimTooltipCard` now renders 3 rows: CLAIM badge + Claim name + owner party. The disclosure-type-and-date line removed entirely. `disclosureType` prop dropped from `ClaimTooltipCard`'s API (call site updated).
+
+**Item 8 — 1-cell buffer in all four directions.** Replaced the prior "phantom-slot gap on same row" buffer with a proper 4-direction buffer. New `layoutClusterCells` helper:
+1. Pack umbrella row-major STARTING AT ROW 1 col 0 (row 0 reserved as top buffer).
+2. Compute `bufferSet` = orthogonally adjacent cells to any umbrella cell, NOT in umbrella itself. Includes col -1 (left), col 6 (right overflow), and the row after umbrella's last row (bottom buffer).
+3. Pack public via row-major scan (rows 0..N, cols 0..MAX_COLS-1), skipping any umbrella OR buffer cell, with a 1000-iter safety cap.
+
+For ChipCo (7 umbrella + 7 public): umbrella at row 1 cols 0-5 + row 2 col 0 (7 amber). Buffer cells: row 0 cols 0-5 + row 1 col 6 + row 1 col -1 + row 2 col -1 + row 2 col 1 + row 3 col 0 + row 3 col -1. Public scan: row 0 cols all blocked → row 1 col 1 (umbrella) skip → cols 2-5 (umbrella) skip → col 6 (buffer) skip → row 2 col 0 (umbrella) skip → col 1 (buffer) skip → cols 2-5 = 4 indigo placed → row 3 col 0 (buffer) skip → cols 1-3 = 3 indigo placed. Total: 4+3 = 7 public. ✓
+
+**Item 10 — Corner card symmetric margins.** `CORNER_CARD_BOTTOM` 32 → 60. Computed: left margin (32) + app footer effective height (~28: 6px padding × 2 + 11px font + 1px border + slack) = 60. The card's bottom-edge-to-footer-top spacing now matches the left-edge-to-viewport-left spacing.
+
+**Item 11 — Own RFP dot halo trim.** The HTML overlay was already 6×6 (`width: 6, height: 6`) but had a `boxShadow: 0 0 5px ...` glow that visually inflated the perceived size. Removed the boxShadow entirely. The InstancedMesh dots also have no halo; visual sizes now match at zoom = 1 (where InstancedMesh circle radius=3 world units = 3 pixels = 6×6 footprint).
+
+**Item 12 — Cluster vertically centered on Actor square.** New `anchorY = snapGrid(center.y - ((maxRow + minRow) / 2) * ROW_GAP)`. With ChipCo's 4-row cluster (rows 0-3, where row 0 is the top buffer per Item 8), `(maxRow + minRow) / 2 = 1.5`, so `anchorY = squareY - 18` (= -1.5 * 12). Rows render at `squareY - 18, squareY - 6, squareY + 6, squareY + 18`. The Actor square at `squareY` sits cleanly in the inter-row gap between rows 1 and 2 (no dot overlap). For non-umbrella clusters with odd row counts, the square sits ON a row position and may visually overlap a dot's grid cell — the hollow square outlines the filled circle, acceptable visual.
+
+**Item 9 (skipped per brief).** Edge connection during pan was already working in 16.1.0 QA; no changes.
+
+**Footer version v0.16.1.1.** Per the convention codified in 16.1.0: forward-progress phases roll the footer constant. Phase 16.1.1 ships → footer reads v0.16.1.1.
+
+**Branch handling.** This phase ships to the worktree branch `claude/peaceful-chatelet-c63ee1`. Andrew's external merge-to-main step (matching the prior shipped phases) is the canonical path: `git checkout main && git merge claude/peaceful-chatelet-c63ee1 && git push origin main`.
+
+**Verification.** Build clean (112 modules, 0 errors). Manual visual verification of the 11 fixes is the canonical path per the V2Canvas raycaster note + the headless 0×0 viewport limitation; structural verification via DOM probes confirms the new state machine + listener wiring + L-shape SVG path generation + footer string.
+
+**Status:** [x] Complete.
+
 ### Phase 16.1.0 completion notes (2026-05-08) — Three.js migration for Directory Layer
 
 Substantial sub-phase. Migrates DirectoryLayer's rendering pipeline from HTML/CSS dots + CSS-tiled background to Three.js scene + InstancedMesh dots + THREE.Points grid + scroll-zoom + drag-pan. Mirrors V2Canvas's hybrid architecture: Three.js for scene/grid/dots/camera, HTML for tooltip + cards + edges. Folds in three Phase 16.0.x bugs.

@@ -4208,6 +4208,10 @@ export default function V2App() {
                   setV22DirectoryWipeOrigin(null)
                   setV22DirectoryOpen((open) => {
                     if (open) setV22DirectorySelectedClaim(null)
+                    // Phase 16.1.1 Item 5: clear parent-layer edge tooltip
+                    // and any related hover state when Directory opens, so
+                    // the tooltip doesn't persist behind the wipe.
+                    if (!open) canvasRef.current?.clearHoverState?.()
                     return !open
                   })
                 }}
@@ -5175,6 +5179,10 @@ export default function V2App() {
             setForceExpandSda(null)
             setSelectedEdgeId(null)
             setOpenAgreement(null)
+            // Phase 16.1.1 Item 5: clear parent-layer edge hover state
+            // before transitioning so any open tooltip doesn't persist
+            // behind the wipe.
+            canvasRef.current?.clearHoverState?.()
             setV22DirectoryWipeOrigin({ x: screenX, y: screenY })
             setV22DirectoryOpen(true)
           }}
@@ -7739,7 +7747,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.0 &middot; Changelog
+          v0.16.1.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7786,6 +7794,21 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.1.1', date: '2026-05-09', label: 'Phase 16.1.1', items: [
+                  'Phase 16.1.1 — Three.js Directory Layer hotfix (eleven QA fixes from Phase 16.1.0).',
+                  'Item 1: Zoom wheel handler now functional. Effect dep array gained `phase` so the wheel listener re-binds when the layer mounts (previously the listener was never attached because `containerRef.current` was null at first effect run).',
+                  'Item 2: Zoom indicator lifted to `bottom: 56` so it clears the v0.16.1.x app footer.',
+                  'Item 3: First-transition dot rendering race fixed — sync `renderer.render(scene, camera)` after the InstancedMesh attaches, so dots appear on the very first frame after Directory opens.',
+                  'Item 4: Removed the `+DOT_GRID/2` offset from dot world-coord computation. Cluster dot centers now sit ON background grid points, not between them.',
+                  'Item 5: Parent-layer edge tooltip cleared on Directory open. New `clearHoverState` imperative method on V2Canvas via useImperativeHandle; V2App invokes it from both Directory entry points (chrome globe button + Radiant Network actor double-click).',
+                  'Item 6: Amber L-shape border + tinted-bg fill restored as an SVG overlay projected per-frame via worldToScreen. Boundary path computed from umbrella cells with CLUSTER_PAD breathing room.',
+                  'Item 7: Tooltip card 4th row (`UMBRELLA · date` / `PUBLIC · date`) removed — tooltip is now badge + name + owner only.',
+                  'Item 8: 1-cell buffer in all four directions around the umbrella subset (was just the inter-subset gap on the same row). New `layoutClusterCells` helper places umbrella starting at row 1 (top buffer), computes orthogonal-adjacent buffer cells, then fills public via row-major scan skipping umbrella + buffer.',
+                  'Item 10: Corner card bottom margin = left margin (32) + footer height (~28) = 60. Card-to-footer spacing now matches card-to-viewport-left spacing.',
+                  'Item 11: Own RFP green dot box-shadow halo removed. The 6×6 dot itself was already correct; the halo visually inflated perceived size.',
+                  'Item 12: Cluster vertically centered on the Actor square. anchorY = squareY - ((maxRow + minRow) / 2) * ROW_GAP. ChipCo`s 4-row cluster (with row 0 buffer + rows 1-3 dots) places the square cleanly in the inter-row gap between rows 1 and 2.',
+                  'Footer rolled forward to v0.16.1.1 per the corrected versioning convention (forward phases roll the footer).',
+                ]},
                 { version: '0.16.1.0', date: '2026-05-08', label: 'Phase 16.1.0', items: [
                   'Phase 16.1.0 — Three.js migration for Directory Layer. Dot matrix grid + Claim/RFP dots migrated to Three.js (Points + InstancedMesh, single draw call across all dots); pan (drag) + zoom (wheel) controls added matching the parent-layer canvas. HTML overlays (tooltip card, label pillboxes, Actor squares, SVG umbrella edges) project via worldToScreen and track camera moves via the same RAF loop that drives Three.js renders.',
                   'Footer version convention corrected — backtrack-hotfix exception removed; forward phases now roll the footer constant forward. Footer reads v0.16.1.0 (was frozen at v0.15.9 across the 16.0.x backtrack-hotfix cycle).',
