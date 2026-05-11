@@ -419,9 +419,9 @@ The Directory Layer is a separate canvas layer (not part of the parent or child 
 
 ### 8.1 Entry
 
-- Radiant Network button lives in the bottom-left of the canvas, always on top.
-- Clicking it triggers a **single circular wipe animation** that simultaneously reveals the Directory Layer as it conceals the user's network. Implementation: render the Directory Layer behind the parent layer with a circular clip-path starting at 100% (fully clipped, invisible) anchored at the bottom-left corner. On click, animate the clip-path radius expanding outward from the corner, which hides the parent layer and reveals the Directory Layer in one sweep.
-- The Radiant Network button's label/appearance morphs mid-animation to the user's corner node (e.g., "GovCo"), which persists as the Directory Layer's anchor point.
+- Radiant Network button lives in the chrome bar (top-right cluster of chrome icons), always on top.
+- Clicking it triggers a **single circular wipe animation** that simultaneously reveals the Directory Layer as it conceals the user's network. Implementation: render the Directory Layer behind the parent layer with a CSS `clip-path: circle(...)` starting at 0% (fully clipped, invisible) anchored at the wipe origin. On click, animate the clip-path radius expanding outward, which hides the parent layer and reveals the Directory Layer in one sweep.
+- The wipe origin is configurable via `v22DirectoryWipeOrigin` (set when a parent-layer Radiant Network Actor node is double-clicked) or defaults to a corner-anchored origin when entered via the chrome globe button.
 - One animation, not two. No intermediate "everything is hidden" state.
 
 ### 8.2 — Directory Layer Content
@@ -430,72 +430,89 @@ The Directory Layer is a per-role view onto the Radiant Network's public + priva
 
 #### 8.2.1 Background
 
-A dense dot matrix grid covers the canvas background. All node-level visual elements (Claim dots, RFP dots, Actor squares) align to this grid. The dot matrix is a Directory-Layer-specific treatment — it does not appear on the parent or child layers.
+A dense dot matrix grid covers the canvas background, rendered via Three.js `Points` (one `Vector3` per grid intersection on a `BufferGeometry`; world coords are integer multiples of `DOT_GRID = 12`). All node-level visual elements (Claim dots, RFP dots, Actor squares) snap to this grid via a `snapGrid(v) = round(v / DOT_GRID) * DOT_GRID` helper. The dot matrix is a Directory-Layer-specific treatment — it does not appear on the parent or child layers.
 
 #### 8.2.2 Node types
 
 Three node types render on the Directory:
 
-**Claim dots** — One dot per Claim with at least one active Disclosure Agreement visible to the active Actor. Aligned to the dot matrix grid. Coloring:
-- **Indigo** — Claim has an active DA disclosing to the Radiant Network (publicly disclosed)
-- **Amber** — Claim is privately disclosed to the active Actor via umbrella DA from another Actor (see §8.2.4)
+**Claim dots** — One filled circle per Claim with at least one active Disclosure Agreement visible to the active Actor. 6×6 world units (3-radius `CircleGeometry`). Aligned to the dot matrix grid. Coloring maps to **disclosure TYPE** (not visibility scope):
 
-A Claim that is BOTH publicly disclosed AND privately disclosed to the active Actor renders as indigo. Public disclosure takes precedence in the visual.
+- **Indigo** (`--accent-indigo`) — Full disclosure (Claim's effective DA type is `full`)
+- **Amber** (`--accent-amber`) — Selective disclosure (effective DA type is `selective`)
+- **Green** (`--accent-green`) — Proof-only disclosure (effective DA type is `proofonly`)
 
-**RFP dots** — One dot per active RFP with all-Directory visibility. Green. Aligned to the dot matrix grid. Phase 16 renders RFP dots as non-functional placeholders; click and hover affordances activate in Phase 17.
+Effective disclosure type resolution: when both an umbrella DA (grantor = source Actor, grantee = active Actor) AND a public DA (grantee = Radiant Network) exist for the same Claim, the umbrella DA's type takes precedence (the active Actor has a privileged disclosure relationship and sees the type assigned to them, not the public type). The Directory's color scheme thus mirrors the parent-layer LegendBar's edge-color semantics.
 
-**Actor squares** — Hollow squares with thick indigo borders. One Actor square per non-active Actor whose Claims or RFPs render in the active Actor's view. Positioned at the center of that Actor's cluster. The active Actor's own representation is the corner card (existing §8.1 behavior); the active Actor does not have an Actor square in the canvas body.
+**RFP dots** — One hollow circle per active RFP. Rendered as `THREE.Mesh` with `ShapeGeometry` (outer circle + inner circular hole) so the border thickness scales with camera zoom. Color: `--accent-cyan` (distinct from the three disclosure-type colors). Aligned to the dot matrix grid. Phase 16 renders RFP dots as non-functional placeholders; click and hover affordances activate in Phase 17.
+
+**Actor squares** — Hollow squares rendered as `THREE.Mesh` with `ShapeGeometry` (outer 6×6 square + inner 4×4 hole) so the border thickness scales with camera zoom. Indigo color (`--accent-indigo`). One Actor square per cluster — including the active Actor's own cluster when the active Actor publishes Claims or RFPs (the Phase 7/11A/11B-era corner card is gone as of Phase 16.1.2; the active Actor's own representation is now a regular cluster with its own Actor square). Anonymous actors (Carol/AuditCo — no own publications) render no own cluster.
+
+Pillbox labels (HTML overlay positioned via `worldToScreen` projection) sit above each Actor square showing the party name (`MicroCo`, `ChipCo`, `GovCo`, etc.). Labels fade to `opacity: 0.25` when an underlying Claim dot is hovered (so the dot's hover state reads on top).
 
 #### 8.2.3 Clusters
 
-Claim dots and RFP dots cluster around their owning Actor's square (or the active Actor's corner card for the active Actor's own outputs). Cluster shapes are intentionally irregular — incomplete squares, lo-res circles, or other naturally-bounded shapes generated from deterministic seeded positions. Each cluster maintains a one-row buffer of empty grid positions to its neighbors.
+Each cluster contains an Actor square + the dots for Claims and RFPs owned by that Actor (and visible to the active Actor). Cluster layout is a row-major grid (max 6 columns, 12 world-units per cell). The Actor square reserves one cell in the cluster grid before umbrella/public/RFP dots are placed, so no dot overlaps the square.
 
-The active Actor's own publicly disclosed Claims and RFPs (if any) cluster adjacent to the corner card rather than around a separate Actor square.
+**Spatial model (Phase 16.1.2 rewrite):**
 
-Within a single Actor's cluster, RFP green dots and Claim indigo dots may sit adjacent to each other when that Actor publishes both.
+- The **active Actor's own cluster** (when present — `isUserVisible === true`) is anchored at canvas-horizontal-center + bottom-third vertically on initial load (world coords: `(0, snapGrid(viewport.h / INITIAL_ZOOM * 0.18))`).
+- **Other Actors' clusters** are fanned above the user's cluster with deterministic placement keyed off a hash of the party name (so cluster positions are stable across sessions for the same seed).
+- A **12-cell minimum buffer** (`CLUSTER_BUFFER_CELLS = 12`, i.e. 144 world units) separates any two cluster bounding boxes. Naive placement uses bbox-overlap check + nudge-upward-and-sideways retry up to 30 attempts. Force-directed layout deferred to a future seed-expansion phase (backlog #196).
+- **Anonymous actors** (e.g. Carol/AuditCo — no own Claims, no own RFPs) render no own cluster; the bottom-third anchor is just a virtual layout reference for fanning other clusters around.
+
+Within a single Actor's cluster, Claim dots cluster row-major with a 1-cell buffer around the umbrella subset (the rows of dots that are privately disclosed to the active Actor via an umbrella DA). The buffer ensures the umbrella subset reads as a distinct sub-region of the cluster.
 
 #### 8.2.4 Umbrella Disclosure visualization
 
 When the active Actor holds umbrella disclosure access to another Actor's catalog, the source Actor's cluster gains:
-- **An amber border** wrapping the subset of dots that are privately disclosed via umbrella
-- **A slight amber-tinted background** behind the amber-bordered region
-- **An indigo umbrella DA edge** from the active Actor's corner card to the source Actor's square
 
-Within the amber-bordered region, individual Claim dots render amber. Claims of the same Actor that are ALSO publicly disclosed sit outside the amber border as indigo dots, still part of the visual cluster around the same Actor square.
+- **A neutral grey L-shape boundary** wrapping the subset of dots that are privately disclosed via umbrella (the umbrella subset). Rendered as an SVG `<path>` overlay, projected per-frame from world coords via `worldToScreen`. Stroke: `color-mix(in srgb, var(--text-secondary) 60%, transparent)` 1.5px. Fill: `color-mix(in srgb, var(--text-secondary) 6%, transparent)`. The L-shape (not a simple rectangle) accommodates clusters where the umbrella subset occupies a partial row.
+- **No umbrella DA edge.** Phase 16.1.2 dropped all edges from the Directory Layer (the umbrella DA edge from corner card to source Actor square was removed when the corner card itself was removed). The L-shape boundary + amber/green dot colors carry the umbrella-relationship information without a separate edge.
 
-> **Prototype shortcut — Umbrella Disclosure.** "Umbrella disclosure" is not a new architectural primitive. The underlying data model is a collection of individual DAs from the source Actor to the grantee — each one independently typed (full / selective / proof-only). The UI represents this collection as a single full-disclosure-styled edge for visual simplicity. Per-Claim disclosure type remains accurate at the artifact level (each Claim's Detail Panel surfaces its actual disclosure type) and at the Detail Panel content level. This prototype shortcut may scale poorly when umbrella DAs cover hundreds of Claims with mixed disclosure types; future iterations may need to differentiate the umbrella edge visually based on aggregate disclosure-type composition.
+The umbrella subset's *position* within the cluster (the dots that fall inside the L-shape) is determined at layout time: umbrella-disclosed Claims are placed first in row-major order starting at row 1 (row 0 is a top buffer), with a 1-cell orthogonal buffer between umbrella and public subsets.
+
+Each dot inside the umbrella subset still picks up its individual disclosure-type color (indigo / amber / green per §8.2.2). The L-shape is a *region* marker, not a per-dot styling layer.
+
+> **Prototype shortcut — Umbrella Disclosure.** "Umbrella disclosure" is not a new architectural primitive. The underlying data model is a collection of individual DAs from the source Actor to the active Actor — each one independently typed (full / selective / proof-only). Phase 16.1.3 surfaced per-DA type as the dot color (replacing the earlier visibility-scope-based color scheme); the L-shape just groups the umbrella-disclosed subset visually. Per-Claim disclosure type remains accurate at the artifact level (each Claim's Detail Panel surfaces its actual type) and at the rendering level (each dot's color reflects its actual type). This shortcut should scale to umbrella DAs covering hundreds of Claims because each dot is independently typed and rendered.
 
 #### 8.2.5 Per-role view rules
 
 Each Actor sees a filtered subset of the network:
 
-| Active Actor | Sees own corner card | Sees own clusters | Sees others' public clusters | Sees others' umbrella clusters | Sees RFPs |
-|---|---|---|---|---|---|
-| Active Actor publishes Claims (e.g. Alice, Dave) | Yes | Yes (around corner card) | Yes | When active Actor is the umbrella grantee | All open RFPs (others') |
-| Active Actor publishes RFPs (e.g. Bob) | Yes | Own RFPs adjacent to corner card (Phase 17) | Yes (full Directory of supplier Claims) | When active Actor is the umbrella grantee | Own RFPs + others' open RFPs |
-| Active Actor neither publishes Claims nor posts RFPs (e.g. Carol) | Yes | None | Yes | When active Actor is the umbrella grantee | All open RFPs (others') |
+| Active Actor | Sees own cluster | Sees others' public clusters | Sees others' umbrella clusters | Sees RFPs |
+|---|---|---|---|---|
+| Publishes Claims (e.g. Alice, Dave) | Yes (own cluster center-bottom-third) | Yes | When active Actor is the umbrella grantee | All open RFPs (others') |
+| Publishes RFPs (e.g. Bob) | Yes (own cluster includes RFPs as cyan hollow circles) | Yes (full Directory of supplier Claims) | When active Actor is the umbrella grantee | Own RFPs + others' open RFPs |
+| Neither publishes Claims nor posts RFPs (e.g. Carol) | No (anonymous actor — no own cluster rendered; `isUserVisible === false`) | Yes | When active Actor is the umbrella grantee | All open RFPs (others') |
 
-The filter runs at render time so role switches refresh the cluster set immediately, mirroring the §8.5 per-role visibility pattern established in Phase 11A.
+The filter runs at render time via `buildV22DirectoryDataForRole(roleId, provisionals)` so role switches refresh the cluster set immediately.
 
 #### 8.2.6 Hover and click
 
 **Hover on a Claim dot:**
-- The hovered dot whitens (direct hover state)
-- The cluster containing the hovered dot brightens slightly (group hover state)
-- A node-card tooltip appears, showing Claim summary metadata (name, owner, disclosure type, posted date) — visual styling matches the parent-layer dot-level hover preview pattern (V2Canvas.jsx `AssetNodeDot` rendering when `zoom < MID_LOD_THRESHOLD`)
 
-**Click on a Claim dot:**
-- Tooltip pins (persistent until dismissed)
-- Detail Panel opens on the right, rendering the Claim's full Detail Panel content
-- Detail Panel content respects disclosure type — full disclosure shows complete details, selective shows only disclosed fields, proof-only shows aggregate satisfaction without underlying evidence
+- The hovered dot whitens (its instance color is set to pure white via `InstancedMesh.setColorAt`).
+- The cluster containing the hovered dot brightens slightly — sibling dots' instance colors are lerped 15% toward white via a precomputed `clusterByDotIndex` lookup.
+- A node-card tooltip (HTML overlay) appears showing Claim summary metadata (CLAIM badge + name + owner). The tooltip is anchored to the dot's right-center via `transform: translateY(-50%)`, with a viewport-edge flip via `wouldClipRight` check that swaps to the dot's left-center via `translate(-100%, -50%)` when too close to the right viewport edge.
 
-Hover and click on RFP dots is non-functional in Phase 16; activates in Phase 17.
+**Click on a Claim dot** (raycast hit via `THREE.Raycaster.intersectObject(dotsInstancedMesh)`):
 
-Hover on an Actor square is non-functional in Phase 16; reserved for future Actor-level Detail Panels (the Actor square is currently a positional anchor, not an interactive node).
+- Tooltip pins (persistent until dismissed via dot click elsewhere or Directory close).
+- Detail Panel opens on the right, rendering the Claim's full Detail Panel content via `V22ClaimPanel` (the standard parent-layer panel — no Directory-specific variant). Detail Panel content respects disclosure type at the field level (full shows complete details, selective shows only disclosed fields, proof-only shows aggregate satisfaction without underlying evidence).
+- Camera animates to centre the clicked dot in the visible area — `handleMouseUp` calls `animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, currentZoom, 500ms)` where `panelOffsetWorld = (PANEL_W/2) / zoom`. The panel-aware offset shifts the camera target right so the clicked dot lands at the visible-area horizontal center (not under the Detail Panel which occupies the rightmost `PANEL_W = 480` pixels).
 
-#### 8.2.7 Disclosure-type rendering
+**RFP dots**: click and hover are non-functional in Phase 16; activate in Phase 17.
 
-Per §8.2.2, the Directory's per-dot coloring distinguishes only between disclosure visibility scope (public vs umbrella-private), not disclosure type (full / selective / proof-only). The Detail Panel surfaces the type. Future iterations may add per-dot disclosure-type styling if demo feedback justifies the visual complexity.
+**Actor squares**: non-interactive in Phase 16 — positional anchors only. Hover/click reserved for future Actor-level Detail Panels.
+
+#### 8.2.7 Drag-pan + wheel-zoom
+
+The camera supports parent-layer-parity pan + zoom:
+
+- **Drag pan**: left-mouse-button drag on the canvas translates the camera. Drag-vs-click distinction via 4-pixel movement threshold (`wasDragRef`).
+- **Wheel zoom**: mouse wheel zooms around the cursor position (preserves the world point under the cursor across zoom). `MIN_ZOOM = 0.5`, `MAX_ZOOM = 4.0`, `INITIAL_ZOOM = 1.5`.
+- **Zoom controls** (top-right of the canvas, matching parent-layer position): `+`, `−`, `FIT` buttons + percentage indicator. `FIT` computes the bounding box across all visible clusters and adjusts camera position + zoom to fit.
 
 ### 8.3 AI Shopper Entry Point
 
@@ -510,17 +527,35 @@ Per §8.2.2, the Directory's per-dot coloring distinguishes only between disclos
 
 ### 8.5 Implementation note
 
-> **Prototype note — Directory Layer.** The Directory Layer is the demo's most ambitious surface. The Phase 16 implementation establishes the new visual model: dot matrix background, per-Actor clusters with deterministic seeded layout, role-filtered view, hover and click interactions on Claim dots, and umbrella DA edge visualization. Phase 7's mock supplier clusters (NovaFab, ElectroGrid, Precision Components) and Phase 11A's standalone ChipCo cluster are removed in Phase 16; the new model derives clusters from real per-role disclosure visibility. Phase 11B's cluster-click → Claim card materialization flow is removed in favor of dot-click → Detail Panel.
+> **Prototype note — Directory Layer (current state, as of Phase 16.1.5).** The Directory Layer is the demo's most architecturally complex surface. Current implementation:
 >
-> **Layout.** Cluster positions are deterministic seeded random within the canvas, with a one-row dot-grid buffer between neighboring clusters. Cluster shape within a single Actor's cluster is irregular (incomplete squares, lo-res circles); dots within a cluster fill positions on the dot matrix grid. No force-directed simulation; no concave-hull computation for amber boundaries (a simpler bounding rectangle around amber dots is acceptable for MVP).
+> **Rendering pipeline (Three.js + HTML/SVG hybrid).** Three.js renders the scene, background grid (`THREE.Points` on a `BufferGeometry`), Claim dots (single `InstancedMesh` of `CircleGeometry`), Actor squares (single `InstancedMesh` of hollow `ShapeGeometry`), and RFP hollow circles (single `InstancedMesh` of hollow `ShapeGeometry`). HTML/SVG overlays render: tooltip card, label pillboxes per Actor, L-shape umbrella borders (SVG `<path>` projected per-frame from world coords), zoom controls, "← Back to Network" exit chip, "RADIANT NETWORK" header pillbox. HTML overlays update on every camera change via a `worldToScreen` projection.
 >
-> **Scale.** Phase 16 ships with limited seed data (Bob + Dave's umbrella relationship, plus Alice's three publicly disclosed Claims and Carol's auditor view). A future Phase 16.1 (or later) seed-expansion sub-phase populates the canvas with ~12 mock supplier Actors with varying cluster sizes for visual density. Layout algorithms may need force-directed or stratified treatment at production scale; deferred until demo feedback indicates the seeded approach has visibly broken.
+> **Per-role view derivation.** `buildV22DirectoryDataForRole(roleId, provisionals)` produces a `{ activeParty, isUserVisible, ownClaims, ownRfps, otherClusters, otherRfps }` shape from the shared artifact set. `otherClusters` is one entry per non-active Actor with at least one visible Claim — public (grantee = Radiant Network) OR umbrella-to-active (grantee = active Actor, grantor = non-active non-Radiant-Network party). The view is decorated inline in `DirectoryLayer.jsx` with `publicTypeByClaimId` + `umbrellaTypeByClaimId` lookup tables so each dot's effective disclosure type can be resolved at render time.
+>
+> **Lifecycle.** Scene-init is gated on a stable `shouldMountScene = phase !== 'closed'` boolean (NOT directly on the four-state `phase` machine) so the scene is built once on first open and torn down only on full close — internal phase transitions (`opening → in`, `in → out`) don't tear down and rebuild the scene. Mesh population runs in a `useLayoutEffect` (synchronous after DOM mutations, before browser paint) with deps `[threeReady, layout]`. Each `InstancedMesh` is created with generous capacity (`MAX_DOTS = 10000`, `MAX_SQUARES = 64`, `MAX_RFPS = 256`); `mesh.count` updates per layout without recreating the mesh.
+>
+> **Defensive mesh settings (Phase 16.1.5).** On every `InstancedMesh`, `frustumCulled = false` AND `boundingSphere = new THREE.Sphere(origin, Infinity)`. The auto-computed bounding sphere on `InstancedMesh` is geometry-derived (origin-centred, tiny because the geometry sits at origin while per-instance positions live in the instance matrix), which breaks BOTH the renderer's frustum culling (mesh culled when origin sphere falls outside frustum at high zoom) AND the raycast pre-filter (`raycaster.ray.intersectsSphere(_sphere)` rejects the mesh entirely if the click ray doesn't intersect the origin-centred radius-3 sphere). Disabling frustum culling + overriding the bounding sphere is the canonical workaround.
+>
+> **Animation primitives.** `animatedPanToWithZoom(worldX, worldY, targetZoom, durationMs)` — mirrors V2Canvas's pattern with the same cubic-ease curve (`t<0.5 ? 4*t³ : 1 - pow(-2*t+2, 3)/2`). Used by dot-click to centre the dot in the visible area with panel-aware offset.
 >
 > **In production:** the Directory Layer renders the Platform's public directory index — a real catalog of publicly disclosed Claims and active RFPs with discoverability metadata, indexed and searchable by the Platform. **Authority:** Platform (directory indexing + per-actor subscription + discoverability rules); App (rendering the filtered set returned by the Platform's index query).
 
-> **Prototype note — Per-role cluster visibility.** The prototype keys cluster visibility off the active Actor's seeded inter-party DAs as a stand-in for production discoverability rules. Phase 11A introduced this for the ChipCo cluster (visible only to actors with at least one active DA from ChipCo); Phase 16 generalizes the rule to all clusters and edges. Bob sees Dave's cluster because of the seeded umbrella DA; without that DA, Dave's cluster would not render in Bob's Directory view. Alice and Dave see only their own clusters + everyone's public clusters; Carol sees only public clusters since she has no own publications.
+> **Prototype note — Per-role cluster visibility.** The prototype keys cluster visibility off the active Actor's seeded inter-party DAs as a stand-in for production discoverability rules. Bob sees Dave's cluster because of the seeded umbrella DA; without that DA, Dave's cluster would not render in Bob's Directory view. Alice and Dave see only their own clusters + everyone's public clusters; Carol sees only public clusters since she has no own publications (and renders no own cluster — `isUserVisible === false`).
 >
 > **In production:** which clusters and Claims appear in a user's Directory view is platform-managed via subscription, discoverability settings on the publishing party's profile, and direct DA presence — the App renders whatever the Platform's Directory-index query returns for the active party. **Authority:** Platform (per-actor directory subscription + discoverability index); App (rendering the filtered set).
+
+> **Historical notes (Round 16 evolution).** The current state is the product of a 10-phase Round 16 sequence:
+> - **Phase 16.0** — Replaced Phase 7/11A/11B placeholder scaffolding (mock supplier clusters, ChipCo standalone cluster, cluster-click → materialized Claim card). New visual model: dot matrix background, per-Actor clusters, hollow indigo Actor squares, per-role view filtering, dot-click → Detail Panel. New `buildV22DirectoryDataForRole` view-builder. Skeletal `makeRfp` factory + Bob's seeded RFP. Dave/ChipCo catalog grown 2→14 Claims with mixed disclosure types.
+> - **Phase 16.0.1, 16.0.2, 16.0.3** — Layout polish + PDF.js worker fix + curved Bezier umbrella edges + footer z-index bump + `DOT_GRID = 12` snapping. Claim/RFP dots resized 8×8 → 6×6. Actor squares to 6×6 hollow. Pillbox-styled labels above squares with hover-fade.
+> - **Phase 16.1.0** — Three.js migration. HTML/CSS dots + CSS-tiled background → Three.js scene + InstancedMesh dots + Points grid + scroll-zoom + drag-pan. Hover/click via `THREE.Raycaster`. Three.js scope kept narrow (only dots + grid); HTML/SVG preserved for tooltip, labels, umbrella edges, Actor squares.
+> - **Phase 16.1.1** — Eleven QA fixes: wheel listener re-binding, sync render after InstancedMesh attach, dots-on-grid alignment (`+DOT_GRID/2` offset removed), `clearHoverState` imperative method on V2Canvas, amber L-shape SVG overlay, 1-cell buffer around umbrella subset, cluster vertically centred on Actor square.
+> - **Phase 16.1.2** — Spatial model rewrite. Corner card removed; active Actor's own representation becomes a regular cluster anchored at canvas-horizontal-center + bottom-third. New `isUserVisible` flag for anonymous-actor case. Actor squares migrated to Three.js `LineSegments`. All edges dropped from Directory. 12-cell buffer between cluster bboxes. Zoom controls migrated to top-right `+/-/FIT/%` matching parent layer. Filed #196 (force-directed layout, deferred).
+> - **Phase 16.1.3** — Parent-parity fixes + disclosure-type-based dot colors. Nine items: lifecycle hardened via `useLayoutEffect`; Actor square migrated `LineSegments` → `Mesh` with hollow `ShapeGeometry` (border scales with zoom); squareCell reserved in cluster layout; zoom controls top:73; Detail Panel `bottom:28`; click pans camera; Request EA modal close stays on Directory; **dot colors map to disclosure TYPE** (full→indigo, selective→amber, proof-only→green); L-shape boundary changed from amber to neutral grey; RFP migrated filled green dot → cyan hollow circle.
+> - **Phase 16.1.4** — Hotfix: lifecycle race fixed by deriving `shouldMountScene = phase !== 'closed'` boolean and depending on that instead of `phase` directly. Scene-init no longer tears down on internal phase transitions.
+> - **Phase 16.1.5** — Hotfix: frustum culling + raycast bounding-sphere fix. `frustumCulled = false` + `boundingSphere = unbounded` on every `InstancedMesh`. Resolved dots-disappear-at-high-zoom + dot-click-doesn't-open-Detail-Panel.
+>
+> Round 17 plan: Phase 16.2 (seed expansion to ~12 mock supplier Actors), then Phase 17.0–17.2 (RFP MVP — factory promotion, supplier discovery + response, buyer review).
 
 ### 8.6 Library
 

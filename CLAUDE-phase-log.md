@@ -2673,6 +2673,37 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Round 16 closeout (2026-05-10) — Documentation hygiene + Round 17 transition
+
+Documentation-only phase. No code changes. Single commit on `main` consolidating Round 16's shipped state across the canonical docs in preparation for Round 17.
+
+**Round 16 summary.** Ten sub-phases (16.0, 16.0.1, 16.0.2, 16.0.3, 16.1.0, 16.1.1, 16.1.2, 16.1.3, 16.1.4, 16.1.5) shipped between 2026-05-08 and 2026-05-10, all targeting the Directory Layer. Started from Phase 7/11A/11B placeholder scaffolding (mock supplier clusters, ChipCo standalone hit-area, cluster-click → materialized Claim card). Ended at a Three.js-rendered, pan-zoom-capable, disclosure-type-coloured Directory with stable lifecycle and clickable dots. Closed backlog items #43 (clickable dots) + #45 (real dot-cloud data sourcing). Filed deferred items #193 (V2App split), #194 (legacy PDF migration), #195 (Three.js edge migration), #196 (force-directed cluster layout).
+
+**Key learnings carried forward.**
+
+- **`THREE.InstancedMesh` requires `frustumCulled = false` + `boundingSphere = unbounded`.** The auto-computed bounding sphere is geometry-derived (origin-centred, tiny because per-instance positions live in matrices, not vertices) and breaks BOTH renderer frustum culling AND raycast pre-filter at high zoom or when instances are far from origin. Phase 16.1.5 root cause. Codified in CLAUDE.md "Round 16 retrospective" + architecture-spec.md §8.5.
+- **`useEffect` deps including phase state machine values cause render-disposing-mid-flight bugs.** When a scene-init effect declares `phase` in its dep array, internal phase transitions trigger cleanup + recreate cycles that wipe populated meshes. Cure: derive a stable boolean (`shouldMountScene = phase !== 'closed'`) and depend on that. Phase 16.1.4 root cause.
+- **Hybrid Three.js + HTML/SVG architecture for the Directory Layer.** Three.js renders the scene, background grid (Points), Claim dot InstancedMesh, Actor squares (hollow ShapeGeometry InstancedMesh), and RFP hollow circles. HTML/SVG renders tooltip card, label pillboxes, L-shape umbrella borders (projected from world coords via `worldToScreen` every camera change), zoom controls, exit chip, header pillbox. Mouse handlers are React JSX event props on the container `<div>`, bound via `useCallback` with full deps — NOT `addEventListener` in long-lived effects.
+- **Commit-discipline correction.** Round 16 lost track briefly when 16.0.3 → 16.1.0 surfaced 13 unpushed phases at catchup time. Current convention codified: one Claude Code prompt = one phase = one commit, direct to main. The worktree feature is currently disabled (was used through Phase 16.1.4; disabled afterward).
+- **Footer version convention.** Forward-progress phases roll the footer constant forward; backtrack-hotfix versions (inserted between existing entries) leave the footer unchanged. The Round 16 16.0.x cycle over-applied the backtrack rule (footer held at v0.15.9 across 16.0/16.0.1/16.0.2/16.0.3); Phase 16.1.0 corrected this and the footer now rolls forward each forward-progress phase.
+
+**Documentation updates this phase.**
+
+- **CLAUDE.md** rewritten lean. Bloated phase-by-phase narrative back to Phase 14.2 removed; "Current state of the world" now keeps Phase 16.1.5 (last shipped) + concise prior-phase summaries 16.0 → 16.1.4. New "Round 16 retrospective" section captures the four learnings. Stale references to pre-Round-16 patterns (`v2.html` entry point, Phase 11B materialization machinery, original-spec Directory descriptions) cleaned up. Active phase queue updated to show Round 17 plan: 16.2 (seed expansion) → 17.0–17.2 (RFP MVP).
+- **architecture-spec.md §8** rewritten end-to-end:
+  - §8.1 — entry mechanism updated for chrome-bar globe + `wipeOrigin` pinning.
+  - §8.2 — rewritten to reflect Phase 16.1.5 state: disclosure-type-based dot colors (full→indigo, selective→amber, proof-only→green); no corner card; user's cluster center-bottom-third; 12-cell inter-cluster buffer; neutral grey L-shape umbrella boundary (not amber); no edges; cyan hollow-circle RFPs; drag-pan + wheel-zoom + FIT zoom controls.
+  - §8.5 inline implementation note consolidated into a single coherent current-state narrative with a "Historical notes (Round 16 evolution)" subsection covering the 10-phase sequence chronologically. The chronological Changelog bullets at the bottom of the file remain as a chronological audit trail.
+- **polish-backlog.md** — Round 16 entries (Phase 16.0 → 16.1.5) verified intact in the Update Log; #193 / #194 / #195 / #196 confirmed in the Open section; #43 / #45 confirmed in the Completed section. Round 16 closeout entry added.
+- **CLAUDE-phase-log.md** — every Round 16 sub-phase has a completion-notes entry (16.0, 16.0.1, 16.0.2, 16.0.3, 16.1.0, 16.1.1, 16.1.2, 16.1.3, 16.1.4, 16.1.5). This Round 16 closeout entry sits at the top of the Round 16 block.
+- **ROUND-17-CONTEXT.md** — new canonical entry doc for Round 17 created at repo root. Covers: Round 17 scope (Phase 16.2 + 17.0–17.2 per-phase summaries), Round 16 recap, per-phase load-in lists (files to attach at the start of each phase prompt), workflow conventions (commit-direct-to-main, worktree disabled, one prompt = one phase = one commit), demo roles + architecture rules, current state at Round 17 entry, outstanding-backlog snapshot.
+
+**Files changed:** `CLAUDE.md` (rewritten), `architecture-spec.md` (§8 rewritten, §8.5 consolidated), `polish-backlog.md` (Update Log entry), `CLAUDE-phase-log.md` (this entry), `ROUND-17-CONTEXT.md` (new file).
+
+**Footer:** stays at v0.16.1.5 (no behavior change).
+
+**Status:** [x] Complete.
+
 ### Phase 16.1.5 completion notes (2026-05-10) — Hotfix: Frustum culling + raycast bounding-sphere fix
 
 Two QA issues from Phase 16.1.4, both downstream of that phase's lifecycle change:
