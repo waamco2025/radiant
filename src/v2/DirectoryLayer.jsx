@@ -422,7 +422,12 @@ function computeLayout(directoryData, viewport) {
   for (let i = 0; i < N; i++) {
     const cluster = otherClustersInput[i]
     const spreadFraction = N === 1 ? 0 : (i / (N - 1)) - 0.5
-    let cx = snapGrid(userCenterX + spreadFraction * 800)
+    // Phase 16.2: scale initial cluster x-spread with N so 12+ Actors don't
+    // collapse onto the hardcoded 800-px band. Force-directed layout (#196)
+    // remains deferred; this scaling extends the deterministic-bbox-overlap
+    // approach by another tier of cluster count.
+    const xSpread = Math.max(800, 600 * Math.max(N - 1, 1))
+    let cx = snapGrid(userCenterX + spreadFraction * xSpread)
     const seed = hashString(cluster.ownerParty)
     let cy = snapGrid(userCenterY - 240 - (seed % 80))
     let attempts = 0

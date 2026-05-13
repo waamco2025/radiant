@@ -1327,6 +1327,130 @@ export function makeRfp({
 //   • Alice's Power Reg, VReg, and EMI Shield Claims published to the Radiant
 //     Network (Story 2 seed).
 
+/**
+ * Phase 16.2: seed bundle for a non-switchable mock supplier Actor that exists
+ * to populate the Directory at scale. Each call yields the Actor plus a fully
+ * wired set of Claims + 1 stub Asset per Claim + ownership DAs + public DAs.
+ *
+ * No umbrella DAs are emitted. The mock Actor is invisible to every active
+ * role except via the Radiant Network public-directory channel.
+ *
+ * claimSpecs entry shape:
+ *   { slug: string, name: string, description?: string, disclosureType: 'full' | 'selective' | 'proofonly' }
+ *
+ * Returns: { actor, claims, assets, ownershipDas, publicDas }
+ */
+export function seedMockSupplierActor({ id, party, vertical, claimSpecs, baseDate = '2026-02-01T10:00:00Z' }) {
+  const actor = makeActor({ id, user: null, party, role: 'supplier', credits: 0, vertical })
+  const baseMs = new Date(baseDate).getTime()
+  const dayMs = 24 * 60 * 60 * 1000
+  const stampFor = (idx) => new Date(baseMs + idx * dayMs).toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+  const claims = []
+  const assets = []
+  const ownershipDas = []
+  const publicDas = []
+
+  claimSpecs.forEach((spec, i) => {
+    const idx = i + 1
+    const ts = stampFor(idx)
+    const assetId = `asset-${id}-${spec.slug}-ds`
+    const claimId = `claim-${id}-${spec.slug}`
+
+    const asset = makeAsset({
+      id: assetId,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      name: `${spec.name} Datasheet`,
+      description: spec.description || `${spec.name} stub datasheet for the ${vertical} catalog.`,
+      file: {
+        uri: `provenance://stub/${assetId}`,
+        filename: `${assetId}.pdf`,
+        size: 1024,
+        mimeType: 'application/pdf',
+        hash: `stub-hash-${assetId}`,
+      },
+      registrationDate: ts,
+      parseResultIds: [],
+    })
+    assets.push(asset)
+
+    const claim = makeClaim({
+      id: claimId,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      name: spec.name,
+      description: spec.description || `${spec.name} — ${vertical} component published to the Radiant Network directory.`,
+      referencedAssetIds: [asset.id],
+      referencedRequirementsSets: [
+        { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: ts },
+      ],
+      createdDate: ts,
+    })
+    claims.push(claim)
+
+    ownershipDas.push(makeInternalDisclosureAgreement({
+      id: `da-own-${asset.id}`,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      subject: { kind: 'asset', id: asset.id },
+      terms: { createdDate: ts },
+    }))
+    ownershipDas.push(makeInternalDisclosureAgreement({
+      id: `da-own-${claim.id}`,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      subject: { kind: 'claim', id: claim.id },
+      terms: { createdDate: ts },
+    }))
+    ownershipDas.push(makeInternalDisclosureAgreement({
+      id: `da-ref-${claim.id}-${asset.id}`,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      subject: { kind: 'claim', id: claim.id },
+      scope: { assetIds: [asset.id], includeDerivatives: true },
+      terms: { createdDate: ts },
+    }))
+    publicDas.push(makePublicDirectoryDisclosureAgreement({
+      id: `da-pub-${id}-${spec.slug}`,
+      grantor: actor.party,
+      grantorDot: actor.partyDot,
+      subject: { kind: 'claim', id: claim.id },
+      type: spec.disclosureType,
+      scope: { assetIds: [asset.id], includeDerivatives: true },
+      terms: { createdDate: ts },
+    }))
+  })
+
+  return { actor, claims, assets, ownershipDas, publicDas }
+}
+
+// Phase 16.2: deterministic disclosure-type interleaver. Targets the brief's
+// ~60% full / 25% selective / 15% proofonly mix so every cluster paints a
+// visible indigo + amber + green spread. Small clusters (n ≤ 4) get a fixed
+// pattern so the 3-color variety survives at low Claim counts.
+function pickDirectoryType(i, total) {
+  if (total <= 4) {
+    if (i === total - 2) return 'proofonly'
+    if (i === 1) return 'selective'
+    return 'full'
+  }
+  const m = i % 8
+  if (m === 5) return 'proofonly'
+  if (m === 2 || m === 6) return 'selective'
+  return 'full'
+}
+
+// Phase 16.2: compact builder — accepts `[slug, name]` tuples and stamps an
+// interleaved disclosureType per-row via pickDirectoryType.
+function specsFromTuples(tuples) {
+  return tuples.map(([slug, name], i) => ({
+    slug,
+    name,
+    disclosureType: pickDirectoryType(i, tuples.length),
+  }))
+}
+
 export function buildV22SharedArtifacts() {
   // ── Actors ────────────────────────────────────────────────────────────
   const bob = makeActor({
@@ -1366,6 +1490,268 @@ export function buildV22SharedArtifacts() {
     credits: 2400,
     vertical: 'Electronics',
   })
+
+  // ── Phase 16.2: 12 mock supplier Actors (Sentinel-4 supply chain) ────
+  // Each Actor is non-switchable (`user: null`, `credits: 0`) and exists to
+  // populate the Directory at scale. All disclosures are public-directory
+  // only — no umbrella DAs to any of the four primary actors. Bundle shapes
+  // come from seedMockSupplierActor() above.
+  const mockSeedBundles = [
+    {
+      id: 'nova-novafab',
+      party: 'NovaFab',
+      vertical: 'Wafer Foundry / Rad-Hard IC Fab',
+      claimSpecs: specsFromTuples([
+        ['rhf-820',  'Rad-Hard 0.18µm CMOS Logic Array RHF-820 Datasheet'],
+        ['sck-440',  'Mil-Spec ASIC SCK-440 Compliance'],
+        ['rh-32',    '32-bit Microcontroller Core RH-32 Spec'],
+        ['rtf-220',  'Rad-Tolerant FPGA RTF-220 Qualification'],
+        ['sgs-110',  'Space-Grade SoC SGS-110 Compliance'],
+        ['rhs-440',  'Rad-Hard SRAM 4Mb RHS-440 Datasheet'],
+        ['nvm-820',  'Non-Volatile MRAM 16Mb NVM-820 Spec'],
+        ['nvr-220',  'Mil-Spec NVRAM 32Mb NVR-220 Compliance'],
+        ['sqp-540',  'Space-Qualified Processor SQP-540 Datasheet'],
+        ['trx-110',  'Rad-Hard Transceiver IC TRX-110 Test Report'],
+        ['msf-220',  'Mil-Spec Sensor Front-End MSF-220 Datasheet'],
+        ['msc-440',  'Mixed-Signal Conditioning IC MSC-440 Compliance'],
+        ['rpm-820',  'Rad-Hard Power Management IC RPM-820 Datasheet'],
+        ['sgd-110',  'Space-Grade DC-DC IC SGD-110 Spec'],
+        ['rti-220',  'Rad-Tolerant CAN Interface IC RTI-220 Qualification'],
+        ['mlv-440',  'Mil-Spec LVDS Interface IC MLV-440 Datasheet'],
+        ['rco-820',  'Rad-Hard Clock Oscillator IC RCO-820 Datasheet'],
+        ['sgp-110',  'Space-Grade PLL Clock IC SGP-110 Spec'],
+        ['mce-220',  'Mil-Spec Configuration EEPROM MCE-220 Datasheet'],
+        ['rad-440',  'Rad-Hard ADC IC RAD-440 Compliance'],
+        ['sgda-820', 'Space-Grade DAC IC SGDA-820 Datasheet'],
+        ['moa-110',  'Mil-Spec OpAmp Array MOA-110 Test Report'],
+        ['rtv-220',  'Rad-Tolerant Voltage Reference RTV-220 Datasheet'],
+        ['sqc-440',  'Space-Qualified Comparator IC SQC-440 Compliance'],
+        ['rmc-820',  'Rad-Hard Memory Controller IC RMC-820 Datasheet'],
+      ]),
+    },
+    {
+      id: 'egrid-electrogrid',
+      party: 'ElectroGrid',
+      vertical: 'Spacecraft Power Systems (PCDU, regulators)',
+      claimSpecs: specsFromTuples([
+        ['pcdu-820', 'Power Conditioning & Distribution Unit PCDU-820 Compliance'],
+        ['bcr-540',  'Battery Charge Regulator BCR-540 Spec'],
+        ['sade-110', 'Solar Array Drive Electronics SADE-110 Datasheet'],
+        ['pcdu-440', 'Modular PCDU PCDU-440 Qualification'],
+        ['bcr-220',  'Lithium-Ion Battery Charge Regulator BCR-220 Datasheet'],
+        ['inv-820',  '28V DC-AC Inverter Module INV-820 Spec'],
+        ['bms-110',  'Battery Management Unit BMS-110 Compliance'],
+        ['dcdc-540', 'Isolated DC-DC Converter DCDC-540 Datasheet'],
+        ['lsw-220',  'Latching Load Switch LSW-220 Spec'],
+        ['fm-440',   'Solid-State Fuse Module FM-440 Compliance'],
+        ['pbi-110',  'Redundant Power Bus Interface PBI-110 Datasheet'],
+        ['sade-820', 'High-Torque Solar Array Drive SADE-820 Spec'],
+        ['pcdu-540', 'Centralized PCDU PCDU-540 Test Report'],
+        ['bcr-110',  'Dual-Channel Charge Regulator BCR-110 Datasheet'],
+        ['inv-440',  'Three-Phase Inverter INV-440 Compliance'],
+        ['bms-220',  'Hot-Swappable BMS BMS-220 Spec'],
+        ['dcdc-110', 'Buck-Boost DC-DC Converter DCDC-110 Datasheet'],
+        ['lsw-820',  'High-Current Load Switch LSW-820 Compliance'],
+        ['fm-220',   'Resettable Fuse Module FM-220 Datasheet'],
+        ['pbi-440',  '28V Power Bus Interface PBI-440 Spec'],
+        ['sade-220', 'Compact Solar Array Drive SADE-220 Datasheet'],
+        ['bcr-820',  'Maximum-Power-Point BCR BCR-820 Qualification'],
+        ['inv-110',  'Low-Power Inverter INV-110 Datasheet'],
+        ['pcdu-220', 'Distributed PCDU PCDU-220 Compliance'],
+      ]),
+    },
+    {
+      id: 'prec-precision',
+      party: 'Precision Components',
+      vertical: 'Precision-Machined Structural / Mechanism Parts',
+      claimSpecs: specsFromTuples([
+        ['tob-440', 'Titanium Optical Bench Mount TOB-440 Datasheet'],
+        ['bym-220', 'Beryllium Mirror Substrate BYM-220 Spec'],
+        ['ctn-110', 'Composite Truss Node CTN-110 Compliance'],
+        ['abr-820', 'Aluminium Bracket ABR-820 Datasheet'],
+        ['thn-440', 'Titanium Hinge Assembly THN-440 Spec'],
+        ['mlt-220', 'Magnetic Latch Module MLT-220 Datasheet'],
+        ['wfl-110', 'Waveguide Flange WFL-110 Compliance'],
+        ['opb-540', 'Optical Bench Assembly OPB-540 Datasheet'],
+        ['tn-820',  'Composite Truss Node TN-820 Qualification'],
+        ['shl-440', 'Equipment Shell SHL-440 Spec'],
+        ['hsg-220', 'Avionics Housing HSG-220 Test Report'],
+        ['fst-110', 'High-Strength Fastener Kit FST-110 Datasheet'],
+        ['mnt-820', 'Vibration-Isolation Mount MNT-820 Compliance'],
+        ['brk-440', 'Lightweight Bracket BRK-440 Datasheet'],
+        ['hng-220', 'Deployment Hinge HNG-220 Spec'],
+        ['lch-110', 'Spring-Loaded Latch LCH-110 Datasheet'],
+        ['wgr-540', 'Waveguide Run WGR-540 Compliance'],
+        ['bch-820', 'Optical Bench BCH-820 Datasheet'],
+      ]),
+    },
+    {
+      id: 'sub-substrate',
+      party: 'Substrate Dynamics',
+      vertical: 'High-Reliability PCB Substrates',
+      claimSpecs: specsFromTuples([
+        ['ps-1240',  '12-Layer Polyimide PCB Substrate PS-1240 Compliance'],
+        ['cms-820',  'Ceramic Multilayer Substrate CMS-820 Datasheet'],
+        ['ltcc-440', 'LTCC Substrate LTCC-440 Spec'],
+        ['hdi-220',  'HDI Substrate HDI-220 Datasheet'],
+        ['flex-110', 'Flex PCB Substrate FLEX-110 Compliance'],
+        ['rflex-540','Rigid-Flex PCB Substrate RFLEX-540 Datasheet'],
+        ['mcp-820',  'Metal-Core PCB MCP-820 Spec'],
+        ['aln-440',  'Aluminium Nitride Substrate ALN-440 Qualification'],
+        ['ps-820',   '8-Layer Polyimide PCB PS-820 Datasheet'],
+        ['cms-220',  'Ceramic Single-Layer Substrate CMS-220 Compliance'],
+        ['ltcc-110', 'LTCC RF Substrate LTCC-110 Datasheet'],
+        ['hdi-820',  'High-Density HDI Substrate HDI-820 Spec'],
+        ['flex-440', 'Heavy-Copper Flex PCB FLEX-440 Datasheet'],
+        ['rflex-220','Rigid-Flex PCB RFLEX-220 Compliance'],
+        ['mcp-110',  'Thermally-Bonded MCP MCP-110 Datasheet'],
+        ['aln-820',  'High-Purity Aluminium Nitride Substrate ALN-820 Test Report'],
+      ]),
+    },
+    {
+      id: 'avsys-avionicsys',
+      party: 'AvionicSys',
+      vertical: 'Avionics & Flight Computers',
+      claimSpecs: specsFromTuples([
+        ['fcm-740',      'Flight Computer Module FCM-740 Compliance'],
+        ['imu-220',      'Inertial Measurement Unit IMU-220 Datasheet'],
+        ['st-ifc-110',   'Star Tracker Interface Card ST-IFC-110 Spec'],
+        ['pdh-440',      'Payload Data Handler PDH-440 Datasheet'],
+        ['mcm-820',      'Mission Computer Module MCM-820 Compliance'],
+        ['imu-540',      'Fibre-Optic IMU IMU-540 Datasheet'],
+        ['mil-1553-110', 'MIL-STD-1553 Bus Controller Card MIL-1553-110 Spec'],
+        ['swr-220',      'SpaceWire Router SWR-220 Datasheet'],
+        ['tmtc-440',     'TM/TC Interface Card TMTC-440 Compliance'],
+        ['wdt-110',      'Watchdog Timer Board WDT-110 Datasheet'],
+        ['fcm-220',      'Redundant Flight Computer FCM-220 Test Report'],
+        ['pdh-820',      'Payload Data Handler PDH-820 Spec'],
+        ['mcm-440',      'Compact Mission Computer MCM-440 Datasheet'],
+        ['imu-110',      'MEMS IMU IMU-110 Compliance'],
+        ['swr-540',      'SpaceWire Switch SWR-540 Datasheet'],
+        ['tmtc-220',     'Dual-Redundant TM/TC Interface TMTC-220 Spec'],
+        ['wdt-820',      'Programmable Watchdog Timer WDT-820 Datasheet'],
+      ]),
+    },
+    {
+      id: 'hrf-helixrf',
+      party: 'Helix RF',
+      vertical: 'RF / Microwave / Antenna Modules',
+      claimSpecs: specsFromTuples([
+        ['xda-440',  'X-Band Downlink Antenna XDA-440 Compliance'],
+        ['stx-820',  'S-Band Transponder STX-820 Spec'],
+        ['kln-110',  'Ka-Band LNA KLN-110 Datasheet'],
+        ['pa-220',   'X-Band Power Amplifier PA-220 Datasheet'],
+        ['mx-540',   'S-Band Mixer MX-540 Compliance'],
+        ['flt-440',  'Cavity Bandpass Filter FLT-440 Datasheet'],
+        ['mux-820',  'Output Multiplexer MUX-820 Spec'],
+        ['crc-110',  'Ferrite Circulator CRC-110 Datasheet'],
+        ['wgd-220',  'WR-90 Waveguide Section WGD-220 Compliance'],
+        ['hyc-440',  '90° Hybrid Coupler HYC-440 Datasheet'],
+        ['omux-820', 'Output Multiplexer Assembly OMUX-820 Test Report'],
+      ]),
+    },
+    {
+      id: 'opt-optech',
+      party: 'Optech Sensors',
+      vertical: 'Star Trackers & Imaging Sensors',
+      claimSpecs: specsFromTuples([
+        ['st-440',  'Wide-FOV Star Tracker ST-440 Compliance'],
+        ['cis-820', 'CMOS Imaging Sensor CIS-820 Datasheet'],
+        ['ehs-110', 'Earth Horizon Sensor EHS-110 Spec'],
+        ['ccd-220', 'CCD Imaging Sensor CCD-220 Datasheet'],
+        ['css-540', 'Coarse Sun Sensor CSS-540 Compliance'],
+        ['mag-440', '3-Axis Magnetometer MAG-440 Datasheet'],
+        ['gyr-820', 'Fibre-Optic Gyroscope GYR-820 Spec'],
+        ['acc-110', 'MEMS Accelerometer ACC-110 Datasheet'],
+        ['fps-220', 'Fine Pointing Sensor FPS-220 Compliance'],
+        ['fss-440', 'Digital Fine Sun Sensor FSS-440 Datasheet'],
+      ]),
+    },
+    {
+      id: 'sv-solarvantage',
+      party: 'SolarVantage',
+      vertical: 'Solar Panels & Solar Cells',
+      claimSpecs: specsFromTuples([
+        ['tjs-440', 'Triple-Junction GaAs Solar Cell TJS-440 Compliance'],
+        ['sap-820', 'Solar Array Panel SAP-820 Datasheet'],
+        ['cpv-110', 'Concentrator Photovoltaic Cell CPV-110 Spec'],
+        ['qjs-220', 'Quadruple-Junction Solar Cell QJS-220 Datasheet'],
+        ['cvg-540', 'Cerium-Doped Coverglass CVG-540 Compliance'],
+        ['icn-440', 'Inter-Cell Interconnect ICN-440 Datasheet'],
+        ['yke-820', 'Solar Array Yoke YKE-820 Spec'],
+        ['hng-110', 'Solar Panel Hinge Assembly HNG-110 Datasheet'],
+        ['dpm-220', 'Solar Array Deployment Mechanism DPM-220 Compliance'],
+        ['sap-440', 'Flexible Solar Array Panel SAP-440 Datasheet'],
+      ]),
+    },
+    {
+      id: 'tc-thermacore',
+      party: 'ThermaCore',
+      vertical: 'Thermal Management (Heat Pipes, Radiators)',
+      claimSpecs: specsFromTuples([
+        ['vchp-440', 'Variable Conductance Heat Pipe VCHP-440 Compliance'],
+        ['drp-820',  'Deployable Radiator Panel DRP-820 Datasheet'],
+        ['lhp-110',  'Loop Heat Pipe LHP-110 Spec'],
+        ['cph-220',  'Constant-Conductance Heat Pipe CPH-220 Datasheet'],
+        ['cdp-540',  'Aluminium Coldplate CDP-540 Compliance'],
+        ['mli-440',  'MLI Thermal Blanket MLI-440 Datasheet'],
+        ['tlv-820',  'Bimetallic Thermal Louver TLV-820 Spec'],
+        ['thr-110',  'Kapton Heater THR-110 Datasheet'],
+        ['tim-220',  'Thermal Interface Material TIM-220 Compliance'],
+      ]),
+    },
+    {
+      id: 'cs-compostruct',
+      party: 'CompoStruct',
+      vertical: 'Composite Structures & Panels',
+      claimSpecs: specsFromTuples([
+        ['cfrp-440', 'Carbon-Fibre Reinforced Panel CFRP-440 Compliance'],
+        ['hsp-820',  'Honeycomb Sandwich Panel HSP-820 Datasheet'],
+        ['smp-110',  'Sandwich Mounting Plate SMP-110 Spec'],
+        ['ahp-220',  'Aluminium-Honeycomb Panel AHP-220 Datasheet'],
+        ['ksp-540',  'Kevlar-Skin Composite Panel KSP-540 Compliance'],
+        ['sbm-440',  'Composite Structural Beam SBM-440 Datasheet'],
+        ['ibk-820',  'Composite Interface Bracket IBK-820 Spec'],
+        ['emp-110',  'Equipment-Mounting Plate EMP-110 Datasheet'],
+        ['cfrp-220', 'CFRP Stringer Panel CFRP-220 Test Report'],
+      ]),
+    },
+    {
+      id: 'pho-photonix',
+      party: 'Photonix',
+      vertical: 'Optical Instruments & Telescopes',
+      claimSpecs: specsFromTuples([
+        ['cta-440', 'Cassegrain Telescope Assembly CTA-440 Compliance'],
+        ['oap-820', 'Off-Axis Parabolic Mirror OAP-820 Datasheet'],
+        ['wfs-110', 'Wavefront Sensor WFS-110 Spec'],
+        ['fsm-220', 'Fine-Steering Mirror FSM-220 Datasheet'],
+      ]),
+    },
+    {
+      id: 'cryo-cryotek',
+      party: 'Cryotek',
+      vertical: 'Cryocoolers & IR Detector Cooling',
+      claimSpecs: specsFromTuples([
+        ['ptc-440', 'Pulse-Tube Cryocooler PTC-440 Compliance'],
+        ['scc-820', 'Stirling-Cycle Cryocooler SCC-820 Datasheet'],
+        ['jtc-110', 'Joule-Thomson Cooler JTC-110 Spec'],
+        ['acr-220', 'Active Cryogenic Radiator ACR-220 Datasheet'],
+      ]),
+    },
+  ]
+  const mockActors = []
+  const mockAssets = []
+  const mockClaims = []
+  const mockOwnershipDas = []
+  const mockPublicDas = []
+  for (const bundleSpec of mockSeedBundles) {
+    const bundle = seedMockSupplierActor(bundleSpec)
+    mockActors.push(bundle.actor)
+    mockAssets.push(...bundle.assets)
+    mockClaims.push(...bundle.claims)
+    mockOwnershipDas.push(...bundle.ownershipDas)
+    mockPublicDas.push(...bundle.publicDas)
+  }
 
   // ── Alice's Assets ────────────────────────────────────────────────────
   // Phase 15.0 (#172 part 1): aPrmDatasheet + aPrmTestReport now point at
@@ -1652,6 +2038,8 @@ export function buildV22SharedArtifacts() {
     dPrmIcDatasheet,
     dPrmIcTestReport,
     dVrefDatasheet,
+    // Phase 16.2: 1 stub Asset per mock-supplier Claim (157 total).
+    ...mockAssets,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -1968,6 +2356,13 @@ export function buildV22SharedArtifacts() {
     createdDate: '2026-02-28T11:00:00Z',
     amendments: [],
   })
+  // Phase 16.2: this list holds the primary-actor claims only. The
+  // mock-supplier claims (`mockClaims`, 157 entries) carry their own
+  // ownership / claim-ref DAs from `seedMockSupplierActor`, so they must
+  // NOT flow through the generic `aliceOwnClaims` + `claimRefEdges` loops
+  // below — those would re-produce duplicate-id DAs. The final return-shape
+  // `claims` field is built as `[...claims, ...mockClaims]` so consumers
+  // see the full set.
   const claims = [
     cPrm, cVreg, cEmi, cChipcoPrmIc, cChipcoVref,
     // Phase 16.0 expansion: Dave's catalog grows from 2 → 14 Claims.
@@ -2876,6 +3271,9 @@ export function buildV22SharedArtifacts() {
     daOwnEvalCarol,
     daOwnEvalBobVreg,
     daOwnEvalCarolEmi,
+    // Phase 16.2: 4 × 157 = 628 internal + public DAs for the mock catalog.
+    ...mockOwnershipDas,
+    ...mockPublicDas,
   ]
 
   // ── Badge Templates — Phase 14.0 (#169 part 1) ────────────────────────
@@ -3001,10 +3399,14 @@ export function buildV22SharedArtifacts() {
   ]
 
   return {
-    actors: [bob, alice, carol, dave, RADIANT_NETWORK_ACTOR],
+    actors: [bob, alice, carol, dave, ...mockActors, RADIANT_NETWORK_ACTOR],
     assets,
     parseResults,
-    claims,
+    // Phase 16.2: union of primary-actor claims + mock-supplier claims. The
+    // primary `claims` constant intentionally does NOT include `mockClaims`
+    // so the generic ownership / claim-ref loops above don't double-emit
+    // DAs for them — see the comment on `const claims = [...]` above.
+    claims: [...claims, ...mockClaims],
     disclosureAgreements,
     evaluationAgreements,
     evaluationResults,

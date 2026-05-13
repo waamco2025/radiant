@@ -7755,7 +7755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.1.5 &middot; Changelog
+          v0.16.2.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7802,6 +7802,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.0', date: '2026-05-13', label: 'Phase 16.2', items: [
+                  'Phase 16.2 — Directory Layer seed expansion. Opens Round 17. The Directory now hosts 12 new mock supplier Actors representing the defense-electronics supply chain under Bob\'s Sentinel-4 satellite program: NovaFab (25 Claims), ElectroGrid (24), Precision Components (18), AvionicSys (17), Substrate Dynamics (16), Helix RF (11), Optech Sensors (10), SolarVantage (10), ThermaCore (9), CompoStruct (9), Photonix (4), Cryotek (4). Total: 157 new Claims, 157 stub Assets, and 628 internal + public Disclosure Agreements (1 own-asset + 1 own-claim + 1 claim-ref-asset + 1 public per Claim).',
+                  'Every new Actor is non-switchable (`user: null`, `credits: 0`) and discloses exclusively to the Radiant Network — no umbrella DAs to any of the four primary actors. The four existing actor seeds (Bob/GovCo, Alice/MicroCo, Carol/AuditCo, Dave/ChipCo) are frozen for this phase; none of their Claims, Assets, DAs, EAs, RFPs, PoEs, Eval Results, or Parse Results were modified.',
+                  'New exported helper `seedMockSupplierActor({ id, party, vertical, claimSpecs, baseDate })` in `v2_2Data.js` produces an Actor + Claims + 1 stub Asset per Claim + ownership DAs + public DAs in one call. A companion `pickDirectoryType(i, total)` interleaver assigns disclosure types per Claim to target ~60% full / 25% selective / 15% proofonly so every cluster paints a visible indigo + amber + green mix (with a forced fixed pattern for n ≤ 4 to keep Photonix and Cryotek non-monotone).',
+                  'DirectoryLayer placement-scaling patch: the initial cluster x-spread band scales with cluster count `N` (`xSpread = Math.max(800, 600 × (N − 1))`) instead of the previous hardcoded 800-px band. With 14 non-own clusters on Bob\'s view, the initial band is ~7800 px — comfortably enough that the 30-attempt up-zigzag retry no longer needs to compensate. Force-directed layout (#196) remains deferred.',
+                  'Footer rolls forward to v0.16.2.0.',
+                ]},
                 { version: '0.16.1.5', date: '2026-05-10', label: 'Phase 16.1.5', items: [
                   'Phase 16.1.5 — Hotfix. Two QA issues surfaced in 16.1.4, both downstream of the lifecycle change: (1) dots disappeared at zoom > ~60%; (2) dot clicks no longer opened the Detail Panel.',
                   'Root cause for both — `InstancedMesh.boundingSphere` is auto-computed from the underlying geometry vertices, which sit at world origin because instance positions live in per-instance matrices, not the geometry. The first computed sphere ended up tiny (radius = `DOT_RADIUS = 3`, centred at origin) and was cached on the mesh. The rendering frustum check (`Frustum.intersectsObject`) and the raycast pre-filter (`InstancedMesh.raycast` → `raycaster.ray.intersectsSphere(_sphere)`) both consult this cached sphere — the tiny origin-sphere fell outside the camera frustum at high zoom and outside the click ray at any zoom, so the entire mesh was rejected before per-instance work ran. Phase 16.1.4 stabilized the scene lifecycle but didn\'t touch the bounding-sphere caching, so both symptoms surfaced once the lifecycle stopped masking them.',

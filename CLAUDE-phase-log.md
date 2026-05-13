@@ -2673,6 +2673,85 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2 completion notes (2026-05-13) — Directory Layer seed expansion
+
+Round 17 opens. Pure seed + one cheap placement-algorithm patch. No new architectural primitives, no UI changes beyond what the seed exposes.
+
+**What shipped.**
+
+12 new mock supplier Actors representing the defense-electronics supply chain underneath Bob's Sentinel-4 satellite program. Per-Actor totals:
+
+| #  | id                     | party                 | vertical                                       | Claims |
+|----|------------------------|-----------------------|------------------------------------------------|--------|
+| 1  | nova-novafab           | NovaFab               | Wafer Foundry / Rad-Hard IC Fab                | 25     |
+| 2  | egrid-electrogrid      | ElectroGrid           | Spacecraft Power Systems (PCDU, regulators)    | 24     |
+| 3  | prec-precision         | Precision Components  | Precision-Machined Structural / Mechanism Parts| 18     |
+| 4  | sub-substrate          | Substrate Dynamics    | High-Reliability PCB Substrates                | 16     |
+| 5  | avsys-avionicsys       | AvionicSys            | Avionics & Flight Computers                    | 17     |
+| 6  | hrf-helixrf            | Helix RF              | RF / Microwave / Antenna Modules               | 11     |
+| 7  | opt-optech             | Optech Sensors        | Star Trackers & Imaging Sensors                | 10     |
+| 8  | sv-solarvantage        | SolarVantage          | Solar Panels & Solar Cells                     | 10     |
+| 9  | tc-thermacore          | ThermaCore            | Thermal Management (Heat Pipes, Radiators)     | 9      |
+| 10 | cs-compostruct        | CompoStruct           | Composite Structures & Panels                  | 9      |
+| 11 | pho-photonix           | Photonix              | Optical Instruments & Telescopes               | 4      |
+| 12 | cryo-cryotek           | Cryotek               | Cryocoolers & IR Detector Cooling              | 4      |
+
+Total: **157 new Claims, 157 stub Assets, 628 new DAs** (1 own-asset + 1 own-claim + 1 claim-ref-asset + 1 public per Claim). `actors` array grew from 5 → 17 entries (4 existing + 12 new + Radiant Network).
+
+Every new Actor is **non-switchable** (`user: null`, `credits: 0`) and discloses **exclusively to the Radiant Network** — zero umbrella DAs to any of the four primary actors. The four existing actor seeds (Bob/GovCo, Alice/MicroCo, Carol/AuditCo, Dave/ChipCo) are **frozen**: none of their Claims, Assets, DAs, EAs, RFPs, PoEs, Eval Results, or Parse Results were modified.
+
+**Helper.** New exported `seedMockSupplierActor({ id, party, vertical, claimSpecs, baseDate = '2026-02-01T10:00:00Z' })` in `v2_2Data.js` produces an Actor + Claims + 1 stub Asset per Claim + ownership DAs + public DAs in one call. Each `claimSpec` entry has shape `{ slug, name, description?, disclosureType: 'full' | 'selective' | 'proofonly' }`. Returns `{ actor, claims, assets, ownershipDas, publicDas }`. Companion `pickDirectoryType(i, total)` interleaver assigns disclosure types per Claim targeting ~60% full / 25% selective / 15% proofonly so every cluster paints a visible indigo + amber + green mix; small clusters (n ≤ 4) get a forced fixed pattern (`i === 1` → selective, `i === total - 2` → proofonly, rest → full) so Photonix and Cryotek stay non-monotone. Companion `specsFromTuples(tuples)` keeps the 12 inline arrays compact — each entry is a `[slug, name]` pair, disclosure types are picked deterministically by position.
+
+**Stub Assets.** Each Asset has `id: 'asset-{actor-id}-{slug}-ds'`, no `localPath`, `file: { uri: 'provenance://stub/{asset-id}', filename: '{asset-id}.pdf', size: 1024, mimeType: 'application/pdf', hash: 'stub-hash-{asset-id}' }`, and `registrationDate: <baseDate + idx days>` where `idx` is the 1-indexed position in the actor's `claimSpecs` array. The Detail Panel's "Document preview not available" fallback handles the missing `localPath` cleanly.
+
+**Internal ownership DAs per Claim (3 per Claim).** `da-own-{assetId}` (subject: asset), `da-own-{claimId}` (subject: claim), `da-ref-{claimId}-{assetId}` (subject: claim, scope.assetIds: [assetId]).
+
+**Public DAs (1 per Claim).** `da-pub-{actorId}-{slug}` — grantor: actor.party, grantee: Radiant Network, subject: { kind: 'claim', id: claimId }, type: spec.disclosureType, scope: { assetIds: [assetId], includeDerivatives: true }, terms.createdDate: <baseDate + idx days>.
+
+**Wiring into `buildV22SharedArtifacts`.** After the existing actor block: build the 12 mock seeds via a `mockSeedBundles` config array passed through `seedMockSupplierActor`. Aggregate into local `mockActors`, `mockAssets`, `mockClaims`, `mockOwnershipDas`, `mockPublicDas`. Spread into existing return-shape arrays at their natural aggregation points: `actors` (after `dave`, before `RADIANT_NETWORK_ACTOR`); `assets` (appended); `claims` (appended); `disclosureAgreements` (appended — internal ownership DAs then public DAs).
+
+**DirectoryLayer placement-scaling patch.** In `computeLayout`'s "Other clusters" placement loop, the previous hardcoded 800-px initial band was replaced with `xSpread = Math.max(800, 600 * Math.max(N - 1, 1))`. With 14 non-own clusters on Bob's view the initial band is ~7800 px — comfortably enough that the 30-attempt up-zigzag retry no longer needs to compensate. Force-directed layout (#196) remains deferred; the cheap fix covers the N=14 scale documented in the brief.
+
+**What was NOT touched.**
+
+- Phase 16.1.5's defensive `frustumCulled = false` + unbounded `boundingSphere` settings on every `InstancedMesh` left intact.
+- Phase 16.1.4's `shouldMountScene` lifecycle pattern left intact.
+- No new architectural primitives, no new artifact types, no new edge types.
+- No RFP changes (Phase 17.0 owns RFP MVP).
+- No supplier-internal Claims (every new Claim has a public DA so it renders).
+
+**Documented deviations.** None. Implementation followed the brief verbatim.
+
+**Acceptance criteria — structural assertions verified.**
+
+1. Build clean (`npm run build` — 99 modules transformed, 0 errors beyond the existing 500-KB V2App.jsx warning).
+2. `actors` array contains **17 entries** (4 existing + 12 new + Radiant Network) ✓.
+3. `claims` array grew by exactly **157** ✓.
+4. `assets` array grew by exactly **157** ✓.
+5. `disclosureAgreements` grew by exactly **157 × 4 = 628** (3 internal + 1 public per Claim) ✓.
+6. Each new public DA has `grantee.party === 'Radiant Network'` + `subject.kind === 'claim'` ✓.
+7. Zero new umbrella DAs across the 12 new Actors (no DA where `grantor.party` is in the new-party set and `grantee.party` is not in `{grantor.party, 'Radiant Network'}`) ✓.
+8. Bob's `buildV22DirectoryDataForRole('bob-govco').otherClusters` has **14 entries** (12 new + ChipCo + MicroCo). Bob's own RFP-cluster is built separately from `ownRfps`. Verified via direct buildV22DirectoryDataForRole call.
+
+**Runtime verification.**
+
+Dev server probe — Vite up + cold reload, all role views render without console errors. Directory Layer opens on Bob's view and renders all 15 clusters (12 new + ChipCo + MicroCo + Bob's own RFP-only cluster). FIT zoom fits all clusters within canvas bounds. Cluster-color variety (indigo + amber + green) visible on every cluster including Photonix and Cryotek (4-Claim clusters get the forced fixed pattern). Role-switch to Alice / Carol / Dave / Bob all open Directory cleanly without errors.
+
+**Per CLAUDE.md's documented limitation** the V2Canvas + DirectoryLayer Three.js Raycaster does not respond to DOM-dispatched events — scripted UI walkthroughs of canvas-click flows are not possible from the agent session. Manual mouse interaction is the canonical verification path for canvas clicks; data-layer probes + module-load verification are the structural backstops used here.
+
+**Files changed:**
+- `src/v2/v2_2Data.js` — added `seedMockSupplierActor` + `pickDirectoryType` + `specsFromTuples` helpers; added 12 `mockSeedBundles` configs + aggregation loop; wired 4 spread points into return-shape arrays.
+- `src/v2/DirectoryLayer.jsx` — placement-scaling patch (1-line + comment).
+- `src/v2/V2App.jsx` — footer constant v0.16.1.5 → v0.16.2.0; Changelog modal `v0.16.2.0` entry prepended.
+- `architecture-spec.md` — §8 Changelog tail gains Phase 16.2 bullet; §8.5 "Round 17 status" line updated.
+- `polish-backlog.md` — Update Log Phase 16.2 entry; #196 stays Open.
+- `CLAUDE.md` — "Current state of the world" updated (footer v0.16.2.0, Phase 16.2 last shipped, 16.1.5 demoted to prior phase); active phase queue updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer:** rolls forward to v0.16.2.0.
+
+**Status:** [x] Complete.
+
 ### Round 16 closeout (2026-05-10) — Documentation hygiene + Round 17 transition
 
 Documentation-only phase. No code changes. Single commit on `main` consolidating Round 16's shipped state across the canonical docs in preparation for Round 17.
