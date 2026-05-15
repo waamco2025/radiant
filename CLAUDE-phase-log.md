@@ -2673,6 +2673,60 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.2 completion notes (2026-05-13) — Parent canvas node spreading
+
+Refactor of the parent-canvas node-layout function in `src/v2/v2_2Data.js` (`buildV22Canvas`) to address visible overlap between Eval Result / PoE chains and the Claims they reference, and to coalesce each evaluation chain into a single y-row anchored to its grantee Asset where possible. V2Canvas itself was not touched — it consumes `{ x, y }` from each node and is the rendering pipeline only; the upstream `buildV22Canvas` assigns positions.
+
+**Locating the function — first action.** Per the brief, located via `grep -n "computeLayout\|layoutNodes\|positionNodes\|...\|buildV22Canvas"` across `src/v2/V2App.jsx`, `src/v2/v2_2Data.js`, `src/v2/V2Canvas.jsx`. Match landed at `src/v2/v2_2Data.js:5825` (`export function buildV22Canvas(view)`). V2App.jsx invokes it via `buildV22Canvas(v22View)` at line 320, memoized over `v22View`.
+
+**Three coordinated changes.**
+
+1. **Chain-row coalescing (y-anchor to grantee Asset).** A new two-pass allocator runs after Assets are placed but before ER / PoE placement. Pass 1: iterate evaluation chains (one per `chainOrigin`) in anchor-y order; first chain at each anchor Asset claims that anchor's `y` exactly. Pass 2: deferred chains (anchor already claimed by another chain) pick the nearest non-colliding `y` via symmetric outward search (`±ROW_STEP`, `±2·ROW_STEP`, …). Chain successors (re-runs sharing a chain origin) share their origin's y so a chain reads as a single horizontal row, not a column of staggered rows. Anchor lookup: `EA.granteeAssetId` resolved through `view.evaluationAgreements`. Fallback to `symmetricRowY(i) + COL_Y_OFFSET` when the anchor Asset isn't on canvas (proof-only-pulled flows where the grantee Asset isn't visible to the active actor).
+
+2. **Increased grantee-direction Claim-side x-gap.** Constants bumped: `COL_PULLED_CLAIM` 2100 → 2400, `COL_PULLED_ASSET` 2500 → 2800, `COL_PUBLIC` 2900 → 3200, `COL_OWN_POE` 2100 → 2400. On Bob/Carol's grantee-direction canvases, owned PoEs sit at `COL_OWN_EVAL_eff + chainLength·ER_COL_SPACING` (= 2000 for non-supersession chains), so the gap to the pulled Claim is now 400 world units — comfortably above the brief's ≥240 minimum. The previous 100-unit gap read as visual overlap. Downstream columns (`COL_PULLED_ASSET`, `COL_PUBLIC`, `COL_OWN_POE`) bumped by the same step (300 world units) to preserve column-to-column spacing consistency.
+
+3. **PoE column order on grantor-direction views.** `proofOfEvalPulledPoEs` x changed from `COL_OWN_EVAL_eff - ER_COL_SPACING` (= 1400, sitting *between* Claim at 1300 and ER at 1700 — only 100-unit gap to Claim) to `COL_OWN_EVAL_eff + ER_COL_SPACING` (= 2000, sitting *right* of ER). Restores the brief's `Claim → ER → PoE → counterparty Asset` column order on Alice's view. The Claim → ER gap (400) and ER → PoE gap (300) both clear the ≥240 minimum.
+
+**Additional alignment: proof-only-pulled PoE.** `proofOnlyPulledPoEs` y now inherits from the wrapped ER's y on canvas (was `sourceClaim.y + 200`). Aligns PoE + wrapped ER on the same chain row for Dave-style proof-only-pulled views. Falls back to the legacy `sourceClaim.y + 200 + stackIdx*COL_Y_OFFSET` when the wrapped ER isn't visible on canvas.
+
+**Architectural deviation surfaced (per the brief's escape clause).** Both Bob's evaluations (`erBobPrm` + `erBobVreg`) carry `granteeAssetId: bAvionics`, so the brief's "bAvionics for PRM eval, bThermal for VReg eval" example doesn't hold under the actual seed. Strictly anchoring each chain to its respective grantee Asset is impossible when two distinct chains share an anchor; the two-pass allocator stacks them symmetrically as the deterministic fallback. Result on Bob's view: `erBobPrm` at y=0 (anchor bAvionics y=0), `erBobVreg` at y=300 (stacked +1 ROW_STEP). Per CLAUDE.md / brief's "stop and surface" clause this discrepancy is recorded here rather than re-architecting seed data.
+
+**Acceptance criteria — structural assertions verified via Node probe.**
+
+| Criterion | Result |
+|-----------|--------|
+| Build clean (0 errors beyond existing 500-KB chunk warning) | ✓ |
+| Bob's PRM Eval Result + PoE aligned with bAvionics (y=0) | ✓ |
+| Bob's VReg Eval Result aligned with bThermal | ✗ (seed has VReg anchored to bAvionics; stacked at y=300 — surfaced deviation) |
+| Bob's PoE → Claim gap ≥ 240 world units | ✓ (gap = 400) |
+| Alice's PRM has 2 chain rows on distinct y values | ✓ (Bob @ y=100, Carol @ y=700) |
+| Alice's PoE x-order: Claim → ER → PoE → granteeAsset | ✓ |
+| Carol's view: chains at y=0 (anchor cAuditWorkspace) + y=300 (stacked) | ✓ |
+| Dave's view: proof-only-pulled ER + PoE share chain row (both y=300) | ✓ |
+| Zero node bounding-box overlap pairs across all four role views (≈240×100 bbox) | ✓ |
+
+**Dev-server verification.** Launched Vite, bypassed boot via sessionStorage flag, clicked ESTABLISH SESSION, switched between Bob's view and Alice's view. Footer shows v0.16.2.0. No console errors. Visual: Bob's canvas at FIT zoom shows GovCo Actor → 3 own Assets (Avionics center, Thermal above, Guidance below) → chain row centered on Avionics → pulled Claims to the right; Alice's canvas at FIT shows MicroCo Actor → 6 own Assets stack → 3 Claim cards → multiple chain rows spread vertically (one per evaluator party) → counterparty Assets at far right.
+
+**What was NOT touched.**
+
+- No changes to V2Canvas.jsx's render pipeline (Three.js geometry, edge drawing, screen projection).
+- No changes to `layoutChildren` (dive-view layout for `depthLevel ≥ 1`).
+- No changes to `edgeDrawIn.js` reveal animations or `reveal.js`.
+- No changes to seed data (`v2_2Data.js` factories / buildV22SharedArtifacts).
+- No changes to Directory Layer.
+
+**Files changed:**
+- `src/v2/v2_2Data.js` — column constants (4 bumps); two-pass y-allocator added before ER placement; `erOwn` + `erProofOfEval` forEach use `yForEr(er)` (chain-aware y); `proofOfEvalPulledPoEs` x flipped to right of ER; `proofOnlyPulledPoEs` y inherits from wrapped ER.
+- `architecture-spec.md` — §6/§3.5 Phase 16.2.2 changelog entry.
+- `polish-backlog.md` — Update Log Phase 16.2.2 entry.
+- `CLAUDE.md` — "Current state of the world" updated (16.2.2 last shipped; 16.2.1 demoted to prior).
+- `CLAUDE-phase-log.md` — this entry.
+- `src/v2/V2App.jsx` — Changelog modal v0.16.2.2 entry prepended.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention (matches Phase 14.6.x / 16.1.4 / 16.1.5 / 16.2.1 pattern).
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.1 completion notes (2026-05-13) — `aVregTestReport` ownership DA bugfix
 
 One-line bugfix correcting a Phase 15.4 seed regression. When `aVregTestReport` was promoted to an unattached "floating" Asset (Alice attaches it to her VReg Claim during the Re-Run demo prereq), the Actor → Asset ownership DA was inadvertently omitted from the `aliceOwnAssets` array. Without it, the Asset rendered floating on Alice's parent canvas with no Full Disclosure edge to the MicroCo Actor card. Ownership and Claim-reference are orthogonal in the V2.2 data model — the ownership DA is what surfaces the Asset on the owner's canvas with an edge to the Actor node; the Claim-reference relationship is established separately when Alice amends the VReg Claim during the Re-Run prereq.

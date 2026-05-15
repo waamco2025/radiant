@@ -4394,7 +4394,12 @@ const COL_OWN_ASSET = 500           // Phase 10.2.1: was 520; snap to 100-grid
 const COL_OWN_PARSE = 900
 const COL_OWN_CLAIM = 1300
 const COL_OWN_EVAL = 1700
-const COL_PULLED_CLAIM = 2100
+// Phase 16.2.2: was 2100; bumped to 2400 so the gap between the rightmost
+// chain node (owned PoE at COL_OWN_EVAL + chainLength*ER_COL_SPACING = 2000
+// for non-supersession chains) and the pulled Claim is ≥240 world units.
+// The previous 2100 produced only a 100-unit gap, which read as visual
+// overlap on Bob/Carol/Dave's grantee-direction canvases.
+const COL_PULLED_CLAIM = 2400
 // Phase 11D.4: proof-only-pulled Eval Results sit 400px LEFT of the pulled
 // Claim (matching the existing ASSET_COL_GAP convention) — same column as
 // the actor's own Eval Results (`COL_OWN_EVAL = 1700`). Y separation keeps
@@ -4405,13 +4410,18 @@ const COL_PULLED_CLAIM = 2100
 // proof-only disclosure. Phase 11D.3 placed this at 2300 (200px from the
 // Claim) which produced visible card overlap.
 const COL_PULLED_EVAL = 1700
-const COL_PULLED_ASSET = 2500
-const COL_PUBLIC = 2900
+// Phase 16.2.2: COL_PULLED_ASSET + COL_PUBLIC bumped by 300 to keep step
+// spacing consistent with the new COL_PULLED_CLAIM (2400).
+const COL_PULLED_ASSET = 2800
+const COL_PUBLIC = 3200
 // Phase 13 (#168): PoE column sits 400px right of own Eval Results so PoE
 // nodes appear "downstream" of the Eval Results they wrap. The wrapping
 // edges run leftward to the Eval Result column. Pulled-in (counterparty
 // canvas) PoEs hang next to their source Claim — see placement loop.
-const COL_OWN_POE = 2100
+// Phase 16.2.2: bumped to 2400 in line with COL_PULLED_CLAIM. Used only as
+// a fallback when an owned PoE's wrapped Eval Result isn't on canvas — the
+// main owned-PoE x-formula is `COL_OWN_EVAL_eff + chainLength*ER_COL_SPACING`.
+const COL_OWN_POE = 2400
 const ROW_STEP = 300                // Phase 10.2.1: was 260; snap to 100-grid
 // Phase 10.2: per-depth horizontal spacing for the Asset hierarchy column.
 // Phase 10.2.1: bumped 380 → 400 so it stays on the 100-grid (the elastic
@@ -6070,21 +6080,114 @@ export function buildV22Canvas(view) {
   //   effectivePos = (chainLength-1) - chainPos
   //   (Latest at COL_OWN_EVAL_eff close to Claim; origin farther right).
   const claimById = new Map(view.claims.map((c) => [c.id, c]))
+
+  // Phase 16.2.2: y-anchor each evaluation CHAIN (one row per chain origin)
+  // to its evaluator's grantee Asset on canvas (`EA.granteeAssetId`). Chains
+  // sharing the same anchor Asset stack downward by ROW_STEP. Falls back to
+  // symmetric distribution when the anchor Asset isn't on canvas (e.g.,
+  // proof-only-pulled flows or future provisional ERs). Chain successors
+  // (re-runs) share the y of their chain origin so the chain reads as a
+  // single horizontal row, not a column of staggered rows.
+  //
+  // Architectural deviation surfaced for the prototype's actual seed:
+  // both of Bob's evaluations (PRM + VReg) carry `granteeAssetId: bAvionics`,
+  // so they share the same anchor Asset and stack — they do not split onto
+  // bAvionics vs bThermal rows as the brief's example suggested. Aligning
+  // strictly to "respective grantee Asset" is impossible when two distinct
+  // chains share an anchor; stacking is the deterministic fallback.
+  const eaById = new Map((view.evaluationAgreements || []).map((ea) => [ea.id, ea]))
+  const assetNodeById = new Map(
+    nodes.filter((n) => n.v22Type === 'ASSET').map((n) => [n.id, n])
+  )
+  const orderedErsForY = [...erOwn, ...erProofOfEval]
+  const seenOrigins = new Set()
+  const orderedOrigins = []
+  for (const er of orderedErsForY) {
+    const origin = chainOriginByErId.get(er.id)
+    if (!seenOrigins.has(origin)) {
+      seenOrigins.add(origin)
+      orderedOrigins.push(origin)
+    }
+  }
+  const anchorIdForOrigin = (originId) => {
+    const er = erIdToErArtifact.get(originId)
+    const ea = er ? eaById.get(er.evaluationAgreementId) : null
+    return ea?.granteeAssetId ?? null
+  }
+  const anchorYForOrigin = (originId) => {
+    const anchorId = anchorIdForOrigin(originId)
+    const asset = anchorId ? assetNodeById.get(anchorId) : null
+    return asset ? asset.y : Number.POSITIVE_INFINITY
+  }
+  // Sort origins by anchor-asset y (then by origin id for stability) so
+  // pass 1 processes anchor groups in top-down order.
+  orderedOrigins.sort((a, b) => {
+    const yA = anchorYForOrigin(a)
+    const yB = anchorYForOrigin(b)
+    if (yA !== yB) return yA - yB
+    return a < b ? -1 : 1
+  })
+  const chainYByOriginId = new Map()
+  const usedErYs = new Set()
+  // Pass 1: the FIRST chain at each anchor Asset claims that anchor's y,
+  // so the visual association between chain row and grantee Asset is
+  // exact when possible. Chains whose anchor is missing or whose anchor.y
+  // is already claimed by a prior pass-1 row get deferred to pass 2.
+  const seenAnchors = new Set()
+  const deferred = []
+  for (const origin of orderedOrigins) {
+    const anchorId = anchorIdForOrigin(origin)
+    const anchorY = anchorYForOrigin(origin)
+    if (anchorId && !seenAnchors.has(anchorId) && Number.isFinite(anchorY) && !usedErYs.has(anchorY)) {
+      seenAnchors.add(anchorId)
+      usedErYs.add(anchorY)
+      chainYByOriginId.set(origin, anchorY)
+      continue
+    }
+    deferred.push(origin)
+  }
+  // Pass 2: deferred chains pick the nearest non-colliding y to their
+  // anchor (symmetric search outward: +ROW_STEP, -ROW_STEP, +2*ROW_STEP,
+  // ...). When the anchor Asset isn't on canvas (e.g., proof-only-pulled
+  // flows where the grantee Asset isn't visible to the active actor),
+  // fall back to symmetric distribution with COL_Y_OFFSET.
+  let fallbackIdx = 0
+  for (const origin of deferred) {
+    const anchorY = anchorYForOrigin(origin)
+    const baseY = Number.isFinite(anchorY)
+      ? anchorY
+      : symmetricRowY(fallbackIdx++) + COL_Y_OFFSET
+    let y = baseY
+    let step = 1
+    while (usedErYs.has(y)) {
+      const offset = Math.ceil(step / 2) * ROW_STEP
+      y = baseY + (step % 2 === 1 ? offset : -offset)
+      step++
+    }
+    usedErYs.add(y)
+    chainYByOriginId.set(origin, y)
+  }
+  const yForEr = (er) => {
+    const origin = chainOriginByErId.get(er.id)
+    const y = chainYByOriginId.get(origin)
+    return typeof y === 'number' ? y : 0
+  }
+
   // Bob's view (own ERs): chain reads left-to-right toward Claim. x grows
   // with chainPosition.
-  erOwn.forEach((er, i) => {
+  erOwn.forEach((er) => {
     const chainPos = chainPositionByErId.get(er.id) || 0
     const x = COL_OWN_EVAL_eff + chainPos * ER_COL_SPACING
-    nodes.push(evalResultToNode(er, x, symmetricRowY(i) + COL_Y_OFFSET, claimById.get(er.claimId)))
+    nodes.push(evalResultToNode(er, x, yForEr(er), claimById.get(er.claimId)))
   })
   // Alice's view (proof-of-eval pulled ERs): chain reads right-to-left
   // (Latest closest to Claim). effectivePos mirrors chainPosition.
-  erProofOfEval.forEach((er, i) => {
+  erProofOfEval.forEach((er) => {
     const chainPos = chainPositionByErId.get(er.id) || 0
     const len = chainLengthForEr(er)
     const effectivePos = (len - 1) - chainPos
     const x = COL_OWN_EVAL_eff + effectivePos * ER_COL_SPACING
-    nodes.push(evalResultToNode(er, x, symmetricRowY(erOwn.length + i) + COL_Y_OFFSET, claimById.get(er.claimId)))
+    nodes.push(evalResultToNode(er, x, yForEr(er), claimById.get(er.claimId)))
   })
   // Phase 11D.4.1: place each proof-only-pulled Eval Result derived from
   // its source Claim's position, NOT at a fixed column. This avoids
@@ -6167,10 +6270,15 @@ export function buildV22Canvas(view) {
       : symmetricRowY(ownedPoEs.length + i) + COL_Y_OFFSET
     let x
     if (wrapped) {
-      // Mirror: Latest sits at COL_OWN_EVAL_eff (effectivePos 0). PoE
-      // inserts to its LEFT toward Claim → effectivePos -1 → x =
-      // COL_OWN_EVAL_eff - ER_COL_SPACING.
-      x = COL_OWN_EVAL_eff - ER_COL_SPACING
+      // Phase 16.2.2: on the Claim owner's canvas (grantor-direction),
+      // the column order reads Claim → Eval Result → PoE → counterparty
+      // Asset. Previously this code placed the PoE to the LEFT of the
+      // Eval Result (between Claim and ER), producing a tight 100-unit
+      // gap to the Claim that read as visual overlap. The PoE now sits
+      // ONE ER_COL_SPACING to the RIGHT of Latest, matching the
+      // grantee-direction layout's "PoE downstream of ER" semantics and
+      // restoring the ≥240-unit minimum gap to the Claim.
+      x = COL_OWN_EVAL_eff + ER_COL_SPACING
     } else {
       x = COL_OWN_POE_eff
     }
@@ -6190,7 +6298,15 @@ export function buildV22Canvas(view) {
       return
     }
     const x = sourceClaim.x + 400
-    const y = sourceClaim.y + 200 + (stackIdx * COL_Y_OFFSET)
+    // Phase 16.2.2: inherit y from the wrapped Eval Result when on canvas
+    // so PoE + wrapped ER share a chain row (matches the brief's
+    // "ER + PoE on the same y-row" rule for grantee-direction views).
+    // Falls back to the legacy sourceClaim.y + offset pattern when the
+    // wrapped ER isn't visible on this canvas.
+    const wrappedErY = evalNodeById.get(poe.wrappedEvalResultId)?.y
+    const y = typeof wrappedErY === 'number'
+      ? wrappedErY
+      : sourceClaim.y + 200 + (stackIdx * COL_Y_OFFSET)
     nodes.push(poeToNode(poe, x, y, view.evaluationResults))
   })
 
