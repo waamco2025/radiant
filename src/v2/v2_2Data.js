@@ -2379,6 +2379,7 @@ export function buildV22SharedArtifacts() {
     aPrmTestReport,
     aPrmThermal,
     aVregDatasheet,
+    aVregTestReport,    // Phase 16.2.1: ownership DA restored; demo prereq attaches Asset to VReg Claim via amendment later.
     aEmiDatasheet,
   ].map((a) =>
     makeInternalDisclosureAgreement({

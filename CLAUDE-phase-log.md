@@ -2673,6 +2673,50 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.1 completion notes (2026-05-13) — `aVregTestReport` ownership DA bugfix
+
+One-line bugfix correcting a Phase 15.4 seed regression. When `aVregTestReport` was promoted to an unattached "floating" Asset (Alice attaches it to her VReg Claim during the Re-Run demo prereq), the Actor → Asset ownership DA was inadvertently omitted from the `aliceOwnAssets` array. Without it, the Asset rendered floating on Alice's parent canvas with no Full Disclosure edge to the MicroCo Actor card. Ownership and Claim-reference are orthogonal in the V2.2 data model — the ownership DA is what surfaces the Asset on the owner's canvas with an edge to the Actor node; the Claim-reference relationship is established separately when Alice amends the VReg Claim during the Re-Run prereq.
+
+**Fix.** Single-line addition in `buildV22SharedArtifacts`:
+
+```js
+const aliceOwnAssets = [
+  aPrmDatasheet,
+  aPrmTestReport,
+  aPrmThermal,
+  aVregDatasheet,
+  aVregTestReport,    // Phase 16.2.1: ownership DA restored
+  aEmiDatasheet,
+].map((a) => makeInternalDisclosureAgreement({ ... }))
+```
+
+The standard `aliceOwnAssets.map` factory produces one internal DA per Asset, so the addition generates exactly one new DA: `da-own-asset-vreg-test-report`, owner=alice.party, grantor + grantee both MicroCo, subject `{kind:'asset', id: aVregTestReport.id}`, type: 'full'.
+
+**Acceptance criteria — structural assertions verified.**
+
+1. Build clean (`npm run build` — 112 modules transformed, 0 errors beyond the existing 500-KB chunk warning).
+2. `disclosureAgreements` array length grows by exactly 1 (720 → 721).
+3. New DA has the expected shape: id `da-own-asset-vreg-test-report`, `grantor.party === 'MicroCo'`, `grantee.party === 'MicroCo'` (internal), `subject.kind === 'asset'`, `subject.id === aVregTestReport.id`, `type === 'full'`. Verified via Node probe.
+
+**Scope boundaries.**
+
+- No changes to the Re-Run demo prereq flow. Alice still amends VReg Claim to add `aVregTestReport` as a referenced Asset later; `hasNewAssetsForRerun` from Phase 13.3 still fires correctly because Claim-reference state is independent of Asset-ownership state.
+- No other artifact additions or removals.
+- No changes outside `aliceOwnAssets`.
+
+**Footer convention.** Stays at v0.16.2.0 per the backtrack-hotfix convention. Phase 16.2.1 is a backtrack-hotfix (correction of pre-existing 15.4 seed regression, no forward-progress feature work), so the footer constant remains unchanged. The v0.16.2.1 entry sits in the Changelog modal in chronological order above v0.16.2.0. Matches the Phase 14.6/14.6.1/14.6.2 + Phase 16.1.4/16.1.5 pattern.
+
+**Files changed:**
+- `src/v2/v2_2Data.js` — single-line addition of `aVregTestReport` to `aliceOwnAssets` array.
+- `architecture-spec.md` — §8 Changelog gains Phase 16.2.1 entry.
+- `polish-backlog.md` — Update Log Phase 16.2.1 entry.
+- `CLAUDE.md` — "Current state of the world" updated (16.2.1 last shipped, 16.2 demoted to prior phase).
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer:** stays at v0.16.2.0 (backtrack-hotfix convention).
+
+**Status:** [x] Complete.
+
 ### Phase 16.2 completion notes (2026-05-13) — Directory Layer seed expansion
 
 Round 17 opens. Pure seed + one cheap placement-algorithm patch. No new architectural primitives, no UI changes beyond what the seed exposes.

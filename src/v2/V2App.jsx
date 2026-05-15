@@ -7802,6 +7802,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.1', date: '2026-05-13', label: 'Phase 16.2.1', items: [
+                  'Phase 16.2.1 — Hotfix: `aVregTestReport` ownership DA restored. Phase 15.4 promoted the Asset to an unattached "floating" entry that Alice attaches to her VReg Claim during the Re-Run demo prereq, but omitted the Actor → Asset ownership DA. Without it the Asset rendered floating on Alice\'s parent canvas with no Full Disclosure edge to the MicroCo Actor card.',
+                  'Fix: single-line addition of `aVregTestReport` to the `aliceOwnAssets` array in `buildV22SharedArtifacts`. The standard `aliceOwnAssets.map` factory produces one new internal DA — `da-own-asset-vreg-test-report` (grantor + grantee both MicroCo, subject `{kind:"asset", id: aVregTestReport.id}`, type: "full"). Disclosure-agreements grows by exactly 1 (720 → 721).',
+                  'Re-Run demo prereq flow unchanged. Ownership and Claim-reference are orthogonal in the V2.2 data model — Alice still amends VReg Claim to add `aVregTestReport` as a referenced Asset later; `hasNewAssetsForRerun` from Phase 13.3 still fires correctly.',
+                  'Footer stays at v0.16.2.0 per backtrack-hotfix convention.',
+                ]},
                 { version: '0.16.2.0', date: '2026-05-13', label: 'Phase 16.2', items: [
                   'Phase 16.2 — Directory Layer seed expansion. Opens Round 17. The Directory now hosts 12 new mock supplier Actors representing the defense-electronics supply chain under Bob\'s Sentinel-4 satellite program: NovaFab (25 Claims), ElectroGrid (24), Precision Components (18), AvionicSys (17), Substrate Dynamics (16), Helix RF (11), Optech Sensors (10), SolarVantage (10), ThermaCore (9), CompoStruct (9), Photonix (4), Cryotek (4). Total: 157 new Claims, 157 stub Assets, and 628 internal + public Disclosure Agreements (1 own-asset + 1 own-claim + 1 claim-ref-asset + 1 public per Claim).',
                   'Every new Actor is non-switchable (`user: null`, `credits: 0`) and discloses exclusively to the Radiant Network — no umbrella DAs to any of the four primary actors. The four existing actor seeds (Bob/GovCo, Alice/MicroCo, Carol/AuditCo, Dave/ChipCo) are frozen for this phase; none of their Claims, Assets, DAs, EAs, RFPs, PoEs, Eval Results, or Parse Results were modified.',
