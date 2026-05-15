@@ -2673,6 +2673,73 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.3 completion notes (2026-05-13) — Directory galactic view + loading animation
+
+`DirectoryLayer.jsx` rewritten to use a bounded design surface + radial fan-out + radial wave loading animation. Andrew's reframed design: "galactic view first impression" — the Directory should look impressive on initial load and on every role-switch, with the whole canvas visible at default zoom. The view is "90% interesting, 10% useful"; real functionality lives on other layers.
+
+**Locating the function — first action.** Per the brief, the camera/zoom/pan/placement logic lives in `src/v2/DirectoryLayer.jsx` (≈1349 lines). Layout function `computeLayout` lines 206-531; camera + zoom controls + pan-bounds + scene init + animate loop in the main `DirectoryLayer` component.
+
+**Three core changes.**
+
+1. **Bounded canvas + zoom constants.** New `CANVAS_WIDTH = 17280`, `CANVAS_HEIGHT = 11170` (16" MBP logical at 10% zoom), `OWN_CLUSTER_ANCHOR_X = 8640`, `OWN_CLUSTER_ANCHOR_Y = 8936` (canvas-bottom-center, 20% up from bottom). `MIN_ZOOM` lowered 0.5 → 0.1; `INITIAL_ZOOM` set to 0.1. Zoom-percentage display now maps zoom × 100 directly (was a remap onto a 10%–100% sweep). At initial mount and every role-switch re-entry the camera resets to `(CANVAS_WIDTH/2, CANVAS_HEIGHT/2)` at zoom 0.1 so the user sees the whole 17280×11170 canvas in an MBP viewport.
+
+2. **Radial polar Poisson disc fan-out.** Replaces the Phase 16.2 deterministic-bbox-overlap loop (which had collapsed clusters into a thin horizontal band). For each non-active cluster, sample (θ, r) in polar space emanating from the anchor: θ ∈ [-75°, +75°] from straight up (upper 150° arc), r ∈ [2000, 8377.5] world units. Cartesian projection: `cx = anchor.x + r·sin(θ); cy = anchor.y - r·cos(θ)`. Deterministic seed via `hashString(ownerParty) + attempt`. Up to 50 retries with seed-perturbed samples; collision check via the existing 12-cell buffer; canvas-bounds check `bbox ⊆ [0,W]×[0,H]`. Sort input by descending Claim count so jumbo clusters (NovaFab @ 25 Claims, ElectroGrid @ 24) get first pick. Fallback after 50 retries logs a `console.warn` and keeps the last candidate.
+
+3. **Pan-bounds recompute per zoom.** `clampPan` derives `[minX,maxX] × [minY,maxY]` from `(CANVAS_WIDTH/HEIGHT, viewport, zoom)` on every call. At zoom=0.1 the bounds collapse to a single point — the canvas exactly fits the viewport so the user can't pan into void. At higher zoom the bounds open up and the user can traverse the canvas. **FIT** recalculates zoom from `min(viewport.w / CANVAS_WIDTH, viewport.h / CANVAS_HEIGHT)` and centers camera on canvas-center.
+
+**Loading animation (new helper `src/v2/directoryLoadAnimation.js`).** Parallel to `edgeDrawIn.js`'s pattern. Exports `playDirectoryLoadAnimation({ dots, labels, anchor, setDotOpacity, setLabelOpacity, ... })` returning `{ skip, promise }`. Behaviour:
+- Per-dot start time `t_start = d / waveSpeed` (waveSpeed = 3000 world units / sec).
+- Per-dot ramp opacity 0 → 1 over `dotFadeMs = 200ms`.
+- Per-cluster label start time `labelStart = min(dist among cluster dots) / waveSpeed + labelDelayMs` (labelDelayMs = 100ms).
+- Total duration ~3.2s for the 17280×11170 canvas with anchor at bottom-center.
+- `skip()` snaps every dot + label opacity to 1.0 and resolves the promise.
+
+**Dot opacity realisation.** `MeshBasicMaterial` doesn't support per-instance alpha cleanly. Since the Directory background is opaque dark `--bg-deep`, multiplying the dot's base color by opacity (0..1) produces the same visual effect as alpha blending — at opacity 0 the dot renders black and blends into the background. The animation tick writes per-dot opacity to a `Float32Array` (`dotOpacitiesRef`); the existing animate loop sets `dotsDirtyRef = true` and calls `flushDotColors()` once per tick before `renderer.render()`. `flushDotColors` reads base color per dot, applies hover/pinned state, then multiplies by opacity. Hover/pinned color blending (15% lerp toward white) was consolidated into the same flush so the load wave + hover state + base color blend via one code path.
+
+**Skip semantics.** Click on empty canvas during animation calls `animationHandleRef.current.skip()` via `handleMouseUp`'s "dot raycast missed" branch. Click on a dot opens the Detail Panel normally and does NOT skip — the animation continues for remaining dots. Pan-drag and wheel-zoom run on independent timelines and do NOT interrupt the wave.
+
+**Animation entry trigger.** A new `useEffect` with deps `[phase, roleId, threeReady, clampPan, updateCamera]` resets camera + opacities + starts the wave when:
+- Phase transitions closed → in (initial Directory entry).
+- roleId changes while phase === 'in' (role-switch re-entry).
+
+Layout is read via `layoutRef` (not in deps) so provisional updates and window resizes don't replay the animation. The effect's cleanup function calls `skip()` so any in-flight animation snaps to completion when the user closes the Directory or switches roles mid-wave.
+
+**Camera-init NaN guard.** `updateCamera` bails when `container.clientWidth ≤ 0 || container.clientHeight ≤ 0` (briefly true during initial mount before layout). Without this guard, a zero-width orthographic frustum produces NaN entries in the projection matrix, which propagate through `worldToScreen` and result in `left: NaN` / `top: NaN` on every HTML overlay positioned via projection (every PillboxLabel). PillboxLabel additionally short-circuits when its `x` / `y` aren't finite as a belt-and-suspenders safeguard.
+
+**#196 (force-directed Directory layout) closed.** Superseded by the polar Poisson disc fan-out — with the bounded canvas as a design surface, the radial sampling produces a clean fan across the upper hemisphere for the current 14-cluster scale (12 mock suppliers + ChipCo + MicroCo). If future scale demands force-directed simulation (e.g., 50+ clusters where retry attempts cap out consistently), a successor item can be filed.
+
+**Backward-compatible defensive settings.** Phase 16.1.5's `frustumCulled = false` + unbounded `boundingSphere` on every InstancedMesh left intact. Phase 16.1.4's `shouldMountScene` lifecycle pattern left intact. The new animation infrastructure uses the existing InstancedMesh; no new InstancedMesh introduced.
+
+**Acceptance criteria — verified.**
+
+| Criterion | Result |
+|-----------|--------|
+| Build clean (0 errors beyond existing 500-KB chunk warning) | ✓ |
+| First load: camera at zoom 0.1, full canvas visible | ✓ (verified via probe) |
+| Active Actor's own cluster anchors at (8640, 8936) for Bob/Alice/Dave; Carol uses same anchor without rendering own cluster | ✓ (Carol's view shows 14 labels, no AuditCo) |
+| 12 mock + ChipCo + MicroCo fan across upper hemisphere | ✓ |
+| All cluster bboxes ⊆ [0, CANVAS_WIDTH] × [0, CANVAS_HEIGHT] | ✓ (per probe; some at canvas edges) |
+| Loading animation runs ~3s from anchor; first dot at t≈400ms, all complete by t≈3000ms | ✓ (per opacity sampling) |
+| Empty-canvas click during animation: instant snap to opacity 1.0 | ✓ |
+| Dot click during animation: opens Detail Panel; animation continues | ✓ (raycast precedence preserved) |
+| Pan/zoom during animation: no interruption | ✓ (independent timelines) |
+| Role switch (Bob → Alice → Carol → Dave): animation replays from scratch | ✓ |
+| Zoom-percentage display reads zoom × 100 ("10%", "100%", "400%") | ✓ |
+| No NaN errors in console | ✓ (after camera-init guard + PillboxLabel guard) |
+
+**Files changed.**
+- `src/v2/DirectoryLayer.jsx` — canvas + zoom constants; grid expanded to canvas bounds with sparser spacing; polar Poisson disc placement (replacing the Phase 16.2 30-attempt zigzag); pan-bounds recompute per zoom; FIT recalc; animation entry effect; flushDotColors callback; dot-opacity multiplier in mesh population; PillboxLabel opacity prop + NaN guard; updateCamera zero-frustum guard.
+- `src/v2/directoryLoadAnimation.js` — new helper (~180 lines).
+- `src/v2/V2App.jsx` — Changelog modal v0.16.2.3 entry prepended.
+- `architecture-spec.md` — §8.2 Phase 16.2.3 changelog bullet.
+- `polish-backlog.md` — Update Log Phase 16.2.3 entry; #196 marked Closed (superseded).
+- `CLAUDE.md` — "Current state of the world" updated (16.2.3 last shipped, 16.2.2 demoted to prior).
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.2 completion notes (2026-05-13) — Parent canvas node spreading
 
 Refactor of the parent-canvas node-layout function in `src/v2/v2_2Data.js` (`buildV22Canvas`) to address visible overlap between Eval Result / PoE chains and the Claims they reference, and to coalesce each evaluation chain into a single y-row anchored to its grantee Asset where possible. V2Canvas itself was not touched — it consumes `{ x, y }` from each node and is the rendering pipeline only; the upstream `buildV22Canvas` assigns positions.

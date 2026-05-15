@@ -32,6 +32,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
 import * as THREE from 'three'
 import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals } from './v2_2Data.js'
+import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 
 // ─── Layout constants (world units) ────────────────────────────────────
 const DOT_GRID = 12
@@ -49,11 +50,28 @@ const TOOLTIP_OFFSET = 12
 const CLUSTER_BUFFER_CELLS = 12
 const CLUSTER_BUFFER = CLUSTER_BUFFER_CELLS * DOT_GRID
 
+// Phase 16.2.3: bounded canvas matching 16" MacBook Pro logical resolution
+// at 10% zoom (default INITIAL_ZOOM = 0.1). At default zoom the canvas
+// exactly fills the MBP viewport so the user sees the whole galactic view
+// on first load.
+const CANVAS_WIDTH = 17280
+const CANVAS_HEIGHT = 11170
+// Active Actor's own cluster anchors at canvas-bottom-center, shifted up
+// 20% from the bottom edge so the cluster has visual breathing room above
+// the footer.
+const OWN_CLUSTER_ANCHOR_X = CANVAS_WIDTH / 2          // 8640
+const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 8936
+
 // ─── Camera / zoom constants ───────────────────────────────────────────
-const MIN_ZOOM = 0.5
+// Phase 16.2.3: galactic-view defaults — load fully zoomed out (0.1 = 10%)
+// so the whole 17280×11170 canvas fits in the viewport.
+const MIN_ZOOM = 0.1
 const MAX_ZOOM = 4.0
-const INITIAL_ZOOM = 1.5
-const GRID_RANGE = 4000
+const INITIAL_ZOOM = 0.1
+// Phase 16.2.3: grid spans the full canvas with sparser spacing (4×DOT_GRID)
+// to keep the THREE.Points buffer count reasonable (~84k points).
+const GRID_SPACING = DOT_GRID * 4
+const GRID_MARGIN = 600
 const DRAG_THRESHOLD_PX = 4
 const PANEL_W = 480                   // Detail Panel width — mirrors V2App's PANEL_W
 
@@ -163,7 +181,16 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
   )
 }
 
-function PillboxLabel({ ownerParty, x, y, faded }) {
+function PillboxLabel({ ownerParty, x, y, faded, opacity = 1 }) {
+  // Phase 16.2.3: outer opacity multiplies the loaded fade-in opacity (0..1
+  // during the wave animation, then 1 thereafter) with the existing
+  // hover-pillbox-fade behaviour (faded = 0.25 when a dot is hovered near
+  // the pillbox).
+  // Guard against the brief window during initial mount when the camera /
+  // renderer aren't ready yet — worldToScreen returns NaN if the camera's
+  // projection matrix hasn't been computed against a non-zero viewport.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  const hoverFade = faded ? 0.25 : 1
   return (
     <div
       data-actor-pillbox={ownerParty}
@@ -181,8 +208,11 @@ function PillboxLabel({ ownerParty, x, y, faded }) {
         fontWeight: 600,
         letterSpacing: '0.04em',
         whiteSpace: 'nowrap',
-        opacity: faded ? 0.25 : 1,
-        transition: 'opacity 150ms ease',
+        opacity: opacity * hoverFade,
+        // Skip the transition while the load-in animation drives opacity
+        // (between 0 and 1 exclusive) — the helper applies its own ramp
+        // each frame, and a CSS transition would smear it.
+        transition: opacity >= 1 ? 'opacity 150ms ease' : 'none',
         pointerEvents: 'none',
         zIndex: 4,
       }}
@@ -214,8 +244,11 @@ function computeLayout(directoryData, viewport) {
   // (This is fine — `buildV22DirectoryDataForRole` already does similar
   // work; an alternative is to thread `daTypeForClaim` from the builder.)
 
-  const userCenterX = 0
-  const userCenterY = snapGrid(viewport.h / INITIAL_ZOOM * 0.18)
+  // Phase 16.2.3: active Actor's own cluster anchors at canvas-bottom-center.
+  // The 12 mock supplier clusters + ChipCo + MicroCo fan outward from this
+  // anchor across the upper hemisphere of the bounded canvas.
+  const userCenterX = OWN_CLUSTER_ANCHOR_X
+  const userCenterY = OWN_CLUSTER_ANCHOR_Y
 
   const allDots = []
   const clusterByDotIndex = []
@@ -413,67 +446,84 @@ function computeLayout(directoryData, viewport) {
     )
   })
 
-  // ─── Other clusters ──────────────────────────────────────────────────
-  const otherClustersInput = [...directoryData.otherClusters].sort((a, b) =>
-    hashString(a.ownerParty) - hashString(b.ownerParty),
-  )
+  // ─── Other clusters — Phase 16.2.3 polar Poisson disc fan-out. ────────
+  // For each non-active cluster (12 mock + ChipCo + MicroCo where visible),
+  // sample (θ, r) in polar space emanating from the active Actor anchor:
+  //   • θ ∈ [-75°, +75°] from straight up (upper 150° arc).
+  //   • r ∈ [r_min, r_max] world units (keeps off-anchor + within canvas).
+  // Cartesian: cx = anchor.x + r·sin(θ); cy = anchor.y - r·cos(θ).
+  // Collision check via the existing buffer rule; canvas-bounds check vs.
+  // CANVAS_WIDTH/HEIGHT. Up to 50 retries with seed-perturbed samples.
+  // Sort input by descending Claim count (jumbo first) so large clusters
+  // get first pick of placement space.
+  const POISSON_R_MIN = 2000
+  const POISSON_R_MAX = CANVAS_HEIGHT * 0.75  // 8377.5
+  const POISSON_THETA_HALF_DEG = 75
+  const POISSON_MAX_RETRIES = 50
+  const totalDotsFor = (c) => (c.umbrellaClaims?.length || 0) + (c.publicClaims?.length || 0)
+  const otherClustersInput = [...directoryData.otherClusters].sort((a, b) => {
+    const dotDiff = totalDotsFor(b) - totalDotsFor(a)
+    if (dotDiff !== 0) return dotDiff
+    return hashString(a.ownerParty) - hashString(b.ownerParty)
+  })
+  const inBounds = (bbox) =>
+    bbox.minX >= 0 && bbox.maxX <= CANVAS_WIDTH &&
+    bbox.minY >= 0 && bbox.maxY <= CANVAS_HEIGHT
   const otherClusters = []
-  const N = otherClustersInput.length
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < otherClustersInput.length; i++) {
     const cluster = otherClustersInput[i]
-    const spreadFraction = N === 1 ? 0 : (i / (N - 1)) - 0.5
-    // Phase 16.2: scale initial cluster x-spread with N so 12+ Actors don't
-    // collapse onto the hardcoded 800-px band. Force-directed layout (#196)
-    // remains deferred; this scaling extends the deterministic-bbox-overlap
-    // approach by another tier of cluster count.
-    const xSpread = Math.max(800, 600 * Math.max(N - 1, 1))
-    let cx = snapGrid(userCenterX + spreadFraction * xSpread)
     const seed = hashString(cluster.ownerParty)
-    let cy = snapGrid(userCenterY - 240 - (seed % 80))
-    let attempts = 0
-    while (attempts < 30) {
+    const baseUmbrellaItems = cluster.umbrellaClaims.map((c) => ({
+      claim: c,
+      disclosureType: cluster.umbrellaTypeByClaimId?.[c.id] || 'full',
+    }))
+    const basePublicItems = cluster.publicClaims.map((c) => ({
+      claim: c,
+      disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
+    }))
+    let placed = null
+    let lastAttempt = null
+    for (let attempt = 0; attempt < POISSON_MAX_RETRIES; attempt++) {
+      // Deterministic-ish PRNG via cluster-seed + attempt.
+      const a = ((seed + attempt * 9173) >>> 0) % 10000 / 10000
+      const b = ((seed * 31 + attempt * 12289) >>> 0) % 10000 / 10000
+      const c2 = ((seed * 7 + attempt * 28201) >>> 0) % 10000 / 10000
+      const thetaDeg = (a * 2 - 1) * POISSON_THETA_HALF_DEG
+      const theta = thetaDeg * Math.PI / 180
+      // Bias radius toward outer range so clusters spread out across the
+      // canvas instead of clumping near the anchor. The `attempt` index
+      // gradually pulls r inward if early outer attempts collide.
+      const rScale = 0.35 + 0.65 * b  // 0.35..1.0
+      const rAdjust = Math.max(0, 1 - attempt / POISSON_MAX_RETRIES * 0.5)
+      const r = POISSON_R_MIN + (POISSON_R_MAX - POISSON_R_MIN) * rScale * rAdjust
+      const cx = snapGrid(userCenterX + r * Math.sin(theta) + (c2 - 0.5) * 40)
+      const cy = snapGrid(userCenterY - r * Math.cos(theta) + (c2 - 0.5) * 40)
       const candidate = buildCluster({
         ownerParty: cluster.ownerParty,
-        umbrellaItems: cluster.umbrellaClaims.map((c) => ({
-          claim: c,
-          disclosureType: cluster.umbrellaTypeByClaimId?.[c.id] || 'full',
-        })),
-        publicItems: cluster.publicClaims.map((c) => ({
-          claim: c,
-          disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
-        })),
+        umbrellaItems: baseUmbrellaItems,
+        publicItems: basePublicItems,
         rfpItems: [],
         isOwnCluster: false,
         centerOverride: { x: cx, y: cy },
       })
-      if (!violatesBuffer(candidate.bbox)) {
-        otherClusters.push(candidate)
-        placedBoxes.push(candidate.bbox)
-        break
-      }
-      cy -= DOT_GRID * 4
-      cx += (attempts % 2 === 0 ? 1 : -1) * DOT_GRID * 6
-      cx = snapGrid(cx)
-      cy = snapGrid(cy)
-      attempts++
+      lastAttempt = candidate
+      if (!inBounds(candidate.bbox)) continue
+      if (violatesBuffer(candidate.bbox)) continue
+      placed = candidate
+      break
     }
-    if (attempts === 30) {
-      const candidate = buildCluster({
-        ownerParty: cluster.ownerParty,
-        umbrellaItems: cluster.umbrellaClaims.map((c) => ({
-          claim: c,
-          disclosureType: cluster.umbrellaTypeByClaimId?.[c.id] || 'full',
-        })),
-        publicItems: cluster.publicClaims.map((c) => ({
-          claim: c,
-          disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
-        })),
-        rfpItems: [],
-        isOwnCluster: false,
-        centerOverride: { x: cx, y: cy },
-      })
-      otherClusters.push(candidate)
-      placedBoxes.push(candidate.bbox)
+    if (placed) {
+      otherClusters.push(placed)
+      placedBoxes.push(placed.bbox)
+    } else if (lastAttempt) {
+      // Fallback: keep the final attempt and surface a console warning so
+      // density issues are visible during dev stress tests.
+      if (typeof console !== 'undefined') {
+        // eslint-disable-next-line no-console
+        console.warn(`[DirectoryLayer] Polar Poisson disc fallback for cluster ${cluster.ownerParty} (${otherClustersInput.length} non-own clusters)`)
+      }
+      otherClusters.push(lastAttempt)
+      placedBoxes.push(lastAttempt.bbox)
     }
   }
 
@@ -643,7 +693,9 @@ export default function DirectoryLayer({
   const rfpMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
   const dirtyRef = useRef(true)
-  const camPosRef = useRef({ x: 0, y: 0 })
+  // Phase 16.2.3: initial camera target = canvas-horizontal-center +
+  // vertical-center (so the full bounded canvas fits at INITIAL_ZOOM = 0.1).
+  const camPosRef = useRef({ x: OWN_CLUSTER_ANCHOR_X, y: CANVAS_HEIGHT / 2 })
   const zoomRef = useRef(INITIAL_ZOOM)
   const draggingRef = useRef(false)
   const wasDragRef = useRef(false)
@@ -653,10 +705,42 @@ export default function DirectoryLayer({
   const [threeReady, setThreeReady] = useState(false)
   const [zoom, setZoom] = useState(INITIAL_ZOOM)
 
+  // Phase 16.2.3: loading animation state.
+  //   • dotOpacitiesRef — per-dot opacity (0..1) used to scale each dot's
+  //     base color so opacity 0 renders black (blends into the opaque dark
+  //     `--bg-deep` background) and opacity 1 renders the dot's full color.
+  //   • labelOpacities — per-party opacity for the cluster PillboxLabel.
+  //   • animationHandleRef — { skip, promise } returned by
+  //     playDirectoryLoadAnimation; consumed by the empty-canvas click
+  //     handler to skip the in-flight wave.
+  //   • lastAnimatedRoleRef + entryNonce — used to gate re-animation so the
+  //     wave replays only on Directory entry (initial mount + role switch)
+  //     and not on every layout recompute (provisional updates, resize).
+  const dotOpacitiesRef = useRef(new Float32Array(MAX_DOTS).fill(1))
+  const [labelOpacities, setLabelOpacities] = useState({})
+  const animationHandleRef = useRef(null)
+  const lastAnimatedRoleRef = useRef(null)
+  const lastAnimatedPhaseRef = useRef('closed')
+
   const [hover, setHover] = useState(null)
   const [pinned, setPinned] = useState(null)
   useEffect(() => { if (phase === 'closed') { setHover(null); setPinned(null) } }, [phase])
   useEffect(() => { setHover(null); setPinned(null) }, [roleId])
+
+  // Phase 16.2.3: ref mirrors of hover/pinned/layout so the load-animation
+  // mesh-color flush (called from the Three.js animate loop) reads fresh
+  // values without rebuilding the callback on every state change.
+  const hoverRef = useRef(null)
+  const pinnedRef = useRef(null)
+  const layoutRef = useRef(null)
+  useEffect(() => { hoverRef.current = hover }, [hover])
+  useEffect(() => { pinnedRef.current = pinned }, [pinned])
+  // Per-dot base color cache (one THREE.Color per Claim dot, keyed by
+  // index in `layout.allDots.filter(d => d.kind !== 'rfp')`). Populated in
+  // the layout `useLayoutEffect` and read by `flushDotColors`.
+  const baseDotColorsRef = useRef([])
+  const dotsDirtyRef = useRef(false)
+  const flushDotColorsRef = useRef(() => {})
 
   const [overlay, setOverlay] = useState(null)
 
@@ -679,6 +763,11 @@ export default function DirectoryLayer({
     if (!camera || !container) return
     const w = container.clientWidth
     const h = container.clientHeight
+    // Phase 16.2.3: guard against zero-sized container (briefly true during
+    // initial mount before layout). A zero-width frustum produces NaN in
+    // the orthographic projection matrix, which propagates through
+    // worldToScreen and breaks every HTML overlay positioned via it.
+    if (w <= 0 || h <= 0) return
     const z = zoomRef.current
     const halfW = (w / z) * 0.5
     const halfH = (h / z) * 0.5
@@ -691,10 +780,28 @@ export default function DirectoryLayer({
     dirtyRef.current = true
   }, [])
 
+  // Phase 16.2.3: pan-bounds recompute based on the bounded canvas + current
+  // zoom + viewport size. At INITIAL_ZOOM=0.1 the bounds collapse to a
+  // single point (full canvas already fits) so the user can't pan into
+  // empty void; at higher zooms the bounds open up and the user can
+  // traverse the canvas without revealing space beyond [0, CANVAS_WIDTH] ×
+  // [0, CANVAS_HEIGHT].
   const clampPan = useCallback((x, y) => {
+    const container = containerRef.current
+    const z = zoomRef.current || INITIAL_ZOOM
+    const vw = container?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1280)
+    const vh = container?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 720)
+    const halfW = vw / (2 * z)
+    const halfH = vh / (2 * z)
+    // If the canvas is smaller than the half-viewport in either axis, snap
+    // to the canvas center for that axis (no panning possible at this zoom).
+    const minX = halfW >= CANVAS_WIDTH / 2 ? CANVAS_WIDTH / 2 : halfW
+    const maxX = halfW >= CANVAS_WIDTH / 2 ? CANVAS_WIDTH / 2 : CANVAS_WIDTH - halfW
+    const minY = halfH >= CANVAS_HEIGHT / 2 ? CANVAS_HEIGHT / 2 : halfH
+    const maxY = halfH >= CANVAS_HEIGHT / 2 ? CANVAS_HEIGHT / 2 : CANVAS_HEIGHT - halfH
     return {
-      x: Math.max(-1500, Math.min(1500, x)),
-      y: Math.max(-1500, Math.min(1500, y)),
+      x: Math.max(minX, Math.min(maxX, x)),
+      y: Math.max(minY, Math.min(maxY, y)),
     }
   }, [])
 
@@ -783,13 +890,21 @@ export default function DirectoryLayer({
     updateCamera()
 
     // Background grid as Points.
+    // Phase 16.2.3: grid spans the full bounded canvas (with a small margin
+    // for breathing room when zoomed in close to an edge). Uses sparser
+    // GRID_SPACING (4×DOT_GRID = 48 world units) to keep the point count
+    // tractable at ~84k for a 17280×11170 canvas.
     const isDark = document.documentElement.dataset.theme !== 'light'
     const gridColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
     const gridPoints = []
-    const gridStart = -Math.ceil(GRID_RANGE / DOT_GRID) * DOT_GRID
-    for (let gx = gridStart; gx <= GRID_RANGE; gx += DOT_GRID) {
-      for (let gy = gridStart; gy <= GRID_RANGE; gy += DOT_GRID) {
-        gridPoints.push(new THREE.Vector3(gx, gy, -1))
+    const gx0 = -GRID_MARGIN
+    const gx1 = CANVAS_WIDTH + GRID_MARGIN
+    const gy0 = -GRID_MARGIN
+    const gy1 = CANVAS_HEIGHT + GRID_MARGIN
+    for (let gx = gx0; gx <= gx1; gx += GRID_SPACING) {
+      for (let gy = gy0; gy <= gy1; gy += GRID_SPACING) {
+        // Note: world y stored as negative in Three.js (camera consumes -y).
+        gridPoints.push(new THREE.Vector3(gx, -gy, -1))
       }
     }
     const gridGeometry = new THREE.BufferGeometry().setFromPoints(gridPoints)
@@ -845,6 +960,13 @@ export default function DirectoryLayer({
     let animId
     const animate = () => {
       animId = requestAnimationFrame(animate)
+      // Phase 16.2.3: if the load animation (or hover state change) marked
+      // dotsDirtyRef, flush per-instance colors before rendering. This is
+      // the single integration point for per-dot color/opacity updates.
+      if (dotsDirtyRef.current) {
+        flushDotColorsRef.current?.()
+        dotsDirtyRef.current = false
+      }
       if (dirtyRef.current) {
         renderer.render(scene, camera)
         updateOverlayRef.current()
@@ -919,10 +1041,30 @@ export default function DirectoryLayer({
     const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp')
     const rfpDots = layout.allDots.filter((d) => d.kind === 'rfp')
 
+    // Phase 16.2.3: cache base colors per dot for the load animation +
+    // hover-state color blending. Indexed by position in claimDots.
+    layoutRef.current = layout
+    const baseColors = new Array(claimDots.length)
+    for (let i = 0; i < claimDots.length; i++) {
+      const d = claimDots[i]
+      if (d.colorVar === '--accent-amber') baseColors[i] = colorAmber.clone()
+      else if (d.colorVar === '--accent-green') baseColors[i] = colorGreen.clone()
+      else baseColors[i] = colorIndigo.clone()
+    }
+    baseDotColorsRef.current = baseColors
+
     const m = new THREE.Matrix4()
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
 
     // Claim dots
+    // Phase 16.2.3: opacities are pre-zeroed by the load-animation effect
+    // when a new wave starts; otherwise default 1 (set via .fill(1) on the
+    // initial array and on animation completion). Each dot's instance color
+    // is its base color multiplied by its current opacity; since the
+    // Directory background is opaque dark `--bg-deep`, scaling color → 0
+    // makes the dot disappear into the background.
+    const dotOpacities = dotOpacitiesRef.current
+    const scaled = new THREE.Color()
     for (let i = 0; i < MAX_DOTS; i++) {
       if (i < claimDots.length) {
         const d = claimDots[i]
@@ -931,7 +1073,13 @@ export default function DirectoryLayer({
         let c = colorIndigo
         if (d.colorVar === '--accent-amber') c = colorAmber
         else if (d.colorVar === '--accent-green') c = colorGreen
-        dotsMesh.setColorAt(i, c)
+        const op = dotOpacities[i]
+        if (op >= 1) {
+          dotsMesh.setColorAt(i, c)
+        } else {
+          scaled.copy(c).multiplyScalar(Math.max(0, op))
+          dotsMesh.setColorAt(i, scaled)
+        }
       } else {
         dotsMesh.setMatrixAt(i, hidden)
       }
@@ -981,36 +1129,153 @@ export default function DirectoryLayer({
   }, [threeReady, layout])
 
   // ─── Hover repaint via per-instance colors ───────────────────────────
+  // Phase 16.2.3: consolidated into `flushDotColors` so the load-animation
+  // wave + hover state + base color all blend via the same code path. The
+  // hover effect just marks dotsDirtyRef so the animate loop flushes on
+  // the next tick.
   useEffect(() => {
-    if (!threeReady || !layout) return
+    dotsDirtyRef.current = true
+    dirtyRef.current = true
+  }, [hover, pinned])
+
+  const flushDotColors = useCallback(() => {
     const mesh = dotsMeshRef.current
-    if (!mesh) return
-    const colorIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
-    const colorAmber = cssVarToColor('--accent-amber', '#c49a45')
-    const colorGreen = cssVarToColor('--accent-green', '#22c55e')
+    const baseColors = baseDotColorsRef.current
+    const layoutCur = layoutRef.current
+    if (!mesh || !baseColors || baseColors.length === 0 || !layoutCur) return
     const colorWhite = new THREE.Color('#ffffff')
     const lerpToWhite = (base) => {
       const c = base.clone()
       c.lerp(colorWhite, 0.15)
       return c
     }
-    const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp')
-    const target = pinned || hover
+    const claimDots = layoutCur.allDots.filter((d) => d.kind !== 'rfp')
+    const target = pinnedRef.current || hoverRef.current
     const targetIdx = target?.dotIndex ?? -1
     const targetClusterIdx = targetIdx >= 0 ? claimDots[targetIdx]?.clusterIdx : null
-    for (let i = 0; i < claimDots.length; i++) {
-      const d = claimDots[i]
-      let base = colorIndigo
-      if (d.colorVar === '--accent-amber') base = colorAmber
-      else if (d.colorVar === '--accent-green') base = colorGreen
-      let c = base
+    const opacities = dotOpacitiesRef.current
+    const scaled = new THREE.Color()
+    for (let i = 0; i < baseColors.length; i++) {
+      let c = baseColors[i]
       if (i === targetIdx) c = colorWhite
-      else if (targetClusterIdx !== null && targetClusterIdx !== undefined && d.clusterIdx === targetClusterIdx) c = lerpToWhite(base)
-      mesh.setColorAt(i, c)
+      else if (targetClusterIdx !== null && targetClusterIdx !== undefined && claimDots[i]?.clusterIdx === targetClusterIdx) {
+        c = lerpToWhite(c)
+      }
+      const op = opacities[i]
+      if (op < 1) {
+        scaled.copy(c).multiplyScalar(Math.max(0, op))
+        mesh.setColorAt(i, scaled)
+      } else {
+        mesh.setColorAt(i, c)
+      }
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     dirtyRef.current = true
-  }, [threeReady, layout, hover, pinned])
+  }, [])
+  useEffect(() => { flushDotColorsRef.current = flushDotColors }, [flushDotColors])
+  // Flush after every layout change too (so the freshly-populated mesh
+  // picks up the current hover/opacity state).
+  useEffect(() => {
+    if (!threeReady || !layout) return
+    dotsDirtyRef.current = true
+    dirtyRef.current = true
+  }, [threeReady, layout])
+
+  // ─── Phase 16.2.3: loading animation entry trigger. ──────────────────
+  // Fires when:
+  //   • phase transitions closed → in (initial Directory entry).
+  //   • roleId changes while phase === 'in' (role-switch re-entry).
+  // Does NOT re-fire on:
+  //   • Provisional updates (those change `layout` but not roleId / phase).
+  //   • Window resize (changes `viewport` and thus layout).
+  //   • Detail Panel open/close (just sets `pinned`; doesn't touch layout).
+  // Resets camera to canvas-center at INITIAL_ZOOM, zeros all dot + label
+  // opacities, then starts the wave. The handle is stored in
+  // animationHandleRef so the empty-canvas click handler can call skip().
+  useEffect(() => {
+    if (phase === 'closed') {
+      lastAnimatedRoleRef.current = null
+      lastAnimatedPhaseRef.current = 'closed'
+      return
+    }
+    if (phase !== 'in' || !threeReady) return
+    const prevPhase = lastAnimatedPhaseRef.current
+    const prevRole = lastAnimatedRoleRef.current
+    // Only fire on (closed→in) or (in→in with role change).
+    if (prevPhase === 'in' && prevRole === roleId) return
+    lastAnimatedPhaseRef.current = phase
+    lastAnimatedRoleRef.current = roleId
+
+    // Cancel any in-flight animation cleanly.
+    animationHandleRef.current?.skip()
+    animationHandleRef.current = null
+
+    // Reset camera + zoom to initial galactic-view state on every entry.
+    zoomRef.current = INITIAL_ZOOM
+    camPosRef.current = clampPan(OWN_CLUSTER_ANCHOR_X, CANVAS_HEIGHT / 2)
+    setZoom(INITIAL_ZOOM)
+    updateCamera()
+
+    // Compute dot + label inputs for the wave animation. Read layout via
+    // ref so this effect's deps stay tight to (phase, roleId, threeReady)
+    // — provisional updates and window resizes recompute `layout` but must
+    // NOT replay the animation per the brief.
+    const layoutCur = layoutRef.current
+    if (!layoutCur) return
+    const claimDots = layoutCur.allDots.filter((d) => d.kind !== 'rfp')
+    if (claimDots.length === 0) return
+    // Per-cluster min-distance for label start times.
+    const anchor = { x: OWN_CLUSTER_ANCHOR_X, y: OWN_CLUSTER_ANCHOR_Y }
+    const minDistByCluster = new Map()
+    for (const d of claimDots) {
+      const dx = d.x - anchor.x
+      const dy = d.y - anchor.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      const prev = minDistByCluster.get(d.clusterIdx)
+      if (prev === undefined || dist < prev) minDistByCluster.set(d.clusterIdx, dist)
+    }
+    const labels = layoutCur.allClusters.map((c, idx) => ({
+      party: c.ownerParty,
+      minDistFromAnchor: minDistByCluster.get(idx) ?? 0,
+    }))
+
+    // Pre-zero opacities + label state so the very first frame is blank.
+    const opacities = dotOpacitiesRef.current
+    for (let i = 0; i < opacities.length; i++) opacities[i] = 0
+    const initialLabelOpacities = {}
+    for (const l of labels) initialLabelOpacities[l.party] = 0
+    setLabelOpacities(initialLabelOpacities)
+    dotsDirtyRef.current = true
+    dirtyRef.current = true
+
+    // Start the wave.
+    const handle = playDirectoryLoadAnimation({
+      dots: claimDots.map((d) => ({ x: d.x, y: d.y })),
+      labels,
+      anchor,
+      setDotOpacity: (idx, op) => {
+        opacities[idx] = op
+        dotsDirtyRef.current = true
+      },
+      setLabelOpacity: (party, op) => {
+        setLabelOpacities((prev) => {
+          if (prev[party] === op) return prev
+          return { ...prev, [party]: op }
+        })
+      },
+    })
+    animationHandleRef.current = handle
+    handle.promise.then(() => {
+      if (animationHandleRef.current === handle) animationHandleRef.current = null
+    })
+    return () => {
+      // If the effect re-fires (role change) or unmounts (phase=closed),
+      // snap to the final state so the next entry starts from a known good
+      // baseline.
+      handle.skip()
+      if (animationHandleRef.current === handle) animationHandleRef.current = null
+    }
+  }, [phase, roleId, threeReady, clampPan, updateCamera])
 
   // ─── Pointer event handlers ──────────────────────────────────────────
   const handleMouseDown = useCallback((e) => {
@@ -1079,6 +1344,11 @@ export default function DirectoryLayer({
     if (wasDragRef.current) return
     const dotIdx = raycast(e.clientX, e.clientY)
     if (dotIdx === null) {
+      // Phase 16.2.3: empty-canvas click during the load animation snaps
+      // the wave to completion. Click missed a dot AND no drag → skip.
+      if (animationHandleRef.current) {
+        animationHandleRef.current.skip()
+      }
       setPinned(null)
       onClaimDotClick?.(null)
       return
@@ -1147,29 +1417,26 @@ export default function DirectoryLayer({
     updateCamera()
   }, [updateCamera])
   const zoomFit = useCallback(() => {
-    if (!layout || layout.allClusters.length === 0) return
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-    for (const c of layout.allClusters) {
-      if (c.bbox.minX < minX) minX = c.bbox.minX
-      if (c.bbox.maxX > maxX) maxX = c.bbox.maxX
-      if (c.bbox.minY < minY) minY = c.bbox.minY
-      if (c.bbox.maxY > maxY) maxY = c.bbox.maxY
-    }
-    const cx = (minX + maxX) / 2
-    const cy = (minY + maxY) / 2
-    const w = (maxX - minX) + 80
-    const h = (maxY - minY) + 80
+    // Phase 16.2.3: FIT targets the bounded canvas (not the cluster-bbox
+    // aggregate). Camera centers on (canvas-center-x, canvas-center-y);
+    // zoom is set so [0, CANVAS_WIDTH] × [0, CANVAS_HEIGHT] fits inside the
+    // viewport with aspect ratio preserved.
     const container = containerRef.current
     if (!container) return
-    const fitZoom = Math.min(container.clientWidth / w, container.clientHeight / h)
+    const fitZoom = Math.min(
+      container.clientWidth / CANVAS_WIDTH,
+      container.clientHeight / CANVAS_HEIGHT,
+    )
     const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fitZoom))
-    camPosRef.current = clampPan(cx, cy)
     zoomRef.current = newZoom
+    camPosRef.current = clampPan(OWN_CLUSTER_ANCHOR_X, CANVAS_HEIGHT / 2)
     setZoom(newZoom)
     updateCamera()
-  }, [layout, clampPan, updateCamera])
+  }, [clampPan, updateCamera])
 
-  const zoomPct = Math.round(((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 90 + 10) + '%'
+  // Phase 16.2.3: zoom display maps `zoom` directly to a percentage so
+  // 0.1 → "10%", 1.0 → "100%", 4.0 → "400%".
+  const zoomPct = Math.round(zoom * 100) + '%'
 
   // Hover/pinned screen position sync.
   useEffect(() => {
@@ -1266,7 +1533,21 @@ export default function DirectoryLayer({
         const screen = overlay.ownerSquares.find((s) => s.ownerParty === cluster.ownerParty)?.screen
         if (!screen) return null
         const faded = fadePillboxFor(screen.x, screen.y)
-        return <PillboxLabel key={cluster.ownerParty} ownerParty={cluster.ownerParty} x={screen.x} y={screen.y} faded={faded} />
+        // Phase 16.2.3: opacity defaults to 1 (loaded). During the wave
+        // animation each cluster's entry ramps 0 → 1; the value comes
+        // from `labelOpacities[party]` set by the helper.
+        const op = labelOpacities[cluster.ownerParty]
+        const labelOp = op === undefined ? 1 : op
+        return (
+          <PillboxLabel
+            key={cluster.ownerParty}
+            ownerParty={cluster.ownerParty}
+            x={screen.x}
+            y={screen.y}
+            faded={faded}
+            opacity={labelOp}
+          />
+        )
       })}
 
       {/* Tooltip (singleton). */}
