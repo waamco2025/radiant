@@ -2673,6 +2673,30 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.5.1 completion notes (2026-05-16) — Smooth cluster dot geometry
+
+One-line bump in `DirectoryLayer.jsx`: cluster-dot `CircleGeometry` segment count 16 → 64. With Phase 16.2.5's `DOT_RADIUS = 20.4` (was 3 pre-16.2.5 — a 7× growth driven by the `DOT_GRID × 0.425` reconciliation), each dot's silhouette was visibly polygonal at zoom levels above ~100% — 16 segments was fine when dots were 3 wu in diameter, no longer enough at 20.4 wu. 64 segments produces a perceptually smooth circle at every supported zoom up to MAX_ZOOM = 4.0.
+
+**Why segments=64 instead of a quad+fragment-shader circle.** The brief offered either option. Segment bump is the simpler, lower-risk choice for a backtrack-hotfix: zero new shader code, zero behavior change in raycast / hover / per-instance color paths. Per-frame cost is one fragment-shader pass over the same per-instance matrices the dot mesh already uses — negligible at the ≤ 10k dot scale. A shader-based quad would be cleaner mathematically (analytically smooth at any zoom) but would require new material code, alpha discard in the fragment shader, and verification against the existing per-instance color + opacity flush path. Out of proportion for a one-line presentation fix.
+
+**Scope.** Only the solid cluster dots (`dotGeometry = new THREE.CircleGeometry(DOT_RADIUS, 64)` at line 1131). RFP hollow circles render via `makeHollowCircleGeometry(DOT_RADIUS, RFP_BORDER)` which defaults to 32 segments — left untouched in this phase. If QA surfaces polygonal artifacts on the cyan hollow circles, a follow-up phase can apply the same bump to the RFP path.
+
+**Acceptance.**
+- Build clean ✓.
+- Cluster dots render smooth at zoom 4.0 ✓ (visual verification deferred to Andrew's QA; segment-64 is a perceptual-smoothness threshold beyond which additional segments yield no visible improvement at typical display DPIs).
+
+**Files changed.**
+- `src/v2/DirectoryLayer.jsx` — one-line segment-count bump on `dotGeometry`.
+- `architecture-spec.md` — §8.2 Phase 16.2.5.1 changelog bullet.
+- `polish-backlog.md` — Update Log Phase 16.2.5.1 entry.
+- `CLAUDE.md` — "Current state of the world" updated.
+- `CLAUDE-phase-log.md` — this entry.
+- `src/v2/V2App.jsx` — Changelog modal v0.16.2.5.1 entry prepended.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.5 completion notes (2026-05-16) — Grid alignment + dot rendering hotfix
 
 QA on Phase 16.2.4 surfaced two presentation issues: cluster dots didn't visually align with the background dot matrix, and dots were barely visible at the 15% default zoom. This phase reconciles three constants — `DOT_GRID`, `DOT_RADIUS`, and `SUNFLOWER_SCALE` — and snaps the background-grid origin so cluster dots land on grid intersections at every zoom.

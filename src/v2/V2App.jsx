@@ -7802,6 +7802,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.5.1', date: '2026-05-16', label: 'Phase 16.2.5.1', items: [
+                  'Phase 16.2.5.1 — Smooth cluster dot geometry. One-line bump: cluster-dot `CircleGeometry` segment count 16 → 64 in `DirectoryLayer.jsx`.',
+                  'With Phase 16.2.5\'s `DOT_RADIUS = 20.4` (7× pre-16.2.5\'s 3-wu dots), 16-sided dots were visibly polygonal at zoom > ~100%. 64 segments produces a perceptually smooth circle at every supported zoom up to MAX_ZOOM = 4.0.',
+                  'Chose segment-bump over a shader-based quad-discard implementation for the simpler / lower-risk path: zero new shader code, zero behavior change in raycast / hover / per-instance color paths. Per-frame cost negligible at ≤ 10k dot scale.',
+                  'RFP hollow circles (separate `makeHollowCircleGeometry` code path, 32 segments) untouched — follow-up if needed.',
+                  'Footer stays at v0.16.2.0 per backtrack-hotfix convention.',
+                ]},
                 { version: '0.16.2.5', date: '2026-05-16', label: 'Phase 16.2.5', items: [
                   'Phase 16.2.5 — Grid alignment + dot rendering hotfix. QA on Phase 16.2.4 surfaced two presentation issues: cluster dots didn\'t visually align with the background dot matrix, and dots were barely visible at the 15% default zoom (0.45 screen px diameter).',
                   '`DOT_GRID` 12 → 48 — reconciled to match the background grid\'s actual world-space spacing (`GRID_SPACING` was `4×DOT_GRID = 48`). Every sunflower-snapped cluster dot now lands on a background-grid intersection. `GRID_SPACING` redefined as `DOT_GRID` directly so the relationship is structural; background-grid origin snapped to a multiple of `GRID_SPACING` so grid points pass through `(0, 0)`.',

@@ -1122,7 +1122,14 @@ export default function DirectoryLayer({
     // raycast pre-filter (which also consults the bounding sphere) never
     // rejects the mesh outright at high zoom.
     const unboundedSphere = () => new THREE.Sphere(new THREE.Vector3(0, 0, 0), Number.POSITIVE_INFINITY)
-    const dotGeometry = new THREE.CircleGeometry(DOT_RADIUS, 16)
+    // Phase 16.2.5.1: 16 segments → 64. With Phase 16.2.5's `DOT_RADIUS = 20.4`
+    // (was 3), each cluster dot is ~7× bigger on screen and the 16-sided
+    // polygon silhouette became visible at higher zoom (clearly polygonal at
+    // 100 %+). Bumping to 64 segments produces a perceptually smooth circle
+    // at every supported zoom level (up to MAX_ZOOM = 4.0). Per-frame cost
+    // is one fragment shader pass over the same per-instance matrices —
+    // negligible at our dot scale (≤ 10k dots).
+    const dotGeometry = new THREE.CircleGeometry(DOT_RADIUS, 64)
     const dotMaterial = new THREE.MeshBasicMaterial()
     const dotsMesh = new THREE.InstancedMesh(dotGeometry, dotMaterial, MAX_DOTS)
     dotsMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DOTS * 3), 3)
