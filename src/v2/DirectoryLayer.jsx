@@ -36,8 +36,16 @@ import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisional
 import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 
 // ─── Layout constants (world units) ────────────────────────────────────
-const DOT_GRID = 12
-const DOT_RADIUS = 3
+// Phase 16.2.5 — Grid alignment + dot rendering hotfix.
+//   • DOT_GRID was 12 in Phase 16.2.4. Background grid (THREE.Points)
+//     rendered at GRID_SPACING = 48 = 4×DOT_GRID, so cluster-dot snap
+//     produced sub-cell offsets every 4 cells. Reconciled to G = 48 so
+//     every cluster dot snaps to a background-grid intersection.
+//   • DOT_RADIUS bumped to DOT_GRID × 0.425 (= 20.4): dots fill ~85% of
+//     their grid cell, leaving a thin 7.5% gap on each side. Was 3 wu —
+//     barely visible at 15% default zoom (0.45 screen px).
+const DOT_GRID = 48
+const DOT_RADIUS = DOT_GRID * 0.425                    // ≈ 20.4
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
 const RFP_BORDER = 1                  // hollow RFP circle border thickness
@@ -62,9 +70,12 @@ const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 5957.6 — 20% up from
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 4.0
 const INITIAL_ZOOM = 0.15
-// Background-grid spacing — sparser than DOT_GRID to keep the THREE.Points
-// buffer count tractable across the canvas extent.
-const GRID_SPACING = DOT_GRID * 4
+// Phase 16.2.5: background-grid spacing now equals DOT_GRID (was 4×DOT_GRID
+// pre-reconciliation). Same point count as before because DOT_GRID grew
+// 12 → 48 in lockstep — the visible grid spacing is unchanged in world
+// units (still 48 wu between adjacent grid dots), the cluster snap simply
+// matches it now.
+const GRID_SPACING = DOT_GRID
 const GRID_MARGIN = 600
 const DRAG_THRESHOLD_PX = 4
 const PANEL_W = 480                   // Detail Panel width — mirrors V2App's PANEL_W
@@ -76,10 +87,14 @@ const PANEL_W = 480                   // Detail Panel width — mirrors V2App's 
 // dot acceptance — boundary dots can't sit within 2×DOT_GRID of any dot
 // belonging to another cluster.
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))      // ~137.5°
-const SUNFLOWER_SCALE = 1.7                            // arm spacing tuning
-const LABEL_HOLE_W = 6 * DOT_GRID                      // 72 world units
-const LABEL_HOLE_H = 3 * DOT_GRID                      // 36
-const INTER_CLUSTER_BUFFER = 2 * DOT_GRID              // 24
+// Phase 16.2.5: SUNFLOWER_SCALE 1.7 → 1.0. At SCALE = 1.0 the Vogel spiral
+// places adjacent dots one cell apart at the cluster surface (and packs
+// more densely toward the center). Combined with the Item 3 dot-size bump,
+// clusters now read as pixelated filled discs around the label hole.
+const SUNFLOWER_SCALE = 1.0
+const LABEL_HOLE_W = 6 * DOT_GRID                      // 288 world units (was 72 pre-16.2.5)
+const LABEL_HOLE_H = 3 * DOT_GRID                      // 144 (was 36)
+const INTER_CLUSTER_BUFFER = 2 * DOT_GRID              // 96 (was 24)
 const SUNFLOWER_MAX_ITER_PER_DOT = 4                   // give up after N×4 spiral steps
 // Lloyd-iterated centroidal Voronoi tessellation parameters.
 const LLOYD_MAX_ITER = 10
@@ -1065,17 +1080,20 @@ export default function DirectoryLayer({
     updateCamera()
 
     // Background grid as Points.
-    // Phase 16.2.3: grid spans the full bounded canvas (with a small margin
-    // for breathing room when zoomed in close to an edge). Uses sparser
-    // GRID_SPACING (4×DOT_GRID = 48 world units) to keep the point count
-    // tractable at ~84k for a 17280×11170 canvas.
+    // Phase 16.2.3: grid spans the full bounded canvas with a small margin
+    // for breathing room when zoomed in close to an edge.
+    // Phase 16.2.5: grid origin snapped to a multiple of GRID_SPACING so
+    // grid points include (0, 0). Combined with the cluster snap
+    // (`snapGrid(v) = Math.round(v/DOT_GRID)*DOT_GRID` where `DOT_GRID ===
+    // GRID_SPACING`), every sunflower-snapped dot now lands on a
+    // background-grid intersection at every zoom level.
     const isDark = document.documentElement.dataset.theme !== 'light'
     const gridColor = isDark ? new THREE.Color(0xffffff) : new THREE.Color(0x000000)
     const gridPoints = []
-    const gx0 = -GRID_MARGIN
-    const gx1 = CANVAS_WIDTH + GRID_MARGIN
-    const gy0 = -GRID_MARGIN
-    const gy1 = CANVAS_HEIGHT + GRID_MARGIN
+    const gx0 = -Math.ceil(GRID_MARGIN / GRID_SPACING) * GRID_SPACING
+    const gx1 = Math.ceil((CANVAS_WIDTH + GRID_MARGIN) / GRID_SPACING) * GRID_SPACING
+    const gy0 = -Math.ceil(GRID_MARGIN / GRID_SPACING) * GRID_SPACING
+    const gy1 = Math.ceil((CANVAS_HEIGHT + GRID_MARGIN) / GRID_SPACING) * GRID_SPACING
     for (let gx = gx0; gx <= gx1; gx += GRID_SPACING) {
       for (let gy = gy0; gy <= gy1; gy += GRID_SPACING) {
         // Note: world y stored as negative in Three.js (camera consumes -y).

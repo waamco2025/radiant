@@ -7802,6 +7802,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.5', date: '2026-05-16', label: 'Phase 16.2.5', items: [
+                  'Phase 16.2.5 — Grid alignment + dot rendering hotfix. QA on Phase 16.2.4 surfaced two presentation issues: cluster dots didn\'t visually align with the background dot matrix, and dots were barely visible at the 15% default zoom (0.45 screen px diameter).',
+                  '`DOT_GRID` 12 → 48 — reconciled to match the background grid\'s actual world-space spacing (`GRID_SPACING` was `4×DOT_GRID = 48`). Every sunflower-snapped cluster dot now lands on a background-grid intersection. `GRID_SPACING` redefined as `DOT_GRID` directly so the relationship is structural; background-grid origin snapped to a multiple of `GRID_SPACING` so grid points pass through `(0, 0)`.',
+                  '`DOT_RADIUS` 3 → `DOT_GRID × 0.425` (≈20.4 wu) — dots now fill ~85% of their grid cell. At 15% zoom each dot is ~6 screen px (was 0.9 px). `SUNFLOWER_SCALE` 1.7 → 1.0 so Vogel arm spacing matches grid (one cell apart at the cluster surface). Combined effect: pixelated sunflower clusters that read as solid filled discs around the centered label hole.',
+                  'Derived constants scale automatically: `LABEL_HOLE_W = 6×DOT_GRID = 288`, `LABEL_HOLE_H = 3×DOT_GRID = 144`, `INTER_CLUSTER_BUFFER = 2×DOT_GRID = 96`, `LLOYD_CONVERGENCE_DELTA = DOT_GRID = 48`.',
+                  'Lloyd\'s convergence re-test: at the 12-actor seed, max displacement after 10 iterations is 193.8 wu (≈4× the new 48-wu threshold; was ≈16× the old 12-wu threshold). Per the brief, accepted with `console.warn` rather than unilaterally raising the cap — Phase 16.2.6\'s denser seed (~3k dots) is the canonical convergence test.',
+                  'Brief Item 2 caveat surfaced: footprint actually grows ~2.4× because `DOT_GRID` scaled in lockstep with the SCALE drop, but net visual reads as denser since dot size grew 6.8× — intent preserved (clusters read as solid blobs at default zoom).',
+                  'Footer stays at v0.16.2.0 per backtrack-hotfix convention.',
+                ]},
                 { version: '0.16.2.4', date: '2026-05-16', label: 'Phase 16.2.4', items: [
                   'Phase 16.2.4 — Directory galactic view v2 (Voronoi packing + sunflower clusters). Andrew\'s feedback on Phase 16.2.3: the polar Poisson disc fan-out left the canvas feeling sparse. Phase 16.2.4 rebuilds the Directory\'s spatial primitives end-to-end. Seed stays at the current 12-actor scale; Phase 16.2.5 will expand to ~3k dots.',
                   'Smaller canvas: 17280×11170 → 11520×7447 (16" MBP logical at 15% zoom). MIN_ZOOM and INITIAL_ZOOM both 0.15 (was 0.1). Active Actor anchor at (5760, 5957.6).',

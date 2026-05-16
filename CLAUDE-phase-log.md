@@ -2673,6 +2673,74 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.5 completion notes (2026-05-16) — Grid alignment + dot rendering hotfix
+
+QA on Phase 16.2.4 surfaced two presentation issues: cluster dots didn't visually align with the background dot matrix, and dots were barely visible at the 15% default zoom. This phase reconciles three constants — `DOT_GRID`, `DOT_RADIUS`, and `SUNFLOWER_SCALE` — and snaps the background-grid origin so cluster dots land on grid intersections at every zoom.
+
+**Background grid investigation.** Located the background grid rendering at line ~1067 of `DirectoryLayer.jsx` — a `THREE.Points` mesh in world space (not screen-fixed CSS pixels), rendered at `GRID_SPACING = DOT_GRID × 4 = 48` world units. Cluster snap was at `DOT_GRID = 12`, producing sub-cell offsets every 4 cells. The brief's "stop and surface" escape clause for CSS-pixel backgrounds was not triggered — world-space grid confirmed via the existing scale-with-zoom behaviour.
+
+**Canonical constants (post-16.2.5).**
+
+| Constant | Before (16.2.4) | After (16.2.5) | Notes |
+|----------|-----------------|----------------|-------|
+| `DOT_GRID` | 12 | **48** | Matches `GRID_SPACING` world-space spacing |
+| `DOT_RADIUS` | 3 | **`DOT_GRID × 0.425` (20.4)** | Dots fill ~85% of grid cell |
+| `SUNFLOWER_SCALE` | 1.7 | **1.0** | Vogel arm spacing = 1 grid cell at cluster surface |
+| `GRID_SPACING` | `DOT_GRID × 4` | **`DOT_GRID`** | Same world units (48) — relationship is now structural |
+| `LABEL_HOLE_W` | 72 | **288** | Derived: `6 × DOT_GRID` |
+| `LABEL_HOLE_H` | 36 | **144** | Derived: `3 × DOT_GRID` |
+| `INTER_CLUSTER_BUFFER` | 24 | **96** | Derived: `2 × DOT_GRID` |
+| `LLOYD_CONVERGENCE_DELTA` | 12 | **48** | Derived: `DOT_GRID` |
+
+**Background-grid origin snap.** Previous origin started at `-GRID_MARGIN = -600`, which is NOT a multiple of `GRID_SPACING = 48` (`-600 / 48 = -12.5`). The grid lattice was offset by 24 wu from world origin, so grid points landed at `{..., -72, -24, 24, 72, ...}` instead of `{..., -48, 0, 48, 96, ...}`. Fixed by snapping the iteration bounds to multiples of `GRID_SPACING`:
+
+```js
+const gx0 = -Math.ceil(GRID_MARGIN / GRID_SPACING) * GRID_SPACING  // -624
+const gx1 = Math.ceil((CANVAS_WIDTH + GRID_MARGIN) / GRID_SPACING) * GRID_SPACING
+// same for gy0 / gy1
+```
+
+Grid points now pass through `(0, 0)` and align with `snapGrid(v) = Math.round(v / DOT_GRID) × DOT_GRID` from the cluster sunflower placement loop.
+
+**Visual effect of the constant changes.**
+
+| | 16.2.4 | 16.2.5 |
+|---|--------|--------|
+| Dot diameter at 15% zoom | `6 × 0.15 = 0.9 px` (effectively invisible) | `40.8 × 0.15 = 6.1 px` (clearly visible) |
+| Cluster footprint for N=25 (NovaFab) | `sqrt(25) × 12 × 1.7 = 102 wu radius` | `sqrt(25) × 48 × 1.0 = 240 wu radius` (~2.4× larger) |
+| Dots align with background grid | No (offset by 24 wu) | Yes (both at multiples of 48 from origin) |
+
+Clusters now read as pixelated filled discs around the centered label hole at default zoom — the "wow factor" the brief targeted.
+
+**Brief deviation surfaced (per the brief's "stop and surface" rule).** The brief's Item 2 claimed "cluster footprint shrinks by `(1.7/1.0)^2 ≈ 2.9×` compared to 16.2.4 at the same dot count." That calculation holds DOT_GRID constant at 12, but Item 1 explicitly says to set `DOT_GRID = G = 48`. With both changes, cluster footprints actually GROW ~2.4× — the brief's intent (denser-feeling clusters) is achieved via the 6.8× dot-size growth swamping the 2.4× footprint growth, not via footprint shrinkage. Reported here rather than silently ad-hoc-patching.
+
+**Lloyd's convergence re-test.** Max displacement after 10 iterations at the current 12-actor seed: **193.8 wu**, against the new `LLOYD_CONVERGENCE_DELTA = 48` threshold (≈4×). Was ≈16× the old 12-wu threshold; ratio improved but still doesn't converge. Per the brief's "don't loop-cap-bump" rule, accepted via `console.warn`. Phase 16.2.6's denser seed (~3k dots) is the real convergence test — with 10× more clusters, Lloyd's relaxation should equilibrate more cleanly.
+
+**Acceptance criteria — verified.**
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Build clean (no new warnings beyond existing 500-KB chunk warning) | ✓ |
+| 2 | Background-grid spacing identified; documented in code comments near `DOT_GRID` | ✓ |
+| 3 | `DOT_GRID === GRID_SPACING` world units | ✓ |
+| 4 | Cluster dots snap to positions that visually align with background-grid intersections at zoom 0.15 / 0.5 / 1.0 / 4.0 | ✓ (verified via screenshot at default 15%; both cluster snap and grid origin are multiples of 48) |
+| 5 | `SUNFLOWER_SCALE = 1.0` in code | ✓ |
+| 6 | Dot world-render size = `DOT_GRID × 0.85` (radius = `DOT_GRID × 0.425`) | ✓ |
+| 7 | Lloyd's residual reported via `console.warn` | ✓ (193.8 wu, surfaced) |
+| 8 | Dot-click raycast continues to work against larger dots | ✓ (Three.js CircleGeometry radius drives raycast hit-target naturally; no regression) |
+
+**Files changed.**
+- `src/v2/DirectoryLayer.jsx` — `DOT_GRID` 12 → 48; `DOT_RADIUS` 3 → `DOT_GRID × 0.425`; `SUNFLOWER_SCALE` 1.7 → 1.0; `GRID_SPACING` `DOT_GRID × 4` → `DOT_GRID`; background-grid origin snapped to multiples of `GRID_SPACING`.
+- `architecture-spec.md` — §8.2 Phase 16.2.5 changelog bullet.
+- `polish-backlog.md` — Update Log Phase 16.2.5 entry.
+- `CLAUDE.md` — "Current state of the world" updated.
+- `CLAUDE-phase-log.md` — this entry.
+- `src/v2/V2App.jsx` — Changelog modal v0.16.2.5 entry prepended.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.4 completion notes (2026-05-16) — Directory galactic view v2 (Voronoi + sunflower)
 
 Andrew's feedback on Phase 16.2.3: the polar Poisson disc fan-out left the canvas feeling sparse; emptiness reads as a negative for the "wow" view the Directory is meant to deliver on first load. Phase 16.2.4 rebuilds the Directory's spatial primitives end-to-end. The seed stays at the current 12-actor scale — Phase 16.2.5 expands it to ~3,000 dots; this phase exercises the algorithms against the existing seed so the visual is intentionally sparse at this density.
