@@ -2673,6 +2673,46 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6 completion notes (2026-05-16) — Seed expansion to ~3,288 dots (procedural lexicons)
+
+35 new mock supplier Actors added to the Directory Layer, expanding the network seed beneath Bob's Sentinel-4 program. Total Actors now 52 (4 switchable primary + 12 existing mock from Phase 16.2 + 35 new mock from 16.2.6 + Radiant Network).
+
+**Heavy-tailed by design.** Four super-jumbo clusters carry ~50% of the new dot mass: Helios Industries 500, Atlas Avionics 450, Polaris Defense 400, Vortex Aerospace 350. Long tail of medium and small clusters (60 down to 5 dots) for variety. Total new dot count is 3,288.
+
+**Brief vs. table arithmetic discrepancy surfaced.** The brief headline says "3,328 new dots" but the dotCount column actually sums to 3,288 (independently verified by `Object.values(dotCounts).reduce((a,b)=>a+b,0)`). Implementation encodes the table, which is canonical. Acceptance criterion #3 ("claims grows by exactly 3,328") therefore reads as exactly 3,288 in the implementation; the brief headline is an arithmetic error.
+
+**Procedural Claim names.** New `VERTICAL_LEXICONS` constant in `v2_2Data.js` defines 21 verticals (20 from the brief's Item 2 hand-defined table + 1 added — `'Connectors & Backshells'` was assigned to row 20 (zenith-components) in Item 1 but absent from both Item 2's lexicon table AND the brief's "verticals beyond this list" enumeration for actors 22–35). Each lexicon has 5–10 families, 6–10 prefixes, 5–7 doc types — combinatorial space large enough that the 20-attempt retry rarely needs the counter-fallback. New exported helper `generateClaimSpecsForVertical(actorParty, vertical, count)` produces `{slug, name, description, disclosureType}` arrays via `hashString(actorParty) → mulberry32(seed)` PRNG; the same `(actor, vertical, count)` tuple always yields identical specs across module reloads (Helios determinism spot-checked). Name shape: `{family} {prefix}-{number} {docType}` (e.g., "Bipropellant Valve Driver LSM-857 Compliance"). Description: `{family} {prefix} — {docType.toLowerCase()} for compliance evaluation.` Per-actor disclosure-type mix `(i × 7 + seed) % 100 < 60 ? full : <85 ? selective : proofonly` produces deterministic 60/25/15 indigo/amber/green spread per cluster (Helios verified: exactly 300 full / 125 selective / 75 proofonly of 500). Determinism + the seeded approach mean no rebuilds churn the seed; a refresh / cold module load reproduces the same Directory.
+
+**Wiring.** New module-level constant `PHASE_16_2_6_NEW_MOCK_ACTORS` holds the 35-actor table. A separate accumulator loop in `buildV22SharedArtifacts` calls `seedMockSupplierActor` for each new actor — kept distinct from the Phase 16.2 `mockActors` accumulator so the 16.2 brief's "do not iterate over mock claims" caveats remain easy to reason about. The final return-shape `actors`, `assets`, `claims`, and `disclosureAgreements` arrays union both pools. New artifact splice points: `assets` line ~2042 (post-Phase 16.2), `disclosureAgreements` line ~3277 (post-Phase 16.2), return-shape `actors` + `claims` lines ~3403 / ~3410. Every new public DA verified to have `grantee.party === 'Radiant Network'` + `subject.kind === 'claim'`; zero umbrella DAs from any new actor (existing Dave→Bob umbrella is the only umbrella in the seed, unchanged). Existing 12-actor + 4-primary seeds frozen — NovaFab anchor claim "Rad-Hard 0.18µm CMOS Logic Array RHF-820 Datasheet" spot-checked unchanged.
+
+**Lloyd's iteration cap bumped 10 → 20** in `DirectoryLayer.jsx` per brief Item 5. At 52 seeds the residual still exceeds `DOT_GRID = 48` — observed 101.4 wu after 20 iterations. Per the brief's "If Lloyd's still doesn't converge within 20 iterations, surface the final residual and accept; don't unilaterally raise the cap further — file as 16.2.6.1 if the visual reveals tessellation issues" rule, accept + `console.warn`.
+
+**Known regressions filed as 16.2.6.1 candidates.** Runtime QA on dev server surfaced two issues that the brief's pinned conventions anticipate:
+- **Super-jumbo cluster sunflower overflow**: the 4 super-jumbo clusters can't fit their assigned dots inside their Lloyd-derived Voronoi cells. Observed placement counts: Atlas Avionics 124/450 (28%), Polaris Defense 120/400 (30%), Helios Industries 261/500 (52%), Vortex Aerospace 297/350 (85%). The Lloyd's centroidal step targets area proportional to `dot_count_i / total_dots × canvas_area`, but the convergence cap at 20 iterations leaves the super-jumbos significantly under-sized. Fix candidates for 16.2.6.1: (a) bias the centroid step further (`stepFactor` amplified for high-dot-count cells), (b) raise the Lloyd's cap to 50+ for super-jumbo convergence, (c) grow the canvas, (d) split super-jumbo clusters into 2–3 sub-clusters that share a label.
+- **Lloyd's residual still > DOT_GRID** at the 20-iter cap.
+
+Both surface via existing `console.warn` lines.
+
+**Verification.**
+- Data-layer probe (`probe-1626.mjs`, deleted after use): per-actor claim count mismatches = 0; per-actor asset count mismatches = 0; per-actor DA count mismatches = 0; new-actor DA total = 13,152 (= 3288 × 4) ✓; bad public DA grantee/subject = 0; umbrella DAs from new actors = 0; Helios determinism = true; Helios pub-DA type mix = 300/125/75 of 500.
+- Build clean (`npm run build`) — no new warnings beyond the pre-existing 500-KB chunk warning.
+- Dev server (`npm run dev`) — page loads, zero React errors, Directory opens via the chrome globe button, all 35 new mock-actor labels render alongside the existing 12 + GovCo center anchor.
+- Canvas-click on dots is not scriptable via DOM events (raycaster limitation documented since Phase 9A.6, re-confirmed 16.1.5); QA item #7 (procedural Claim name in Detail Panel) is code-verified only.
+
+**Files changed.**
+- `src/v2/v2_2Data.js` — `VERTICAL_LEXICONS` constant (21 verticals); `hashString` + `seededRandom` (mulberry32) utilities; `generateClaimSpecsForVertical` exported helper; `PHASE_16_2_6_NEW_MOCK_ACTORS` constant; expansion loop + return-shape splices in `buildV22SharedArtifacts`.
+- `src/v2/DirectoryLayer.jsx` — `LLOYD_MAX_ITER` 10 → 20.
+- `architecture-spec.md` — §8.2 Phase 16.2.6 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.6 entry.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
+---
+
 ### Phase 16.2.5.1 completion notes (2026-05-16) — Smooth cluster dot geometry
 
 One-line bump in `DirectoryLayer.jsx`: cluster-dot `CircleGeometry` segment count 16 → 64. With Phase 16.2.5's `DOT_RADIUS = 20.4` (was 3 pre-16.2.5 — a 7× growth driven by the `DOT_GRID × 0.425` reconciliation), each dot's silhouette was visibly polygonal at zoom levels above ~100% — 16 segments was fine when dots were 3 wu in diameter, no longer enough at 20.4 wu. 64 segments produces a perceptually smooth circle at every supported zoom up to MAX_ZOOM = 4.0.

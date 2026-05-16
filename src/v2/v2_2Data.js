@@ -1451,6 +1451,319 @@ function specsFromTuples(tuples) {
   }))
 }
 
+// ── Phase 16.2.6: vertical lexicons + procedural Claim spec generator ─────
+// 35 mock supplier Actors (3,328 dots) are too many for hand-rolled names.
+// Each vertical defines families × prefixes × docTypes so Claims procedurally
+// produced for that vertical read as plausible defense-electronics names.
+
+const VERTICAL_LEXICONS = {
+  'Power Systems & Propulsion': {
+    families: ['Power Conditioning Unit', 'Battery Management Module', 'DC-DC Converter', 'Solar Array Regulator', 'Ion Thruster Controller', 'Bipropellant Valve Driver', 'Bus Voltage Monitor', 'Load Switch Module', 'Pyro Initiator Driver'],
+    prefixes: ['PCU', 'BMM', 'DCD', 'SAR', 'ITC', 'BVD', 'BVM', 'LSM', 'PID', 'PWR'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification Report', 'Test Report', 'Acceptance Data', 'Performance Spec'],
+  },
+  'Flight Computers & Integration': {
+    families: ['Flight Computer Module', 'On-Board Computer', 'Watchdog Timer Board', 'Boot ROM Module', 'Data Handling Unit', 'System Controller', 'Backplane Interface Card', 'TM/TC Processor'],
+    prefixes: ['FCM', 'OBC', 'WTB', 'BRM', 'DHU', 'SCT', 'BIC', 'TMC', 'FLT'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification Report', 'Acceptance Test Report', 'Software Manifest'],
+  },
+  'RF Comms & Ground Systems': {
+    families: ['X-Band Transponder', 'S-Band Transmitter', 'Ka-Band Receiver', 'UHF Modem', 'Beacon Generator', 'Ground Station Modem', 'IF Downconverter', 'High-Power Amplifier'],
+    prefixes: ['XBT', 'SBX', 'KBR', 'UHF', 'BCN', 'GSM', 'IFD', 'HPA', 'RFC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'Link Budget Analysis', 'EMC Report'],
+  },
+  'Structures, Composites & Mechanisms': {
+    families: ['Carbon-Fibre Panel', 'Honeycomb Sandwich', 'Optical Bench', 'Truss Joint', 'Bipod Strut', 'Mounting Bracket', 'Hinge Assembly', 'Latch Mechanism', 'Deployable Boom'],
+    prefixes: ['CFP', 'HSP', 'OBP', 'TJN', 'BPS', 'MBR', 'HGA', 'LMC', 'DPB', 'STR'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'Stress Analysis Report', 'Modal Survey'],
+  },
+  'Connectors & Harnesses': {
+    families: ['MIL-DTL-38999 Connector', 'D-Sub Backshell', 'Twinax Coupler', 'Coaxial Bulkhead', 'Wire Harness Assembly', 'Power Distribution Cable', 'High-Voltage Connector'],
+    prefixes: ['MDC', 'DSB', 'TXC', 'CXB', 'WHA', 'PDC', 'HVC', 'CON'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Test Report', 'Mating Cycle Report'],
+  },
+  'Comms Signal Processing': {
+    families: ['Software-Defined Modem', 'Forward Error Correction Module', 'Symbol Synchronizer', 'Frequency Reference', 'IF Filter Bank', 'Direct Digital Synthesizer'],
+    prefixes: ['SDM', 'FEC', 'SYM', 'FRQ', 'IFB', 'DDS', 'SIG'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'BER Test Report', 'Qualification'],
+  },
+  'IMUs, Gyros & GPS Receivers': {
+    families: ['Fiber-Optic Gyroscope', 'MEMS IMU', 'Ring Laser Gyro', 'Tactical-Grade Accelerometer', 'GPS Receiver Module', 'GNSS Antenna LNA'],
+    prefixes: ['FOG', 'MIU', 'RLG', 'TGA', 'GPR', 'GLA', 'IMU'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Allan Variance Report', 'Qualification'],
+  },
+  'Imaging Optics & Lasers': {
+    families: ['Cassegrain Telescope', 'Off-Axis Parabolic Mirror', 'Optical Filter Wheel', 'Laser Diode Module', 'Fold Mirror Assembly', 'Wavefront Sensor'],
+    prefixes: ['CTA', 'OAP', 'OFW', 'LDM', 'FMA', 'WFS', 'OPT'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'MTF Test Report', 'Qualification'],
+  },
+  'Thermal Management & Cryogenics': {
+    families: ['Heat Pipe Assembly', 'Pulse-Tube Cryocooler', 'Loop Heat Pipe', 'Thermal Strap', 'Deployable Radiator', 'MLI Blanket', 'Cold Plate'],
+    prefixes: ['HPA', 'PTC', 'LHP', 'TST', 'DRP', 'MLI', 'CPL', 'THM'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification Report', 'Thermal Vacuum Report'],
+  },
+  'Mixed-Signal ICs & Processors': {
+    families: ['16-bit ADC', '14-bit DAC', 'Rad-Hard Microprocessor', 'Voltage Reference IC', 'Op-Amp Array', 'Comparator IC', 'Multiplexer IC'],
+    prefixes: ['ADC', 'DAC', 'RHM', 'VRF', 'OPA', 'CMP', 'MUX', 'IC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'TID Report', 'SEE Report', 'Qualification'],
+  },
+  'Atomic Clocks & Quantum Sensors': {
+    families: ['Rubidium Atomic Clock', 'Cesium Beam Standard', 'Optical Lattice Clock', 'Cold-Atom Interferometer', 'NV-Centre Magnetometer'],
+    prefixes: ['RAC', 'CBS', 'OLC', 'CAI', 'NVM', 'QNT'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Allan Variance Report', 'Qualification'],
+  },
+  'Composite Structures': {
+    families: ['CFRP Panel', 'Kevlar Sandwich', 'Aluminum Honeycomb Core', 'Glass-Epoxy Substrate', 'Carbon-Carbon Heatshield'],
+    prefixes: ['CFP', 'KSW', 'AHC', 'GES', 'CCH', 'CMP'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Stress Analysis', 'Material Cert'],
+  },
+  'Mission & Payload Computers': {
+    families: ['Payload Data Handler', 'Mission Computer', 'Solid-State Recorder', 'Compression Engine', 'Encryption Card'],
+    prefixes: ['PDH', 'MCM', 'SSR', 'CMP', 'ENC', 'MIS'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'Throughput Test Report'],
+  },
+  'RF & Microwave Modules': {
+    families: ['Low-Noise Amplifier', 'Power Amplifier Module', 'Image-Reject Mixer', 'Microwave Filter', 'Circulator', 'OMUX Manifold'],
+    prefixes: ['LNA', 'PAM', 'IRM', 'MWF', 'CIR', 'OMX', 'RF'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'S-Parameter Report'],
+  },
+  'Star Trackers & Sun Sensors': {
+    families: ['Wide-FOV Star Tracker', 'Narrow-FOV Star Tracker', 'Coarse Sun Sensor', 'Fine Sun Sensor', 'Earth Horizon Sensor', 'Centroiding Camera'],
+    prefixes: ['WST', 'NST', 'CSS', 'FSS', 'EHS', 'CTC', 'SEN'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'Pointing Accuracy Report'],
+  },
+  'Bus Controllers & Network Modules': {
+    families: ['MIL-STD-1553 Bus Controller', 'SpaceWire Router', 'TTEthernet Switch', 'CAN Bus Bridge', 'RS-422 Transceiver'],
+    prefixes: ['MBC', 'SWR', 'TES', 'CBB', 'RST', 'NET'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Conformance Test Report', 'Qualification'],
+  },
+  'Pyrotechnics & Ordnance': {
+    families: ['NASA Standard Initiator', 'Pyrobolt Assembly', 'Frangible Joint', 'Pin Puller', 'Cable Cutter'],
+    prefixes: ['NSI', 'PBA', 'FRJ', 'PPL', 'CBC', 'PYR'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Qualification', 'Lot Acceptance Report'],
+  },
+  'Adhesives & Coatings': {
+    families: ['Structural Epoxy', 'Conductive Adhesive', 'Black-Body Coating', 'OSR Tile', 'Thermal Interface Material'],
+    prefixes: ['SEP', 'CDA', 'BBC', 'OSR', 'TIM', 'ADH'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Outgassing Report', 'Cure Schedule'],
+  },
+  'Magnetics & Inductors': {
+    families: ['Common-Mode Choke', 'Toroidal Inductor', 'Power Transformer', 'Current Sense Transformer', 'EMI Filter Coil'],
+    prefixes: ['CMC', 'TRI', 'PTX', 'CST', 'EFC', 'MAG'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Saturation Report', 'Qualification'],
+  },
+  'Cybersecurity & Encryption Modules': {
+    families: ['AES-256 Hardware Engine', 'Key Management Unit', 'Secure Boot ROM', 'Anti-Tamper Module', 'TRNG Chip'],
+    prefixes: ['AHE', 'KMU', 'SBR', 'ATM', 'TRN', 'SEC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'FIPS Validation', 'Qualification'],
+  },
+  // ── Phase 16.2.6: lexicons added for verticals 20 + 22–35 ──────────────
+  'Connectors & Backshells': {
+    families: ['Circular MIL Backshell', 'EMI Shielded Backshell', 'Right-Angle Backshell', 'Strain-Relief Boot', 'Hermetic Bulkhead Receptacle', 'Composite Connector Shell'],
+    prefixes: ['CMB', 'ESB', 'RAB', 'SRB', 'HBR', 'CCS', 'BSL'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Salt-Fog Report', 'Qualification'],
+  },
+  'Flight Software & Firmware': {
+    families: ['Real-Time Kernel Image', 'Flight Software Build', 'Boot Loader Image', 'Telemetry Service Module', 'Fault Detection Module', 'Mode Manager Module', 'OS Abstraction Layer'],
+    prefixes: ['RTK', 'FSB', 'BLD', 'TSM', 'FDM', 'MMG', 'OSA', 'FSW'],
+    docTypes: ['Software Manifest', 'Compliance', 'Spec', 'Build Report', 'Qualification', 'Coverage Report'],
+  },
+  'Crystal Oscillators & Clock ICs': {
+    families: ['TCXO Module', 'OCXO Reference', 'VCXO Module', 'PLL Clock IC', 'Clock Distribution Buffer', 'Crystal Filter'],
+    prefixes: ['TCX', 'OCX', 'VCX', 'PLL', 'CDB', 'XFL', 'OSC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Allan Variance Report', 'Qualification'],
+  },
+  'Test Equipment & Calibration': {
+    families: ['Bench Source Meter', 'Vector Network Analyzer', 'Calibration Standard Kit', 'Spectrum Analyzer Probe', 'Test Fixture Assembly', 'Reference Load'],
+    prefixes: ['BSM', 'VNA', 'CSK', 'SAP', 'TFA', 'RLD', 'TST'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Calibration Certificate', 'Acceptance Data'],
+  },
+  'Switches & Relays': {
+    families: ['Latching Relay', 'Solid-State Relay', 'RF Coaxial Switch', 'High-Current Contactor', 'Hybrid Power Switch', 'Reed Relay'],
+    prefixes: ['LTR', 'SSR', 'RCS', 'HCC', 'HPS', 'RDR', 'SWR'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Endurance Report', 'Qualification'],
+  },
+  'Optical Coatings & Mirrors': {
+    families: ['Anti-Reflective Coating', 'Dielectric Mirror', 'Cold Mirror Filter', 'Beamsplitter Cube', 'Protected Silver Mirror', 'Bandpass Filter Coating'],
+    prefixes: ['ARC', 'DMR', 'CMF', 'BSC', 'PSM', 'BFC', 'OPC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Reflectance Report', 'Qualification'],
+  },
+  'EMI & RF Filters': {
+    families: ['EMI Line Filter', 'Common-Mode Filter', 'Power Entry Filter', 'RF Lowpass Filter', 'Cavity Bandpass Filter', 'Tunable Notch Filter'],
+    prefixes: ['EMI', 'CMF', 'PEF', 'RLF', 'CBF', 'TNF', 'FLT'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Insertion Loss Report', 'Qualification'],
+  },
+  'Laser Diodes & Optical Sources': {
+    families: ['Fiber-Coupled Laser Diode', 'High-Power Pump Diode', 'Single-Mode Laser Diode', 'VCSEL Array', 'Superluminescent Diode', 'DFB Laser Module'],
+    prefixes: ['FCL', 'HPD', 'SML', 'VCS', 'SLD', 'DFB', 'LSR'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Burn-In Report', 'Qualification'],
+  },
+  'Reaction Wheels & Momentum Storage': {
+    families: ['Reaction Wheel Assembly', 'Momentum Wheel', 'Control Moment Gyro', 'Wheel Drive Electronics', 'Bearing Cartridge'],
+    prefixes: ['RWA', 'MWH', 'CMG', 'WDE', 'BCR', 'MOM'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Acceptance Data', 'Qualification'],
+  },
+  'GNSS Receivers & Antennas': {
+    families: ['Multi-Constellation GNSS Receiver', 'L1/L2 GNSS Antenna', 'Survey-Grade GNSS Module', 'GNSS Front-End LNA', 'Choke-Ring Antenna'],
+    prefixes: ['MCR', 'LGA', 'SGM', 'GFE', 'CRA', 'GNS'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Acceptance Data', 'Qualification'],
+  },
+  'Magnetorquers & Magnetic Actuators': {
+    families: ['Air-Core Magnetorquer Rod', 'Torque Rod Assembly', 'Magnetic Bearing Coil', 'Saturable Reactor', 'Magnetic Damper'],
+    prefixes: ['ACM', 'TRA', 'MBC', 'STR', 'MDM', 'MAG'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Dipole Test Report', 'Qualification'],
+  },
+  'Deployable Mechanisms & Hinges': {
+    families: ['Spring-Loaded Hinge', 'Burn-Wire Release', 'Tape-Spring Boom Hinge', 'Pin-Puller Mechanism', 'Latch Release Assembly', 'Hold-Down & Release Mechanism'],
+    prefixes: ['SLH', 'BWR', 'TSH', 'PPM', 'LRA', 'HDR', 'DPL'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Life Test Report', 'Qualification'],
+  },
+  'Photodetectors & Photodiodes': {
+    families: ['InGaAs Photodiode', 'Silicon Avalanche Photodiode', 'PIN Photodetector', 'Quadrant Photodiode', 'UV-Enhanced Photodiode'],
+    prefixes: ['INP', 'APD', 'PIN', 'QPD', 'UVP', 'PDD'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Responsivity Report', 'Qualification'],
+  },
+  'Encoders & Position Sensors': {
+    families: ['Absolute Optical Encoder', 'Incremental Encoder', 'Resolver Module', 'Linear Position Sensor', 'Inductive Proximity Sensor'],
+    prefixes: ['AOE', 'IEC', 'RVM', 'LPS', 'IPS', 'ENC'],
+    docTypes: ['Datasheet', 'Compliance', 'Spec', 'Accuracy Report', 'Qualification'],
+  },
+  'Material Samples & Test Coupons': {
+    families: ['Tensile Test Coupon', 'Outgassing Sample', 'Witness Coupon Set', 'Thermal Cycling Sample', 'Radiation Test Coupon'],
+    prefixes: ['TTC', 'OGS', 'WCS', 'TCS', 'RTC', 'MAT'],
+    docTypes: ['Material Cert', 'Compliance', 'Spec', 'Test Report', 'Acceptance Data'],
+  },
+}
+
+// Deterministic 32-bit string hash (cyrb53-lite) — seeds the per-actor PRNG
+// so the same (actor, vertical, count) tuple always yields identical Claim
+// specs across module reloads.
+function hashString(str) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
+// Mulberry32 PRNG — small, fast, well-distributed seeded random in [0, 1).
+function seededRandom(seed) {
+  let a = seed >>> 0
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/**
+ * Phase 16.2.6: deterministic procedural Claim spec generation for a mock
+ * supplier actor, based on its vertical's lexicon. Produces a count-sized
+ * array of { slug, name, description, disclosureType } entries unique
+ * within the actor's namespace.
+ *
+ * @param {string} actorParty   The actor's party name (e.g., 'Helios Industries').
+ * @param {string} vertical     The actor's vertical (key into VERTICAL_LEXICONS).
+ * @param {number} count        How many Claim specs to produce.
+ * @returns {Array<{slug, name, description, disclosureType}>}
+ */
+export function generateClaimSpecsForVertical(actorParty, vertical, count) {
+  const lexicon = VERTICAL_LEXICONS[vertical]
+  if (!lexicon) throw new Error(`generateClaimSpecsForVertical: unknown vertical "${vertical}"`)
+
+  const seed = hashString(actorParty)
+  const rand = seededRandom(seed)
+  const specs = []
+  const usedNames = new Set()
+
+  for (let i = 0; i < count; i++) {
+    let attempts = 0
+    let placed = false
+    while (attempts < 20) {
+      const family = lexicon.families[Math.floor(rand() * lexicon.families.length)]
+      const prefix = lexicon.prefixes[Math.floor(rand() * lexicon.prefixes.length)]
+      const number = 100 + Math.floor(rand() * 900)
+      const partNumber = `${prefix}-${number}`
+      const docType = lexicon.docTypes[Math.floor(rand() * lexicon.docTypes.length)]
+      const name = `${family} ${partNumber} ${docType}`
+      if (!usedNames.has(name)) {
+        usedNames.add(name)
+        const slug = `c${i + 1}`
+        const description = `${family} ${partNumber} — ${docType.toLowerCase()} for compliance evaluation.`
+        // Deterministic disclosure type per index: rough 60/25/15 mix.
+        const disclosureRoll = (i * 7 + seed) % 100
+        const disclosureType =
+          disclosureRoll < 60 ? 'full' :
+          disclosureRoll < 85 ? 'selective' :
+          'proofonly'
+        specs.push({ slug, name, description, disclosureType })
+        placed = true
+        break
+      }
+      attempts++
+    }
+    if (!placed) {
+      // Fallback: append a uniqueness counter — guarantees uniqueness even
+      // when the lexicon's combinatorial space is locally exhausted.
+      const fallbackName = `${lexicon.families[0]} ${lexicon.prefixes[0]}-${1000 + i} ${lexicon.docTypes[0]}`
+      specs.push({
+        slug: `c${i + 1}`,
+        name: fallbackName,
+        description: `${lexicon.families[0]} ${lexicon.prefixes[0]}-${1000 + i} — generated spec.`,
+        disclosureType: i % 5 === 0 ? 'proofonly' : i % 4 === 0 ? 'selective' : 'full',
+      })
+    }
+  }
+
+  return specs
+}
+
+// Phase 16.2.6: 35 new mock supplier Actors representing the broader
+// defense-electronics supply chain underneath Bob's Sentinel-4 program.
+// Heavy-tailed distribution: a few super-jumbo clusters carry most of the
+// dot count, a long tail of medium and small clusters provides variety.
+// All claims are procedurally generated via generateClaimSpecsForVertical.
+const PHASE_16_2_6_NEW_MOCK_ACTORS = [
+  { id: 'helios-industries',   party: 'Helios Industries',   vertical: 'Power Systems & Propulsion',           dotCount: 500 },
+  { id: 'atlas-avionics',      party: 'Atlas Avionics',      vertical: 'Flight Computers & Integration',       dotCount: 450 },
+  { id: 'polaris-defense',     party: 'Polaris Defense',     vertical: 'RF Comms & Ground Systems',            dotCount: 400 },
+  { id: 'vortex-aerospace',    party: 'Vortex Aerospace',    vertical: 'Structures, Composites & Mechanisms',  dotCount: 350 },
+  { id: 'vega-components',     party: 'Vega Components',     vertical: 'Connectors & Harnesses',               dotCount: 180 },
+  { id: 'sirius-systems',      party: 'Sirius Systems',      vertical: 'Comms Signal Processing',              dotCount: 160 },
+  { id: 'beacon-dynamics',     party: 'Beacon Dynamics',     vertical: 'IMUs, Gyros & GPS Receivers',          dotCount: 140 },
+  { id: 'aurora-labs',         party: 'Aurora Labs',         vertical: 'Imaging Optics & Lasers',              dotCount: 120 },
+  { id: 'solstice-aerospace',  party: 'Solstice Aerospace',  vertical: 'Thermal Management & Cryogenics',      dotCount: 110 },
+  { id: 'orion-microsystems',  party: 'Orion Microsystems',  vertical: 'Mixed-Signal ICs & Processors',        dotCount: 100 },
+  { id: 'quantum-dynamics',    party: 'Quantum Dynamics',    vertical: 'Atomic Clocks & Quantum Sensors',      dotCount: 60 },
+  { id: 'cascade-aerospace',   party: 'Cascade Aerospace',   vertical: 'Composite Structures',                 dotCount: 55 },
+  { id: 'apex-avionics',       party: 'Apex Avionics',       vertical: 'Mission & Payload Computers',          dotCount: 50 },
+  { id: 'nexus-electronics',   party: 'Nexus Electronics',   vertical: 'RF & Microwave Modules',               dotCount: 50 },
+  { id: 'stellar-sensors',     party: 'Stellar Sensors',     vertical: 'Star Trackers & Sun Sensors',          dotCount: 45 },
+  { id: 'pinnacle-systems',    party: 'Pinnacle Systems',    vertical: 'Bus Controllers & Network Modules',    dotCount: 45 },
+  { id: 'citadel-aerospace',   party: 'Citadel Aerospace',   vertical: 'Pyrotechnics & Ordnance',              dotCount: 40 },
+  { id: 'catalyst-industries', party: 'Catalyst Industries', vertical: 'Adhesives & Coatings',                 dotCount: 40 },
+  { id: 'meridian-tech',       party: 'Meridian Tech',       vertical: 'Magnetics & Inductors',                dotCount: 40 },
+  { id: 'zenith-components',   party: 'Zenith Components',   vertical: 'Connectors & Backshells',              dotCount: 40 },
+  { id: 'andromeda-defense',   party: 'Andromeda Defense',   vertical: 'Cybersecurity & Encryption Modules',   dotCount: 40 },
+  { id: 'eos-defense',         party: 'Eos Defense',         vertical: 'Flight Software & Firmware',           dotCount: 35 },
+  { id: 'lyra-microsystems',   party: 'Lyra Microsystems',   vertical: 'Crystal Oscillators & Clock ICs',      dotCount: 35 },
+  { id: 'equinox-systems',     party: 'Equinox Systems',     vertical: 'Test Equipment & Calibration',         dotCount: 35 },
+  { id: 'bowsprit-defense',    party: 'Bowsprit Defense',    vertical: 'Switches & Relays',                    dotCount: 30 },
+  { id: 'albedo-optics',       party: 'Albedo Optics',       vertical: 'Optical Coatings & Mirrors',           dotCount: 25 },
+  { id: 'hyperion-components', party: 'Hyperion Components', vertical: 'EMI & RF Filters',                     dotCount: 20 },
+  { id: 'gauntlet-industries', party: 'Gauntlet Industries', vertical: 'Laser Diodes & Optical Sources',       dotCount: 18 },
+  { id: 'drifter-aerospace',   party: 'Drifter Aerospace',   vertical: 'Reaction Wheels & Momentum Storage',   dotCount: 15 },
+  { id: 'falcon-tech',         party: 'Falcon Tech',         vertical: 'GNSS Receivers & Antennas',            dotCount: 15 },
+  { id: 'kestrel-aerospace',   party: 'Kestrel Aerospace',   vertical: 'Magnetorquers & Magnetic Actuators',   dotCount: 12 },
+  { id: 'onyx-defense',        party: 'Onyx Defense',        vertical: 'Deployable Mechanisms & Hinges',       dotCount: 10 },
+  { id: 'niveus-optics',       party: 'Niveus Optics',       vertical: 'Photodetectors & Photodiodes',         dotCount: 10 },
+  { id: 'prism-aerospace',     party: 'Prism Aerospace',     vertical: 'Encoders & Position Sensors',          dotCount: 8 },
+  { id: 'cordite-labs',        party: 'Cordite Labs',        vertical: 'Material Samples & Test Coupons',      dotCount: 5 },
+]
+
 export function buildV22SharedArtifacts() {
   // ── Actors ────────────────────────────────────────────────────────────
   const bob = makeActor({
@@ -1753,6 +2066,32 @@ export function buildV22SharedArtifacts() {
     mockPublicDas.push(...bundle.publicDas)
   }
 
+  // ── Phase 16.2.6: 35 new mock supplier Actors (~3,328 dots) ───────────
+  // Procedural Claim names per vertical via generateClaimSpecsForVertical.
+  // Same architectural rules as the Phase 16.2 seed: every Actor is
+  // non-switchable, public-directory-only disclosure, no umbrella DAs.
+  // Kept in a separate accumulator solely so the Phase 16.2 caveats remain
+  // easy to reason about — the unified union happens at return-shape time.
+  const expandedMockActors = []
+  const expandedMockAssets = []
+  const expandedMockClaims = []
+  const expandedMockOwnershipDas = []
+  const expandedMockPublicDas = []
+  for (const spec of PHASE_16_2_6_NEW_MOCK_ACTORS) {
+    const claimSpecs = generateClaimSpecsForVertical(spec.party, spec.vertical, spec.dotCount)
+    const bundle = seedMockSupplierActor({
+      id: spec.id,
+      party: spec.party,
+      vertical: spec.vertical,
+      claimSpecs,
+    })
+    expandedMockActors.push(bundle.actor)
+    expandedMockAssets.push(...bundle.assets)
+    expandedMockClaims.push(...bundle.claims)
+    expandedMockOwnershipDas.push(...bundle.ownershipDas)
+    expandedMockPublicDas.push(...bundle.publicDas)
+  }
+
   // ── Alice's Assets ────────────────────────────────────────────────────
   // Phase 15.0 (#172 part 1): aPrmDatasheet + aPrmTestReport now point at
   // the calibrated PDFs generated by scripts/generate-seed-pdfs.mjs. Both
@@ -2040,6 +2379,8 @@ export function buildV22SharedArtifacts() {
     dVrefDatasheet,
     // Phase 16.2: 1 stub Asset per mock-supplier Claim (157 total).
     ...mockAssets,
+    // Phase 16.2.6: 3,328 additional stub Assets from the 35 new mock actors.
+    ...expandedMockAssets,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -3275,6 +3616,10 @@ export function buildV22SharedArtifacts() {
     // Phase 16.2: 4 × 157 = 628 internal + public DAs for the mock catalog.
     ...mockOwnershipDas,
     ...mockPublicDas,
+    // Phase 16.2.6: 4 × 3,328 = 13,312 additional DAs for the 35 new mock
+    // actors (3 internal ownership + 1 public per Claim).
+    ...expandedMockOwnershipDas,
+    ...expandedMockPublicDas,
   ]
 
   // ── Badge Templates — Phase 14.0 (#169 part 1) ────────────────────────
@@ -3400,14 +3745,15 @@ export function buildV22SharedArtifacts() {
   ]
 
   return {
-    actors: [bob, alice, carol, dave, ...mockActors, RADIANT_NETWORK_ACTOR],
+    actors: [bob, alice, carol, dave, ...mockActors, ...expandedMockActors, RADIANT_NETWORK_ACTOR],
     assets,
     parseResults,
     // Phase 16.2: union of primary-actor claims + mock-supplier claims. The
     // primary `claims` constant intentionally does NOT include `mockClaims`
     // so the generic ownership / claim-ref loops above don't double-emit
     // DAs for them — see the comment on `const claims = [...]` above.
-    claims: [...claims, ...mockClaims],
+    // Phase 16.2.6: extended with expandedMockClaims (3,328 new Claims).
+    claims: [...claims, ...mockClaims, ...expandedMockClaims],
     disclosureAgreements,
     evaluationAgreements,
     evaluationResults,

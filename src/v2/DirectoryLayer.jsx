@@ -97,7 +97,11 @@ const LABEL_HOLE_H = 3 * DOT_GRID                      // 144 (was 36)
 const INTER_CLUSTER_BUFFER = 2 * DOT_GRID              // 96 (was 24)
 const SUNFLOWER_MAX_ITER_PER_DOT = 4                   // give up after N×4 spiral steps
 // Lloyd-iterated centroidal Voronoi tessellation parameters.
-const LLOYD_MAX_ITER = 10
+// Phase 16.2.6: 10 → 20. At 52 seeds (35 new mock + 12 existing + 4 switchable +
+// Radiant Network anchor) Lloyd's needs more iterations to converge cell areas
+// to the target distribution. 16.2.5 reported ~194 wu residual at 12 actors;
+// extra headroom helps the denser tessellation reach DOT_GRID-scale residual.
+const LLOYD_MAX_ITER = 20
 const LLOYD_CONVERGENCE_DELTA = DOT_GRID               // converged when max displacement < this
 
 // Phase 16.1.3 Item 2 + 9: max InstancedMesh capacity for stable lifecycle.
