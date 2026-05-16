@@ -31,6 +31,7 @@
 
 import { useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
 import * as THREE from 'three'
+import { Delaunay } from 'd3-delaunay'
 import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals } from './v2_2Data.js'
 import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 
@@ -40,40 +41,49 @@ const DOT_RADIUS = 3
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
 const RFP_BORDER = 1                  // hollow RFP circle border thickness
-const MAX_COLS = 6
 const ROW_GAP = DOT_GRID
 const COL_GAP = DOT_GRID
 const ACTOR_LABEL_OFFSET = 18
-const CLUSTER_PAD = 5
 const TOOLTIP_W = 230
 const TOOLTIP_OFFSET = 12
-const CLUSTER_BUFFER_CELLS = 12
-const CLUSTER_BUFFER = CLUSTER_BUFFER_CELLS * DOT_GRID
 
-// Phase 16.2.3: bounded canvas matching 16" MacBook Pro logical resolution
-// at 10% zoom (default INITIAL_ZOOM = 0.1). At default zoom the canvas
-// exactly fills the MBP viewport so the user sees the whole galactic view
-// on first load.
-const CANVAS_WIDTH = 17280
-const CANVAS_HEIGHT = 11170
-// Active Actor's own cluster anchors at canvas-bottom-center, shifted up
-// 20% from the bottom edge so the cluster has visual breathing room above
-// the footer.
-const OWN_CLUSTER_ANCHOR_X = CANVAS_WIDTH / 2          // 8640
-const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 8936
+// Phase 16.2.4: bounded canvas at 16" MBP logical resolution × (1/0.15).
+// Default zoom 0.15 → full canvas fills the MBP viewport. Smaller area than
+// 16.2.3 (11520×7447 vs 17280×11170) yields denser-feeling clusters at the
+// current seed size and reduces the dot-count target for Phase 16.2.5.
+const CANVAS_WIDTH = 11520
+const CANVAS_HEIGHT = 7447
+const OWN_CLUSTER_ANCHOR_X = CANVAS_WIDTH / 2          // 5760
+const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 5957.6 — 20% up from bottom
 
 // ─── Camera / zoom constants ───────────────────────────────────────────
-// Phase 16.2.3: galactic-view defaults — load fully zoomed out (0.1 = 10%)
-// so the whole 17280×11170 canvas fits in the viewport.
-const MIN_ZOOM = 0.1
+// Phase 16.2.4: galactic-view default — load fully zoomed out (0.15 = 15%)
+// so the whole 11520×7447 canvas fits in the viewport.
+const MIN_ZOOM = 0.15
 const MAX_ZOOM = 4.0
-const INITIAL_ZOOM = 0.1
-// Phase 16.2.3: grid spans the full canvas with sparser spacing (4×DOT_GRID)
-// to keep the THREE.Points buffer count reasonable (~84k points).
+const INITIAL_ZOOM = 0.15
+// Background-grid spacing — sparser than DOT_GRID to keep the THREE.Points
+// buffer count tractable across the canvas extent.
 const GRID_SPACING = DOT_GRID * 4
 const GRID_MARGIN = 600
 const DRAG_THRESHOLD_PX = 4
 const PANEL_W = 480                   // Detail Panel width — mirrors V2App's PANEL_W
+
+// Phase 16.2.4: sunflower phyllotaxis primitives for cluster dot placement.
+// Each cluster's N dots are placed in a Vogel sunflower spiral around its
+// Voronoi cell centroid, with a reserved 6×3 cell rectangle at the center
+// for the Actor label. The 2-cell inter-cluster buffer is enforced during
+// dot acceptance — boundary dots can't sit within 2×DOT_GRID of any dot
+// belonging to another cluster.
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))      // ~137.5°
+const SUNFLOWER_SCALE = 1.7                            // arm spacing tuning
+const LABEL_HOLE_W = 6 * DOT_GRID                      // 72 world units
+const LABEL_HOLE_H = 3 * DOT_GRID                      // 36
+const INTER_CLUSTER_BUFFER = 2 * DOT_GRID              // 24
+const SUNFLOWER_MAX_ITER_PER_DOT = 4                   // give up after N×4 spiral steps
+// Lloyd-iterated centroidal Voronoi tessellation parameters.
+const LLOYD_MAX_ITER = 10
+const LLOYD_CONVERGENCE_DELTA = DOT_GRID               // converged when max displacement < this
 
 // Phase 16.1.3 Item 2 + 9: max InstancedMesh capacity for stable lifecycle.
 const MAX_DOTS = 10000
@@ -197,8 +207,12 @@ function PillboxLabel({ ownerParty, x, y, faded, opacity = 1 }) {
       style={{
         position: 'absolute',
         left: x,
-        top: y - ACTOR_SQUARE / 2 - ACTOR_LABEL_OFFSET,
-        transform: 'translateX(-50%)',
+        // Phase 16.2.4: label centered inside cluster (occupies the
+        // reserved 6×3 cell label hole). Previously sat above the
+        // Actor square at top = y - ACTOR_SQUARE/2 - ACTOR_LABEL_OFFSET;
+        // the Actor square has been retired in this phase.
+        top: y,
+        transform: 'translate(-50%, -50%)',
         padding: '3px 8px',
         borderRadius: 999,
         background: 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
@@ -222,6 +236,187 @@ function PillboxLabel({ ownerParty, x, y, faded, opacity = 1 }) {
 
 const PILLBOX_W = 64
 const PILLBOX_H = 16
+// ─── Phase 16.2.4 geometry helpers ────────────────────────────────────
+//
+// Inline polygon utilities for the Voronoi tessellation pipeline. Imported
+// here rather than via a third-party polygon library — each function is
+// short and the dependency surface is kept minimal.
+
+function polygonArea(poly) {
+  let s = 0
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    s += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1])
+  }
+  return s * 0.5
+}
+
+function polygonCentroid(poly) {
+  let cx = 0, cy = 0, a = 0
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const f = poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1]
+    cx += (poly[j][0] + poly[i][0]) * f
+    cy += (poly[j][1] + poly[i][1]) * f
+    a += f
+  }
+  a *= 0.5
+  if (Math.abs(a) < 1e-9) {
+    // Degenerate polygon — fall back to vertex average.
+    cx = poly.reduce((s, p) => s + p[0], 0) / poly.length
+    cy = poly.reduce((s, p) => s + p[1], 0) / poly.length
+    return [cx, cy]
+  }
+  return [cx / (6 * a), cy / (6 * a)]
+}
+
+function pointInPolygon(x, y, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1]
+    const xj = poly[j][0], yj = poly[j][1]
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+// Andrew's monotone-chain convex hull. Returns vertices in counter-clockwise
+// order (or empty array when fewer than 3 unique points are supplied).
+function convexHull(points) {
+  if (points.length < 3) return [...points]
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const lower = []
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop()
+    }
+    lower.push(p)
+  }
+  const upper = []
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i]
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop()
+    }
+    upper.push(p)
+  }
+  lower.pop()
+  upper.pop()
+  return lower.concat(upper)
+}
+
+// Offset a polygon outward by `dist` world units. Uses the per-vertex
+// bisector normal — works for the convex polygons we produce (from
+// convexHull above). Returns a new polygon.
+function offsetPolygonOutward(poly, dist) {
+  if (poly.length < 3) return [...poly]
+  // Ensure CCW orientation so outward bisectors point outward.
+  const a = polygonArea(poly)
+  const oriented = a < 0 ? [...poly].reverse() : poly
+  const n = oriented.length
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const prev = oriented[(i - 1 + n) % n]
+    const cur = oriented[i]
+    const next = oriented[(i + 1) % n]
+    // Inward edges (cur - prev) and (next - cur); outward normal is the
+    // bisector of their outward-pointing perpendiculars.
+    const e1x = cur[0] - prev[0], e1y = cur[1] - prev[1]
+    const e2x = next[0] - cur[0], e2y = next[1] - cur[1]
+    const len1 = Math.hypot(e1x, e1y) || 1
+    const len2 = Math.hypot(e2x, e2y) || 1
+    // Outward perpendiculars (right-hand, for CCW polygons).
+    const n1x = e1y / len1, n1y = -e1x / len1
+    const n2x = e2y / len2, n2y = -e2x / len2
+    let bx = n1x + n2x
+    let by = n1y + n2y
+    const blen = Math.hypot(bx, by) || 1
+    bx /= blen
+    by /= blen
+    // Miter length: dist / cos(half-angle). cos(half-angle) = dot(n1, b).
+    const cosHalf = Math.max(0.2, n1x * bx + n1y * by)
+    const miter = dist / cosHalf
+    out.push([cur[0] + bx * miter, cur[1] + by * miter])
+  }
+  return out
+}
+
+// Clip a polygon to the canvas rectangle (Sutherland–Hodgman). The Voronoi
+// cells from d3-delaunay are already clipped via the bounding box passed
+// to `delaunay.voronoi([0,0,W,H])`, but extra clipping is cheap insurance
+// against numerical edge cases.
+function clipPolygonToRect(poly, x0, y0, x1, y1) {
+  let out = poly
+  const clip = (input, edge) => {
+    const result = []
+    for (let i = 0, j = input.length - 1; i < input.length; j = i++) {
+      const a = input[j], b = input[i]
+      const aIn = edge(a), bIn = edge(b)
+      if (aIn && bIn) result.push(b)
+      else if (aIn && !bIn) result.push(intersect(a, b, edge))
+      else if (!aIn && bIn) { result.push(intersect(a, b, edge)); result.push(b) }
+    }
+    return result
+  }
+  const intersect = (a, b, _edge) => {
+    // Walk parametrically t∈[0,1] and find the t where edge() flips sign.
+    // For axis-aligned edges this is exact.
+    return [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5]  // fallback midpoint (rarely hit)
+  }
+  out = clip(out, (p) => p[0] >= x0)
+  out = clip(out, (p) => p[0] <= x1)
+  out = clip(out, (p) => p[1] >= y0)
+  out = clip(out, (p) => p[1] <= y1)
+  return out
+}
+void clipPolygonToRect  // reserved for future use
+
+function vogelPosition(i, cx, cy) {
+  const angle = i * GOLDEN_ANGLE
+  const radius = Math.sqrt(i + 0.5) * DOT_GRID * SUNFLOWER_SCALE
+  return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]
+}
+
+function isInLabelHole(px, py, cx, cy) {
+  return Math.abs(px - cx) < LABEL_HOLE_W / 2 && Math.abs(py - cy) < LABEL_HOLE_H / 2
+}
+
+// Build the per-cluster umbrella outline path. Concave-hull would be the
+// preferred shape but the canonical `concaveman` algorithm requires another
+// dep — for the current cluster sizes the convex hull is visually clean.
+// Fallback for <3 dots: bounding circle approximated as a 24-sided polygon.
+function umbrellaOutlinePath(umbrellaDots) {
+  if (!umbrellaDots || umbrellaDots.length === 0) return null
+  const points = umbrellaDots.map((d) => [d.x, d.y])
+  if (points.length === 1) {
+    const [cx, cy] = points[0]
+    const r = DOT_GRID + DOT_RADIUS + DOT_GRID  // +1 cell margin
+    const segs = 24
+    const ring = []
+    for (let i = 0; i < segs; i++) {
+      const a = (i / segs) * Math.PI * 2
+      ring.push([cx + r * Math.cos(a), cy + r * Math.sin(a)])
+    }
+    return ring
+  }
+  if (points.length === 2) {
+    // Stadium (capsule) approximation via convex-hull of two circles.
+    const [a, b] = points
+    const r = DOT_RADIUS + DOT_GRID
+    const segs = 24
+    const ring = []
+    for (let i = 0; i < segs; i++) {
+      const t = (i / segs) * Math.PI * 2
+      ring.push([a[0] + r * Math.cos(t), a[1] + r * Math.sin(t)])
+      ring.push([b[0] + r * Math.cos(t), b[1] + r * Math.sin(t)])
+    }
+    return convexHull(ring)
+  }
+  const hull = convexHull(points)
+  return offsetPolygonOutward(hull, DOT_GRID)
+}
+
 function isHoverNearPillbox(hoverScreen, pillX, pillY) {
   if (!hoverScreen) return false
   const dotR = 3
@@ -236,300 +431,275 @@ function isHoverNearPillbox(hoverScreen, pillX, pillY) {
 function computeLayout(directoryData, viewport) {
   if (!directoryData) return null
 
+  // Phase 16.2.4 rewrite — replaces Phase 16.2.3's polar Poisson disc
+  // fan-out + rectangular cluster grid with:
+  //   1. Lloyd-iterated centroidal Voronoi tessellation for cluster
+  //      placement (active Actor's seed pinned at the bottom-center anchor;
+  //      cell areas pulled toward target_area_i ∝ dot_count_i).
+  //   2. Vogel sunflower phyllotaxis for per-cluster dot placement, with a
+  //      reserved 6×3 cell label hole at the cluster centroid.
+  //   3. Convex-hull umbrella outline (replacing Phase 16.0's rectangular
+  //      L-shape boundary). Falls back to circle/stadium for <3 dots.
+  //
   // Phase 16.1.3 Item 8: lookup-by-claim-id for per-claim disclosure types.
-  // Build maps for public + (umbrella from active actor's POV) DA types.
-  // The Phase 16.0 view-builder doesn't return raw DAs; we re-derive here
-  // from the cluster's `umbrellaClaims` + `publicClaims` arrays. To avoid
-  // a wholesale refactor of the view-builder, we walk shared DAs inline.
-  // (This is fine — `buildV22DirectoryDataForRole` already does similar
-  // work; an alternative is to thread `daTypeForClaim` from the builder.)
+  // Per-Claim disclosure type comes in via cluster.publicTypeByClaimId /
+  // cluster.umbrellaTypeByClaimId (see the parent component's view-builder
+  // decoration). For non-umbrella publics we map disclosure type → color
+  // var via disclosureTypeToColorVar.
 
-  // Phase 16.2.3: active Actor's own cluster anchors at canvas-bottom-center.
-  // The 12 mock supplier clusters + ChipCo + MicroCo fan outward from this
-  // anchor across the upper hemisphere of the bounded canvas.
+  // Phase 16.2.4: active Actor's own cluster anchors at canvas-bottom-center.
+  // Lloyd's iterations pin index-0 seed; other clusters distribute around it.
   const userCenterX = OWN_CLUSTER_ANCHOR_X
   const userCenterY = OWN_CLUSTER_ANCHOR_Y
 
   const allDots = []
   const clusterByDotIndex = []
 
-  // Phase 16.1.3 Items 3 + 8: cell layout helper with squareCell reservation.
-  // Per-Claim disclosure type passed in via per-Claim metadata.
-  function layoutClusterCells(umbrellaClaims, publicClaims, rfps, squareCell) {
-    const reservedSet = new Set()
-    if (squareCell) reservedSet.add(`${squareCell.row},${squareCell.col}`)
-
-    // Place umbrella row-major starting at row 1 (row 0 = top buffer), but
-    // SKIP the squareCell if it falls on an umbrella position. Push to the
-    // next available cell.
-    const umbrellaCells = []
-    if (umbrellaClaims.length > 0) {
-      let r = 1, c = 0, safety = 0
-      for (let i = 0; i < umbrellaClaims.length && safety < 1000; safety++) {
-        const key = `${r},${c}`
-        if (!reservedSet.has(key)) {
-          umbrellaCells.push({
-            ...umbrellaClaims[i],
-            row: r, col: c,
-          })
-          i++
-        }
-        c++
-        if (c >= MAX_COLS) { r++; c = 0 }
-      }
-    }
-    const umbrellaSet = new Set(umbrellaCells.map((c) => `${c.row},${c.col}`))
-    const bufferSet = new Set()
-    for (const cell of umbrellaCells) {
-      for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const nr = cell.row + dr
-        const nc = cell.col + dc
-        const key = `${nr},${nc}`
-        if (!umbrellaSet.has(key)) bufferSet.add(key)
-      }
-    }
-    // Pack public + RFPs together via row-major scan, skipping umbrella +
-    // buffer + reserved (squareCell).
-    const remaining = [
-      ...publicClaims.map((c) => ({ ...c, kind: 'public' })),
-      ...rfps.map((r) => ({ ...r, kind: 'rfp' })),
-    ]
-    const remainingCells = []
-    let r = 0, c = 0, safety = 0
-    for (let i = 0; i < remaining.length; i++) {
-      while (safety < 1000) {
-        safety++
-        const key = `${r},${c}`
-        if (!umbrellaSet.has(key) && !bufferSet.has(key) && !reservedSet.has(key) && c >= 0 && c < MAX_COLS) {
-          remainingCells.push({ ...remaining[i], row: r, col: c })
-          c++
-          if (c >= MAX_COLS) { r++; c = 0 }
-          break
-        }
-        c++
-        if (c >= MAX_COLS) { r++; c = 0 }
-      }
-    }
-    return { umbrellaCells, remainingCells }
-  }
-
-  function buildCluster({ ownerParty, umbrellaItems, publicItems, rfpItems, isOwnCluster, centerOverride }) {
-    const totalDots = umbrellaItems.length + publicItems.length + rfpItems.length
-    const colsUsed = Math.min(MAX_COLS, Math.max(1, totalDots))
-    const clusterPxWidth = colsUsed * DOT_GRID
-
-    // Phase 16.1.3 Item 3: pre-compute squareCell so umbrella + public
-    // placement can skip it. squareCol = middle of 6-col grid. squareRow
-    // depends on whether umbrella exists (umbrella shifts dots down by 1).
-    const totalRowsEstimate = Math.max(
-      1,
-      Math.ceil((umbrellaItems.length) / MAX_COLS),
-    )
-    const squareCol = Math.floor(MAX_COLS / 2)  // = 3
-    // For umbrella clusters: row 0 is top buffer; place square at row 2
-    // (visual midpoint with row 0 buffer + rows 1-N umbrella + post-umbrella indigo).
-    // For non-umbrella clusters: place square at row 0 (only row used).
-    const squareRow = umbrellaItems.length > 0
-      ? Math.max(1, Math.ceil(totalRowsEstimate / 2) + 1)  // mid of umbrella+post region
-      : 0
-    const squareCell = { row: squareRow, col: squareCol }
-
-    const { umbrellaCells, remainingCells } = layoutClusterCells(umbrellaItems, publicItems, rfpItems, squareCell)
-    const cellsPlaced = [...umbrellaCells, ...remainingCells]
-
-    let minRow = 0, maxRow = 0
-    if (cellsPlaced.length > 0) {
-      minRow = Math.min(...cellsPlaced.map((c) => c.row))
-      maxRow = Math.max(...cellsPlaced.map((c) => c.row))
-    }
-    if (umbrellaItems.length > 0) {
-      minRow = Math.min(minRow, 0)
-      const lastUmbrella = umbrellaCells[umbrellaCells.length - 1]
-      if (lastUmbrella) maxRow = Math.max(maxRow, lastUmbrella.row + 1)
-    }
-    // squareCell.row also factors into bounds.
-    minRow = Math.min(minRow, squareCell.row)
-    maxRow = Math.max(maxRow, squareCell.row)
-    const rowsCount = maxRow - minRow + 1
-
-    const center = centerOverride || { x: 0, y: 0 }
-    const anchorX = snapGrid(center.x - clusterPxWidth / 2)
-    const anchorY = snapGrid(center.y - ((maxRow + minRow) / 2) * ROW_GAP)
-
-    const dots = cellsPlaced.map((entry) => {
-      const colorVar = entry.kind === 'rfp'
-        ? '--accent-cyan'
-        : disclosureTypeToColorVar(entry.disclosureType)
-      return {
-        ...entry,
-        colorVar,
-        x: anchorX + entry.col * COL_GAP,
-        y: anchorY + entry.row * ROW_GAP,
-      }
-    })
-
-    const squareWorldX = anchorX + squareCell.col * COL_GAP
-    const squareWorldY = anchorY + squareCell.row * ROW_GAP
-
-    // L-shape boundary path. Built in WORLD coords. Color is now neutral
-    // grey (Phase 16.1.3 Item 8) — amber is reserved for selective dots.
-    let umbrellaPathWorld = null
-    if (umbrellaCells.length > 0) {
-      const cellLeftW = (col) => anchorX + col * COL_GAP - DOT_RADIUS - CLUSTER_PAD
-      const cellRightW = (col) => anchorX + col * COL_GAP + DOT_RADIUS + CLUSTER_PAD
-      const cellTopW = (row) => anchorY + row * ROW_GAP - DOT_RADIUS - CLUSTER_PAD
-      const cellBottomW = (row) => anchorY + row * ROW_GAP + DOT_RADIUS + CLUSTER_PAD
-      const rowMaxCol = new Map()
-      for (const { row, col } of umbrellaCells) {
-        rowMaxCol.set(row, Math.max(rowMaxCol.get(row) ?? -Infinity, col))
-      }
-      const urows = [...rowMaxCol.keys()].sort((a, b) => a - b)
-      const points = []
-      const firstUR = urows[0]
-      const lastUR = urows[urows.length - 1]
-      points.push([cellLeftW(0), cellTopW(firstUR)])
-      points.push([cellRightW(rowMaxCol.get(firstUR)), cellTopW(firstUR)])
-      for (let i = 0; i < urows.length - 1; i++) {
-        const thisR = urows[i], nextR = urows[i + 1]
-        points.push([cellRightW(rowMaxCol.get(thisR)), cellBottomW(thisR)])
-        points.push([cellRightW(rowMaxCol.get(nextR)), cellBottomW(thisR)])
-      }
-      points.push([cellRightW(rowMaxCol.get(lastUR)), cellBottomW(lastUR)])
-      points.push([cellLeftW(0), cellBottomW(lastUR)])
-      points.push([cellLeftW(0), cellTopW(firstUR)])
-      umbrellaPathWorld = points
-    }
-
-    const halfW = clusterPxWidth / 2 + CLUSTER_PAD
-    const halfH = (rowsCount / 2 + 1) * ROW_GAP + CLUSTER_PAD
-    const bbox = {
-      minX: center.x - halfW,
-      maxX: center.x + halfW,
-      minY: center.y - halfH,
-      maxY: center.y + halfH,
-    }
-
-    return {
-      ownerParty,
-      isOwnCluster,
-      center,
-      squareWorld: { x: squareWorldX, y: squareWorldY },
-      dots,
-      umbrellaPathWorld,
-      rowsCount,
-      bbox,
-    }
-  }
-
-  // ─── User's own cluster ──────────────────────────────────────────────
-  const ownClusters = []
-  if (directoryData.isUserVisible) {
-    const own = buildCluster({
-      ownerParty: directoryData.activeParty,
-      umbrellaItems: [],
-      // Own Claims render as indigo (full disclosure to self).
-      publicItems: directoryData.ownClaims.map((c) => ({ claim: c, disclosureType: 'full' })),
-      rfpItems: directoryData.ownRfps.map((r) => ({ rfp: r })),
-      isOwnCluster: true,
-      centerOverride: { x: userCenterX, y: userCenterY },
-    })
-    ownClusters.push(own)
-  }
-
-  const placedBoxes = ownClusters.map((c) => c.bbox)
-  const violatesBuffer = (candidateBbox) => placedBoxes.some((p) => {
-    return !(
-      candidateBbox.maxX + CLUSTER_BUFFER < p.minX ||
-      candidateBbox.minX > p.maxX + CLUSTER_BUFFER ||
-      candidateBbox.maxY + CLUSTER_BUFFER < p.minY ||
-      candidateBbox.minY > p.maxY + CLUSTER_BUFFER
-    )
-  })
-
-  // ─── Other clusters — Phase 16.2.3 polar Poisson disc fan-out. ────────
-  // For each non-active cluster (12 mock + ChipCo + MicroCo where visible),
-  // sample (θ, r) in polar space emanating from the active Actor anchor:
-  //   • θ ∈ [-75°, +75°] from straight up (upper 150° arc).
-  //   • r ∈ [r_min, r_max] world units (keeps off-anchor + within canvas).
-  // Cartesian: cx = anchor.x + r·sin(θ); cy = anchor.y - r·cos(θ).
-  // Collision check via the existing buffer rule; canvas-bounds check vs.
-  // CANVAS_WIDTH/HEIGHT. Up to 50 retries with seed-perturbed samples.
-  // Sort input by descending Claim count (jumbo first) so large clusters
-  // get first pick of placement space.
-  const POISSON_R_MIN = 2000
-  const POISSON_R_MAX = CANVAS_HEIGHT * 0.75  // 8377.5
-  const POISSON_THETA_HALF_DEG = 75
-  const POISSON_MAX_RETRIES = 50
-  const totalDotsFor = (c) => (c.umbrellaClaims?.length || 0) + (c.publicClaims?.length || 0)
-  const otherClustersInput = [...directoryData.otherClusters].sort((a, b) => {
-    const dotDiff = totalDotsFor(b) - totalDotsFor(a)
-    if (dotDiff !== 0) return dotDiff
-    return hashString(a.ownerParty) - hashString(b.ownerParty)
-  })
-  const inBounds = (bbox) =>
-    bbox.minX >= 0 && bbox.maxX <= CANVAS_WIDTH &&
-    bbox.minY >= 0 && bbox.maxY <= CANVAS_HEIGHT
-  const otherClusters = []
-  for (let i = 0; i < otherClustersInput.length; i++) {
-    const cluster = otherClustersInput[i]
-    const seed = hashString(cluster.ownerParty)
-    const baseUmbrellaItems = cluster.umbrellaClaims.map((c) => ({
+  // ─── Step 1: assemble cluster specs ──────────────────────────────────
+  // The active Actor goes FIRST so its index is 0 (pinned at the anchor
+  // through Lloyd's). Carol (anonymous, no own Claims) still gets a seed
+  // here so the tessellation has a cell at the anchor — the cell just has
+  // dot_count = 0 and renders no dots/label.
+  const clusterSpecs = []
+  const activeParty = directoryData.activeParty
+  const buildItems = (cluster) => {
+    const umbrellaItems = (cluster.umbrellaClaims || []).map((c) => ({
       claim: c,
       disclosureType: cluster.umbrellaTypeByClaimId?.[c.id] || 'full',
+      kind: 'umbrella',
     }))
-    const basePublicItems = cluster.publicClaims.map((c) => ({
+    const publicItems = (cluster.publicClaims || []).map((c) => ({
       claim: c,
       disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
+      kind: 'public',
     }))
-    let placed = null
-    let lastAttempt = null
-    for (let attempt = 0; attempt < POISSON_MAX_RETRIES; attempt++) {
-      // Deterministic-ish PRNG via cluster-seed + attempt.
-      const a = ((seed + attempt * 9173) >>> 0) % 10000 / 10000
-      const b = ((seed * 31 + attempt * 12289) >>> 0) % 10000 / 10000
-      const c2 = ((seed * 7 + attempt * 28201) >>> 0) % 10000 / 10000
-      const thetaDeg = (a * 2 - 1) * POISSON_THETA_HALF_DEG
-      const theta = thetaDeg * Math.PI / 180
-      // Bias radius toward outer range so clusters spread out across the
-      // canvas instead of clumping near the anchor. The `attempt` index
-      // gradually pulls r inward if early outer attempts collide.
-      const rScale = 0.35 + 0.65 * b  // 0.35..1.0
-      const rAdjust = Math.max(0, 1 - attempt / POISSON_MAX_RETRIES * 0.5)
-      const r = POISSON_R_MIN + (POISSON_R_MAX - POISSON_R_MIN) * rScale * rAdjust
-      const cx = snapGrid(userCenterX + r * Math.sin(theta) + (c2 - 0.5) * 40)
-      const cy = snapGrid(userCenterY - r * Math.cos(theta) + (c2 - 0.5) * 40)
-      const candidate = buildCluster({
-        ownerParty: cluster.ownerParty,
-        umbrellaItems: baseUmbrellaItems,
-        publicItems: basePublicItems,
-        rfpItems: [],
-        isOwnCluster: false,
-        centerOverride: { x: cx, y: cy },
-      })
-      lastAttempt = candidate
-      if (!inBounds(candidate.bbox)) continue
-      if (violatesBuffer(candidate.bbox)) continue
-      placed = candidate
+    return { umbrellaItems, publicItems }
+  }
+  // Active Actor's own cluster — always present in clusterSpecs so the
+  // tessellation has an anchor seed. dot_count = 0 if no own claims (Carol).
+  const activeOwnUmbrella = []
+  const activeOwnPublic = (directoryData.ownClaims || []).map((c) => ({
+    claim: c, disclosureType: 'full', kind: 'public',
+  }))
+  const activeOwnRfp = (directoryData.ownRfps || []).map((r) => ({
+    rfp: r, kind: 'rfp', disclosureType: 'full',
+  }))
+  clusterSpecs.push({
+    ownerParty: activeParty,
+    isOwnCluster: true,
+    umbrellaItems: activeOwnUmbrella,
+    publicItems: activeOwnPublic,
+    rfpItems: activeOwnRfp,
+    isUserVisible: !!directoryData.isUserVisible,
+  })
+  // Other clusters in deterministic alphabetical order.
+  const otherClustersInput = [...directoryData.otherClusters].sort(
+    (a, b) => a.ownerParty.localeCompare(b.ownerParty)
+  )
+  for (const c of otherClustersInput) {
+    const { umbrellaItems, publicItems } = buildItems(c)
+    clusterSpecs.push({
+      ownerParty: c.ownerParty,
+      isOwnCluster: false,
+      umbrellaItems,
+      publicItems,
+      rfpItems: [],
+      isUserVisible: true,
+    })
+  }
+  const dotCountOf = (s) => s.umbrellaItems.length + s.publicItems.length + s.rfpItems.length
+
+  // ─── Step 2: Lloyd-iterated centroidal Voronoi tessellation ──────────
+  // Seed positions: active pinned, others seeded by hash → deterministic
+  // (CANVAS_WIDTH/HEIGHT-bounded) start, then relaxed toward centroid each
+  // iteration. Cells target area ∝ dot count.
+  const seeds = clusterSpecs.map((spec, i) => {
+    if (i === 0) return [userCenterX, userCenterY]
+    const h = hashString(spec.ownerParty)
+    // Hash-derived deterministic position avoiding the immediate anchor
+    // neighborhood — keep initial seeds in the upper 70% of the canvas so
+    // Lloyd's converges quickly toward the desired fan-out shape.
+    const ax = ((h * 31) >>> 0) % 10000 / 10000
+    const ay = ((h * 17) >>> 0) % 10000 / 10000
+    return [
+      0.1 * CANVAS_WIDTH + ax * 0.8 * CANVAS_WIDTH,
+      0.1 * CANVAS_HEIGHT + ay * 0.55 * CANVAS_HEIGHT,
+    ]
+  })
+  const totalDots = clusterSpecs.reduce((s, c) => s + dotCountOf(c), 0) || 1
+  const canvasArea = CANVAS_WIDTH * CANVAS_HEIGHT
+  const targetAreas = clusterSpecs.map((spec) => {
+    const n = dotCountOf(spec)
+    // Empty clusters (Carol's anchor) still get a small share so they
+    // don't get squeezed to zero area.
+    const share = Math.max(0.01, n / totalDots)
+    return canvasArea * share
+  })
+  let lloydIters = 0
+  let lloydConverged = false
+  let lloydMaxDisplacement = 0
+  for (let iter = 0; iter < LLOYD_MAX_ITER; iter++) {
+    lloydIters = iter + 1
+    const delaunay = Delaunay.from(seeds)
+    const voronoi = delaunay.voronoi([0, 0, CANVAS_WIDTH, CANVAS_HEIGHT])
+    let maxDelta = 0
+    for (let i = 0; i < seeds.length; i++) {
+      if (i === 0) continue  // active Actor's seed pinned
+      const poly = voronoi.cellPolygon(i)
+      if (!poly) continue
+      const [ccx, ccy] = polygonCentroid(poly)
+      const currentArea = Math.abs(polygonArea(poly))
+      const areaError = (targetAreas[i] - currentArea) / Math.max(1, targetAreas[i])
+      // tanh-sigmoid step factor: 0.5..1.0 (deficit cells take bigger steps,
+      // overflow cells take smaller steps toward their centroid).
+      const stepFactor = 0.5 + 0.5 * Math.tanh(areaError)
+      const newX = seeds[i][0] + (ccx - seeds[i][0]) * stepFactor
+      const newY = seeds[i][1] + (ccy - seeds[i][1]) * stepFactor
+      maxDelta = Math.max(maxDelta, Math.hypot(newX - seeds[i][0], newY - seeds[i][1]))
+      seeds[i] = [newX, newY]
+    }
+    lloydMaxDisplacement = maxDelta
+    if (maxDelta < LLOYD_CONVERGENCE_DELTA) {
+      lloydConverged = true
       break
     }
-    if (placed) {
-      otherClusters.push(placed)
-      placedBoxes.push(placed.bbox)
-    } else if (lastAttempt) {
-      // Fallback: keep the final attempt and surface a console warning so
-      // density issues are visible during dev stress tests.
-      if (typeof console !== 'undefined') {
-        // eslint-disable-next-line no-console
-        console.warn(`[DirectoryLayer] Polar Poisson disc fallback for cluster ${cluster.ownerParty} (${otherClustersInput.length} non-own clusters)`)
+  }
+  if (!lloydConverged && typeof console !== 'undefined') {
+    // eslint-disable-next-line no-console
+    console.warn(`[DirectoryLayer] Lloyd's iteration capped at ${LLOYD_MAX_ITER}; max displacement ${lloydMaxDisplacement.toFixed(1)} wu still > ${LLOYD_CONVERGENCE_DELTA}`)
+  }
+  // Final Voronoi cells after iteration.
+  const finalDelaunay = Delaunay.from(seeds)
+  const finalVoronoi = finalDelaunay.voronoi([0, 0, CANVAS_WIDTH, CANVAS_HEIGHT])
+
+  // ─── Step 3: per-cluster sunflower dot placement ─────────────────────
+  // Each cluster's dots are placed via Vogel sunflower starting from i=0,
+  // skipping positions that (a) fall inside the label hole, (b) fall outside
+  // the cluster's Voronoi cell, (c) sit within INTER_CLUSTER_BUFFER of a
+  // dot belonging to another cluster, or (d) collide with an already-placed
+  // dot in this cluster. Umbrella items go in the first spiral arcs (inner
+  // ring) so the convex-hull outline reads as a single connected subset.
+  const clusters = []
+  const allPlacedDots = []  // accumulates positions for inter-cluster buffer check
+  for (let ci = 0; ci < clusterSpecs.length; ci++) {
+    const spec = clusterSpecs[ci]
+    const seed = seeds[ci]
+    const cellPoly = finalVoronoi.cellPolygon(ci) || []
+    const centerX = seed[0]
+    const centerY = seed[1]
+    const items = [...spec.umbrellaItems, ...spec.publicItems, ...spec.rfpItems]
+    const N = items.length
+
+    // If this is the active Actor's seed AND no own claims (Carol), render
+    // nothing — but keep the cluster entry so downstream code (camera
+    // animations, label maps) has a place to look.
+    const placedDots = []
+    if (N > 0) {
+      const maxSpiralSteps = Math.max(60, N * SUNFLOWER_MAX_ITER_PER_DOT + 30)
+      let itemIdx = 0
+      for (let i = 0; i < maxSpiralSteps && itemIdx < N; i++) {
+        const [rx, ry] = vogelPosition(i, centerX, centerY)
+        const x = snapGrid(rx)
+        const y = snapGrid(ry)
+        if (isInLabelHole(x, y, centerX, centerY)) continue
+        if (cellPoly.length >= 3 && !pointInPolygon(x, y, cellPoly)) continue
+        let collidesOther = false
+        for (let k = 0; k < allPlacedDots.length; k++) {
+          const od = allPlacedDots[k]
+          if (od.clusterIdx === ci) continue
+          if (Math.hypot(od.x - x, od.y - y) < INTER_CLUSTER_BUFFER) { collidesOther = true; break }
+        }
+        if (collidesOther) continue
+        let collidesSelf = false
+        for (let k = 0; k < placedDots.length; k++) {
+          if (Math.hypot(placedDots[k].x - x, placedDots[k].y - y) < DOT_GRID * 0.9) { collidesSelf = true; break }
+        }
+        if (collidesSelf) continue
+        const item = items[itemIdx++]
+        const colorVar = item.kind === 'rfp'
+          ? '--accent-cyan'
+          : disclosureTypeToColorVar(item.disclosureType)
+        const placed = {
+          x, y,
+          colorVar,
+          kind: item.kind || 'public',
+          claim: item.claim || null,
+          rfp: item.rfp || null,
+          type: item.kind === 'umbrella' ? 'umbrella' : (item.kind || 'public'),
+          clusterIdx: ci,
+        }
+        placedDots.push(placed)
+        allPlacedDots.push(placed)
       }
-      otherClusters.push(lastAttempt)
-      placedBoxes.push(lastAttempt.bbox)
+      if (placedDots.length < N && typeof console !== 'undefined') {
+        // eslint-disable-next-line no-console
+        console.warn(`[DirectoryLayer] Sunflower overflow for ${spec.ownerParty}: placed ${placedDots.length}/${N} (Voronoi cell may be too small — see Lloyd's convergence above).`)
+      }
     }
+
+    // Umbrella outline path: convex hull of umbrella dots, +1 cell margin.
+    const umbrellaDots = placedDots.filter((d) => d.kind === 'umbrella')
+    const umbrellaPathWorld = umbrellaDots.length > 0
+      ? umbrellaOutlinePath(umbrellaDots)
+      : null
+
+    // Bbox for hit-testing / camera animations — derived from placed dots
+    // or fall back to the Voronoi cell when there are no dots.
+    let bbox
+    if (placedDots.length > 0) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+      for (const d of placedDots) {
+        if (d.x < minX) minX = d.x
+        if (d.x > maxX) maxX = d.x
+        if (d.y < minY) minY = d.y
+        if (d.y > maxY) maxY = d.y
+      }
+      bbox = { minX, maxX, minY, maxY }
+    } else {
+      bbox = {
+        minX: centerX - LABEL_HOLE_W / 2,
+        maxX: centerX + LABEL_HOLE_W / 2,
+        minY: centerY - LABEL_HOLE_H / 2,
+        maxY: centerY + LABEL_HOLE_H / 2,
+      }
+    }
+
+    clusters.push({
+      ownerParty: spec.ownerParty,
+      isOwnCluster: spec.isOwnCluster,
+      center: { x: centerX, y: centerY },
+      // squareWorld coincides with cluster center now — the Actor "square"
+      // is no longer rendered as a Three.js mesh; the centered HTML label
+      // (PillboxLabel) consumes this position. Kept under the same field
+      // name so downstream code (PillboxLabel x/y lookup, hover-fade
+      // pillbox detection) doesn't need to change.
+      squareWorld: { x: centerX, y: centerY },
+      dots: placedDots,
+      umbrellaPathWorld,
+      voronoiCellPolygon: cellPoly,
+      bbox,
+    })
   }
 
-  // Other RFPs (Phase 16: only Bob's seeded one when active != Bob).
+  // Decide which cluster entries actually render dots/labels. Carol's empty
+  // anchor cluster: render no label (isUserVisible === false → keep the
+  // empty cluster slot but skip its label later via the same flag).
+  const ownClusters = clusters[0].dots.length > 0 || clusters[0].isUserVisible
+    ? [clusters[0]]
+    : []
+  // For Carol's case the active cluster entry still exists but isUserVisible
+  // is false, signaling the label should be hidden.
+  const otherClusters = clusters.slice(1)
+
+  // (Phase 16.2.4: layoutClusterCells + buildCluster helpers removed — the
+  // sunflower placement above replaces both. The legacy CLUSTER_PAD-based
+  // L-shape rectangular umbrella border is replaced by the convex-hull
+  // outline computed inline above via umbrellaOutlinePath.)
+
+  // Other RFPs anchored alongside their owning cluster (or near the anchor
+  // if the cluster isn't on canvas).
   const otherRfpEntries = []
-  for (const rfp of directoryData.otherRfps) {
+  for (const rfp of directoryData.otherRfps || []) {
     const ownCluster = otherClusters.find((c) => c.ownerParty === rfp.owner)
     if (ownCluster) {
       const sq = ownCluster.center
@@ -539,6 +709,7 @@ function computeLayout(directoryData, viewport) {
     }
   }
 
+  // ─── Step 4: flatten per-cluster dots into allDots ──────────────────
   const allClusters = [...ownClusters, ...otherClusters]
   for (let ci = 0; ci < allClusters.length; ci++) {
     const cluster = allClusters[ci]
@@ -718,6 +889,10 @@ export default function DirectoryLayer({
   //     and not on every layout recompute (provisional updates, resize).
   const dotOpacitiesRef = useRef(new Float32Array(MAX_DOTS).fill(1))
   const [labelOpacities, setLabelOpacities] = useState({})
+  // Phase 16.2.4: per-cluster umbrella outline opacity. Same fade-in timeline
+  // as the label; default 1 (loaded). During the wave animation each
+  // umbrella-bearing cluster's outline ramps 0 → 1 alongside its label.
+  const [umbrellaOpacities, setUmbrellaOpacities] = useState({})
   const animationHandleRef = useRef(null)
   const lastAnimatedRoleRef = useRef(null)
   const lastAnimatedPhaseRef = useRef('closed')
@@ -1088,18 +1263,13 @@ export default function DirectoryLayer({
     dotsMesh.instanceMatrix.needsUpdate = true
     if (dotsMesh.instanceColor) dotsMesh.instanceColor.needsUpdate = true
 
-    // Actor squares (one per cluster; world position = cluster.squareWorld).
-    const squares = layout.allClusters
-    for (let i = 0; i < MAX_SQUARES; i++) {
-      if (i < squares.length) {
-        const sq = squares[i]
-        m.makeTranslation(sq.squareWorld.x, -sq.squareWorld.y, 0)
-        squaresMesh.setMatrixAt(i, m)
-      } else {
-        squaresMesh.setMatrixAt(i, hidden)
-      }
-    }
-    squaresMesh.count = squares.length
+    // Phase 16.2.4: Actor squares replaced by the centered PillboxLabel.
+    // The instanced mesh is kept (so existing scene-init / dispose paths
+    // stay symmetric) but rendered with count=0 so no squares draw. The
+    // `cluster.squareWorld` field still carries the cluster center for
+    // the HTML PillboxLabel overlay's worldToScreen lookup.
+    for (let i = 0; i < MAX_SQUARES; i++) squaresMesh.setMatrixAt(i, hidden)
+    squaresMesh.count = 0
     squaresMesh.instanceMatrix.needsUpdate = true
 
     // RFP dots (hollow circles).
@@ -1238,6 +1408,15 @@ export default function DirectoryLayer({
       party: c.ownerParty,
       minDistFromAnchor: minDistByCluster.get(idx) ?? 0,
     }))
+    // Phase 16.2.4: umbrella outlines fade in alongside their cluster
+    // label. Distance metric = cluster centroid → anchor (same convention
+    // as the label, since the outline lives at the cluster's location).
+    const umbrellaOutlines = layoutCur.allClusters
+      .filter((c) => c.umbrellaPathWorld && c.umbrellaPathWorld.length > 0)
+      .map((c) => ({
+        party: c.ownerParty,
+        distFromAnchor: Math.hypot(c.center.x - anchor.x, c.center.y - anchor.y),
+      }))
 
     // Pre-zero opacities + label state so the very first frame is blank.
     const opacities = dotOpacitiesRef.current
@@ -1245,6 +1424,9 @@ export default function DirectoryLayer({
     const initialLabelOpacities = {}
     for (const l of labels) initialLabelOpacities[l.party] = 0
     setLabelOpacities(initialLabelOpacities)
+    const initialUmbrellaOpacities = {}
+    for (const u of umbrellaOutlines) initialUmbrellaOpacities[u.party] = 0
+    setUmbrellaOpacities(initialUmbrellaOpacities)
     dotsDirtyRef.current = true
     dirtyRef.current = true
 
@@ -1252,6 +1434,7 @@ export default function DirectoryLayer({
     const handle = playDirectoryLoadAnimation({
       dots: claimDots.map((d) => ({ x: d.x, y: d.y })),
       labels,
+      umbrellaOutlines,
       anchor,
       setDotOpacity: (idx, op) => {
         opacities[idx] = op
@@ -1259,6 +1442,12 @@ export default function DirectoryLayer({
       },
       setLabelOpacity: (party, op) => {
         setLabelOpacities((prev) => {
+          if (prev[party] === op) return prev
+          return { ...prev, [party]: op }
+        })
+      },
+      setUmbrellaOpacity: (party, op) => {
+        setUmbrellaOpacities((prev) => {
           if (prev[party] === op) return prev
           return { ...prev, [party]: op }
         })
@@ -1507,22 +1696,28 @@ export default function DirectoryLayer({
         zIndex: 11,
       }}>Radiant Network</div>
 
-      {/* SVG overlay — umbrella subset L-shape boundary (Phase 16.1.3
-          Item 8: neutral grey, no longer amber). */}
+      {/* SVG overlay — umbrella subset concave/convex hull outline (Phase
+          16.2.4: replaces the rectangular L-shape from Phase 16.0/16.1.3.
+          Color reverts to amber per the brief: amber stroke + 8% amber
+          fill flag the umbrella subset within a cluster). Opacity per-
+          cluster is driven by the load-animation wave. */}
       <svg
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 2 }}
       >
         {overlay?.umbrellaPaths?.map((p) => {
           if (!p.screenPoints || p.screenPoints.length === 0) return null
           const d = p.screenPoints.map((pt, i) => (i === 0 ? `M ${pt.x} ${pt.y}` : `L ${pt.x} ${pt.y}`)).join(' ') + ' Z'
+          const op = umbrellaOpacities[p.ownerParty]
+          const opacity = op === undefined ? 1 : op
           return (
             <path
               key={`umbrella-${p.ownerParty}`}
               d={d}
-              stroke="color-mix(in srgb, var(--text-secondary) 60%, transparent)"
+              stroke="var(--accent-amber)"
               strokeWidth={1.5}
-              fill="color-mix(in srgb, var(--text-secondary) 6%, transparent)"
+              fill="color-mix(in srgb, var(--accent-amber) 8%, transparent)"
               strokeLinejoin="round"
+              opacity={opacity}
             />
           )
         })}

@@ -2673,6 +2673,100 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.4 completion notes (2026-05-16) — Directory galactic view v2 (Voronoi + sunflower)
+
+Andrew's feedback on Phase 16.2.3: the polar Poisson disc fan-out left the canvas feeling sparse; emptiness reads as a negative for the "wow" view the Directory is meant to deliver on first load. Phase 16.2.4 rebuilds the Directory's spatial primitives end-to-end. The seed stays at the current 12-actor scale — Phase 16.2.5 expands it to ~3,000 dots; this phase exercises the algorithms against the existing seed so the visual is intentionally sparse at this density.
+
+**Canonical constants.**
+
+| Constant | Value | Notes |
+|----------|-------|-------|
+| `CANVAS_WIDTH` | 11520 | 16" MBP logical at 15% zoom (1728 / 0.15) |
+| `CANVAS_HEIGHT` | 7447 | 16" MBP logical at 15% zoom (1117 / 0.15) |
+| `OWN_CLUSTER_ANCHOR_X` | 5760 | Canvas-horizontal-center |
+| `OWN_CLUSTER_ANCHOR_Y` | 5957.6 | 20% up from bottom edge |
+| `MIN_ZOOM` | 0.15 | (was 0.1 in 16.2.3) |
+| `INITIAL_ZOOM` | 0.15 | (was 0.1 in 16.2.3) |
+| `MAX_ZOOM` | 4.0 | unchanged |
+| `GOLDEN_ANGLE` | π × (3 - √5) ≈ 2.399 | Vogel phyllotaxis sequential angle |
+| `SUNFLOWER_SCALE` | 1.7 | Spacing multiplier on `DOT_GRID` for sunflower radii |
+| `LABEL_HOLE_W` | 72 wu (6 × DOT_GRID) | Reserved-rectangle width for Actor label |
+| `LABEL_HOLE_H` | 36 wu (3 × DOT_GRID) | Reserved-rectangle height |
+| `INTER_CLUSTER_BUFFER` | 24 wu (2 × DOT_GRID) | Min separation between dots of different clusters |
+| `LLOYD_MAX_ITER` | 10 | Iteration cap for centroidal Voronoi relaxation |
+| `LLOYD_CONVERGENCE_DELTA` | 12 wu | Per-iteration max displacement = converged |
+
+**d3-delaunay dependency.** Added via `npm install d3-delaunay` (resolves to `^6.0.4`). Imported as `import { Delaunay } from 'd3-delaunay'` in `DirectoryLayer.jsx`. No transitive ESLint/Vite issues at build time.
+
+**Geometry helpers inlined in `DirectoryLayer.jsx`.** `polygonArea`, `polygonCentroid`, `pointInPolygon` (ray-casting), `convexHull` (Andrew's monotone-chain), `offsetPolygonOutward` (per-vertex bisector miter), `vogelPosition`, `isInLabelHole`, `umbrellaOutlinePath` (convex-hull-of-amber-dots with 1-cell margin; bounding circle / capsule fallbacks for ≤2 dots). No external geometry library needed beyond d3-delaunay.
+
+**Lloyd-iterated centroidal Voronoi tessellation.** Replaces the Phase 16.2.3 polar Poisson disc fan-out. Algorithm:
+1. Build seed list — active Actor first (index 0, pinned at the anchor); other clusters seeded at hash-derived deterministic positions inside the upper 70% of the canvas. Alphabetical ordering of `ownerParty` for stable index assignment.
+2. Compute target areas per cluster: `target_i = (dotCount_i / totalDots) × canvasArea`. Empty clusters (Carol's anchor) get `max(0.01, share)` so they don't get squeezed to zero area.
+3. Iterate up to `LLOYD_MAX_ITER` times: build Delaunay from current seed positions, compute Voronoi clipped to `[0, 0, CANVAS_WIDTH, CANVAS_HEIGHT]`, for each non-pinned seed move toward area-weighted centroid via `stepFactor = 0.5 + 0.5 × tanh(area_error)`. Deficit cells (cell smaller than target) take bigger steps; overflow cells (cell larger than target) take smaller steps.
+4. Break early when `maxDisplacement < LLOYD_CONVERGENCE_DELTA`; otherwise log a `console.warn` with the final max displacement.
+
+**Convergence caveat (per brief: "stop and surface, don't raise the cap unilaterally").** At the current 12-actor seed, Lloyd's max displacement after 10 iterations is ~194 wu, well above the 12-wu convergence threshold. The cells stabilize visually but the centroid metric oscillates. Hypothesis: the small number of seeds combined with the pinned anchor at a corner-adjacent position keeps the system slightly off-balance — the system would converge cleanly with more seeds (the Phase 16.2.5 ~3k-dot expansion). Per the brief, the iteration cap is NOT raised unilaterally; we accept the positions and emit a `console.warn` for Andrew to QA the visual.
+
+**Sunflower cluster primitive.** Per-cluster dots placed via Vogel phyllotaxis:
+```
+angle  = i × GOLDEN_ANGLE
+radius = sqrt(i + 0.5) × DOT_GRID × SUNFLOWER_SCALE
+(x, y) = (cx + r·cos(angle), cy + r·sin(angle))
+```
+For each spiral index `i = 0, 1, 2, ...` up to `N × 4 + 30` steps, the candidate `(x, y)` is snapped to `DOT_GRID` and tested against four exclusion rules:
+1. Inside the 6×3 cell `LABEL_HOLE` (rectangular, label-anchor-centered) → skip.
+2. Outside the cluster's Voronoi cell polygon → skip (ray-cast point-in-polygon).
+3. Within `INTER_CLUSTER_BUFFER` of a dot belonging to another cluster → skip (enforces the 2-dot buffer).
+4. Within `DOT_GRID × 0.9` of an already-placed dot in this cluster → skip.
+
+Umbrella items go FIRST in the item array (inner spiral arcs); public items follow; RFPs last. This packs the amber subset toward the cluster's interior so the convex-hull outline reads as a tight connected region. Overflow (placed_count < N) emits a `console.warn`; at the current seed, all clusters place their full dot count.
+
+**Centered Actor label.** PillboxLabel HTML overlay moved from `top = y - ACTOR_SQUARE/2 - ACTOR_LABEL_OFFSET; transform: translateX(-50%)` (Phase 16.1.3 above-grid pattern) to `top: y; transform: translate(-50%, -50%)` (16.2.4 cluster-center pattern). The Three.js Actor-squares InstancedMesh stays in the scene-init / dispose path but is rendered with `count = 0` (no draw calls). `cluster.squareWorld` now coincides with `cluster.center` so the PillboxLabel lookup + the hover-fade pillbox-detection helper (`fadePillboxFor`) continue to read the right world position without further changes.
+
+**Umbrella outline path.** Replaces the Phase 16.0 `CLUSTER_PAD`-based L-shape rectangular boundary with a convex-hull-derived outline. For umbrella subsets with ≥3 dots: `convexHull(dots) → offsetPolygonOutward(hull, DOT_GRID)`. For 1 dot: 24-sided bounding circle approximation. For 2 dots: stadium (capsule) approximation via convex hull of two circle samplings. Stroke `var(--accent-amber)` 1.5px; fill `color-mix(in srgb, var(--accent-amber) 8%, transparent)` — reverts the Phase 16.1.3 grey treatment per the brief. The old L-shape construction in `buildCluster` is removed entirely (along with `buildCluster` itself, which is no longer needed).
+
+**Loading animation v2.** `playDirectoryLoadAnimation` in `src/v2/directoryLoadAnimation.js` extended:
+- New parameter `umbrellaOutlines: [{ party, distFromAnchor }]`.
+- New callback `setUmbrellaOpacity(party, opacity)`.
+- Each outline's start time = `distFromAnchor / waveSpeed + labelDelayMs / 1000`, same convention as labels. Ramps opacity 0 → 1 over 200ms.
+- `skip()` snaps every dot + label + outline to opacity 1.
+
+DirectoryLayer wiring: new `umbrellaOpacities` React state (keyed by party); umbrella outlines pass through state-driven `opacity` on their `<path>` elements; entry effect computes `distFromAnchor` per umbrella-bearing cluster (centroid distance) and seeds `setUmbrellaOpacities({})` to zero before starting the wave.
+
+**Acceptance criteria — verified.**
+
+| Criterion | Result |
+|-----------|--------|
+| Build clean (no new warnings beyond existing chunk-size note) | ✓ |
+| d3-delaunay resolves at module load | ✓ |
+| Canvas constants 11520×7447, anchor `(5760, 5957.6)`, INITIAL_ZOOM = MIN_ZOOM = 0.15 | ✓ |
+| Sunflower spiral around 6×3 label hole; no dots overlap label | ✓ (label-hole exclusion + label `translate(-50%, -50%)` centered on `cluster.center`) |
+| Lloyd-iterated Voronoi cells; cap at 10 | ✓ (max displacement ~194 wu at iter 10 — surfaced as warning per brief) |
+| 2×DOT_GRID inter-cluster buffer enforced at dot acceptance | ✓ |
+| Active Actor seed pinned at anchor through Lloyd's | ✓ (index 0 skipped in iteration loop) |
+| Convex-hull umbrella outline; amber stroke + 8% fill | ✓ |
+| L-shape rendering removed | ✓ |
+| Wave-driven fade-in for dots + labels + outlines | ✓ |
+| Click empty canvas → skip snaps all to opacity 1 | ✓ |
+| Carol's anonymous case: no label at anchor, polar origin still pins tessellation | ✓ (14 labels, AuditCo absent) |
+| Role switch (Bob → Carol) replays animation cleanly | ✓ |
+| Zoom-percentage display reads "15%" / "100%" / "400%" | ✓ |
+
+**Files changed.**
+- `package.json` — `d3-delaunay ^6.0.4` added to dependencies.
+- `src/v2/DirectoryLayer.jsx` — canvas + zoom constants; geometry helpers; computeLayout rewrite (Lloyd Voronoi + sunflower); umbrella outline; centered Actor label; Actor-squares mesh emptied to count=0; umbrella opacities state + amber SVG stroke; loading-animation v2 wiring.
+- `src/v2/directoryLoadAnimation.js` — `umbrellaOutlines` parameter + `setUmbrellaOpacity` callback + fade-in tick logic + skip extension.
+- `src/v2/V2App.jsx` — Changelog modal v0.16.2.4 entry prepended.
+- `architecture-spec.md` — §8.2 Phase 16.2.4 changelog bullet.
+- `polish-backlog.md` — Update Log Phase 16.2.4 entry; #196 stays Closed.
+- `CLAUDE.md` — "Current state of the world" updated (16.2.4 last shipped; 16.2.3 demoted to prior).
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer:** stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.3 completion notes (2026-05-13) — Directory galactic view + loading animation
 
 `DirectoryLayer.jsx` rewritten to use a bounded design surface + radial fan-out + radial wave loading animation. Andrew's reframed design: "galactic view first impression" — the Directory should look impressive on initial load and on every role-switch, with the whole canvas visible at default zoom. The view is "90% interesting, 10% useful"; real functionality lives on other layers.

@@ -7802,6 +7802,18 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.4', date: '2026-05-16', label: 'Phase 16.2.4', items: [
+                  'Phase 16.2.4 — Directory galactic view v2 (Voronoi packing + sunflower clusters). Andrew\'s feedback on Phase 16.2.3: the polar Poisson disc fan-out left the canvas feeling sparse. Phase 16.2.4 rebuilds the Directory\'s spatial primitives end-to-end. Seed stays at the current 12-actor scale; Phase 16.2.5 will expand to ~3k dots.',
+                  'Smaller canvas: 17280×11170 → 11520×7447 (16" MBP logical at 15% zoom). MIN_ZOOM and INITIAL_ZOOM both 0.15 (was 0.1). Active Actor anchor at (5760, 5957.6).',
+                  'Lloyd-iterated centroidal Voronoi tessellation replaces polar Poisson disc. Active Actor\'s seed pinned at the anchor; other seeds at hash-derived deterministic positions. Cells target area ∝ dot_count_i / total_dots × canvas_area via `stepFactor = 0.5 + 0.5·tanh(area_error)`. Iteration cap 10.',
+                  'Sunflower clusters (Vogel phyllotaxis) replace rectangular row/col grid. Each cluster\'s dots placed via `angle = i × GOLDEN_ANGLE; radius = sqrt(i + 0.5) × DOT_GRID × 1.7` around its Voronoi cell centroid, with a reserved 6×3 cell label hole at the center. Inter-cluster buffer of 2 × DOT_GRID enforced. Umbrella items placed first so they sit on inner spiral arcs.',
+                  'Centered Actor label: PillboxLabel HTML overlay moved from above-grid to cluster center via `transform: translate(-50%, -50%)`. Three.js Actor-squares InstancedMesh rendered with `count=0` (mesh kept for lifecycle symmetry).',
+                  'Umbrella outline path: convex hull of umbrella dots offset outward by 1 DOT_GRID via per-vertex bisector miter. Fallbacks: bounding circle (1 dot), stadium (2 dots). Amber stroke + 8% amber fill — reverts Phase 16.1.3 grey treatment per brief. Legacy L-shape construction removed.',
+                  'Loading animation v2: `playDirectoryLoadAnimation` extended with `umbrellaOutlines` param + `setUmbrellaOpacity` callback. Outlines fade in alongside their cluster labels; `skip()` snaps everything to opacity 1.',
+                  'd3-delaunay (^6.0.4) added as a project dependency.',
+                  'Lloyd\'s convergence caveat: at the current 12-actor seed, max displacement after 10 iterations is ~194 wu (above the 12-wu threshold). Per brief, we accept those positions and emit a `console.warn` rather than unilaterally raising the cap. Phase 16.2.5 will re-test convergence on a denser dataset.',
+                  'Footer stays at v0.16.2.0 per backtrack-hotfix convention.',
+                ]},
                 { version: '0.16.2.3', date: '2026-05-13', label: 'Phase 16.2.3', items: [
                   'Phase 16.2.3 — Directory galactic view + loading animation. `DirectoryLayer.jsx` rewritten to use a bounded 17280×11170 design surface (matching 16" MBP logical resolution at 10% zoom) + radial polar Poisson disc fan-out + radial wave loading animation.',
                   'Galactic view: `MIN_ZOOM` 0.5 → 0.1; `INITIAL_ZOOM` set to 0.1. On every Directory entry (initial mount + role switch) the camera resets to `(canvas-center-x, canvas-center-y)` at zoom 0.1, showing the full 17280×11170 canvas in an MBP viewport. The active Actor\'s own cluster anchors at (8640, 8936) — canvas-bottom-center, 20% up from the bottom edge. Zoom-percentage display now maps directly: "10%", "100%", "400%".',
