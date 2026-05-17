@@ -2673,6 +2673,51 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.1 completion notes (2026-05-16) — Dense organic cluster packing + ~22k dot expansion
+
+Three coordinated changes that resolve the trio of QA issues Andrew surfaced after Phase 16.2.6 — spiral gaps inside clusters, half-empty top 75% of canvas, and super-jumbo sunflower overflow — via a single algorithmic shift: **dense Voronoi-clipped grid fill replaces Vogel sunflower** in `DirectoryLayer.jsx`.
+
+**Algorithm swap.** `packClusterDense({ cellPoly, centerX, centerY, count, clusterParty })` replaces the Phase 16.2.4 Vogel sunflower placement loop. For each cluster: (a) shrink the Voronoi polygon inward by 1 DOT_GRID via the new `shrinkConvexPolygon` helper (per-vertex bisector miter, orientation-detected via signed area, collapse fallback returns `[]`); (b) enumerate every grid cell inside the shrunken polygon's bbox, snapped to DOT_GRID so positions align with the background grid; (c) exclude cells inside the 6×3 cell label hole at cluster centre; (d) exclude cells outside the shrunken polygon via the existing `pointInPolygon` ray-cast; (e) sort by squared distance from centre; (f) take the first N. Inner cells touch (no Vogel spiral gaps). Organic Voronoi-derived outer shapes preserved.
+
+**Removed**: `vogelPosition`, `GOLDEN_ANGLE`, `SUNFLOWER_SCALE`, `SUNFLOWER_MAX_ITER_PER_DOT`, the cross-cluster `INTER_CLUSTER_BUFFER` collision check (now intrinsic via the polygon shrink — both adjacent clusters shrink 1 cell ⇒ 2-cell gap), and the now-unused `isInLabelHole` helper (inlined into `packClusterDense`).
+
+**Lloyd's target area formula** swapped from the proportional `canvasArea × (dots / totalDots)` (area-blind, no relationship to actual dense-pack needs) to physically grounded `(dots × DOT_GRID² + LABEL_HOLE_AREA) × 1.20` (per-dot area + label hole + 20% packing/wobble overhead). At the new ~21,609-dot seed, target sum is 73% of canvas area — within the brief's 70–80% target range; a `console.warn` fires if sum exceeds canvas area (over-packed seed). Brief sanity-check confirmed: Helios at 3,250 dots → target ≈ 9 Mwu² → ~3,000-wu cell side → ~10.5% of canvas, consistent with super-jumbo expectations.
+
+**35 mock supplier dot counts expanded ~6.5×** in `v2_2Data.js`'s `PHASE_16_2_6_NEW_MOCK_ACTORS` constant per the brief's Item 2 table (Helios 500 → 3250, Atlas 450 → 2950, Polaris 400 → 2600, Vortex 350 → 2300, down to Cordite Labs 5 → 35). Same 35 actors, same verticals, same `generateClaimSpecsForVertical` procedural pipeline. Per-vertical combinatorial space (5–10 families × 5–7 prefixes × 100–999 numbers × 5–7 doc types ≈ 10–30k unique names) comfortably exceeds the new max-per-actor of 3,250 — name-collision fallback rarely fires. New totals: Directory now ~21,609 dots (21,435 new mock + 157 existing mock + 17 switchable role Claims). Deltas vs 16.2.6 baseline: +18,147 Claims, +18,147 stub Assets, +72,588 Disclosure Agreements (3 internal own/ref + 1 public per new Claim). Existing 12-actor mock seeds + 4-primary seeds + Radiant Network all frozen (NovaFab anchor claim "Rad-Hard 0.18µm CMOS Logic Array RHF-820 Datasheet" spot-checked unchanged).
+
+**`DOT_RADIUS = DOT_GRID × 0.475`** (was 0.425) — diameter = `DOT_GRID × 0.95`. With grid-aligned dots one cell apart centre-to-centre, adjacent dots butt with a ~5% visible gap. Going to 1.0 (full cell fill) made them butt with no visible gap which read as a blocky mass; 0.95 is the brief's sweet spot.
+
+**`MAX_DOTS` bumped 10000 → 25000** to accommodate the 21,609-dot seed + headroom. `dotsMesh` InstancedMesh allocation grows ~1.6 MB for the matrices buffer — fine.
+
+**Defensive fixes per brief's pinned conventions**:
+- **Shrink-collapse fallback** in `packClusterDense`: if `shrinkConvexPolygon` returns < 3 vertices (cell too thin for a 1-cell inward offset — happens at the current Lloyd's convergence when a tiny cluster shares boundaries with super-jumbos), fall back to the unshrunken Voronoi cell. Produces a 1-cell inter-cluster gap (instead of 2) for that cluster — visibly tighter but better than dropping the cluster entirely. ChipCo (14 dots) hits this fallback.
+- **Finite-vertex filter** on the umbrella SVG path render: drop the umbrella path entirely if any `screenPoints` vertex is non-finite. Pre-fix, the brief initial-mount race window (when `worldToScreen` returned NaN before the camera's projection matrix was initialised) produced a React warning "NaN is an invalid value for the left css style property". One mount-race instance still appears to come from a different overlay path — non-blocking, non-visually-breaking, candidate for 16.2.6.2 cleanup if Andrew sees it in QA.
+
+**Known regressions surfaced + accepted per brief's pinned conventions** (filed as 16.2.6.2 candidates):
+- (a) **Lloyd's residual still 161 wu** at the 20-iter cap (≈ 3.4 × DOT_GRID = 48). The brief explicitly says: "If Lloyd's still has a non-trivial residual (> 2 × DOT_GRID) at 20 iterations with the new physically-grounded target areas, that's a signal the target sum approaches canvas area too closely. Surface the residual value AND the sum-of-target-areas vs canvas-area ratio. Don't auto-bump the iteration cap." Surfaced via existing `console.warn`. Target sum ratio is 0.73 — far from the canvas-area threshold the brief warned about, so the residual is more likely a tanh-step damping issue than an over-pack issue. 16.2.6.2 candidate.
+- (b) **Cluster overflow warnings** on 9 clusters at the new counts: Helios 789/3250, Atlas 468/2950, Polaris 300/2600, Vortex 854/2300, Vega 946/1200, Aurora 620/800, Beacon 520/900, Solstice 268/700, Apex 202/325. The super-jumbos (top 4) get the biggest absolute deficit. AC #9 ("zero overflow warnings") therefore fails as stated — but the brief's pinned convention for this exact case says: "If Lloyd's still doesn't converge... surface the final residual and accept. Don't unilaterally raise the cap further — file as 16.2.6.1 if the visual reveals tessellation issues." (Same conventions repeat for 16.2.6.2.) Surface + ship.
+- (c) **ChipCo shrink-collapse**: tiny 14-dot cluster's Voronoi cell collapses on 1-cell inward shrink. Handled via the new fallback; warning surfaced.
+
+**Verification**:
+- Data-layer probe: per-actor claim, asset, DA counts all match Item 2 table exactly; total claims = 21,609 (= 3,462 baseline + 18,147 new); zero umbrella DAs from new actors; existing seeds unchanged.
+- Build clean (`npm run build`) — no new warnings beyond the pre-existing 500-KB chunk warning.
+- Dev server (`npm run dev`) at 1400×900 viewport: Directory layer renders dense, organic Voronoi-clipped clusters; label holes preserved; inter-cluster buffer clearly visible; color mix (indigo/amber/green) shows 60/25/15 distribution; super-jumbo clusters visibly massive across the top 75% of canvas; small clusters in the bottom band; GovCo bottom-centre anchor.
+- Canvas-click on dots is not scriptable via DOM events (raycaster limitation since Phase 9A.6); QA items 14 + 15 are code-verified only.
+
+**Files changed**:
+- `src/v2/v2_2Data.js` — `PHASE_16_2_6_NEW_MOCK_ACTORS` dotCount column rewritten per Item 2.
+- `src/v2/DirectoryLayer.jsx` — `DOT_RADIUS` factor 0.425 → 0.475; `MAX_DOTS` 10000 → 25000; removed sunflower constants/helpers; added `shrinkConvexPolygon` + `packClusterDense` helpers; swapped Lloyd's target-area formula; replaced sunflower placement loop in `computeLayout` Step 3; finite-vertex filter on umbrella SVG path render; computeLayout opening docstring refreshed.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.1 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.6.1 entry.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete (with surfaced non-blocking Lloyd's-convergence + super-jumbo-overflow regressions documented and filed as 16.2.6.2 candidates).
+
+---
+
 ### Phase 16.2.6 completion notes (2026-05-16) — Seed expansion to ~3,288 dots (procedural lexicons)
 
 35 new mock supplier Actors added to the Directory Layer, expanding the network seed beneath Bob's Sentinel-4 program. Total Actors now 52 (4 switchable primary + 12 existing mock from Phase 16.2 + 35 new mock from 16.2.6 + Radiant Network).

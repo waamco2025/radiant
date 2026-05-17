@@ -45,7 +45,12 @@ import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 //     their grid cell, leaving a thin 7.5% gap on each side. Was 3 wu —
 //     barely visible at 15% default zoom (0.45 screen px).
 const DOT_GRID = 48
-const DOT_RADIUS = DOT_GRID * 0.425                    // ≈ 20.4
+// Phase 16.2.6.1: 0.425 → 0.475. With dense-pack adjacent dots one cell
+// apart center-to-center, diameter = DOT_GRID × 0.95 leaves a thin ~5%
+// visible gap between dot edges. Going to 1.0 (full cell fill) makes
+// adjacent dots butt with no visible gap at all, which is visually crisper
+// but more sensitive to antialiasing. 0.95 is the sweet spot.
+const DOT_RADIUS = DOT_GRID * 0.475                    // ≈ 22.8 (diameter ≈ 0.95 × DOT_GRID)
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
 const RFP_BORDER = 1                  // hollow RFP circle border thickness
@@ -80,22 +85,21 @@ const GRID_MARGIN = 600
 const DRAG_THRESHOLD_PX = 4
 const PANEL_W = 480                   // Detail Panel width — mirrors V2App's PANEL_W
 
-// Phase 16.2.4: sunflower phyllotaxis primitives for cluster dot placement.
-// Each cluster's N dots are placed in a Vogel sunflower spiral around its
-// Voronoi cell centroid, with a reserved 6×3 cell rectangle at the center
-// for the Actor label. The 2-cell inter-cluster buffer is enforced during
-// dot acceptance — boundary dots can't sit within 2×DOT_GRID of any dot
-// belonging to another cluster.
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))      // ~137.5°
-// Phase 16.2.5: SUNFLOWER_SCALE 1.7 → 1.0. At SCALE = 1.0 the Vogel spiral
-// places adjacent dots one cell apart at the cluster surface (and packs
-// more densely toward the center). Combined with the Item 3 dot-size bump,
-// clusters now read as pixelated filled discs around the label hole.
-const SUNFLOWER_SCALE = 1.0
+// Phase 16.2.6.1: cluster dot placement primitives.
+// Each cluster's N dots are placed via dense Voronoi-clipped grid fill
+// (replaces the Phase 16.2.4 Vogel sunflower phyllotaxis): the cluster's
+// Voronoi polygon is shrunk inward by 1 DOT_GRID, every grid cell inside
+// the shrunken polygon is enumerated (except cells inside the label hole),
+// cells are sorted by distance from cluster center, and the first N are
+// filled. The 2-cell inter-cluster buffer falls out naturally — both
+// adjacent clusters shrink their polygon by 1 cell, so the gap between
+// the last dot of one and the first of the next is 2 × DOT_GRID.
 const LABEL_HOLE_W = 6 * DOT_GRID                      // 288 world units (was 72 pre-16.2.5)
 const LABEL_HOLE_H = 3 * DOT_GRID                      // 144 (was 36)
-const INTER_CLUSTER_BUFFER = 2 * DOT_GRID              // 96 (was 24)
-const SUNFLOWER_MAX_ITER_PER_DOT = 4                   // give up after N×4 spiral steps
+const CLUSTER_SHRINK_CELLS = 1                         // 16.2.6.1: inward shrink in DOT_GRID units; both sides = 2 cell gap
+// Phase 16.2.6.1: Lloyd's target area formula factors.
+const LABEL_HOLE_AREA = LABEL_HOLE_W * LABEL_HOLE_H    // 6×3 cells of DOT_GRID²
+const BUFFER_OVERHEAD_FACTOR = 1.20                    // dense-pack inefficiency + label-hole corner + Lloyd's wobble
 // Lloyd-iterated centroidal Voronoi tessellation parameters.
 // Phase 16.2.6: 10 → 20. At 52 seeds (35 new mock + 12 existing + 4 switchable +
 // Radiant Network anchor) Lloyd's needs more iterations to converge cell areas
@@ -105,7 +109,10 @@ const LLOYD_MAX_ITER = 20
 const LLOYD_CONVERGENCE_DELTA = DOT_GRID               // converged when max displacement < this
 
 // Phase 16.1.3 Item 2 + 9: max InstancedMesh capacity for stable lifecycle.
-const MAX_DOTS = 10000
+// Phase 16.2.6.1: 10000 → 25000. Phase 16.2.6.1's seed targets 21,609 dots
+// (21,435 new mock + 157 existing mock + 17 switchable role Claims).
+// Headroom keeps the lifecycle constant stable across future expansions.
+const MAX_DOTS = 25000
 const MAX_SQUARES = 64
 const MAX_RFPS = 256
 
@@ -391,14 +398,104 @@ function clipPolygonToRect(poly, x0, y0, x1, y1) {
 }
 void clipPolygonToRect  // reserved for future use
 
-function vogelPosition(i, cx, cy) {
-  const angle = i * GOLDEN_ANGLE
-  const radius = Math.sqrt(i + 0.5) * DOT_GRID * SUNFLOWER_SCALE
-  return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]
+// ── Phase 16.2.6.1: dense Voronoi-clipped grid fill ──────────────────────
+// Inward offset of a convex polygon by `distance`. Voronoi cells from
+// d3-delaunay are always convex (and returned closed, last vertex == first).
+// Detects orientation via signed area so the shrink moves *inward* regardless
+// of cell winding. Returns the shrunken polygon as an open vertex list, or
+// an empty array if the shrink collapsed the polygon (cluster cell too thin
+// for the buffer at the current Lloyd's convergence).
+function shrinkConvexPolygon(poly, distance) {
+  if (!poly || poly.length < 3) return []
+  // d3-delaunay closes its polygons; drop the duplicate trailing vertex if
+  // present so prev/next neighbour math doesn't double-count.
+  const last = poly[poly.length - 1]
+  const first = poly[0]
+  const open = (last && first && last[0] === first[0] && last[1] === first[1])
+    ? poly.slice(0, -1)
+    : poly
+  if (open.length < 3) return []
+  // Orient CCW so the inward normal is consistent. `polygonArea` returns
+  // positive for CCW; negative ⇒ flip.
+  const a = polygonArea(open)
+  const oriented = a < 0 ? [...open].reverse() : open
+  const n = oriented.length
+  const result = []
+  for (let i = 0; i < n; i++) {
+    const prev = oriented[(i - 1 + n) % n]
+    const curr = oriented[i]
+    const next = oriented[(i + 1) % n]
+    const e1x = curr[0] - prev[0], e1y = curr[1] - prev[1]
+    const e2x = next[0] - curr[0], e2y = next[1] - curr[1]
+    const len1 = Math.hypot(e1x, e1y)
+    const len2 = Math.hypot(e2x, e2y)
+    if (len1 < 1e-6 || len2 < 1e-6) continue
+    // Inward normals for CCW edges are 90° clockwise rotation of the edge
+    // direction: n = (e_y, -e_x) / len.
+    const n1x = e1y / len1, n1y = -e1x / len1
+    const n2x = e2y / len2, n2y = -e2x / len2
+    const bx = n1x + n2x, by = n1y + n2y
+    const blen = Math.hypot(bx, by)
+    if (blen < 1e-6) continue
+    const cosTheta = (n1x * bx + n1y * by) / blen
+    if (cosTheta < 0.2) continue  // very acute angle — would project too far
+    const miter = distance / cosTheta
+    result.push([curr[0] + (bx / blen) * miter, curr[1] + (by / blen) * miter])
+  }
+  return result.length >= 3 ? result : []
 }
 
-function isInLabelHole(px, py, cx, cy) {
-  return Math.abs(px - cx) < LABEL_HOLE_W / 2 && Math.abs(py - cy) < LABEL_HOLE_H / 2
+/**
+ * Phase 16.2.6.1: dense Voronoi-clipped grid fill replaces Vogel sunflower.
+ * Tiles grid cells inside the cluster's Voronoi polygon (shrunken by 1 DOT_GRID
+ * to leave a 2-cell inter-cluster buffer), excluding the label hole at cluster
+ * center, sorted by distance from center, taking the first N cells.
+ *
+ * Returns positions for the N closest available cells; if fewer than N cells
+ * are available (Voronoi cell too small at current Lloyd's convergence) the
+ * caller logs an overflow warning so we know which cluster overflowed.
+ */
+function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty }) {
+  // Phase 16.2.6.1 pinned convention: if shrink collapses (cell too thin
+  // for a 1-cell inward offset — happens when Lloyd's hasn't pushed jumbo
+  // neighbours away enough to give the small cluster real area), fall back
+  // to the unshrunk Voronoi cell. This produces a 1-cell inter-cluster gap
+  // (vs. the usual 2-cell gap) instead of dropping the cluster entirely.
+  let poly = shrinkConvexPolygon(cellPoly, CLUSTER_SHRINK_CELLS * DOT_GRID)
+  if (poly.length < 3) {
+    if (cellPoly && cellPoly.length >= 3 && typeof console !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.warn(`[DirectoryLayer] packClusterDense: shrink collapsed for ${clusterParty}; falling back to unshrunken cell (1-cell buffer instead of 2).`)
+    }
+    poly = cellPoly && cellPoly.length >= 3 ? cellPoly : []
+  }
+  if (poly.length < 3) return []
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const [px, py] of poly) {
+    if (px < minX) minX = px
+    if (px > maxX) maxX = px
+    if (py < minY) minY = py
+    if (py > maxY) maxY = py
+  }
+  const halfHoleW = LABEL_HOLE_W / 2
+  const halfHoleH = LABEL_HOLE_H / 2
+  // Snap to the same grid origin used by snapGrid so cluster dots align with
+  // the background-grid Points and with cluster-to-cluster gaps measured in
+  // whole cells.
+  const xStart = Math.ceil(minX / DOT_GRID) * DOT_GRID
+  const yStart = Math.ceil(minY / DOT_GRID) * DOT_GRID
+  const cells = []
+  for (let x = xStart; x <= maxX; x += DOT_GRID) {
+    for (let y = yStart; y <= maxY; y += DOT_GRID) {
+      if (Math.abs(x - centerX) < halfHoleW && Math.abs(y - centerY) < halfHoleH) continue
+      if (!pointInPolygon(x, y, poly)) continue
+      const dx = x - centerX
+      const dy = y - centerY
+      cells.push({ x, y, dist: dx * dx + dy * dy })
+    }
+  }
+  cells.sort((a, b) => a.dist - b.dist)
+  return cells.slice(0, count).map((c) => ({ x: c.x, y: c.y }))
 }
 
 // Build the per-cluster umbrella outline path. Concave-hull would be the
@@ -450,13 +547,15 @@ function isHoverNearPillbox(hoverScreen, pillX, pillY) {
 function computeLayout(directoryData, viewport) {
   if (!directoryData) return null
 
-  // Phase 16.2.4 rewrite — replaces Phase 16.2.3's polar Poisson disc
-  // fan-out + rectangular cluster grid with:
+  // Phase 16.2.4 baseline + Phase 16.2.6.1 dense-pack rewrite:
   //   1. Lloyd-iterated centroidal Voronoi tessellation for cluster
   //      placement (active Actor's seed pinned at the bottom-center anchor;
-  //      cell areas pulled toward target_area_i ∝ dot_count_i).
-  //   2. Vogel sunflower phyllotaxis for per-cluster dot placement, with a
-  //      reserved 6×3 cell label hole at the cluster centroid.
+  //      cell areas pulled toward physically-grounded target_area_i =
+  //      (dots × DOT_GRID² + LABEL_HOLE_AREA) × BUFFER_OVERHEAD_FACTOR).
+  //   2. Phase 16.2.6.1: dense Voronoi-clipped grid fill per cluster
+  //      (replaces Phase 16.2.4 Vogel sunflower). Voronoi polygon shrunk
+  //      inward by 1 DOT_GRID; every grid cell inside enumerated, sorted by
+  //      distance from centre, first N taken. Label hole excluded.
   //   3. Convex-hull umbrella outline (replacing Phase 16.0's rectangular
   //      L-shape boundary). Falls back to circle/stadium for <3 dots.
   //
@@ -545,15 +644,23 @@ function computeLayout(directoryData, viewport) {
       0.1 * CANVAS_HEIGHT + ay * 0.55 * CANVAS_HEIGHT,
     ]
   })
-  const totalDots = clusterSpecs.reduce((s, c) => s + dotCountOf(c), 0) || 1
   const canvasArea = CANVAS_WIDTH * CANVAS_HEIGHT
+  // Phase 16.2.6.1: physically-grounded target area replaces the
+  // proportional `share × canvasArea` formula. Each cluster needs
+  // (dots × DOT_GRID²) for its grid cells + LABEL_HOLE_AREA for the centred
+  // label rectangle, scaled by an inefficiency factor that absorbs perimeter
+  // rounding losses + Lloyd's convergence wobble. Empty clusters (Carol's
+  // anonymous anchor) still get the label hole's worth of area so they
+  // can't be squeezed to zero by neighbouring jumbos.
   const targetAreas = clusterSpecs.map((spec) => {
     const n = dotCountOf(spec)
-    // Empty clusters (Carol's anchor) still get a small share so they
-    // don't get squeezed to zero area.
-    const share = Math.max(0.01, n / totalDots)
-    return canvasArea * share
+    return (n * DOT_GRID * DOT_GRID + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
   })
+  const targetSum = targetAreas.reduce((s, a) => s + a, 0)
+  if (targetSum > canvasArea && typeof console !== 'undefined') {
+    // eslint-disable-next-line no-console
+    console.warn(`[DirectoryLayer] Lloyd's target-area sum ${(targetSum / 1e6).toFixed(2)} Mwu² exceeds canvas area ${(canvasArea / 1e6).toFixed(2)} Mwu² — clusters will compete; expect overflow.`)
+  }
   let lloydIters = 0
   let lloydConverged = false
   let lloydMaxDisplacement = 0
@@ -591,15 +698,15 @@ function computeLayout(directoryData, viewport) {
   const finalDelaunay = Delaunay.from(seeds)
   const finalVoronoi = finalDelaunay.voronoi([0, 0, CANVAS_WIDTH, CANVAS_HEIGHT])
 
-  // ─── Step 3: per-cluster sunflower dot placement ─────────────────────
-  // Each cluster's dots are placed via Vogel sunflower starting from i=0,
-  // skipping positions that (a) fall inside the label hole, (b) fall outside
-  // the cluster's Voronoi cell, (c) sit within INTER_CLUSTER_BUFFER of a
-  // dot belonging to another cluster, or (d) collide with an already-placed
-  // dot in this cluster. Umbrella items go in the first spiral arcs (inner
-  // ring) so the convex-hull outline reads as a single connected subset.
+  // ─── Step 3: per-cluster dense Voronoi-clipped grid fill ──────────────
+  // Phase 16.2.6.1: replaces the Phase 16.2.4 Vogel sunflower. Each cluster's
+  // Voronoi polygon is shrunk inward by 1 DOT_GRID (creates the 2-cell
+  // inter-cluster gap when both neighbours shrink), every grid cell inside
+  // the shrunken polygon is enumerated (excluding the label hole), sorted by
+  // distance from the cluster centre, and the first N are filled. Umbrella
+  // items consume the innermost cells so the convex-hull outline traces a
+  // tight inner subset.
   const clusters = []
-  const allPlacedDots = []  // accumulates positions for inter-cluster buffer check
   for (let ci = 0; ci < clusterSpecs.length; ci++) {
     const spec = clusterSpecs[ci]
     const seed = seeds[ci]
@@ -614,27 +721,14 @@ function computeLayout(directoryData, viewport) {
     // animations, label maps) has a place to look.
     const placedDots = []
     if (N > 0) {
-      const maxSpiralSteps = Math.max(60, N * SUNFLOWER_MAX_ITER_PER_DOT + 30)
-      let itemIdx = 0
-      for (let i = 0; i < maxSpiralSteps && itemIdx < N; i++) {
-        const [rx, ry] = vogelPosition(i, centerX, centerY)
-        const x = snapGrid(rx)
-        const y = snapGrid(ry)
-        if (isInLabelHole(x, y, centerX, centerY)) continue
-        if (cellPoly.length >= 3 && !pointInPolygon(x, y, cellPoly)) continue
-        let collidesOther = false
-        for (let k = 0; k < allPlacedDots.length; k++) {
-          const od = allPlacedDots[k]
-          if (od.clusterIdx === ci) continue
-          if (Math.hypot(od.x - x, od.y - y) < INTER_CLUSTER_BUFFER) { collidesOther = true; break }
-        }
-        if (collidesOther) continue
-        let collidesSelf = false
-        for (let k = 0; k < placedDots.length; k++) {
-          if (Math.hypot(placedDots[k].x - x, placedDots[k].y - y) < DOT_GRID * 0.9) { collidesSelf = true; break }
-        }
-        if (collidesSelf) continue
-        const item = items[itemIdx++]
+      const positions = packClusterDense({ cellPoly, centerX, centerY, count: N, clusterParty: spec.ownerParty })
+      if (positions.length < N && typeof console !== 'undefined') {
+        // eslint-disable-next-line no-console
+        console.warn(`[DirectoryLayer] packClusterDense overflow for ${spec.ownerParty}: placed ${positions.length}/${N} (Voronoi cell too small at current Lloyd's convergence — bump Lloyd's cap or grow canvas).`)
+      }
+      for (let i = 0; i < positions.length; i++) {
+        const item = items[i]
+        const { x, y } = positions[i]
         const colorVar = item.kind === 'rfp'
           ? '--accent-cyan'
           : disclosureTypeToColorVar(item.disclosureType)
@@ -648,11 +742,6 @@ function computeLayout(directoryData, viewport) {
           clusterIdx: ci,
         }
         placedDots.push(placed)
-        allPlacedDots.push(placed)
-      }
-      if (placedDots.length < N && typeof console !== 'undefined') {
-        // eslint-disable-next-line no-console
-        console.warn(`[DirectoryLayer] Sunflower overflow for ${spec.ownerParty}: placed ${placedDots.length}/${N} (Voronoi cell may be too small — see Lloyd's convergence above).`)
       }
     }
 
@@ -1735,7 +1824,13 @@ export default function DirectoryLayer({
       >
         {overlay?.umbrellaPaths?.map((p) => {
           if (!p.screenPoints || p.screenPoints.length === 0) return null
-          const d = p.screenPoints.map((pt, i) => (i === 0 ? `M ${pt.x} ${pt.y}` : `L ${pt.x} ${pt.y}`)).join(' ') + ' Z'
+          // Phase 16.2.6.1: drop the umbrella path entirely if any vertex is
+          // non-finite (worldToScreen returned NaN — happens in a brief
+          // mount-race window before the projection matrix is initialised,
+          // and previously surfaced as a `NaN` invalid CSS-style React warn).
+          const finitePts = p.screenPoints.filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y))
+          if (finitePts.length < p.screenPoints.length || finitePts.length === 0) return null
+          const d = finitePts.map((pt, i) => (i === 0 ? `M ${pt.x} ${pt.y}` : `L ${pt.x} ${pt.y}`)).join(' ') + ' Z'
           const op = umbrellaOpacities[p.ownerParty]
           const opacity = op === undefined ? 1 : op
           return (
