@@ -57,7 +57,16 @@ const MAX_SCREEN_DOT_PX = 22                           // on-screen size cap at 
 const DOT_RADIUS = DOT_GRID * BASE_DOT_FACTOR / 2      // 20.4 — geometry radius at zoom ≤ cap-threshold
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
-const RFP_BORDER = 1                  // hollow RFP circle border thickness
+// Phase 16.2.6.3: RFP marker switched from hollow circle (cyan) to hollow
+// square (indigo). Outer size 1.2 × DOT_GRID = 57.6 wu (slightly bigger than
+// a dot for visual distinction). Border thickness in world units is recomputed
+// on every zoom change so its on-screen size stays ≈ RFP_BORDER_SCREEN_PX.
+const RFP_OUTER_SIZE = DOT_GRID * 1.2
+const RFP_BORDER_SCREEN_PX = 2
+// Initial border (world units) sized for the initial-zoom 0.15. A zoom-change
+// useEffect rebuilds the RFP geometry with `RFP_BORDER_SCREEN_PX / zoom` so
+// the on-screen border stays ≈ 2 px at every zoom.
+const RFP_BORDER = RFP_BORDER_SCREEN_PX / 0.15           // ≈ 13.3 wu
 const ROW_GAP = DOT_GRID
 const COL_GAP = DOT_GRID
 const ACTOR_LABEL_OFFSET = 18
@@ -88,11 +97,15 @@ const INITIAL_ZOOM = 0.15
 // 1-cell buffer so cluster dots aren't visibly cut off at the canvas
 // edge. Top/bottom reserve world-space equivalent to the app header
 // (~61 css px) + footer legend (~32 css px) at MIN_ZOOM (the worst
-// case — at higher zoom the chrome occupies less world area). Rounded
-// up to 500 / 250 wu for headroom.
+// case — at higher zoom the chrome occupies less world area).
+// Phase 16.2.6.3: TOP tightened 500 → 475 = `64 css px / 0.15` (header
+// world height at MIN_ZOOM) + 1 × DOT_GRID (visible-buffer parity with
+// the L/R 1-dot edge buffer). Static value used instead of dynamic
+// measurement so the Directory layout pipeline doesn't depend on
+// parent-component DOM mount order.
 const DOMAIN_INSET_LEFT = DOT_GRID
 const DOMAIN_INSET_RIGHT = DOT_GRID
-const DOMAIN_INSET_TOP = 500
+const DOMAIN_INSET_TOP = 475
 const DOMAIN_INSET_BOTTOM = 250
 // Phase 16.2.5: background-grid spacing now equals DOT_GRID (was 4×DOT_GRID
 // pre-reconciliation). Same point count as before because DOT_GRID grew
@@ -151,6 +164,18 @@ function computeDotWorldSize(zoom) {
   const linearScreenSize = DOT_GRID * BASE_DOT_FACTOR * zoom
   const cappedScreenSize = Math.min(linearScreenSize, MAX_SCREEN_DOT_PX)
   return cappedScreenSize / zoom
+}
+
+// Phase 16.2.6.3: zoom-aware cluster-label font size. Labels grow slowly
+// with zoom (sqrt) so they stay readable at low zoom and substantial — but
+// not overwhelming — at high zoom. Clamped to MIN/MAX so the pillbox doesn't
+// vanish or eat the label hole.
+const BASE_LABEL_FONT_PX = 14
+const MIN_LABEL_FONT_PX = 11
+const MAX_LABEL_FONT_PX = 18
+function computeLabelFontSize(zoom) {
+  const scaled = BASE_LABEL_FONT_PX * Math.sqrt(zoom)
+  return Math.max(MIN_LABEL_FONT_PX, Math.min(MAX_LABEL_FONT_PX, scaled))
 }
 
 function cssVarToColor(varName, fallback = '#8888ff') {
@@ -251,7 +276,7 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
   )
 }
 
-function PillboxLabel({ ownerParty, x, y, faded, opacity = 1 }) {
+function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11 }) {
   // Phase 16.2.3: outer opacity multiplies the loaded fade-in opacity (0..1
   // during the wave animation, then 1 thereafter) with the existing
   // hover-pillbox-fade behaviour (faded = 0.25 when a dot is hovered near
@@ -272,13 +297,23 @@ function PillboxLabel({ ownerParty, x, y, faded, opacity = 1 }) {
         // Actor square at top = y - ACTOR_SQUARE/2 - ACTOR_LABEL_OFFSET;
         // the Actor square has been retired in this phase.
         top: y,
+        // Phase 16.2.6.3: flex-centered text + em-relative padding +
+        // lineHeight 1 so the pill scales proportionally with fontPx and
+        // the text reads vertically + horizontally centered at any zoom
+        // (the off-center drift QA saw at zoom 1.5 was a stacked effect of
+        // font ascender/descender pushing text upward inside fixed-pixel
+        // padding; lineHeight: 1 + em-padding flattens that).
         transform: 'translate(-50%, -50%)',
-        padding: '3px 8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '0.3em 0.7em',
+        lineHeight: 1,
         borderRadius: 999,
         background: 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
         color: 'var(--text-primary)',
         fontFamily: 'var(--font-display)',
-        fontSize: 10,
+        fontSize: fontPx,
         fontWeight: 600,
         letterSpacing: '0.04em',
         whiteSpace: 'nowrap',
@@ -1017,6 +1052,11 @@ export default function DirectoryLayer({
   // dots mesh's matrices. Read + written by the zoom-change rescale effect
   // so a no-op zoom step (scale unchanged) skips the 22k-matrix rewrite.
   const dotScaleRef = useRef(1)
+  // Phase 16.2.6.3: tracks the current RFP border thickness in world units
+  // (baked into rfpMesh.geometry). A zoom-change useEffect compares against
+  // the desired `RFP_BORDER_SCREEN_PX / zoom` and rebuilds the geometry on
+  // mismatch so the on-screen border stays ~2 px across the zoom range.
+  const rfpBorderRef = useRef(RFP_BORDER)
   const actorSquaresMeshRef = useRef(null)
   const rfpMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
@@ -1290,8 +1330,12 @@ export default function DirectoryLayer({
     scene.add(squaresMesh)
     actorSquaresMeshRef.current = squaresMesh
 
-    const rfpGeometry = makeHollowCircleGeometry(DOT_RADIUS, RFP_BORDER)
-    const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-cyan', '#22d3ee') })
+    // Phase 16.2.6.3: RFP marker is a hollow square (resurrected primitive
+    // from pre-16.2.4 Actor squares), indigo accent. Border thickness sized
+    // for the initial zoom; a zoom-change useEffect rebuilds the geometry
+    // so the on-screen border stays ~RFP_BORDER_SCREEN_PX at every zoom.
+    const rfpGeometry = makeHollowSquareGeometry(RFP_OUTER_SIZE, RFP_BORDER)
+    const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-indigo', '#6b8aff') })
     const rfpMesh = new THREE.InstancedMesh(rfpGeometry, rfpMaterial, MAX_RFPS)
     rfpMesh.count = 0
     rfpMesh.frustumCulled = false
@@ -1498,6 +1542,28 @@ export default function DirectoryLayer({
     dotScaleRef.current = desiredScale
     dirtyRef.current = true
   }, [zoom, threeReady, layout])
+
+  // ─── Phase 16.2.6.3: rebuild RFP hollow-square geometry on zoom change ─
+  // Border thickness is world-units, so we need to rebuild the geometry
+  // (one ShapeGeometry, shared across all RFP instances) whenever the
+  // desired `RFP_BORDER_SCREEN_PX / zoom` differs from the currently-baked
+  // value. The geometry rebuild is cheap (single ShapeGeometry, ≤ 8 verts).
+  // Position matrices are unaffected.
+  useEffect(() => {
+    if (!threeReady) return
+    const rfpMesh = rfpMeshRef.current
+    if (!rfpMesh) return
+    const desiredBorder = RFP_BORDER_SCREEN_PX / zoom
+    // Skip rebuild for trivial changes (<5% delta) — avoids per-wheel-tick
+    // geometry churn while the on-screen border stays visually constant.
+    if (Math.abs(desiredBorder - rfpBorderRef.current) / rfpBorderRef.current < 0.05) return
+    const newGeom = makeHollowSquareGeometry(RFP_OUTER_SIZE, desiredBorder)
+    const oldGeom = rfpMesh.geometry
+    rfpMesh.geometry = newGeom
+    oldGeom.dispose()
+    rfpBorderRef.current = desiredBorder
+    dirtyRef.current = true
+  }, [zoom, threeReady])
 
   // ─── Hover repaint via per-instance colors ───────────────────────────
   // Phase 16.2.3: consolidated into `flushDotColors` so the load-animation
@@ -1931,26 +1997,60 @@ export default function DirectoryLayer({
       </svg>
 
       {/* Pillbox labels (HTML overlay; positioned via worldToScreen). */}
-      {layout && overlay && layout.allClusters.map((cluster) => {
-        const screen = overlay.ownerSquares.find((s) => s.ownerParty === cluster.ownerParty)?.screen
-        if (!screen) return null
-        const faded = fadePillboxFor(screen.x, screen.y)
-        // Phase 16.2.3: opacity defaults to 1 (loaded). During the wave
-        // animation each cluster's entry ramps 0 → 1; the value comes
-        // from `labelOpacities[party]` set by the helper.
-        const op = labelOpacities[cluster.ownerParty]
-        const labelOp = op === undefined ? 1 : op
-        return (
-          <PillboxLabel
-            key={cluster.ownerParty}
-            ownerParty={cluster.ownerParty}
-            x={screen.x}
-            y={screen.y}
-            faded={faded}
-            opacity={labelOp}
-          />
-        )
-      })}
+      {layout && overlay && (() => {
+        // Phase 16.2.6.3: derive label font-size from current zoom once per
+        // render — sqrt scaling clamped to MIN/MAX (see computeLabelFontSize).
+        const labelFontPx = computeLabelFontSize(zoom)
+        return layout.allClusters.map((cluster) => {
+          const screen = overlay.ownerSquares.find((s) => s.ownerParty === cluster.ownerParty)?.screen
+          if (!screen) return null
+          const faded = fadePillboxFor(screen.x, screen.y)
+          // Phase 16.2.3: opacity defaults to 1 (loaded). During the wave
+          // animation each cluster's entry ramps 0 → 1; the value comes
+          // from `labelOpacities[party]` set by the helper.
+          const op = labelOpacities[cluster.ownerParty]
+          const labelOp = op === undefined ? 1 : op
+          return (
+            <PillboxLabel
+              key={cluster.ownerParty}
+              ownerParty={cluster.ownerParty}
+              x={screen.x}
+              y={screen.y}
+              faded={faded}
+              opacity={labelOp}
+              fontPx={labelFontPx}
+            />
+          )
+        })
+      })()}
+
+      {/* Phase 16.2.6.3: owner-actor label below each RFP marker. Suppressed
+          when the RFP's owning actor IS the active actor (avoids duplicate
+          label next to the cluster's own pillbox). Position computed in
+          world coords below the marker (1 cell of breathing room below the
+          square's bottom edge) and projected through worldToScreen. */}
+      {layout && (() => {
+        const labelFontPx = computeLabelFontSize(zoom)
+        const activeParty = layout.activeParty
+        return layout.allDots.map((d, i) => {
+          if (d.kind !== 'rfp') return null
+          const ownerParty = d.rfp?.owner
+          if (!ownerParty || ownerParty === activeParty) return null
+          const labelY = d.y + RFP_OUTER_SIZE / 2 + DOT_GRID
+          const screen = worldToScreen(d.x, labelY)
+          return (
+            <PillboxLabel
+              key={`rfp-owner-${ownerParty}-${i}`}
+              ownerParty={ownerParty}
+              x={screen.x}
+              y={screen.y}
+              faded={false}
+              opacity={1}
+              fontPx={labelFontPx}
+            />
+          )
+        })
+      })()}
 
       {/* Tooltip (singleton). */}
       {(hover || pinned) && (() => {

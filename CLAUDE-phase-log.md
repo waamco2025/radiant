@@ -2673,6 +2673,78 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.3 completion notes (2026-05-16) — More mock actors + label scaling + RFP hollow square + top inset trim
+
+Six surgical polish items addressing the post-16.2.6.2 QA — canvas needed more cluster boundaries butting (not larger super-jumbos, which already overflow), labels didn't scale with zoom + drifted off-center at high zoom, GovCo's RFP marker was orphaned on non-Bob views, RFP marker primitive needed a distinct identity, and the top inset was one cell thicker than the L/R buffers.
+
+**Item 1 — 25 new mock supplier actors.** New `PHASE_16_2_6_3_NEW_MOCK_ACTORS` constant in `v2_2Data.js` (5 medium + 20 small per the brief's Item 1 table). All 25 reuse 16.2.6's existing `VERTICAL_LEXICONS` — Quartz Labs's `Crystal Oscillators & Clock ICs` lexicon was already added in 16.2.6 for Lyra Microsystems. The 16.2.6.3 expansion loop is collapsed into the existing 16.2.6 loop via array concat (`[...PHASE_16_2_6_NEW_MOCK_ACTORS, ...PHASE_16_2_6_3_NEW_MOCK_ACTORS]`) so the same `seedMockSupplierActor` + `generateClaimSpecsForVertical` pipeline handles both. Probe confirms: actors 52 → 77, claims 21,609 → 22,824 (+1,215), assets 21,606 → 22,821 (+1,215), DAs 86,461 → 91,321 (+4,860 = 1,215 × 4). Per-actor invariants pass: zero claim/DA mismatches, NovaFab anchor unchanged, Helios first procedural claim unchanged (same deterministic mulberry32 seed).
+
+**Item 2 — Zoom-aware cluster label scaling + centering.** Three new module-level constants: `BASE_LABEL_FONT_PX = 14`, `MIN_LABEL_FONT_PX = 11`, `MAX_LABEL_FONT_PX = 18`. New helper `computeLabelFontSize(zoom) = 14 × sqrt(zoom)` clamped to [11, 18]. Behaviors per the brief: zoom 0.15 → 5.4 → clamped to 11; zoom 0.5 → 9.9 → clamped to 11; zoom 1.0 → 14; zoom 1.5 → 17.1.
+
+The label scaling is applied per-render: in the JSX render block iterating `layout.allClusters`, `computeLabelFontSize(zoom)` is called once and the result passed as `fontPx` prop to every `PillboxLabel`. React's normal re-render-on-zoom-change pipeline handles the propagation (no separate ref + useEffect needed because `PillboxLabel` is a pure functional component already reacting to prop changes).
+
+`PillboxLabel` rewritten for proportional scaling + exact centering:
+- `padding` switched from fixed `3px 8px` to em-based `0.3em 0.7em` so the pill grows with the font.
+- `lineHeight: 1` eliminates the font ascender/descender asymmetry that pushed text upward inside fixed-pixel padding (the root cause of the 16.2.6.2 off-center drift at zoom 1.5 — particularly visible on Meridian Tech).
+- `display: flex; alignItems: center; justifyContent: center` guarantees the text reads centered inside the pill regardless of CSS baseline quirks.
+- `fontSize` driven by the new `fontPx` prop (default 11 so legacy call sites don't blow up).
+
+Both cluster labels AND RFP owner-labels (Item 4) share the helper for visual consistency.
+
+**Item 3 — Wave reveal 3000 → 4500 wu/sec.** One-line change in `directoryLoadAnimation.js`: `DEFAULT_WAVE_SPEED` 3000 → 4500. Math: max radial distance from anchor (5760, 5957.6) to a corner is ~8284 wu; at 4500 wu/sec + 0.2s fade = ~2.04s (was ~2.96s). Skip-on-click + outline-fade behavior unchanged.
+
+**Item 4 — RFP owner-actor label.** New render block in the JSX iterates `layout.allDots`, filters to `kind === 'rfp'`, suppresses entries where `d.rfp.owner === layout.activeParty` (avoids duplicate "GovCo" on Bob's view), and renders a `PillboxLabel` for each surviving RFP at position `worldToScreen(d.x, d.y + RFP_OUTER_SIZE/2 + DOT_GRID)` — i.e., 1 cell below the bottom edge of the square marker. Uses the same `computeLabelFontSize(zoom)` for visual consistency. Verified on Alice's view: GovCo's bottom-anchor RFP marker now has a "GovCo" pill adjacent below it (was orphaned in 16.2.6.2 and earlier).
+
+**Item 5 — RFP marker as hollow square (indigo).** Previously hollow circle, cyan. New constants:
+- `RFP_OUTER_SIZE = DOT_GRID * 1.2` (= 57.6 wu) — slightly bigger than a dot for visual distinction.
+- `RFP_BORDER_SCREEN_PX = 2` — on-screen target border thickness.
+- `RFP_BORDER = 2 / 0.15 ≈ 13.3 wu` — initial border for INITIAL_ZOOM (literal 0.15 used because `INITIAL_ZOOM` is declared later in the file — TDZ would trip otherwise).
+
+The existing `makeHollowSquareGeometry` (Phase 16.1.3 Item 2 + 9, originally for the Actor squares retired in Phase 16.2.4) is repurposed. Material color flipped to `--accent-indigo`. New `rfpBorderRef` tracks the currently-baked border thickness; a new zoom-change `useEffect` recomputes `RFP_BORDER_SCREEN_PX / zoom` and rebuilds the shared `rfpMesh.geometry` whenever the desired value differs by ≥5% from the baked value (avoids per-wheel-tick geometry churn while still maintaining ~2px on-screen border across the full zoom range). Single ShapeGeometry rebuild per qualifying zoom transition — negligible cost.
+
+**Pre-existing gap**: no RFP raycast/click pipeline exists in DirectoryLayer.jsx. The brief's QA item #16 ("Click on RFP marker → Detail Panel opens") was not previously functional and isn't introduced by this phase — filed implicitly for the RFP MVP work in Phase 17.0–17.2. The hollow-square geometry has a hole, so a future RFP raycast would need either (a) a separate invisible solid-square hit-test mesh sized to `RFP_OUTER_SIZE`, or (b) custom raycast logic that treats the outer bounds as the hit area.
+
+**Item 6 — `DOMAIN_INSET_TOP` 500 → 475.** Static value chosen (`64 css px / 0.15 ≈ 427 wu` for the header + `DOT_GRID = 48 wu` of L/R-parity buffer = 475) over dynamic `getBoundingClientRect()` measurement so the Directory layout pipeline doesn't depend on parent-component DOM mount order. Visible top buffer below the header now matches the L/R 1-cell edge buffer at every zoom. Usable area grows ~0.3% (negligible Lloyd's impact).
+
+**Item 7 — Polish-backlog #201.** New entry: Directory RFP cluster expansion at canvas bottom third (Open / Effort M). Deferred-future companion to the hollow-square primitive shipped in this phase — adds ~20 buyer actors with 1-12 RFPs each + a few "mixed actors" with both Claims and RFPs, with bottom-bias Voronoi-seed placement.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean (no new warnings beyond the pre-existing 500-KB chunk warning).
+2. ✅ Actors array grew by exactly 25 (52 → 77).
+3. ✅ Claims array grew by exactly 1,215 (21,609 → 22,824).
+4. ✅ DAs array grew by exactly 4,860 (86,461 → 91,321).
+5. ✅ Three label-scaling constants + `computeLabelFontSize(zoom)` helper present.
+6. ✅ Wave speed = 4500 in `directoryLoadAnimation.js`. (Visual confirmation: animation completes within ~2s on dev server.)
+7. ✅ RFP marker geometry now hollow square. Border thickness rebuilds on zoom for ~2px screen target.
+8. ✅ RFP marker has owner-label on non-Bob views (confirmed on Alice). Suppressed on Bob's view per Item 4's recommended path.
+9. ✅ Label centering via `lineHeight: 1` + flex centering (visual centering will hold at zoom 1.5 — runtime verification limited to default zoom since the React-bound wheel handler doesn't receive scripted DOM WheelEvents).
+10. ✅ `DOMAIN_INSET_TOP = 475`.
+11. ✅ `polish-backlog.md` contains #201 RFP cluster expansion entry.
+
+**Verification**:
+- Data-layer probe: all per-actor invariants match, totals correct, NovaFab + Helios spot-checks unchanged.
+- Build clean.
+- Dev server (1400×900 viewport): Directory loads with visibly more clusters (~60+ visible labels at default zoom out of 77 total); top buffer below header now matches L/R edge buffer; GovCo RFP marker renders as small indigo hollow square at bottom-center; on Alice's view the marker has a "GovCo" pill label adjacent. NaN-CSS-left React warning from 16.2.6.1 no longer present.
+- Zoom-range + scale-cap verification limited to code-path inspection (scripted WheelEvent doesn't propagate to the React addEventListener-bound handler — known limitation per CLAUDE.md).
+
+**Known regressions surfaced + accepted per brief's pinned conventions** (deferred candidates):
+- Cluster overflow now affects 18 clusters (was 10 in 16.2.6.2): Atlas 208/2950, Apex 225/325, Aurora 226/800, Beacon 203/900, Cascade 176/350, Citadel 148/250, Eos 212/225, Helios 470/3250, Kestrel 74/75, Lyra 196/225, Meridian 205/250, Orion 383/650, Polaris 226/2600, Quantum 188/400, Sirius 729/1050, Solstice 139/700, Vega 285/1200, Vortex 215/2300. ChipCo still uses 16.2.6.1's shrink-collapse fallback. More seeds competing for the same usable area at the unchanged Lloyd's convergence is exactly what the brief anticipated ("Adding many more dots will exacerbate this... Accept for this phase").
+
+**Files changed**:
+- `src/v2/v2_2Data.js` — new `PHASE_16_2_6_3_NEW_MOCK_ACTORS` constant; expansion-loop concat updated.
+- `src/v2/DirectoryLayer.jsx` — `DOMAIN_INSET_TOP` 500 → 475; new `BASE/MIN/MAX_LABEL_FONT_PX` + `computeLabelFontSize`; `PillboxLabel` rewritten for prop-driven font, em-padding, flex centering, `lineHeight: 1`; new `RFP_OUTER_SIZE` + `RFP_BORDER_SCREEN_PX` constants + `RFP_BORDER` adjusted; `rfpBorderRef` declaration; RFP scene-init uses `makeHollowSquareGeometry` + indigo color; new zoom-change `useEffect` rebuilds RFP geometry on border-thickness change; new render block for RFP owner-actor labels; cluster-label render block reads `computeLabelFontSize(zoom)` and threads `fontPx` to `PillboxLabel`.
+- `src/v2/directoryLoadAnimation.js` — `DEFAULT_WAVE_SPEED` 3000 → 4500.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.3 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — new #201 entry; Update Log Phase 16.2.6.3 entry.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete (with the cluster-overflow regression growing per the brief's anticipated trajectory — surfaced + accepted).
+
+---
+
 ### Phase 16.2.6.2 completion notes (2026-05-16) — Edge buffers + zoom range + non-linear dot scaling + wipe origin
 
 Four surgical polish items addressing the post-16.2.6.1 QA Andrew surfaced — canvas edge cutoff, UI chrome occlusion, dot size at zoom extremes, and the parent → Directory wipe origin still being bottom-left.

@@ -1769,6 +1769,38 @@ const PHASE_16_2_6_NEW_MOCK_ACTORS = [
   { id: 'cordite-labs',        party: 'Cordite Labs',        vertical: 'Material Samples & Test Coupons',      dotCount: 35 },
 ]
 
+// Phase 16.2.6.3: 25 additional mock supplier actors (5 medium + 20 small)
+// to make the canvas read denser via "more cluster boundaries butting"
+// rather than larger super-jumbos (which already overflow at the current
+// Lloyd's convergence). All verticals reuse existing 16.2.6 lexicons.
+const PHASE_16_2_6_3_NEW_MOCK_ACTORS = [
+  { id: 'caelum-defense',      party: 'Caelum Defense',      vertical: 'IMUs, Gyros & GPS Receivers',          dotCount: 140 },
+  { id: 'pyxis-systems',       party: 'Pyxis Systems',       vertical: 'Bus Controllers & Network Modules',    dotCount: 130 },
+  { id: 'vector-industries',   party: 'Vector Industries',   vertical: 'Pyrotechnics & Ordnance',              dotCount: 130 },
+  { id: 'tangent-components',  party: 'Tangent Components',  vertical: 'Connectors & Harnesses',               dotCount: 110 },
+  { id: 'spectra-labs',        party: 'Spectra Labs',        vertical: 'Imaging Optics & Lasers',              dotCount: 120 },
+  { id: 'talos-defense',       party: 'Talos Defense',       vertical: 'Composite Structures',                 dotCount: 50 },
+  { id: 'argus-optics',        party: 'Argus Optics',        vertical: 'Star Trackers & Sun Sensors',          dotCount: 45 },
+  { id: 'vesta-aerospace',     party: 'Vesta Aerospace',     vertical: 'Structures, Composites & Mechanisms',  dotCount: 45 },
+  { id: 'boreas-tech',         party: 'Boreas Tech',         vertical: 'Thermal Management & Cryogenics',      dotCount: 40 },
+  { id: 'caliber-defense',     party: 'Caliber Defense',     vertical: 'Connectors & Harnesses',               dotCount: 40 },
+  { id: 'lapis-components',    party: 'Lapis Components',    vertical: 'Magnetics & Inductors',                dotCount: 35 },
+  { id: 'polara-defense',      party: 'Polara Defense',      vertical: 'RF Comms & Ground Systems',            dotCount: 35 },
+  { id: 'crescent-aerospace',  party: 'Crescent Aerospace',  vertical: 'Structures, Composites & Mechanisms',  dotCount: 30 },
+  { id: 'halcyon-systems',     party: 'Halcyon Systems',     vertical: 'Thermal Management & Cryogenics',      dotCount: 30 },
+  { id: 'verge-defense',       party: 'Verge Defense',       vertical: 'Mixed-Signal ICs & Processors',        dotCount: 30 },
+  { id: 'nimbus-industries',   party: 'Nimbus Industries',   vertical: 'Mixed-Signal ICs & Processors',        dotCount: 25 },
+  { id: 'cinder-labs',         party: 'Cinder Labs',         vertical: 'Adhesives & Coatings',                 dotCount: 25 },
+  { id: 'edgewater-tech',      party: 'Edgewater Tech',      vertical: 'Comms Signal Processing',              dotCount: 25 },
+  { id: 'drumlin-defense',     party: 'Drumlin Defense',     vertical: 'Structures, Composites & Mechanisms',  dotCount: 20 },
+  { id: 'sceptre-aerospace',   party: 'Sceptre Aerospace',   vertical: 'Pyrotechnics & Ordnance',              dotCount: 20 },
+  { id: 'anchor-components',   party: 'Anchor Components',   vertical: 'Connectors & Harnesses',               dotCount: 20 },
+  { id: 'sable-industries',    party: 'Sable Industries',    vertical: 'Adhesives & Coatings',                 dotCount: 20 },
+  { id: 'quartz-labs',         party: 'Quartz Labs',         vertical: 'Crystal Oscillators & Clock ICs',      dotCount: 20 },
+  { id: 'bedrock-defense',     party: 'Bedrock Defense',     vertical: 'Composite Structures',                 dotCount: 15 },
+  { id: 'polar-tech',          party: 'Polar Tech',          vertical: 'Atomic Clocks & Quantum Sensors',      dotCount: 15 },
+]
+
 export function buildV22SharedArtifacts() {
   // ── Actors ────────────────────────────────────────────────────────────
   const bob = makeActor({
@@ -2082,7 +2114,10 @@ export function buildV22SharedArtifacts() {
   const expandedMockClaims = []
   const expandedMockOwnershipDas = []
   const expandedMockPublicDas = []
-  for (const spec of PHASE_16_2_6_NEW_MOCK_ACTORS) {
+  // Phase 16.2.6.3 concat: feed both 16.2.6 and 16.2.6.3 actor specs through
+  // the same expansion loop. Two arrays kept separate in the module scope for
+  // documentation clarity but unioned here at the splice site.
+  for (const spec of [...PHASE_16_2_6_NEW_MOCK_ACTORS, ...PHASE_16_2_6_3_NEW_MOCK_ACTORS]) {
     const claimSpecs = generateClaimSpecsForVertical(spec.party, spec.vertical, spec.dotCount)
     const bundle = seedMockSupplierActor({
       id: spec.id,

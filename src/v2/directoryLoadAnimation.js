@@ -20,7 +20,10 @@
 // interactions do NOT trigger skip — the animation runs on its own
 // timeline, independent of camera state.
 
-const DEFAULT_WAVE_SPEED = 3000     // world units per second
+// Phase 16.2.6.3: 3000 → 4500 wu/sec. At canvas 11520×7447 with anchor at
+// (5760, 5957.6), max radial distance to a corner is ~8284 wu — so animation
+// duration drops from ~3.0s to ~2.0s. Cleaner pacing for the demo.
+const DEFAULT_WAVE_SPEED = 4500     // world units per second
 const DEFAULT_DOT_FADE_MS = 200
 const DEFAULT_LABEL_DELAY_MS = 100
 const LABEL_FADE_MS = 200
