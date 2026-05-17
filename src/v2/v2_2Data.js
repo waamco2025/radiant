@@ -4639,7 +4639,37 @@ export function buildV22DirectoryDataForRole(roleId, provisionals) {
   // consumes this to decide whether to render the user's own cluster +
   // Actor square.
   const isUserVisible = ownClaims.length > 0 || ownRfps.length > 0
-  return { activeParty, isUserVisible, ownClaims, ownRfps, otherClusters, umbrellaEdges, otherRfps }
+
+  // Phase 16.2.8: enrich each surfaced Claim into a node-shaped object via
+  // `claimToNode` + mock health/badges helpers. The enriched node drives
+  // AssetNode / AssetNodeMini rendering in the Directory's mid/full LOD
+  // (CLAIM label, minibar, red border, badge chips). Raw Claim objects on
+  // the cluster (publicClaims, umbrellaClaims, ownClaims) stay untouched —
+  // they continue to flow through onClaimDotClick → Detail Panel, which
+  // reads referencedAssetIds / acknowledgments / pin etc. directly. The
+  // enrichment is render-only, addressed by `claim.id` from a per-cluster
+  // map (active actor uses the top-level `ownNodesByClaimId` map).
+  const buildClaimNode = (claim) => {
+    const health = mockClaimHealth(claim.id)
+    const badges = mockClaimBadges(claim.id, health)
+    const node = claimToNode(claim, { health, claimCount: 0 }, 0, 0)
+    node._activeBadges = badges
+    return node
+  }
+  for (const cluster of otherClusters) {
+    const map = new Map()
+    for (const c of cluster.publicClaims || []) map.set(c.id, buildClaimNode(c))
+    for (const c of cluster.umbrellaClaims || []) {
+      if (!map.has(c.id)) map.set(c.id, buildClaimNode(c))
+    }
+    cluster.nodesByClaimId = map
+  }
+  const ownNodesByClaimId = new Map()
+  for (const c of ownClaims) {
+    if (!ownNodesByClaimId.has(c.id)) ownNodesByClaimId.set(c.id, buildClaimNode(c))
+  }
+
+  return { activeParty, isUserVisible, ownClaims, ownRfps, otherClusters, umbrellaEdges, otherRfps, ownNodesByClaimId }
 }
 
 /**
@@ -5232,6 +5262,98 @@ function parseResultToNode(pr, x, y) {
     v22Type: 'PARSE RESULT',
     v22Artifact: pr,
   }
+}
+
+// Phase 16.2.8: deterministic per-Claim mock health distribution for the
+// Directory layer's full/mid card LOD. Target across all Claims:
+//   50% no minibar          health = { ok:0, warn:0, bad:0 } — HealthBar returns null
+//    5% 100% green + ≥2 badges
+//    5% 100% green + 1 badge
+//   10% 100% green w/o badges
+//   15% has bad (red border on the card)
+//   15% mixed (ok + warn, no bad)
+// Returns the same { ok, warn, bad } counts shape `claimToNode`'s rollup
+// already expects (downstream feeds into AssetNode's HealthBar). PRNG seed
+// is per-Claim, so the same Claim renders identically across reloads.
+function mockClaimHealth(claimId) {
+  const rand = seededRandom(hashString(claimId + ':health'))
+  const r = rand()
+  if (r < 0.50) return { ok: 0, warn: 0, bad: 0 }                       // no minibar
+  if (r < 0.55) return { ok: 4 + Math.floor(rand() * 5), warn: 0, bad: 0 } // green + ≥2 badges
+  if (r < 0.60) return { ok: 3 + Math.floor(rand() * 5), warn: 0, bad: 0 } // green + 1 badge
+  if (r < 0.70) return { ok: 3 + Math.floor(rand() * 6), warn: 0, bad: 0 } // green w/o badges
+  if (r < 0.85) {                                                          // has bad — red border
+    const ok = 1 + Math.floor(rand() * 5)
+    const warn = Math.floor(rand() * 3)
+    const bad = 1 + Math.floor(rand() * 3)
+    return { ok, warn, bad }
+  }
+  // mixed (ok + warn, no bad)
+  const ok = 2 + Math.floor(rand() * 5)
+  const warn = 1 + Math.floor(rand() * 3)
+  return { ok, warn, bad: 0 }
+}
+
+// Phase 16.2.8: deterministic per-Claim mock `_activeBadges` for the
+// Directory's full-card LOD. Badges only appear on 100% green minibars
+// (Andrew's rule), confirmed by checking `health.bad === 0 && health.warn
+// === 0 && health.ok > 0`. The two top buckets in `mockClaimHealth`
+// (5% with ≥2 badges, 5% with exactly 1 badge) drive the count via the
+// same RNG bucket — re-roll the bucket here so the two helpers stay in
+// sync. If you change one threshold, change the other.
+//
+// Badge shape `{ id, badgeName, badgeVersion, issuerParty }` matches
+// `BadgeChipContainer.jsx`'s `ShieldTooltipContent` + `OverflowTooltipContent`
+// consumers (badge.badgeName / badgeVersion / issuerParty are the only
+// fields read). No icon, no color (shield is constant indigo).
+const MOCK_BADGE_NAMES = [
+  'ISO 27001',
+  'SOC 2 Type II',
+  'ITAR Compliance',
+  'DO-178C Level A',
+  'EN 9100',
+  'AS9100D',
+  'CMMC Level 3',
+  'NIST 800-171',
+  'FIPS 140-3',
+  'DO-254 Level B',
+  'MIL-STD-810H',
+  'RTCA DO-160G',
+]
+const MOCK_BADGE_ISSUERS = [
+  'AuditCo',
+  'Sentinel Compliance',
+  'Veritas Standards',
+  'Crucible Audit',
+  'Meridian Certification',
+]
+function mockClaimBadges(claimId, health) {
+  // Eligibility gate: badges only on 100% green minibars.
+  if (health.bad > 0 || health.warn > 0 || health.ok === 0) return []
+  // Same bucket re-roll as mockClaimHealth (same salt → same r value).
+  const r = seededRandom(hashString(claimId + ':health'))()
+  let badgeCount
+  if (r >= 0.50 && r < 0.55) {
+    // Top bucket: 2-4 badges.
+    badgeCount = 2 + Math.floor(seededRandom(hashString(claimId + ':bcnt'))() * 3)
+  } else if (r >= 0.55 && r < 0.60) {
+    badgeCount = 1                                                          // single badge
+  } else {
+    return []                                                                // 100% green but no badges
+  }
+  const out = []
+  for (let i = 0; i < badgeCount; i++) {
+    const nameRand = seededRandom(hashString(claimId + ':bname:' + i))
+    const issuerRand = seededRandom(hashString(claimId + ':bissuer:' + i))
+    const verRand = seededRandom(hashString(claimId + ':bver:' + i))
+    out.push({
+      id: `${claimId}-badge-${i}`,
+      badgeName: MOCK_BADGE_NAMES[Math.floor(nameRand() * MOCK_BADGE_NAMES.length)],
+      badgeVersion: 1 + Math.floor(verRand() * 3),                          // v1-v3
+      issuerParty: MOCK_BADGE_ISSUERS[Math.floor(issuerRand() * MOCK_BADGE_ISSUERS.length)],
+    })
+  }
+  return out
 }
 
 function claimToNode(claim, rollup, x, y) {

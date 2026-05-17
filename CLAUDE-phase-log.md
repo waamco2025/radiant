@@ -2673,6 +2673,85 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.8 completion notes (2026-05-17) — Directory Claim card population (CLAIM/minibar/badges)
+
+Phase 16.2.7 shipped the Directory mini-card / full-card LOD swap by passing `d.claim` (raw output of `makeClaim`) as the `node` prop to `AssetNodeMini` and `AssetNode`. The cards rendered, but visually bare — title + owner only. No "CLAIM" type label (because `AssetNode` reads `node.category` for the CATEGORY_CONFIG lookup which adds the teal `CLAIM` chip), no minibar (because `AssetNode` reads `node.displayHealth || node.health` for the HealthBar), no badges (because `AssetNode` reads `node._activeBadges`).
+
+This phase plumbs the proper data shape end-to-end. Three pieces:
+
+**Item 1 — mock distribution helpers** (in `v2_2Data.js`, placed right above `claimToNode`):
+
+`mockClaimHealth(claimId)` returns the `{ ok, warn, bad }` rollup shape that `claimToNode`'s rollup parameter already accepts. Seeded by `seededRandom(hashString(claimId + ':health'))` — the existing Phase 16.2.6 PRNG composed via the existing `hashString` helper. Distribution per Andrew's brief:
+- 50% no minibar (`{ ok: 0, warn: 0, bad: 0 }` — `HealthBar` returns null)
+- 5% all-green with ≥ 2 badges (top bucket: 4-8 ok counts)
+- 5% all-green with 1 badge (3-7 ok counts)
+- 10% all-green without badges (3-8 ok counts)
+- 15% has-bad (1-5 ok + 0-2 warn + 1-3 bad)
+- 15% mixed (2-6 ok + 1-3 warn, no bad)
+
+`mockClaimBadges(claimId, health)` returns `[{ id, badgeName, badgeVersion, issuerParty }]`. Eligibility gate: `health.bad === 0 && health.warn === 0 && health.ok > 0`. Bucket re-roll uses the same `:health` salt + threshold gates (`r < 0.55` → 2-4 badges, `r < 0.60` → 1 badge, else `[]`) so the two helpers stay in sync. If you change one threshold, change the other — explicit cross-helper coupling documented in the helper comments.
+
+Inline `MOCK_BADGE_NAMES` (12 standards: ISO 27001, SOC 2 Type II, ITAR Compliance, DO-178C Level A, EN 9100, AS9100D, CMMC Level 3, NIST 800-171, FIPS 140-3, DO-254 Level B, MIL-STD-810H, RTCA DO-160G) and `MOCK_BADGE_ISSUERS` (5 issuers: AuditCo, Sentinel Compliance, Veritas Standards, Crucible Audit, Meridian Certification). Each badge gets a deterministic version (`v1-v3`) via a separate `:bver:N` salt per slot. The badge shape `{ id, badgeName, badgeVersion, issuerParty }` matches `BadgeChipContainer.jsx`'s consumer contract verbatim — confirmed by direct inspection of `ShieldTooltipContent` (reads `badge.badgeName`, `badge.badgeVersion`, `badge.issuerParty`) and `OverflowTooltipContent` (reads `b.badgeName`, `b.issuerParty`). No icon, no color (the shield SVG is constant indigo). No template refs. Synthesized directly without going through `makeBadgeTemplate` — the parent canvas flattens template + issuance into this render-ready shape upstream of `node._activeBadges`; for Directory mock data we skip the intermediate.
+
+**Item 2 — view-builder plumb** in `buildV22DirectoryDataForRole`:
+
+After the existing `otherClusters` build (and after the Phase 16.2.6.5 `cluster.rfps` attachment block), a new local helper:
+```js
+const buildClaimNode = (claim) => {
+  const health = mockClaimHealth(claim.id)
+  const badges = mockClaimBadges(claim.id, health)
+  const node = claimToNode(claim, { health, claimCount: 0 }, 0, 0)
+  node._activeBadges = badges
+  return node
+}
+```
+walks every `cluster.publicClaims` + `cluster.umbrellaClaims` and populates `cluster.nodesByClaimId = new Map<claimId, node>`. The active actor's `ownClaims` get the same treatment via a top-level `ownNodesByClaimId` Map returned alongside the existing fields.
+
+Raw `Claim` objects on the cluster (`publicClaims` / `umbrellaClaims` / `ownClaims`) stay untouched — they continue flowing through `onClaimDotClick → V2App's Detail Panel`, which reads `referencedAssetIds`, `acknowledgments`, `pin`, etc. directly off the raw `makeClaim` output. The enriched node has `referencedEvidenceIds` (the `claimToNode` field name), which would break the Panel if substituted — so the enrichment is render-only and lives in a separate field.
+
+**Item 3 — DirectoryLayer plumb** in `computeLayout`:
+
+`buildItems` reads `cluster.nodesByClaimId` and threads `node` onto each public/umbrella spec item alongside the raw `claim`. The active-actor own-cluster path reads `directoryData.ownNodesByClaimId`. The dot construction loop (`placed = { x, y, colorVar, kind, claim, rfp, type, clusterIdx }`) now also includes the new `node` field. The downstream `allDots.push` flatten step propagates `node` so the JSX card overlay block can read `d.node || d.claim` directly. The `|| d.claim` fallback covers any edge case where enrichment failed (defensive only; in normal flow `d.node` always wins).
+
+**Click flow preserved**. The Phase 16.2.7 `onCardClick` and the Phase 16.0 dot-click handler both call `onClaimDotClick?.(d.claim)` — NOT `d.node`. The Detail Panel expects the raw Claim shape, not the node-shaped enriched object. Verified during QA: clicking a card opens the Panel with the correct Claim data. No code change in Item 4 — just a no-touch verification.
+
+**Probe verification** across 22,994 enriched Claim nodes on Bob's view:
+
+| Bucket | Count | % | Target |
+|---|---|---|---|
+| No minibar | 11,467 | 49.9% | ~50% |
+| All green | 4,598 | 20.0% | ~20% |
+| Has bad | 3,490 | 15.2% | ~15% |
+| Mixed | 3,439 | 15.0% | ~15% |
+| With ≥ 1 badge | 2,301 | 10.0% | ~10% |
+| With ≥ 2 badges | 1,127 | 4.9% | ~5% |
+
+Two `buildV22DirectoryDataForRole` calls produce byte-identical node + badge sets for the same `claim.id` — determinism contract holds.
+
+**Dev server verification** (1400×900 viewport, Bob's view, zoom 5.0 / full-LOD): cards display CLAIM teal small-caps label at top, claim name, "Citadel Aerospace" owner, minibars (~half of visible cards), red border on the NASA Standard Initiator card (has-bad bucket), badge chip on a left-edge card. No console errors. RFP markers + cluster pillbox labels unchanged from Phase 16.2.7.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ `mockClaimHealth`, `mockClaimBadges` present in `v2_2Data.js`. Existing `seededRandom` + `hashString` reused via composition.
+3. ✅ `buildV22DirectoryDataForRole` calls `claimToNode` and attaches `node` to each cluster's claims via `nodesByClaimId` Map + `ownNodesByClaimId` at the top level.
+4. ✅ DirectoryLayer.jsx card render passes `d.node || d.claim`.
+5. ✅ No changes to `AssetNode.jsx` or `BadgeChipContainer.jsx`.
+6. ✅ Dot click + card click both route the raw Claim object to `onClaimDotClick`.
+
+**Files changed**:
+- `src/v2/v2_2Data.js` — `mockClaimHealth` + `mockClaimBadges` + `MOCK_BADGE_NAMES` + `MOCK_BADGE_ISSUERS` (above `claimToNode`); `buildClaimNode` local helper + `cluster.nodesByClaimId` Map population + `ownNodesByClaimId` Map in `buildV22DirectoryDataForRole` return shape.
+- `src/v2/DirectoryLayer.jsx` — `buildItems` reads `cluster.nodesByClaimId` + threads `node` onto items; active-actor own setup reads `ownNodesByClaimId`; `placed` dot construction + `allDots.push` propagate `node`; card overlay render uses `node={d.node || d.claim}`.
+- `architecture-spec.md` — §8.2 Phase 16.2.8 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.8 entry; note 16.2.9 (disclosure-type borders) as next forward-progress.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.7 completion notes (2026-05-17) — Mini-card + full-card LOD on Directory + size tweak
 
 Closes polish-backlog #200 (Directory mini-card swap at higher zoom). Three coordinated changes in `DirectoryLayer.jsx`:

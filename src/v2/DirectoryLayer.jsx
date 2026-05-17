@@ -719,13 +719,20 @@ function computeLayout(directoryData, viewport) {
   const clusterSpecs = []
   const activeParty = directoryData.activeParty
   const buildItems = (cluster) => {
+    // Phase 16.2.8: per-cluster `nodesByClaimId` map of pre-enriched node-
+    // shaped objects (claimToNode + mock health + mock badges) — drives the
+    // mid/full card LOD render. Raw `c` stays attached as `item.claim` for
+    // the click-to-Detail-Panel pipeline.
+    const nodesByClaimId = cluster.nodesByClaimId || new Map()
     const umbrellaItems = (cluster.umbrellaClaims || []).map((c) => ({
       claim: c,
+      node: nodesByClaimId.get(c.id) || null,
       disclosureType: cluster.umbrellaTypeByClaimId?.[c.id] || 'full',
       kind: 'umbrella',
     }))
     const publicItems = (cluster.publicClaims || []).map((c) => ({
       claim: c,
+      node: nodesByClaimId.get(c.id) || null,
       disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
       kind: 'public',
     }))
@@ -743,9 +750,12 @@ function computeLayout(directoryData, viewport) {
   }
   // Active Actor's own cluster — always present in clusterSpecs so the
   // tessellation has an anchor seed. dot_count = 0 if no own claims (Carol).
+  // Phase 16.2.8: own Claims also get enriched nodes (via the top-level
+  // `ownNodesByClaimId` map from the view builder).
   const activeOwnUmbrella = []
+  const ownNodesByClaimId = directoryData.ownNodesByClaimId || new Map()
   const activeOwnPublic = (directoryData.ownClaims || []).map((c) => ({
-    claim: c, disclosureType: 'full', kind: 'public',
+    claim: c, node: ownNodesByClaimId.get(c.id) || null, disclosureType: 'full', kind: 'public',
   }))
   const activeOwnRfp = (directoryData.ownRfps || []).map((r) => ({
     rfp: r, kind: 'rfp', disclosureType: 'full',
@@ -929,6 +939,9 @@ function computeLayout(directoryData, viewport) {
           colorVar,
           kind: item.kind || 'public',
           claim: item.claim || null,
+          // Phase 16.2.8: enriched node-shaped object — read by the card
+          // overlay block (mid/full LOD). Null for RFP items.
+          node: item.node || null,
           rfp: item.rfp || null,
           type: item.kind === 'umbrella' ? 'umbrella' : (item.kind || 'public'),
           clusterIdx: ci,
@@ -1019,6 +1032,9 @@ function computeLayout(directoryData, viewport) {
         colorVar: d.colorVar,
         kind: d.kind || 'public',
         claim: d.claim || null,
+        // Phase 16.2.8: propagate enriched node through allDots so the card
+        // overlay block (which iterates layout.allDots) can read it directly.
+        node: d.node || null,
         rfp: d.rfp || null,
         clusterIdx: ci,
       })
@@ -2365,7 +2381,7 @@ export default function DirectoryLayer({
               }}
             >
               <Card
-                node={d.claim}
+                node={d.node || d.claim}
                 isSelected={isSelected}
                 onSelect={() => onCardClick(d, i)}
                 activeParty={layout.activeParty}
