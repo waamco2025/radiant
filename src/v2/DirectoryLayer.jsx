@@ -57,15 +57,29 @@ const MAX_SCREEN_DOT_PX = 22                           // on-screen size cap at 
 const DOT_RADIUS = DOT_GRID * BASE_DOT_FACTOR / 2      // 20.4 — geometry radius at zoom ≤ cap-threshold
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
-// Phase 16.2.6.3: RFP marker switched from hollow circle (cyan) to hollow
-// square (indigo). Outer size 1.2 × DOT_GRID = 57.6 wu (slightly bigger than
-// a dot for visual distinction). Border thickness in world units is recomputed
-// on every zoom change so its on-screen size stays ≈ RFP_BORDER_SCREEN_PX.
-const RFP_OUTER_SIZE = DOT_GRID * 1.2
+// Phase 16.2.6.3 baseline + Phase 16.2.6.6 rewrite. RFP marker is now a
+// tinted-fill hollow square (indigo) that scales with zoom on the same
+// curve as cluster dots — linear below cap, fixed on-screen size above.
+//   • BASE_RFP_FACTOR matches dots' 0.85 → 0.95 lineage choice; squares
+//     leave a ~5% inter-cell gap at adjacent grid positions so adjacent
+//     RFP markers in a dense pack no longer overlap (16.2.6.5 fix).
+//   • MAX_SCREEN_RFP_PX = 22 matches the dot cap so dots & squares are
+//     visually comparable at every zoom.
+//   • RFP_FILL_ALPHA puts a low-opacity indigo plane behind the outline
+//     so the marker reads as filled rather than as an empty rectangle.
+const BASE_RFP_FACTOR = 0.95
+const MAX_SCREEN_RFP_PX = 22
+const RFP_FILL_ALPHA = 0.15
+const RFP_BASE_OUTER = DOT_GRID * BASE_RFP_FACTOR        // 45.6 wu — base outer at unscaled zoom
+// Kept as an alias for label-positioning formulas elsewhere in the file
+// that read RFP_OUTER_SIZE; safe because the new base is the same scale
+// shape (square outer at constant world size for layout purposes).
+const RFP_OUTER_SIZE = RFP_BASE_OUTER
+
 const RFP_BORDER_SCREEN_PX = 2
-// Initial border (world units) sized for the initial-zoom 0.15. A zoom-change
-// useEffect rebuilds the RFP geometry with `RFP_BORDER_SCREEN_PX / zoom` so
-// the on-screen border stays ≈ 2 px at every zoom.
+// Initial border (world units) sized for INITIAL_ZOOM 0.15 at scale 1.0.
+// The geometry-rebuild useEffect updates this to
+// `RFP_BORDER_SCREEN_PX / (scale × zoom)` whenever zoom changes.
 const RFP_BORDER = RFP_BORDER_SCREEN_PX / 0.15           // ≈ 13.3 wu
 const ROW_GAP = DOT_GRID
 const COL_GAP = DOT_GRID
@@ -163,6 +177,19 @@ function snapGrid(v) { return Math.round(v / DOT_GRID) * DOT_GRID }
 function computeDotWorldSize(zoom) {
   const linearScreenSize = DOT_GRID * BASE_DOT_FACTOR * zoom
   const cappedScreenSize = Math.min(linearScreenSize, MAX_SCREEN_DOT_PX)
+  return cappedScreenSize / zoom
+}
+
+/**
+ * Phase 16.2.6.6: parallel helper for RFP marker outer size — same curve
+ * as `computeDotWorldSize` but with the RFP constants. Cap threshold ≈
+ * MAX_SCREEN_RFP_PX / (DOT_GRID × BASE_RFP_FACTOR) ≈ 0.48 at the current
+ * constants (slightly below the dot cap threshold of 0.54 because RFP
+ * markers are sized 0.95 vs dots' 0.85, so they hit the cap sooner).
+ */
+function computeRfpWorldSize(zoom) {
+  const linearScreenSize = DOT_GRID * BASE_RFP_FACTOR * zoom
+  const cappedScreenSize = Math.min(linearScreenSize, MAX_SCREEN_RFP_PX)
   return cappedScreenSize / zoom
 }
 
@@ -1121,8 +1148,18 @@ export default function DirectoryLayer({
   // the desired `RFP_BORDER_SCREEN_PX / zoom` and rebuilds the geometry on
   // mismatch so the on-screen border stays ~2 px across the zoom range.
   const rfpBorderRef = useRef(RFP_BORDER)
+  // Phase 16.2.6.6: tracks the per-instance scale currently baked into the
+  // RFP outline + fill meshes' matrices. Updated by the rfp-rescale-on-zoom
+  // useEffect; read by the border-rebuild useEffect when computing the
+  // geometry's border thickness (`RFP_BORDER_SCREEN_PX / (scale × zoom)`).
+  const rfpScaleRef = useRef(1)
   const actorSquaresMeshRef = useRef(null)
   const rfpMeshRef = useRef(null)
+  // Phase 16.2.6.6: companion InstancedMesh for the tinted indigo fill
+  // rendered behind the outline. Shares the same per-instance scale +
+  // position matrices as `rfpMeshRef`. PlaneGeometry, never rebuilt on zoom
+  // (visual size driven entirely by the per-instance scale).
+  const rfpFillMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
   const dirtyRef = useRef(true)
   // Phase 16.2.3: initial camera target = canvas-horizontal-center +
@@ -1398,7 +1435,27 @@ export default function DirectoryLayer({
     // from pre-16.2.4 Actor squares), indigo accent. Border thickness sized
     // for the initial zoom; a zoom-change useEffect rebuilds the geometry
     // so the on-screen border stays ~RFP_BORDER_SCREEN_PX at every zoom.
-    const rfpGeometry = makeHollowSquareGeometry(RFP_OUTER_SIZE, RFP_BORDER)
+    // Phase 16.2.6.6: built at RFP_BASE_OUTER (was RFP_OUTER_SIZE = 1.2 ×
+    // DOT_GRID); a per-instance scale on the matrix caps the on-screen size
+    // at MAX_SCREEN_RFP_PX above the cap threshold — same pattern as dots.
+    //
+    // Two meshes are added in this order so the outline draws on top of the
+    // tinted fill: scene.add(fill) BEFORE scene.add(outline). Both share
+    // identical per-instance matrices (position + scale).
+    const rfpFillGeometry = new THREE.PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)
+    const rfpFillMaterial = new THREE.MeshBasicMaterial({
+      color: cssVarToColor('--accent-indigo', '#6b8aff'),
+      transparent: true,
+      opacity: RFP_FILL_ALPHA,
+    })
+    const rfpFillMesh = new THREE.InstancedMesh(rfpFillGeometry, rfpFillMaterial, MAX_RFPS)
+    rfpFillMesh.count = 0
+    rfpFillMesh.frustumCulled = false
+    rfpFillMesh.boundingSphere = unboundedSphere()
+    scene.add(rfpFillMesh)
+    rfpFillMeshRef.current = rfpFillMesh
+
+    const rfpGeometry = makeHollowSquareGeometry(RFP_BASE_OUTER, RFP_BORDER)
     const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-indigo', '#6b8aff') })
     const rfpMesh = new THREE.InstancedMesh(rfpGeometry, rfpMaterial, MAX_RFPS)
     rfpMesh.count = 0
@@ -1456,6 +1513,12 @@ export default function DirectoryLayer({
       squareMaterial.dispose()
       rfpGeometry.dispose()
       rfpMaterial.dispose()
+      // Phase 16.2.6.6: dispose fill mesh geom + material alongside outline.
+      // `rfpMesh.geometry` is rebuilt by the border-rebuild useEffect each
+      // time the on-screen border crosses the 5% threshold; the cleanup
+      // disposes whatever the current geometry is at unmount time.
+      rfpFillGeometry.dispose()
+      rfpFillMaterial.dispose()
       renderer.dispose()
       rendererRef.current = null
       sceneRef.current = null
@@ -1464,6 +1527,7 @@ export default function DirectoryLayer({
       dotsMeshRef.current = null
       actorSquaresMeshRef.current = null
       rfpMeshRef.current = null
+      rfpFillMeshRef.current = null
       setThreeReady(false)
     }
   }, [shouldMountScene, updateCamera])
@@ -1477,9 +1541,12 @@ export default function DirectoryLayer({
     const dotsMesh = dotsMeshRef.current
     const squaresMesh = actorSquaresMeshRef.current
     const rfpMesh = rfpMeshRef.current
+    // Phase 16.2.6.6: fill mesh refs grab alongside outline — both populated
+    // in the same pass with identical per-instance matrices.
+    const rfpFillMesh = rfpFillMeshRef.current
     const renderer = rendererRef.current
     const camera = cameraRef.current
-    if (!scene || !dotsMesh || !squaresMesh || !rfpMesh || !renderer || !camera) return
+    if (!scene || !dotsMesh || !squaresMesh || !rfpMesh || !rfpFillMesh || !renderer || !camera) return
 
     // Resolve theme colors once per update.
     const colorIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
@@ -1554,18 +1621,30 @@ export default function DirectoryLayer({
     squaresMesh.count = 0
     squaresMesh.instanceMatrix.needsUpdate = true
 
-    // RFP dots (hollow circles).
+    // RFP markers (hollow square outline + tinted indigo fill underneath).
+    // Phase 16.2.6.6: per-instance matrix bakes the zoom-driven scale so the
+    // on-screen marker size stays capped at MAX_SCREEN_RFP_PX when zoom is
+    // above the cap threshold. Stored in rfpScaleRef so the rescale-on-zoom
+    // effect can write fresh matrices without recomputing positions. Both
+    // meshes (outline + fill) receive identical per-instance matrices.
+    const initialRfpScale = computeRfpWorldSize(zoomRef.current) / RFP_BASE_OUTER
+    rfpScaleRef.current = initialRfpScale
     for (let i = 0; i < MAX_RFPS; i++) {
       if (i < rfpDots.length) {
         const d = rfpDots[i]
-        m.makeTranslation(d.x, -d.y, 0)
+        m.makeScale(initialRfpScale, initialRfpScale, 1)
+        m.setPosition(d.x, -d.y, 0)
         rfpMesh.setMatrixAt(i, m)
+        rfpFillMesh.setMatrixAt(i, m)
       } else {
         rfpMesh.setMatrixAt(i, hidden)
+        rfpFillMesh.setMatrixAt(i, hidden)
       }
     }
     rfpMesh.count = rfpDots.length
+    rfpFillMesh.count = rfpDots.length
     rfpMesh.instanceMatrix.needsUpdate = true
+    rfpFillMesh.instanceMatrix.needsUpdate = true
 
     dirtyRef.current = true
 
@@ -1607,21 +1686,54 @@ export default function DirectoryLayer({
     dirtyRef.current = true
   }, [zoom, threeReady, layout])
 
+  // ─── Phase 16.2.6.6: per-zoom rescale for RFP markers (outline + fill) ──
+  // Mirror of the dot rescale-on-zoom effect above. Both RFP meshes share
+  // the same per-instance matrices (position baked in, plus a uniform scale
+  // baked via `makeScale + setPosition`), so we write to both in the same
+  // pass. 118-marker matrix updates × 2 = trivially cheap per zoom change.
+  // Declared BEFORE the border-rebuild useEffect so `rfpScaleRef.current`
+  // is up-to-date when the border calculation reads it.
+  useEffect(() => {
+    if (!threeReady || !layout) return
+    const rfpMesh = rfpMeshRef.current
+    const rfpFillMesh = rfpFillMeshRef.current
+    if (!rfpMesh || !rfpFillMesh) return
+    const desiredScale = computeRfpWorldSize(zoom) / RFP_BASE_OUTER
+    if (Math.abs(desiredScale - rfpScaleRef.current) < 1e-4) return
+    const rfpDots = layout.allDots.filter((d) => d.kind === 'rfp')
+    const m = new THREE.Matrix4()
+    for (let i = 0; i < rfpDots.length; i++) {
+      const d = rfpDots[i]
+      m.makeScale(desiredScale, desiredScale, 1)
+      m.setPosition(d.x, -d.y, 0)
+      rfpMesh.setMatrixAt(i, m)
+      rfpFillMesh.setMatrixAt(i, m)
+    }
+    rfpMesh.instanceMatrix.needsUpdate = true
+    rfpFillMesh.instanceMatrix.needsUpdate = true
+    rfpScaleRef.current = desiredScale
+    dirtyRef.current = true
+  }, [zoom, threeReady, layout])
+
   // ─── Phase 16.2.6.3: rebuild RFP hollow-square geometry on zoom change ─
-  // Border thickness is world-units, so we need to rebuild the geometry
-  // (one ShapeGeometry, shared across all RFP instances) whenever the
-  // desired `RFP_BORDER_SCREEN_PX / zoom` differs from the currently-baked
-  // value. The geometry rebuild is cheap (single ShapeGeometry, ≤ 8 verts).
-  // Position matrices are unaffected.
+  // Border thickness is world-units. With the Phase 16.2.6.6 per-instance
+  // scale on the RFP mesh, the geometry's on-screen size is
+  // `border_geom × scale × zoom`. To keep on-screen border constant at
+  // RFP_BORDER_SCREEN_PX, re-derive `border_geom = RFP_BORDER_SCREEN_PX /
+  // (scale × zoom)`. Below the cap (scale = 1) this reduces to the
+  // pre-16.2.6.6 formula `RFP_BORDER_SCREEN_PX / zoom`. Above the cap,
+  // scale × zoom is constant so border_geom is constant too — the rebuild
+  // settles on a single value. Position matrices are unaffected.
   useEffect(() => {
     if (!threeReady) return
     const rfpMesh = rfpMeshRef.current
     if (!rfpMesh) return
-    const desiredBorder = RFP_BORDER_SCREEN_PX / zoom
+    const scale = rfpScaleRef.current
+    const desiredBorder = RFP_BORDER_SCREEN_PX / (scale * zoom)
     // Skip rebuild for trivial changes (<5% delta) — avoids per-wheel-tick
     // geometry churn while the on-screen border stays visually constant.
     if (Math.abs(desiredBorder - rfpBorderRef.current) / rfpBorderRef.current < 0.05) return
-    const newGeom = makeHollowSquareGeometry(RFP_OUTER_SIZE, desiredBorder)
+    const newGeom = makeHollowSquareGeometry(RFP_BASE_OUTER, desiredBorder)
     const oldGeom = rfpMesh.geometry
     rfpMesh.geometry = newGeom
     oldGeom.dispose()

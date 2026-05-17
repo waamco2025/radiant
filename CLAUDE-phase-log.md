@@ -2673,6 +2673,80 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.6 completion notes (2026-05-17) — RFP marker scaling + tinted fill
+
+QA on Phase 16.2.6.5's RFP cluster expansion surfaced four related issues — all rooted in the marker's fixed-world-unit outer (`RFP_OUTER_SIZE = DOT_GRID × 1.2`) clashing with the zoom-aware dot sizing from Phase 16.2.6.2:
+
+1. **Oversized at high zoom.** Math at 76% zoom: dots cap at 22 px on screen; squares rendered at `1.2 × 48 × 0.76 = 43.7 px` (no cap). Squares ~2× dot size.
+2. **Borders proportionally tiny.** The 16.2.6.3 border rebuild correctly held 2 px on-screen, but on a 43 px square that border was 4.6% of width — visually thin.
+3. **Adjacent grid-cell squares overlap.** At `outer = 1.2 × DOT_GRID` and `DOT_GRID` center-to-center spacing, each square extended 0.2 × DOT_GRID past its cell boundary.
+4. **No fill.** Markers read as "empty rectangles" against dense dot clusters — no visual differentiation by fill, only by shape.
+
+All four fixed via a single coordinated rewrite of the RFP rendering primitives.
+
+**Item 1 — constants + helper.** Replaced the fixed `RFP_OUTER_SIZE = DOT_GRID × 1.2` with new zoom-aware primitives:
+- `BASE_RFP_FACTOR = 0.95` — matches dots' 5% inter-cell gap pattern, so adjacent grid-cell squares no longer overlap.
+- `MAX_SCREEN_RFP_PX = 22` — same on-screen cap as dots, making the two primitives visually comparable at every zoom.
+- `RFP_FILL_ALPHA = 0.15` — opacity of the tinted indigo fill.
+- `RFP_BASE_OUTER = DOT_GRID × BASE_RFP_FACTOR = 45.6 wu` — the base outer at unscaled zoom.
+- `RFP_OUTER_SIZE` retained as a backwards-compat alias for the label-positioning formula (the marker-label offset at `d.y + RFP_OUTER_SIZE/2 + DOT_GRID` reads OK at the new outer too).
+
+New helper `computeRfpWorldSize(zoom)` parallels `computeDotWorldSize`:
+```js
+function computeRfpWorldSize(zoom) {
+  const linear = DOT_GRID * BASE_RFP_FACTOR * zoom
+  const capped = Math.min(linear, MAX_SCREEN_RFP_PX)
+  return capped / zoom
+}
+```
+Cap threshold ≈ 0.48 (slightly below the dot cap threshold of 0.54 because BASE_RFP_FACTOR > BASE_DOT_FACTOR, so the cap engages sooner).
+
+**Item 2 — outline geometry** rebuilt at `makeHollowSquareGeometry(RFP_BASE_OUTER, RFP_BORDER)` instead of the fixed 1.2 × DOT_GRID outer. Per-instance scale matrices do the work of zoom-aware sizing.
+
+**Item 3 — tinted fill InstancedMesh.** New `rfpFillMeshRef` ref alongside `rfpMeshRef`. Scene-init builds a companion `THREE.InstancedMesh`:
+- Geometry: `new THREE.PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)` — solid plane at the base outer size.
+- Material: `new THREE.MeshBasicMaterial({ color: indigo, transparent: true, opacity: RFP_FILL_ALPHA = 0.15 })`.
+- Added to scene BEFORE the outline mesh (`scene.add(rfpFillMesh)` precedes `scene.add(rfpMesh)`) — Three.js's default render order ensures the outline draws on top of the fill.
+- Cleanup disposes the fill geometry + material; nulls `rfpFillMeshRef.current`.
+
+**Item 4 — populate loop** updated to write per-instance matrices to BOTH meshes. The matrix bakes the zoom-driven scale via `m.makeScale(s, s, 1); m.setPosition(d.x, -d.y, 0)`. Both meshes receive the same matrix per instance. Both update `count` and `instanceMatrix.needsUpdate`. Initial scale captured into the new `rfpScaleRef`.
+
+**Item 5 — `rfpScaleRef` + rescale-on-zoom useEffect.** Mirror of the dot rescale effect (Phase 16.2.6.2). New ref tracks the per-instance scale currently baked into both RFP meshes' matrices. New `useEffect` with deps `[zoom, threeReady, layout]` computes `desiredScale = computeRfpWorldSize(zoom) / RFP_BASE_OUTER`, short-circuits no-op rewrites via `Math.abs(...) < 1e-4`, and writes fresh per-instance matrices to BOTH meshes when the scale changes. 118 markers × 2 meshes = 236 matrix updates per qualifying zoom transition — negligible cost. Effect declared BEFORE the border-rebuild effect so `rfpScaleRef.current` is up-to-date when read.
+
+**Item 6 — border-rebuild formula update.** With the new per-instance scale, the geometry's on-screen size is `border_geom × scale × zoom`. To keep the on-screen border constant at `RFP_BORDER_SCREEN_PX = 2`, re-derive: `border_geom = RFP_BORDER_SCREEN_PX / (scale × zoom)`. Below the cap (scale = 1) reduces to the pre-16.2.6.6 `RFP_BORDER_SCREEN_PX / zoom`. Above the cap, `scale × zoom` is constant (both scale linearly with zoom, but their product is constant in the capped regime), so border_geom is constant too — the rebuild settles on a single geometry value above the cap. Geometry rebuilds still use the 5% threshold short-circuit so wheel-zoom doesn't churn the geometry.
+
+**Effect ordering note.** Both `useEffect`s depend on `[zoom, ...]` and read/write `rfpScaleRef`. React fires effects in declaration order; the rescale effect is declared BEFORE the border-rebuild effect, so the scale is up-to-date when the border calculation runs.
+
+**Verification** (dev server, 1400×900 viewport, Bob's view at default zoom 0.15):
+- 99 PillboxLabel elements rendered with correct z-ordering (cluster-label-by-size + RFP-label at Z_RFP_LABEL).
+- 118 RFP marker instances visible in the bottom third + cross-zone band. Mixed clusters (Lighthouse Programs / Marigold Systems / Quarry Industries / Auger Defense) preserve the dots-inner-squares-outer pattern.
+- Dot rendering unchanged from 16.2.6.5.
+- No new console errors (only the pre-existing V2Canvas2 setState-in-render warning, unrelated).
+- Loading animation completes via skip-click; all dots + outlines + fills + labels at opacity 1.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ New constants present.
+3. ✅ `RFP_OUTER_SIZE` retained as backwards-compat alias for label positioning.
+4. ✅ `computeRfpWorldSize(zoom)` helper present.
+5. ✅ `rfpFillMeshRef` declared; companion InstancedMesh created BEFORE outline mesh; disposed in cleanup.
+6. ✅ Populate loop uses `m.makeScale + setPosition` for BOTH meshes.
+7. ✅ `rfpScaleRef` declared; rescale-on-zoom useEffect updates BOTH meshes' matrices.
+8. ✅ Border-rebuild formula reads `RFP_BORDER_SCREEN_PX / (scale × zoom)`.
+
+**Files changed**:
+- `src/v2/DirectoryLayer.jsx` — all six items + cleanup; the only file touched.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.6 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.6.6 entry.
+- `CLAUDE.md` — "Current state of the world" + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.6.5 completion notes (2026-05-17) — RFP cluster expansion (20 RFP-only + 4 mixed actors)
 
 Populates the Directory's previously-empty bottom third with buyer-side hollow-square clusters and demonstrates the mixed-actor case (party with both Claims and RFPs). Six items + standard doc updates.
