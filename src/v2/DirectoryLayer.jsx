@@ -45,12 +45,16 @@ import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 //     their grid cell, leaving a thin 7.5% gap on each side. Was 3 wu —
 //     barely visible at 15% default zoom (0.45 screen px).
 const DOT_GRID = 48
-// Phase 16.2.6.1: 0.425 → 0.475. With dense-pack adjacent dots one cell
-// apart center-to-center, diameter = DOT_GRID × 0.95 leaves a thin ~5%
-// visible gap between dot edges. Going to 1.0 (full cell fill) makes
-// adjacent dots butt with no visible gap at all, which is visually crisper
-// but more sensitive to antialiasing. 0.95 is the sweet spot.
-const DOT_RADIUS = DOT_GRID * 0.475                    // ≈ 22.8 (diameter ≈ 0.95 × DOT_GRID)
+// Phase 16.2.6.2: dot-render baseline lowered 0.475 → 0.425 (diameter
+// 0.95 → 0.85 × DOT_GRID). The base geometry sits at this unscaled size;
+// the per-frame `computeDotWorldSize(zoom)` helper applies a uniform
+// scale on the InstancedMesh to enforce the 22-px on-screen cap above
+// the cap-threshold zoom (~0.54). At zoom ≤ cap-threshold the scale is
+// 1.0; at higher zoom the scale shrinks the dots so their on-screen
+// pixel size stays at MAX_SCREEN_DOT_PX. See computeDotWorldSize below.
+const BASE_DOT_FACTOR = 0.85                           // unscaled world diameter = DOT_GRID × this
+const MAX_SCREEN_DOT_PX = 22                           // on-screen size cap at high zoom
+const DOT_RADIUS = DOT_GRID * BASE_DOT_FACTOR / 2      // 20.4 — geometry radius at zoom ≤ cap-threshold
 const ACTOR_SQUARE = 6
 const ACTOR_BORDER = 1                // hollow square border thickness (world units)
 const RFP_BORDER = 1                  // hollow RFP circle border thickness
@@ -73,8 +77,23 @@ const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 5957.6 — 20% up from
 // Phase 16.2.4: galactic-view default — load fully zoomed out (0.15 = 15%)
 // so the whole 11520×7447 canvas fits in the viewport.
 const MIN_ZOOM = 0.15
-const MAX_ZOOM = 4.0
+// Phase 16.2.6.2: 4.0 → 1.5. At 22k dots + the new on-screen dot-size
+// cap (BASE_DOT_FACTOR / MAX_SCREEN_DOT_PX above), zoom levels above
+// ~150% don't reveal more useful detail until the mini-card swap ships
+// (deferred — see polish-backlog #200).
+const MAX_ZOOM = 1.5
 const INITIAL_ZOOM = 0.15
+// Phase 16.2.6.2: Voronoi-domain insets shrink the tessellation
+// rectangle inward from the full canvas bounds. Left/right reserve a
+// 1-cell buffer so cluster dots aren't visibly cut off at the canvas
+// edge. Top/bottom reserve world-space equivalent to the app header
+// (~61 css px) + footer legend (~32 css px) at MIN_ZOOM (the worst
+// case — at higher zoom the chrome occupies less world area). Rounded
+// up to 500 / 250 wu for headroom.
+const DOMAIN_INSET_LEFT = DOT_GRID
+const DOMAIN_INSET_RIGHT = DOT_GRID
+const DOMAIN_INSET_TOP = 500
+const DOMAIN_INSET_BOTTOM = 250
 // Phase 16.2.5: background-grid spacing now equals DOT_GRID (was 4×DOT_GRID
 // pre-reconciliation). Same point count as before because DOT_GRID grew
 // 12 → 48 in lockstep — the visible grid spacing is unchanged in world
@@ -118,6 +137,21 @@ const MAX_RFPS = 256
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 function snapGrid(v) { return Math.round(v / DOT_GRID) * DOT_GRID }
+
+/**
+ * Phase 16.2.6.2: compute the world-space dot render diameter for a given
+ * zoom level. Below the cap threshold (where on-screen size ≤ MAX_SCREEN_DOT_PX)
+ * dots are at their unscaled `DOT_GRID × BASE_DOT_FACTOR` world diameter and
+ * scale linearly with zoom on screen. Above the cap threshold the on-screen
+ * size stays fixed at MAX_SCREEN_DOT_PX, so the returned world diameter
+ * shrinks inversely with zoom. Cap threshold ≈ MAX_SCREEN_DOT_PX / (DOT_GRID
+ * × BASE_DOT_FACTOR) ≈ 0.54 at the current constants.
+ */
+function computeDotWorldSize(zoom) {
+  const linearScreenSize = DOT_GRID * BASE_DOT_FACTOR * zoom
+  const cappedScreenSize = Math.min(linearScreenSize, MAX_SCREEN_DOT_PX)
+  return cappedScreenSize / zoom
+}
 
 function cssVarToColor(varName, fallback = '#8888ff') {
   if (typeof window === 'undefined') return new THREE.Color(fallback)
@@ -644,7 +678,12 @@ function computeLayout(directoryData, viewport) {
       0.1 * CANVAS_HEIGHT + ay * 0.55 * CANVAS_HEIGHT,
     ]
   })
-  const canvasArea = CANVAS_WIDTH * CANVAS_HEIGHT
+  // Phase 16.2.6.2: usable area accounts for the Voronoi-domain insets
+  // (edge buffer + header/footer chrome compensation). Lloyd's target-area
+  // sum is checked against this — not full canvas area — since cells are
+  // tessellated inside the inset rectangle.
+  const usableArea = (CANVAS_WIDTH - DOMAIN_INSET_LEFT - DOMAIN_INSET_RIGHT) *
+                     (CANVAS_HEIGHT - DOMAIN_INSET_TOP - DOMAIN_INSET_BOTTOM)
   // Phase 16.2.6.1: physically-grounded target area replaces the
   // proportional `share × canvasArea` formula. Each cluster needs
   // (dots × DOT_GRID²) for its grid cells + LABEL_HOLE_AREA for the centred
@@ -657,9 +696,9 @@ function computeLayout(directoryData, viewport) {
     return (n * DOT_GRID * DOT_GRID + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
   })
   const targetSum = targetAreas.reduce((s, a) => s + a, 0)
-  if (targetSum > canvasArea && typeof console !== 'undefined') {
+  if (targetSum > usableArea && typeof console !== 'undefined') {
     // eslint-disable-next-line no-console
-    console.warn(`[DirectoryLayer] Lloyd's target-area sum ${(targetSum / 1e6).toFixed(2)} Mwu² exceeds canvas area ${(canvasArea / 1e6).toFixed(2)} Mwu² — clusters will compete; expect overflow.`)
+    console.warn(`[DirectoryLayer] Lloyd's target-area sum ${(targetSum / 1e6).toFixed(2)} Mwu² exceeds usable canvas area ${(usableArea / 1e6).toFixed(2)} Mwu² (insets applied) — clusters will compete; expect overflow.`)
   }
   let lloydIters = 0
   let lloydConverged = false
@@ -667,7 +706,7 @@ function computeLayout(directoryData, viewport) {
   for (let iter = 0; iter < LLOYD_MAX_ITER; iter++) {
     lloydIters = iter + 1
     const delaunay = Delaunay.from(seeds)
-    const voronoi = delaunay.voronoi([0, 0, CANVAS_WIDTH, CANVAS_HEIGHT])
+    const voronoi = delaunay.voronoi([DOMAIN_INSET_LEFT, DOMAIN_INSET_TOP, CANVAS_WIDTH - DOMAIN_INSET_RIGHT, CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM])
     let maxDelta = 0
     for (let i = 0; i < seeds.length; i++) {
       if (i === 0) continue  // active Actor's seed pinned
@@ -696,7 +735,7 @@ function computeLayout(directoryData, viewport) {
   }
   // Final Voronoi cells after iteration.
   const finalDelaunay = Delaunay.from(seeds)
-  const finalVoronoi = finalDelaunay.voronoi([0, 0, CANVAS_WIDTH, CANVAS_HEIGHT])
+  const finalVoronoi = finalDelaunay.voronoi([DOMAIN_INSET_LEFT, DOMAIN_INSET_TOP, CANVAS_WIDTH - DOMAIN_INSET_RIGHT, CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM])
 
   // ─── Step 3: per-cluster dense Voronoi-clipped grid fill ──────────────
   // Phase 16.2.6.1: replaces the Phase 16.2.4 Vogel sunflower. Each cluster's
@@ -899,9 +938,15 @@ export default function DirectoryLayer({
     pinnedOriginRef.current = wipeOrigin || null
   }
   const activeOrigin = pinnedOriginRef.current
+  // Phase 16.2.6.2: default wipe origin moved from bottom-left ('0% 100%')
+  // to bottom-center ('50% 100%') — visually says "the network expands out
+  // from your active-actor anchor (canvas-bottom-center) toward the rest of
+  // the directory." The `circle(180% at ...)` end-state radius is expressed
+  // as a viewport-diagonal percentage so it still reaches all four corners
+  // from the new origin.
   const originStr = activeOrigin
     ? `${Math.round(activeOrigin.x)}px ${Math.round(activeOrigin.y)}px`
-    : '0% 100%'
+    : '50% 100%'
   const clipCollapsed = `circle(0% at ${originStr})`
   const clipExpanded = `circle(180% at ${originStr})`
   const clipPath = phase === 'in' ? clipExpanded : clipCollapsed
@@ -968,6 +1013,10 @@ export default function DirectoryLayer({
   const sceneRef = useRef(null)
   const cameraRef = useRef(null)
   const dotsMeshRef = useRef(null)
+  // Phase 16.2.6.2: tracks the per-instance scale currently baked into the
+  // dots mesh's matrices. Read + written by the zoom-change rescale effect
+  // so a no-op zoom step (scale unchanged) skips the 22k-matrix rewrite.
+  const dotScaleRef = useRef(1)
   const actorSquaresMeshRef = useRef(null)
   const rfpMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
@@ -1348,6 +1397,12 @@ export default function DirectoryLayer({
 
     const m = new THREE.Matrix4()
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
+    // Phase 16.2.6.2: per-instance matrix bakes in the current zoom-driven
+    // scale so the on-screen dot diameter stays capped at MAX_SCREEN_DOT_PX
+    // when zoom > cap-threshold. Stored in dotScaleRef so the rescale-on-zoom
+    // effect can write fresh matrices without recomputing positions.
+    const initialDotScale = computeDotWorldSize(zoomRef.current) / (DOT_GRID * BASE_DOT_FACTOR)
+    dotScaleRef.current = initialDotScale
 
     // Claim dots
     // Phase 16.2.3: opacities are pre-zeroed by the load-animation effect
@@ -1361,7 +1416,8 @@ export default function DirectoryLayer({
     for (let i = 0; i < MAX_DOTS; i++) {
       if (i < claimDots.length) {
         const d = claimDots[i]
-        m.makeTranslation(d.x, -d.y, 0)
+        m.makeScale(initialDotScale, initialDotScale, 1)
+        m.setPosition(d.x, -d.y, 0)
         dotsMesh.setMatrixAt(i, m)
         let c = colorIndigo
         if (d.colorVar === '--accent-amber') c = colorAmber
@@ -1415,6 +1471,33 @@ export default function DirectoryLayer({
     // Use unused variable so eslint/no-unused-vars doesn't complain.
     void colorCyan
   }, [threeReady, layout])
+
+  // ─── Phase 16.2.6.2: rescale per-instance dot matrices on zoom change ─
+  // The base geometry sits at DOT_RADIUS (= DOT_GRID × BASE_DOT_FACTOR / 2).
+  // At zooms below the cap-threshold the per-instance scale stays at 1.0
+  // (no-op rewrite). Above the cap-threshold the scale shrinks so the
+  // on-screen dot diameter stays pinned to MAX_SCREEN_DOT_PX. Mesh-level
+  // `dotsMesh.scale` is intentionally NOT used (it would scale positions
+  // too); instead each instance matrix bakes the scale via compose-style
+  // makeScale + setPosition. 22k matrix updates per zoom change is cheap.
+  useEffect(() => {
+    if (!threeReady || !layout) return
+    const dotsMesh = dotsMeshRef.current
+    if (!dotsMesh) return
+    const desiredScale = computeDotWorldSize(zoom) / (DOT_GRID * BASE_DOT_FACTOR)
+    if (Math.abs(desiredScale - dotScaleRef.current) < 1e-4) return
+    const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp')
+    const m = new THREE.Matrix4()
+    for (let i = 0; i < claimDots.length; i++) {
+      const d = claimDots[i]
+      m.makeScale(desiredScale, desiredScale, 1)
+      m.setPosition(d.x, -d.y, 0)
+      dotsMesh.setMatrixAt(i, m)
+    }
+    dotsMesh.instanceMatrix.needsUpdate = true
+    dotScaleRef.current = desiredScale
+    dirtyRef.current = true
+  }, [zoom, threeReady, layout])
 
   // ─── Hover repaint via per-instance colors ───────────────────────────
   // Phase 16.2.3: consolidated into `flushDotColors` so the load-animation

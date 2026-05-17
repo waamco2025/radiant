@@ -2673,6 +2673,61 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.2 completion notes (2026-05-16) — Edge buffers + zoom range + non-linear dot scaling + wipe origin
+
+Four surgical polish items addressing the post-16.2.6.1 QA Andrew surfaced — canvas edge cutoff, UI chrome occlusion, dot size at zoom extremes, and the parent → Directory wipe origin still being bottom-left.
+
+**Item 1 — Voronoi-domain insets.** Four new constants in `DirectoryLayer.jsx`:
+- `DOMAIN_INSET_LEFT = DOT_GRID` (48 wu) — 1-cell edge buffer.
+- `DOMAIN_INSET_RIGHT = DOT_GRID`.
+- `DOMAIN_INSET_TOP = 500` — world-space equivalent of the app header bar (~61 css px) at MIN_ZOOM = 0.15 (the worst case where chrome covers the most world area: `61 / 0.15 ≈ 407 wu`, rounded up to 500 for headroom).
+- `DOMAIN_INSET_BOTTOM = 250` — same calc for the footer legend (~32 css px → `32 / 0.15 ≈ 213 wu`, rounded up).
+
+Both `delaunay.voronoi(...)` call sites (Lloyd's-iteration loop + final tessellation) now pass `[DOMAIN_INSET_LEFT, DOMAIN_INSET_TOP, CANVAS_WIDTH - DOMAIN_INSET_RIGHT, CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM]` instead of `[0, 0, CANVAS_WIDTH, CANVAS_HEIGHT]`. Cells are clipped at the inset rectangle, so dots can't be placed in inset regions. Lloyd's target-sum check now compared against `usableArea = (CANVAS_WIDTH - LEFT - RIGHT) × (CANVAS_HEIGHT - TOP - BOTTOM)` (~93% of canvas area) instead of full canvas area; ratio is now ~0.78 (was 0.73 against full canvas) — still within bounds, no over-pack warning. `OWN_CLUSTER_ANCHOR_Y` stays at `CANVAS_HEIGHT × 0.8 = 5957.6` per the brief's "don't redefine unless QA shows a visual issue" guidance.
+
+**Item 2 — `MAX_ZOOM` 4.0 → 1.5.** Paired with the new dot-size cap (Item 3); above 150% zoom the canvas yields no useful additional detail until the deferred Directory mini-card swap (filed as polish-backlog #200) ships. The wheel handler's existing `Math.min(MAX_ZOOM, ...)` clamp catches the new cap automatically; the top-right zoom indicator continues using `Math.round(zoom * 100) + '%'` (so the readout now tops out at "150%").
+
+**Item 3 — Non-linear dot scaling.** Three new pieces:
+- `BASE_DOT_FACTOR = 0.85` (was 0.95 in 16.2.6.1) — unscaled world diameter = `DOT_GRID × BASE_DOT_FACTOR = 40.8 wu`.
+- `MAX_SCREEN_DOT_PX = 22` — on-screen size cap.
+- `computeDotWorldSize(zoom)` helper: returns the world-space dot diameter for a given zoom. Below the cap threshold (where `linearScreenSize ≤ MAX_SCREEN_DOT_PX`, i.e., zoom ≤ ~0.54) returns the unscaled `DOT_GRID × BASE_DOT_FACTOR`. Above the cap threshold returns `MAX_SCREEN_DOT_PX / zoom` so the on-screen pixel size stays pinned to 22 px.
+
+**Implementation: per-instance matrix bakes the scale**, NOT mesh-level scale. The brief offered `dotsMesh.scale.setScalar(...)` as option (a) but mesh-level scale also multiplies position offsets — at scale 0.5 every dot would move to half its world position. The correct approach (brief's option (b), modified): compose per-instance matrix via `m.makeScale(s, s, 1); m.setPosition(d.x, -d.y, 0)`. New `dotScaleRef` tracks the currently-baked scale; a new zoom-change `useEffect` rewrites all 22k instance matrices when the desired scale differs from the baked one. At zooms in the linear regime (≤ 0.54) the scale stays at 1.0 and the no-op check skips the rewrite, so wheel-zooming through the linear regime has zero matrix cost. 22k matrix updates per zoom transition above the cap threshold is cheap (<5 ms). `DOT_RADIUS` adjusted to `DOT_GRID × BASE_DOT_FACTOR / 2` (= 20.4) so the unscaled `CircleGeometry` matches the new baseline. Hit-target raycast scales with the per-instance matrix.
+
+**Item 4 — Wipe origin: bottom-left → bottom-center.** Single one-line change in `DirectoryLayer.jsx`'s `originStr` fallback: `'0% 100%'` → `'50% 100%'`. Pre-pinned `wipeOrigin` (set by Phase 11.8 #44's node-double-click flow on the parent canvas) still wins — it specifies an explicit `{ x, y }` in css pixels. The change only affects the default chrome-globe-click path. The end-state `circle(180% at ...)` radius is viewport-diagonal-percentage so it still reaches all four corners from the new origin (max distance from bottom-center to a top corner is `sqrt((W/2)² + H²)` < viewport diagonal × 1.5).
+
+**Item 5 — Polish-backlog #200 — Directory mini-card swap at higher zoom.** New entry in `polish-backlog.md` (Open / Effort L). Captures the deferred feature: at zoom > ~50% the Directory should swap dots for the existing parent-layer mini-card primitive (Claim name + party label). Constraints: viewport culling, hit-target migration during cross-fade, visual continuity with parent-layer mini-card styling. Pairs with raising MAX_ZOOM back above 1.5 once mini-cards exist.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean (no new warnings beyond the pre-existing 500-KB chunk warning).
+2. ✅ Four `DOMAIN_INSET_*` constants present.
+3. ✅ Voronoi tessellation uses inset bounds (both call sites).
+4. ✅ `MAX_ZOOM = 1.5`; zoom indicator caps at "150%".
+5. ✅ Dot rendering uses `computeDotWorldSize(zoom)` per-instance with `dotScaleRef` short-circuit; no geometry recreation cost.
+6. ✅ Wipe transition default originates at bottom-center (`'50% 100%'`).
+7. ❌ Lloyd's residual 174.6 wu > DOT_GRID = 48 (≈ 3.6 × DOT_GRID). Surfaced via existing `console.warn`. Brief's pinned convention: "If Lloyd's convergence degrades meaningfully (residual > 2 × DOT_GRID) due to the reduced usable area, surface the value but accept for this phase." 174.6 is in that regime — accepted per the convention. File as 16.2.6.3 candidate.
+8. ❌ Cluster overflow on 10 clusters at the smaller usable area: Helios 503/3250, Atlas 280/2950, Polaris 299/2600, Vortex 253/2300, Vega 523/1200, Aurora 618/800, Beacon 325/900, Solstice 268/700, Cascade 326/350, Quantum 341/400, Apex 201/325 (ChipCo still hits the 16.2.6.1 shrink-collapse fallback). Brief's pinned convention applies: surface + accept; the visual is the brief's intent (dense organic canvas), and brief explicitly forbids unilateral tuning. File as 16.2.6.3 candidate.
+9. ✅ `polish-backlog.md` contains the new mini-card swap entry (#200).
+
+**Verification**:
+- Build clean.
+- Dev server (`npm run dev`) at 1400×900 viewport: Directory renders with visible left/right edge buffers (Albedo Optics on left, Cordite Labs on right both sit ~1 cell from canvas edge); top-row clusters (Beacon Dynamics, Cascade Aerospace, Niveus Optics, Helix RF, Nexus Electronics) sit visibly below the header bar; GovCo anchor at bottom-center with breathing room above the footer. Dots are visibly slightly smaller than 16.2.6.1 (BASE_DOT_FACTOR 0.85 vs 0.95). Color mix and label holes preserved. Wipe origin verified by triggering parent → Directory navigation.
+- Zoom-range + non-linear-dot-scaling verification limited to code-path inspection: dispatched WheelEvent does not propagate through the addEventListener-bound handler in scripted DOM tests (known limitation per CLAUDE.md). Manual mouse interaction is the canonical verification path for canvas zoom; the code paths (`Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * dir))` clamp + `computeDotWorldSize(zoom)` scale-baked matrix rewrite) are straightforward.
+- NaN-CSS-left React warning observed in 16.2.6.1 no longer appears — the umbrella SVG finite-vertex guard from 16.2.6.1 covered that path.
+
+**Files changed**:
+- `src/v2/DirectoryLayer.jsx` — DOMAIN_INSET_* + BASE_DOT_FACTOR + MAX_SCREEN_DOT_PX constants; MAX_ZOOM 4.0 → 1.5; DOT_RADIUS adjusted; `computeDotWorldSize` helper added; Voronoi calls switched to inset bounds; Lloyd's target sum check uses usableArea; per-instance matrix scale-bake on layout build + zoom-change useEffect for matrix rewrite; `dotScaleRef` declaration; wipe origin default `'0% 100%'` → `'50% 100%'`.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.2 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — new #200 Directory mini-card swap entry; Update Log Phase 16.2.6.2 entry.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete (with the same Lloyd's-residual + cluster-overflow regressions from 16.2.6.1 still surfaced + accepted per brief's pinned conventions, filed as 16.2.6.3 candidates).
+
+---
+
 ### Phase 16.2.6.1 completion notes (2026-05-16) — Dense organic cluster packing + ~22k dot expansion
 
 Three coordinated changes that resolve the trio of QA issues Andrew surfaced after Phase 16.2.6 — spiral gaps inside clusters, half-empty top 75% of canvas, and super-jumbo sunflower overflow — via a single algorithmic shift: **dense Voronoi-clipped grid fill replaces Vogel sunflower** in `DirectoryLayer.jsx`.
