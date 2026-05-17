@@ -266,7 +266,11 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
         border: '1px solid color-mix(in srgb, var(--accent-indigo) 35%, var(--border))',
         boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
         pointerEvents: 'none',
-        zIndex: 30,
+        // 2026-05-17 follow-up: bumped 30 → 2500 so the dot tooltip card
+        // renders above cluster Actor labels (z=100-175 per Phase 16.2.6.4),
+        // RFP owner labels (z=1100), and the RADIANT NETWORK header pillbox
+        // (z=2000), while staying below Detail Panels / modals (5900+).
+        zIndex: 2500,
       }}
     >
       <span style={{
