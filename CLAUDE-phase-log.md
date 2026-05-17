@@ -2673,6 +2673,72 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.4 completion notes (2026-05-16) — Label z-order fix (smaller clusters on top)
+
+Single-item phase resolving the label-overlap issues Andrew flagged after 16.2.6.3's 25-actor expansion brought the Directory to 77 visible cluster labels at default zoom. Three named overlap cases on Bob's view:
+- **ChipCo** label pill partially buried behind Prism Aerospace's pill (ChipCo's label is the 8 amber-typed umbrella subset of Dave's cluster Bob can see).
+- **MicroCo** label pill partially buried behind Precision Components' pill.
+- **Photonix** label truncated to "Photo..." behind Substrate Dynamics' pill.
+
+Structural cause: at the prior z-order, all cluster labels rendered at the same stack level (`zIndex: 4`), so DOM insertion order broke ties — and that happened to put smaller-cluster labels behind larger ones in some cases.
+
+**Fix: z-order cluster labels inversely by `dotCount`.** Two new module-level constants in `DirectoryLayer.jsx`:
+- `Z_BASE_CLUSTER_LABEL = 100` — the largest cluster gets this z-rank.
+- `Z_RFP_LABEL = Z_BASE_CLUSTER_LABEL + 1000` (= 1100) — always above every cluster label so RFP marker owner-labels (Phase 16.2.6.3 Item 4) are never buried.
+
+`PillboxLabel` accepts a new `zIndex` prop (default 4 so legacy callers don't regress). The hard-coded `zIndex: 4` on the outermost wrapper div is replaced by `zIndex` from the prop — applied to the absolutely-positioned outer container, NOT the inner text/pill content (per brief's pinned convention).
+
+The cluster-label render block sorts `[...layout.allClusters]` by `dots.length` descending once per render, builds a `clusterZByParty` Map (party name → rank-derived zIndex), and threads `zIndex={clusterZByParty.get(cluster.ownerParty) ?? Z_BASE_CLUSTER_LABEL}` to each PillboxLabel call. The RFP owner-label render block (added in 16.2.6.3) gets `zIndex={Z_RFP_LABEL}`.
+
+**Tie-breaking on equal `dotCount`**: Array.prototype.sort is stable per ES2019, so two clusters with identical dotCount get adjacent z-ranks but neither buries the other if they happen to overlap (their pills are equal size so the lower-rank one peeks out slightly). Acceptable.
+
+**Active actor**: Bob/GovCo has `dots.length = 0` (buyer with no own claims), Carol/AuditCo similarly. Both land at the top of the small end of the sort — their cluster labels always render on top of any colliding neighbour. Alice/MicroCo and Dave/ChipCo rank by their actual `dots.length`. Acceptable — they have visible cluster footprints anyway.
+
+**DOM-probe verification** (Bob's view, default zoom 0.15):
+- Helios Industries (3,250 dots — largest cluster on Bob's view) → z=101 ✓
+- Atlas Avionics (2,950 dots) → z=116
+- Prism Aerospace (50 dots) → z=138
+- Precision Components (visible dots from Alice's umbrella) → z=160
+- Substrate Dynamics → z=162
+- ChipCo (8 amber umbrella dots from Dave) → z=165
+- Photonix → z=172
+- MicroCo → z=173
+- GovCo → z=174
+
+ChipCo (z=165) > Prism Aerospace (z=138) → ChipCo renders ON TOP. ✓
+MicroCo (z=173) > Precision Components (z=160) → MicroCo on top. ✓
+Photonix (z=172) > Substrate Dynamics (z=162) → Photonix on top. ✓
+
+All three named overlap cases resolve.
+
+**Alice's view**: GovCo RFP-marker owner-label renders at z=1100 (Z_RFP_LABEL), above every cluster label. ✓
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ `Z_BASE_CLUSTER_LABEL` and `Z_RFP_LABEL` constants present.
+3. ✅ Cluster label `zIndex` assigned per cluster, computed inversely from `dots.length` (smallest cluster → highest z).
+4. ✅ RFP marker owner-actor labels render at `Z_RFP_LABEL` (above all cluster labels).
+5. ✅ No other behavior changes — positioning, font-size scaling, content unchanged from 16.2.6.3.
+
+**Verification**:
+- Build clean.
+- Dev server (1400×900 viewport): 75 PillboxLabel elements in the DOM at opacity 1 with monotonically descending z-rank by cluster size. Spot checks on the three brief-named overlap cases all confirm correct stacking.
+- No new console errors (only the pre-existing V2Canvas2 setState-in-render warning, unrelated).
+- Manual visual confirmation of the trade-off (large-cluster pills with corners clipped behind small-cluster pills) deferred to Andrew's QA at production zoom — the brief explicitly accepts this trade-off ("a 3,250-dot Helios cluster is unmistakable regardless of whether its label pill has a corner clipped").
+
+**Files changed**:
+- `src/v2/DirectoryLayer.jsx` — two new constants; `PillboxLabel` accepts `zIndex` prop applied to outer wrapper; cluster-label render block adds per-render sort + party→z Map; RFP owner-label render block passes `Z_RFP_LABEL`.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.4 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.6.4 entry.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.6.3 completion notes (2026-05-16) — More mock actors + label scaling + RFP hollow square + top inset trim
 
 Six surgical polish items addressing the post-16.2.6.2 QA — canvas needed more cluster boundaries butting (not larger super-jumbos, which already overflow), labels didn't scale with zoom + drifted off-center at high zoom, GovCo's RFP marker was orphaned on non-Bob views, RFP marker primitive needed a distinct identity, and the top inset was one cell thicker than the L/R buffers.

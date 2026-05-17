@@ -178,6 +178,15 @@ function computeLabelFontSize(zoom) {
   return Math.max(MIN_LABEL_FONT_PX, Math.min(MAX_LABEL_FONT_PX, scaled))
 }
 
+// Phase 16.2.6.4: z-order cluster labels so smaller clusters render on top
+// of larger ones — guarantees small clusters' labels stay readable when
+// they collide with bigger neighbors. The largest cluster gets the lowest
+// z-rank (Z_BASE_CLUSTER_LABEL); each successive smaller cluster gets +1.
+// RFP owner-actor labels always render above all cluster labels (functionally
+// "smaller than the smallest cluster" — they belong to single markers).
+const Z_BASE_CLUSTER_LABEL = 100
+const Z_RFP_LABEL = Z_BASE_CLUSTER_LABEL + 1000   // 1100 — clear of any plausible cluster z-rank
+
 function cssVarToColor(varName, fallback = '#8888ff') {
   if (typeof window === 'undefined') return new THREE.Color(fallback)
   try {
@@ -276,7 +285,7 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
   )
 }
 
-function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11 }) {
+function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11, zIndex = 4 }) {
   // Phase 16.2.3: outer opacity multiplies the loaded fade-in opacity (0..1
   // during the wave animation, then 1 thereafter) with the existing
   // hover-pillbox-fade behaviour (faded = 0.25 when a dot is hovered near
@@ -323,7 +332,9 @@ function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11 }) {
         // each frame, and a CSS transition would smear it.
         transition: opacity >= 1 ? 'opacity 150ms ease' : 'none',
         pointerEvents: 'none',
-        zIndex: 4,
+        // Phase 16.2.6.4: caller-driven z so smaller clusters render on
+        // top of larger ones (and RFP labels render on top of everything).
+        zIndex,
       }}
     >{ownerParty}</div>
   )
@@ -2001,6 +2012,17 @@ export default function DirectoryLayer({
         // Phase 16.2.6.3: derive label font-size from current zoom once per
         // render — sqrt scaling clamped to MIN/MAX (see computeLabelFontSize).
         const labelFontPx = computeLabelFontSize(zoom)
+        // Phase 16.2.6.4: assign per-cluster zIndex inversely to dotCount —
+        // smallest cluster gets the highest z so its label renders on top
+        // of any larger-cluster label it collides with. Sort once per render,
+        // then map party → z-rank for the actual render pass below.
+        const clusterZByParty = new Map()
+        const sortedByDots = [...layout.allClusters].sort(
+          (a, b) => (b.dots?.length || 0) - (a.dots?.length || 0)
+        )
+        sortedByDots.forEach((cluster, rank) => {
+          clusterZByParty.set(cluster.ownerParty, Z_BASE_CLUSTER_LABEL + rank)
+        })
         return layout.allClusters.map((cluster) => {
           const screen = overlay.ownerSquares.find((s) => s.ownerParty === cluster.ownerParty)?.screen
           if (!screen) return null
@@ -2019,6 +2041,7 @@ export default function DirectoryLayer({
               faded={faded}
               opacity={labelOp}
               fontPx={labelFontPx}
+              zIndex={clusterZByParty.get(cluster.ownerParty) ?? Z_BASE_CLUSTER_LABEL}
             />
           )
         })
@@ -2047,6 +2070,7 @@ export default function DirectoryLayer({
               faded={false}
               opacity={1}
               fontPx={labelFontPx}
+              zIndex={Z_RFP_LABEL}
             />
           )
         })
