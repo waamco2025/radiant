@@ -675,7 +675,17 @@ function computeLayout(directoryData, viewport) {
       disclosureType: cluster.publicTypeByClaimId?.[c.id] || 'full',
       kind: 'public',
     }))
-    return { umbrellaItems, publicItems }
+    // Phase 16.2.6.5: pull cluster's RFPs (from view-builder Item 4) into
+    // rfpItems so mixed actors get dots + hollow squares, and RFP-only
+    // actors get hollow squares only. Concatenation order in packClusterDense
+    // (umbrella + public then rfp) means Claims fall inner / RFPs outer
+    // because cells are sorted by distance from centre.
+    const rfpItems = (cluster.rfps || []).map((r) => ({
+      rfp: r,
+      kind: 'rfp',
+      disclosureType: 'full',
+    }))
+    return { umbrellaItems, publicItems, rfpItems }
   }
   // Active Actor's own cluster — always present in clusterSpecs so the
   // tessellation has an anchor seed. dot_count = 0 if no own claims (Carol).
@@ -699,51 +709,84 @@ function computeLayout(directoryData, viewport) {
     (a, b) => a.ownerParty.localeCompare(b.ownerParty)
   )
   for (const c of otherClustersInput) {
-    const { umbrellaItems, publicItems } = buildItems(c)
+    const { umbrellaItems, publicItems, rfpItems } = buildItems(c)
     clusterSpecs.push({
       ownerParty: c.ownerParty,
       isOwnCluster: false,
       umbrellaItems,
       publicItems,
-      rfpItems: [],
+      rfpItems,
       isUserVisible: true,
     })
   }
-  const dotCountOf = (s) => s.umbrellaItems.length + s.publicItems.length + s.rfpItems.length
+
+  // Phase 16.2.6.5: classify each spec's `kind` so initial seed placement
+  // + Lloyd's hard y-clamp can branch on it. ACTIVE is the active actor
+  // (index 0, pinned at the anchor). CLAIMS_CLUSTER has dots only (upper
+  // region). RFP_CLUSTER has hollow squares only (bottom-third clamp).
+  // MIXED_CLUSTER has both (cross-zone band between).
+  const ACTOR_KIND = {
+    ACTIVE: 'active',
+    CLAIMS_CLUSTER: 'claims-cluster',
+    RFP_CLUSTER: 'rfp-cluster',
+    MIXED_CLUSTER: 'mixed-cluster',
+  }
+  for (let i = 0; i < clusterSpecs.length; i++) {
+    if (i === 0) { clusterSpecs[i].kind = ACTOR_KIND.ACTIVE; continue }
+    const s = clusterSpecs[i]
+    const dotCount = s.umbrellaItems.length + s.publicItems.length
+    const rfpCount = s.rfpItems.length
+    if (dotCount > 0 && rfpCount > 0) s.kind = ACTOR_KIND.MIXED_CLUSTER
+    else if (rfpCount > 0)            s.kind = ACTOR_KIND.RFP_CLUSTER
+    else                              s.kind = ACTOR_KIND.CLAIMS_CLUSTER
+  }
 
   // ─── Step 2: Lloyd-iterated centroidal Voronoi tessellation ──────────
   // Seed positions: active pinned, others seeded by hash → deterministic
   // (CANVAS_WIDTH/HEIGHT-bounded) start, then relaxed toward centroid each
-  // iteration. Cells target area ∝ dot count.
+  // iteration. Cells target area = (dot area + rfp area + label hole) × 1.2.
+  // Phase 16.2.6.5: zone thresholds bias RFP-only seeds into the bottom
+  // third and mixed seeds into a narrow cross-zone band between Claims
+  // (top 2/3) and RFPs (bottom 1/3).
+  const usableHeight = CANVAS_HEIGHT - DOMAIN_INSET_TOP - DOMAIN_INSET_BOTTOM
+  const RFP_ZONE_TOP_THRESHOLD = DOMAIN_INSET_TOP + usableHeight * 0.70
+  const CROSS_ZONE_BAND_TOP    = DOMAIN_INSET_TOP + usableHeight * 0.60
+  const CROSS_ZONE_BAND_BOTTOM = DOMAIN_INSET_TOP + usableHeight * 0.70
+  const RFP_ZONE_BOTTOM        = CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM - DOT_GRID
   const seeds = clusterSpecs.map((spec, i) => {
-    if (i === 0) return [userCenterX, userCenterY]
+    if (spec.kind === ACTOR_KIND.ACTIVE) return [userCenterX, userCenterY]
     const h = hashString(spec.ownerParty)
-    // Hash-derived deterministic position avoiding the immediate anchor
-    // neighborhood — keep initial seeds in the upper 70% of the canvas so
-    // Lloyd's converges quickly toward the desired fan-out shape.
     const ax = ((h * 31) >>> 0) % 10000 / 10000
     const ay = ((h * 17) >>> 0) % 10000 / 10000
-    return [
-      0.1 * CANVAS_WIDTH + ax * 0.8 * CANVAS_WIDTH,
-      0.1 * CANVAS_HEIGHT + ay * 0.55 * CANVAS_HEIGHT,
-    ]
+    const x = 0.1 * CANVAS_WIDTH + ax * 0.8 * CANVAS_WIDTH
+    let y
+    if (spec.kind === ACTOR_KIND.RFP_CLUSTER) {
+      y = RFP_ZONE_TOP_THRESHOLD + ay * (RFP_ZONE_BOTTOM - RFP_ZONE_TOP_THRESHOLD)
+    } else if (spec.kind === ACTOR_KIND.MIXED_CLUSTER) {
+      y = CROSS_ZONE_BAND_TOP + ay * (CROSS_ZONE_BAND_BOTTOM - CROSS_ZONE_BAND_TOP)
+    } else {
+      // CLAIMS_CLUSTER: existing upper-region distribution.
+      y = 0.1 * CANVAS_HEIGHT + ay * 0.55 * CANVAS_HEIGHT
+    }
+    return [x, y]
   })
   // Phase 16.2.6.2: usable area accounts for the Voronoi-domain insets
   // (edge buffer + header/footer chrome compensation). Lloyd's target-area
   // sum is checked against this — not full canvas area — since cells are
   // tessellated inside the inset rectangle.
-  const usableArea = (CANVAS_WIDTH - DOMAIN_INSET_LEFT - DOMAIN_INSET_RIGHT) *
-                     (CANVAS_HEIGHT - DOMAIN_INSET_TOP - DOMAIN_INSET_BOTTOM)
-  // Phase 16.2.6.1: physically-grounded target area replaces the
-  // proportional `share × canvasArea` formula. Each cluster needs
-  // (dots × DOT_GRID²) for its grid cells + LABEL_HOLE_AREA for the centred
-  // label rectangle, scaled by an inefficiency factor that absorbs perimeter
-  // rounding losses + Lloyd's convergence wobble. Empty clusters (Carol's
-  // anonymous anchor) still get the label hole's worth of area so they
-  // can't be squeezed to zero by neighbouring jumbos.
+  const usableArea = (CANVAS_WIDTH - DOMAIN_INSET_LEFT - DOMAIN_INSET_RIGHT) * usableHeight
+  // Phase 16.2.6.5: target area splits Claims (DOT_GRID²) from RFPs
+  // ((DOT_GRID × 1.2)² = DOT_GRID² × 1.44) — RFP markers are slightly
+  // larger than dots, so cells need proportionally more area. Both
+  // contribute alongside the LABEL_HOLE_AREA, scaled by the inefficiency
+  // factor that absorbs perimeter rounding losses + Lloyd's wobble.
+  const RFP_AREA_FACTOR = 1.44
   const targetAreas = clusterSpecs.map((spec) => {
-    const n = dotCountOf(spec)
-    return (n * DOT_GRID * DOT_GRID + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
+    const dotCount = spec.umbrellaItems.length + spec.publicItems.length
+    const rfpCount = spec.rfpItems.length
+    const dotArea = dotCount * DOT_GRID * DOT_GRID
+    const rfpArea = rfpCount * DOT_GRID * DOT_GRID * RFP_AREA_FACTOR
+    return (dotArea + rfpArea + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
   })
   const targetSum = targetAreas.reduce((s, a) => s + a, 0)
   if (targetSum > usableArea && typeof console !== 'undefined') {
@@ -769,7 +812,13 @@ function computeLayout(directoryData, viewport) {
       // overflow cells take smaller steps toward their centroid).
       const stepFactor = 0.5 + 0.5 * Math.tanh(areaError)
       const newX = seeds[i][0] + (ccx - seeds[i][0]) * stepFactor
-      const newY = seeds[i][1] + (ccy - seeds[i][1]) * stepFactor
+      let newY = seeds[i][1] + (ccy - seeds[i][1]) * stepFactor
+      // Phase 16.2.6.5: hard y-clamp on RFP-only seeds — they stay pinned
+      // to the bottom third regardless of where Lloyd's centroidal pull
+      // would carry them. Mixed and Claims clusters move freely.
+      if (clusterSpecs[i].kind === ACTOR_KIND.RFP_CLUSTER && newY < RFP_ZONE_TOP_THRESHOLD) {
+        newY = RFP_ZONE_TOP_THRESHOLD
+      }
       maxDelta = Math.max(maxDelta, Math.hypot(newX - seeds[i][0], newY - seeds[i][1]))
       seeds[i] = [newX, newY]
     }
@@ -2065,6 +2114,13 @@ export default function DirectoryLayer({
         const activeParty = layout.activeParty
         return layout.allDots.map((d, i) => {
           if (d.kind !== 'rfp') return null
+          // Phase 16.2.6.5: only render the per-marker owner label for
+          // ORPHAN RFPs (clusterIdx === -1 — set by computeLayout for RFPs
+          // that don't belong to a Voronoi cluster; currently only the
+          // four-primary-parties path, e.g. GovCo on non-Bob views).
+          // RFPs inside clusters get their owner identity from the cluster's
+          // own label (rendered above at a higher z).
+          if (d.clusterIdx !== -1) return null
           const ownerParty = d.rfp?.owner
           if (!ownerParty || ownerParty === activeParty) return null
           const labelY = d.y + RFP_OUTER_SIZE / 2 + DOT_GRID

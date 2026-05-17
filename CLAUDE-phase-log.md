@@ -2673,6 +2673,85 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.6.5 completion notes (2026-05-17) — RFP cluster expansion (20 RFP-only + 4 mixed actors)
+
+Populates the Directory's previously-empty bottom third with buyer-side hollow-square clusters and demonstrates the mixed-actor case (party with both Claims and RFPs). Six items + standard doc updates.
+
+**Item 1 — 20 RFP-only mock actors.** New module-level constant `PHASE_16_2_6_5_RFP_ONLY_BUNDLES` in `v2_2Data.js` (NavalSys Authority 12 RFPs through Vesper Defense 1 RFP, 98 total). Each runs through a parallel seed loop after the existing 16.2.6/16.2.6.3 expansion loop: `makeActor` with `role: 'buyer'` (distinct from supplier mocks so future view-builder branches can filter on it) + `generateRfpsForActor`. No Claims, no Assets, no DAs.
+
+**Item 2 — 4 mixed actors.** New `PHASE_16_2_6_5_MIXED_BUNDLES` (Lighthouse Programs / Marigold Systems / Quarry Industries / Auger Defense). Each combines `seedMockSupplierActor` (Claims half via `generateClaimSpecsForVertical` against existing 16.2.6 lexicons) + `generateRfpsForActor` (RFP half). Totals: 170 Claims + 19 RFPs.
+
+**Item 3 — `generateRfpsForActor(actor, count)` helper.** New exported helper in `v2_2Data.js`. Uses existing `hashString` + `seededRandom` (mulberry32) seeded with `${actor.party}:rfps:${count}` for determinism. Six template strings (`{prefix}-{year}-{number} {component} for {mission}`, etc.) × dictionaries of prefixes (RFP/BAA/PRC/SOL), 20 components, 8 missions, 6 programs. Output passes `makeRfp` validation: id `rfp-${actor.id}-${i+1}`, owner = actor.party, ownerDot = actor.partyDot, name procedural, requirementsSetIds: [] (Phase 17 wires real RS links), status: 'open', createdDate procedural-month-day in actor's hash year.
+
+**Item 4 — `buildV22DirectoryDataForRole` extended.** New constant `PRIMARY_PARTIES_FOR_ORPHAN_RFP = {GovCo, MicroCo, AuditCo, ChipCo}` — these 4 parties keep routing their RFPs through the 16.2.6.3 orphan path so GovCo's Sentinel-4 RFP still labels adjacently on Alice/Carol/Dave views. After the existing `otherClusters` build:
+- Each cluster gets `cluster.rfps = rfpsByOwner.get(owner) || []`.
+- Clusters are upserted for RFP-only owners (parties with RFPs but no Claims) NOT in the primary set — e.g. NavalSys Authority becomes a new cluster entry with `publicClaims: []`, `umbrellaClaims: []`, `rfps: [...]`.
+- `otherRfps` narrowed via `otherRfpsBaseline.filter(r => PRIMARY_PARTIES_FOR_ORPHAN_RFP.has(r.owner))`.
+
+**Item 5 — `computeLayout` updates** in `DirectoryLayer.jsx`:
+- `buildItems` now also returns `rfpItems` extracted from `cluster.rfps`. The for-loop populating non-active clusterSpecs receives `rfpItems` from buildItems instead of hardcoding `[]`.
+- New `ACTOR_KIND` taxonomy: `ACTIVE` (index 0, anchor-pinned), `CLAIMS_CLUSTER` (dots only), `RFP_CLUSTER` (hollow squares only — bottom-bias + clamp), `MIXED_CLUSTER` (both — cross-zone band). Classified post-build by checking `dots/rfps` counts.
+- Initial seed positions branch on `spec.kind`:
+  - `ACTIVE` → `[userCenterX, userCenterY]` (the bottom-center anchor).
+  - `RFP_CLUSTER` → y ∈ [`RFP_ZONE_TOP_THRESHOLD`, `CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM - DOT_GRID`] (bottom 30% of usable canvas).
+  - `MIXED_CLUSTER` → y ∈ [`CROSS_ZONE_BAND_TOP`, `CROSS_ZONE_BAND_BOTTOM`] (band at 60-70% of usable height).
+  - `CLAIMS_CLUSTER` → existing upper-region distribution `0.1 × CANVAS_HEIGHT + ay × 0.55 × CANVAS_HEIGHT`.
+- Target-area formula now splits Claims (`DOT_GRID²`) from RFPs (`DOT_GRID² × RFP_AREA_FACTOR`, where `RFP_AREA_FACTOR = 1.44` matches the `RFP_OUTER_SIZE = DOT_GRID × 1.2` square's area).
+- Lloyd's iteration loop applies a hard y-clamp on RFP-only seeds: after the centroidal step, if `newY < RFP_ZONE_TOP_THRESHOLD`, snap back to threshold. Mixed and Claims clusters move freely.
+- The previous `dotCountOf` helper removed (replaced inline in the split target-area formula).
+
+**Item 6 — Per-RFP-marker label suppression.** The 16.2.6.3 render block that placed a `PillboxLabel` below every non-active-actor RFP marker added an `if (d.clusterIdx !== -1) return null` guard. With 117 new in-cluster RFPs, this prevents per-marker label noise — RFPs inside clusters inherit identity from the cluster's centered label. Only orphan RFPs (currently just GovCo's Sentinel-4 on non-Bob views, `clusterIdx === -1` set by computeLayout for the `otherRfpEntries` path) still render a per-marker label.
+
+**Probe verification** (`probe-16265.mjs`):
+- ACTORS: 77 → 101 (+24) ✓
+- CLAIMS: 22,824 → 22,994 (+170) ✓
+- ASSETS: 22,821 → 22,991 (+170) ✓
+- DAs: 91,321 → 92,001 (+680) ✓
+- RFPs: 1 → 118 (+117) ✓
+- NavalSys Authority on Alice's view: 12 RFPs + 0 Claims ✓ (RFP-only cluster surfaced)
+- Lighthouse Programs on Alice's view: 6 RFPs + 50 Claims ✓ (mixed cluster carries both)
+- Bob's view: ownRfps = 1, otherRfps = 0 ✓ (GovCo active, no orphans)
+- Alice's view: otherRfps = 1 ✓ (only GovCo's Sentinel-4 orphan)
+- NavalSys Authority first RFP: "Aegis Phase II Thermal Control Subsystem RFP" — deterministic across reloads ✓
+
+**Dev server visual** (1400×900 viewport, Bob's view at zoom 0.15):
+- Bottom third populated with hollow-square clusters (NavalSys / Pegasus / Cobalt / Aegis Prime / Brookline Procurement / etc. labels visible).
+- Cross-zone band shows mixed clusters with both dots (inner) and hollow squares (outer) — Lighthouse Programs, Marigold Systems, Quarry Industries, Auger Defense.
+- Top 2/3 dot clusters look unchanged from 16.2.6.4 — Voronoi tessellation in upper region preserved.
+- Bottom-center: GovCo's Sentinel-4 RFP marker visible at active-actor anchor.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ Both `PHASE_16_2_6_5_*` constants present.
+3. ✅ `generateRfpsForActor` exported; output passes `makeRfp` validation.
+4. ✅ Actors +24, Claims +170, Assets +170, DAs +680, RFPs +117 (= 118 total).
+5. ✅ `buildV22DirectoryDataForRole` returns `otherClusters` with `cluster.rfps` everywhere; RFP-only owners upserted; `otherRfps` narrowed.
+6. ✅ `computeLayout` populates `rfpItems` from `cluster.rfps`.
+7. ✅ `ACTOR_KIND` taxonomy + per-spec classification.
+8. ✅ Initial seed positions branch on kind.
+9. ✅ Hard y-clamp on RFP-only seeds inside Lloyd's loop.
+10. ✅ Target area uses `RFP_AREA_FACTOR = 1.44`.
+11. ✅ Per-RFP-marker label render filters on `clusterIdx === -1`.
+
+**Known regressions surfaced + accepted per brief pinned conventions**:
+- Cluster overflow grew 18 → 20 clusters at the new seed density. Bowsprit Defense (95/200) + Andromeda Defense (223/250) newly overflow; Apex Avionics dropped further to 143/325 (was 225/325 in 16.2.6.4). Brief said "expected 4-8 cluster overflow growth" — actual +2 well within bounds.
+- Lloyd's hard clamp on RFP-only seeds disrupts convergence mildly — surfaced via existing `lloydConverged` warn.
+- No new RFP click pipeline (deferred to Phase 17.0).
+
+**Files changed**:
+- `src/v2/v2_2Data.js` — two new phase constants, new exported helper, two new parallel seed loops, splices into actors/claims/assets/DAs/rfps return shape, view builder extended with `cluster.rfps` + `PRIMARY_PARTIES_FOR_ORPHAN_RFP` + RFP-only cluster upsert + narrowed `otherRfps`.
+- `src/v2/DirectoryLayer.jsx` — `buildItems` returns `rfpItems`; otherClustersInput loop uses it; new `ACTOR_KIND` taxonomy + classification; branched initial seed positions; new `RFP_AREA_FACTOR` + split target-area formula; Lloyd's loop hard y-clamp on RFP-only seeds; per-marker label render `clusterIdx === -1` guard.
+- `architecture-spec.md` — §8.2 Phase 16.2.6.5 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.6.5 entry; #201 moved to Completed section with full ship summary.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.6.4 completion notes (2026-05-16) — Label z-order fix (smaller clusters on top)
 
 Single-item phase resolving the label-overlap issues Andrew flagged after 16.2.6.3's 25-actor expansion brought the Directory to 77 visible cluster labels at default zoom. Three named overlap cases on Bob's view:

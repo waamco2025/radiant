@@ -1801,6 +1801,118 @@ const PHASE_16_2_6_3_NEW_MOCK_ACTORS = [
   { id: 'polar-tech',          party: 'Polar Tech',          vertical: 'Atomic Clocks & Quantum Sensors',      dotCount: 15 },
 ]
 
+// Phase 16.2.6.5: 20 RFP-only buyer-side mock actors. Each gets `role: 'buyer'`
+// (distinct from supplier mock actors so view-builder filters can branch on it
+// in future phases) and issues 1-12 RFPs procedurally generated via
+// generateRfpsForActor (mulberry32-seeded for determinism). No Claims, no
+// Assets, no DAs. RFPs join the shared `rfps` collection at module load.
+const PHASE_16_2_6_5_RFP_ONLY_BUNDLES = [
+  { id: 'navalsys-authority',    party: 'NavalSys Authority',    rfpCount: 12 },
+  { id: 'pegasus-defense',       party: 'Pegasus Defense',       rfpCount: 10 },
+  { id: 'northstar-authority',   party: 'Northstar Authority',   rfpCount:  9 },
+  { id: 'arrowguard-defense',    party: 'ArrowGuard Defense',    rfpCount:  8 },
+  { id: 'vanguard-systems',      party: 'Vanguard Systems',      rfpCount:  7 },
+  { id: 'solarshield',           party: 'SolarShield',           rfpCount:  7 },
+  { id: 'hightower-industries',  party: 'Hightower Industries',  rfpCount:  6 },
+  { id: 'cobalt-defense',        party: 'Cobalt Defense',        rfpCount:  6 },
+  { id: 'aegis-prime',           party: 'Aegis Prime',           rfpCount:  5 },
+  { id: 'citrine-programs',      party: 'Citrine Programs',      rfpCount:  5 },
+  { id: 'halberd-systems',       party: 'Halberd Systems',       rfpCount:  4 },
+  { id: 'talon-defense',         party: 'Talon Defense',         rfpCount:  4 },
+  { id: 'marshall-defense',      party: 'Marshall Defense',      rfpCount:  3 },
+  { id: 'brookline-procurement', party: 'Brookline Procurement', rfpCount:  3 },
+  { id: 'sterling-industries',   party: 'Sterling Industries',   rfpCount:  2 },
+  { id: 'trident-programs',      party: 'Trident Programs',      rfpCount:  2 },
+  { id: 'garnet-authority',      party: 'Garnet Authority',      rfpCount:  2 },
+  { id: 'nautilus-defense',      party: 'Nautilus Defense',      rfpCount:  1 },
+  { id: 'cypress-programs',      party: 'Cypress Programs',      rfpCount:  1 },
+  { id: 'vesper-defense',        party: 'Vesper Defense',        rfpCount:  1 },
+]
+// Total RFPs across PHASE_16_2_6_5_RFP_ONLY_BUNDLES = 98
+
+// Phase 16.2.6.5: 4 "mixed" actors that have BOTH Claims (via seedMockSupplierActor)
+// AND RFPs (via generateRfpsForActor). Positioned by computeLayout into a cross-zone
+// band between the Claims zone (top 2/3) and the RFPs zone (bottom 1/3). Their cells
+// contain dots (Claims) on the inner ring + hollow squares (RFPs) on the outer ring
+// — the dense-pack algorithm sorts by distance from center, and the items array
+// concatenates Claims before RFPs so Claims fall inner.
+const PHASE_16_2_6_5_MIXED_BUNDLES = [
+  { id: 'lighthouse-programs', party: 'Lighthouse Programs', vertical: 'Mixed-Signal ICs & Processors',       dotCount: 50, rfpCount: 6 },
+  { id: 'marigold-systems',    party: 'Marigold Systems',    vertical: 'Bus Controllers & Network Modules',   dotCount: 45, rfpCount: 4 },
+  { id: 'quarry-industries',   party: 'Quarry Industries',   vertical: 'Structures, Composites & Mechanisms', dotCount: 40, rfpCount: 5 },
+  { id: 'auger-defense',       party: 'Auger Defense',       vertical: 'Connectors & Harnesses',              dotCount: 35, rfpCount: 4 },
+]
+// Total Claims = 170, total RFPs = 19 across PHASE_16_2_6_5_MIXED_BUNDLES
+
+/**
+ * Phase 16.2.6.5: procedural RFP generator for buyer-side mock actors.
+ * Deterministic per (actor.party, count) via mulberry32 seeded with
+ * hashString(`${actor.party}:rfps:${count}`). Produces RFPs that pass
+ * makeRfp's required-field validation (id, owner, name).
+ *
+ * @param {Object} actor - Actor record (must have `id`, `party`, `partyDot`).
+ * @param {number} count - How many RFPs to generate.
+ * @returns {Array<RFP>}
+ */
+export function generateRfpsForActor(actor, count) {
+  const rand = seededRandom(hashString(`${actor.party}:rfps:${count}`))
+
+  const TEMPLATES = [
+    '{prefix}-{year}-{number} {component} for {mission}',
+    '{component} Compliance RFP',
+    '{component} Procurement Solicitation',
+    '{program} {component} Sourcing Inquiry',
+    'RFP {number}: {component} Qualification',
+    '{mission} {component} RFP',
+  ]
+  const PREFIXES = ['RFP', 'BAA', 'PRC', 'SOL']
+  const COMPONENTS = [
+    'Avionics Bus Controller', 'Solid-State Gyro', 'Star Tracker',
+    'Atomic Clock Subassembly', 'Cryogenic Cooler', 'Hardened Mixed-Signal IC',
+    'RF Front-End Module', 'Power Distribution Unit', 'Connector Harness',
+    'Composite Structure Panel', 'Reaction Wheel Assembly',
+    'Inertial Measurement Unit', 'Imaging Optics', 'Bus Network Module',
+    'Pyrotechnic Initiator', 'Thermal Control Subsystem', 'Sun Sensor Array',
+    'Antenna Assembly', 'Signal Processing Module', 'Composite Coating Set',
+  ]
+  const MISSIONS = [
+    'Sentinel-7', 'Lighthouse-3', 'Aegis Phase II', 'Beacon Constellation',
+    'Pathfinder-12', 'Resilience-IV', 'Vanguard Alpha', 'Northstar-9',
+  ]
+  const PROGRAMS = [
+    'Mission Office', 'Procurement Authority', 'Joint Force Command',
+    'Systems Integration', 'Acquisition Office', 'Program Management',
+  ]
+
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)]
+  const rfps = []
+  for (let i = 0; i < count; i++) {
+    const template = pick(TEMPLATES)
+    const year = 2026 + Math.floor(rand() * 2)
+    const number = 1000 + Math.floor(rand() * 9000)
+    const name = template
+      .replace('{prefix}', pick(PREFIXES))
+      .replace('{year}', String(year))
+      .replace('{number}', String(number))
+      .replace('{component}', pick(COMPONENTS))
+      .replace('{mission}', pick(MISSIONS))
+      .replace('{program}', pick(PROGRAMS))
+    const month = String(Math.floor(rand() * 12) + 1).padStart(2, '0')
+    const day = String(Math.floor(rand() * 28) + 1).padStart(2, '0')
+    rfps.push(makeRfp({
+      id: `rfp-${actor.id}-${i + 1}`,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      name,
+      description: `Solicitation for ${pick(COMPONENTS).toLowerCase()} qualifying against published requirements sets.`,
+      requirementsSetIds: [],
+      status: 'open',
+      createdDate: `${year}-${month}-${day}T09:00:00Z`,
+    }))
+  }
+  return rfps
+}
+
 export function buildV22SharedArtifacts() {
   // ── Actors ────────────────────────────────────────────────────────────
   const bob = makeActor({
@@ -2132,6 +2244,49 @@ export function buildV22SharedArtifacts() {
     expandedMockPublicDas.push(...bundle.publicDas)
   }
 
+  // ── Phase 16.2.6.5: 20 RFP-only buyer mock actors ─────────────────────
+  // Distinct from supplier mocks: no Claims, no Assets, no DAs — just an
+  // Actor + 1-12 RFPs each. Procedural RFP names via generateRfpsForActor.
+  const rfpOnlyMockActors = []
+  const rfpOnlyMockRfps = []
+  for (const bundle of PHASE_16_2_6_5_RFP_ONLY_BUNDLES) {
+    const actor = makeActor({
+      id: bundle.id,
+      user: null,
+      party: bundle.party,
+      role: 'buyer',
+      credits: 0,
+    })
+    rfpOnlyMockActors.push(actor)
+    rfpOnlyMockRfps.push(...generateRfpsForActor(actor, bundle.rfpCount))
+  }
+
+  // ── Phase 16.2.6.5: 4 mixed actors (Claims + RFPs) ────────────────────
+  // Use seedMockSupplierActor for the Claims half + generateRfpsForActor
+  // for the RFP half. Both halves attach to the same Actor record so the
+  // view builder sees them as a single owner with mixed artifacts.
+  const mixedMockActors = []
+  const mixedMockAssets = []
+  const mixedMockClaims = []
+  const mixedMockOwnershipDas = []
+  const mixedMockPublicDas = []
+  const mixedMockRfps = []
+  for (const bundle of PHASE_16_2_6_5_MIXED_BUNDLES) {
+    const claimSpecs = generateClaimSpecsForVertical(bundle.party, bundle.vertical, bundle.dotCount)
+    const supplierBundle = seedMockSupplierActor({
+      id: bundle.id,
+      party: bundle.party,
+      vertical: bundle.vertical,
+      claimSpecs,
+    })
+    mixedMockActors.push(supplierBundle.actor)
+    mixedMockAssets.push(...supplierBundle.assets)
+    mixedMockClaims.push(...supplierBundle.claims)
+    mixedMockOwnershipDas.push(...supplierBundle.ownershipDas)
+    mixedMockPublicDas.push(...supplierBundle.publicDas)
+    mixedMockRfps.push(...generateRfpsForActor(supplierBundle.actor, bundle.rfpCount))
+  }
+
   // ── Alice's Assets ────────────────────────────────────────────────────
   // Phase 15.0 (#172 part 1): aPrmDatasheet + aPrmTestReport now point at
   // the calibrated PDFs generated by scripts/generate-seed-pdfs.mjs. Both
@@ -2421,6 +2576,8 @@ export function buildV22SharedArtifacts() {
     ...mockAssets,
     // Phase 16.2.6: 3,328 additional stub Assets from the 35 new mock actors.
     ...expandedMockAssets,
+    // Phase 16.2.6.5: 170 stub Assets from the 4 mixed actors.
+    ...mixedMockAssets,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -3174,7 +3331,9 @@ export function buildV22SharedArtifacts() {
     status: 'open',
     createdDate: '2026-04-15T09:00:00Z',
   })
-  const rfps = [rfpBobSentinel4]
+  // Phase 16.2.6.5: shared rfps collection now spans Bob's seeded RFP + the
+  // 20 RFP-only buyer mocks (98 RFPs) + the 4 mixed actors (19 RFPs) = 118.
+  const rfps = [rfpBobSentinel4, ...rfpOnlyMockRfps, ...mixedMockRfps]
 
   // ── Evaluation Agreements (paired with explicit inter-party DAs) ──────
   const eaBobOnPrm = makeEvaluationAgreement({
@@ -3660,6 +3819,9 @@ export function buildV22SharedArtifacts() {
     // actors (3 internal ownership + 1 public per Claim).
     ...expandedMockOwnershipDas,
     ...expandedMockPublicDas,
+    // Phase 16.2.6.5: 4 × 170 = 680 DAs for the 4 mixed actors.
+    ...mixedMockOwnershipDas,
+    ...mixedMockPublicDas,
   ]
 
   // ── Badge Templates — Phase 14.0 (#169 part 1) ────────────────────────
@@ -3785,7 +3947,7 @@ export function buildV22SharedArtifacts() {
   ]
 
   return {
-    actors: [bob, alice, carol, dave, ...mockActors, ...expandedMockActors, RADIANT_NETWORK_ACTOR],
+    actors: [bob, alice, carol, dave, ...mockActors, ...expandedMockActors, ...rfpOnlyMockActors, ...mixedMockActors, RADIANT_NETWORK_ACTOR],
     assets,
     parseResults,
     // Phase 16.2: union of primary-actor claims + mock-supplier claims. The
@@ -3793,7 +3955,8 @@ export function buildV22SharedArtifacts() {
     // so the generic ownership / claim-ref loops above don't double-emit
     // DAs for them — see the comment on `const claims = [...]` above.
     // Phase 16.2.6: extended with expandedMockClaims (3,328 new Claims).
-    claims: [...claims, ...mockClaims, ...expandedMockClaims],
+    // Phase 16.2.6.5: + 170 mixed-actor Claims.
+    claims: [...claims, ...mockClaims, ...expandedMockClaims, ...mixedMockClaims],
     disclosureAgreements,
     evaluationAgreements,
     evaluationResults,
@@ -4431,7 +4594,44 @@ export function buildV22DirectoryDataForRole(roleId, provisionals) {
 
   const allRfps = (shared.rfps || []).filter((r) => r.status === 'open')
   const ownRfps = allRfps.filter((r) => r.owner === activeParty)
-  const otherRfps = allRfps.filter((r) => r.owner !== activeParty)
+  const otherRfpsBaseline = allRfps.filter((r) => r.owner !== activeParty)
+
+  // Phase 16.2.6.5: RFPs flow through clusters now. Each cluster carries
+  // its owner's RFPs in `cluster.rfps`. RFPs from the 4 primary parties
+  // (GovCo / MicroCo / AuditCo / ChipCo) on views where their cluster
+  // doesn't render fall back to the existing orphan path via `otherRfps`
+  // — preserves the 16.2.6.3 GovCo-on-Alice/Carol/Dave behavior.
+  const PRIMARY_PARTIES_FOR_ORPHAN_RFP = new Set(['GovCo', 'MicroCo', 'AuditCo', 'ChipCo'])
+  const rfpsByOwner = new Map()
+  for (const r of otherRfpsBaseline) {
+    if (!rfpsByOwner.has(r.owner)) rfpsByOwner.set(r.owner, [])
+    rfpsByOwner.get(r.owner).push(r)
+  }
+  // (a) Existing clusters: attach owner's rfps.
+  for (const cluster of otherClusters) {
+    cluster.rfps = rfpsByOwner.get(cluster.ownerParty) || []
+  }
+  // (b) Upsert clusters for RFP-only owners (parties with RFPs but no
+  // Claims). Primary parties excluded — their RFPs route through the
+  // orphan path so GovCo's RFP on Alice's view still labels adjacently.
+  const existingOwnersForRfps = new Set(otherClusters.map((c) => c.ownerParty))
+  for (const [owner, ownerRfps] of rfpsByOwner.entries()) {
+    if (existingOwnersForRfps.has(owner)) continue
+    if (PRIMARY_PARTIES_FOR_ORPHAN_RFP.has(owner)) continue
+    otherClusters.push({
+      ownerParty: owner,
+      publicClaims: [],
+      umbrellaClaims: [],
+      rfps: ownerRfps,
+    })
+  }
+  // (c) otherRfps now contains ONLY orphan RFPs (primary-party RFPs whose
+  // cluster isn't rendered on the active view). The 16.2.6.3 per-marker
+  // owner-pillbox-label render in DirectoryLayer is filtered down to these
+  // — see Item 6 (clusterIdx === -1 guard).
+  const otherRfps = otherRfpsBaseline.filter(
+    (r) => PRIMARY_PARTIES_FOR_ORPHAN_RFP.has(r.owner)
+  )
 
   // Phase 16.1.2 Item 2: `isUserVisible` flag — true when the active actor
   // has at least one own publicly-disclosed Claim or own RFP. False for
