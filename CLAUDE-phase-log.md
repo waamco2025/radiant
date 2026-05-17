@@ -2673,6 +2673,55 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.9 completion notes (2026-05-17) — Card-click pan + hover-preview offset fix
+
+Two surgical QA-driven polish fixes following Phase 16.2.8:
+
+**Item 1 — onCardClick pan-to-center.** Phase 16.2.7's `onCardClick` deliberately omitted the animated pan/zoom the dot-click handler runs, on the rationale that "the user is already viewing the card — no need to recenter." Wrong call. The Detail Panel opens on the right and partially covers the card without the `panelOffsetWorld = (PANEL_W / 2) / zoom` correction — the exact thing the dot-click handler's pan was built to prevent.
+
+Fix: append the four-line `animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)` block to `onCardClick`, mirroring the dot-click handler at `DirectoryLayer.jsx:2057-2062`. `targetZoom = zoomRef.current` (no zoom change, just pan), same 500 ms ease as dot click. `animatedPanToWithZoom` added to the `useCallback` deps. The function-comment header was updated from "Phase 16.2.7" to "Phase 16.2.7 / 16.2.9" with the corrected rationale.
+
+**Item 2 — AssetNodeMini hover-preview portal offset.** When hovering a mini-card on Directory, the full-size preview that pops up sits ~14 px LEFT of the mini-card centre. Root cause: `AssetNode.jsx:486` wraps the card in a `CARD_W + ACTION_BAR_W = 210 + 34 = 244 px` container, where the visible card body is the LEFT 210 px and the action bar is the RIGHT 34 px. The portal at `AssetNode.jsx:1526-1556` centers the WRAPPER on `tooltipPos` via `translate(-50%, -50%) scale(0.85)` — but that puts the visible body's centre at `tooltipPos.x − (ACTION_BAR_W × 0.85) / 2 = tooltipPos.x − 14.45 px`.
+
+On parent canvas the offset is masked by the mini-card's zoom-driven scale (the mini-card itself scales with zoom, so the absolute pixel offset gets diluted). On Directory the mini-card renders at fixed 160 px regardless of zoom (Phase 16.2.7's density invariant), so the 14 px gap is obvious — the mini-card's amber hover border peeks out on the right of the preview.
+
+Fix: change the transform line in `AssetNode.jsx`'s `AssetNodeMini` portal to:
+```js
+transform: `translate(calc(-50% + ${(ACTION_BAR_W * 0.85) / 2}px), -50%) scale(0.85)`,
+```
+
+**Why `(ACTION_BAR_W × 0.85) / 2` and not just `ACTION_BAR_W / 2`?** The CSS transform `translate(tx, ty) scale(s)` applies the translate in the post-scale coordinate system — `tx` is in visual pixels, not natural pixels. So the shift value must be in scaled units: `34 × 0.85 / 2 = 14.45 px`. The `-50%` translate references the element's natural box width, so the CSS engine combines the scale + translate matrices such that the percent translate already reads as visual px. Adding `+14.45 px` shifts the whole element right by 14.45 visual px in the post-scale coordinate system. Result: the visible card body's centre lands on `tooltipPos.x`.
+
+**The Item 2 fix improves parent canvas too** — the offset has always been there; on parent canvas it's just been subtle because of the zoom-driven scale dilution. After the fix, the preview is truly centered on the mini-card body across both layers.
+
+**No changes to AssetNodeDot's tooltip** — different render path (anchor-based positioning logic), no offset issue Andrew flagged.
+
+**Verification**:
+- Build clean.
+- Dev server (1400×900 viewport, Bob's view): no new console errors.
+- Visual verification of the pan animation + hover-preview centering requires real mouse interaction (scripted MouseEvents trigger React handlers but the visual outcome can't be reliably captured via screenshots). Both code paths mirror existing known-working patterns (`onCardClick` mirrors the dot-click handler exactly; the transform shift is a straightforward `+(ACTION_BAR_W × 0.85) / 2 = 14.45 px` correction).
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ `onCardClick` contains the four-line `animatedPanToWithZoom` block.
+3. ✅ `useCallback` deps include `animatedPanToWithZoom`.
+4. ✅ Transform reads `translate(calc(-50% + ${(ACTION_BAR_W * 0.85) / 2}px), -50%) scale(0.85)`.
+5. ✅ No other render changes.
+
+**Files changed**:
+- `src/v2/DirectoryLayer.jsx` — `onCardClick` pan-to-center block + dep array update + function-comment header update.
+- `src/v2/AssetNode.jsx` — single transform-line change at the AssetNodeMini portal render.
+- `architecture-spec.md` — §8.2 Phase 16.2.9 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.9 entry; note 16.2.10 (disclosure-type borders) renumbered as the next forward-progress phase.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.8 completion notes (2026-05-17) — Directory Claim card population (CLAIM/minibar/badges)
 
 Phase 16.2.7 shipped the Directory mini-card / full-card LOD swap by passing `d.claim` (raw output of `makeClaim`) as the `node` prop to `AssetNodeMini` and `AssetNode`. The cards rendered, but visually bare — title + owner only. No "CLAIM" type label (because `AssetNode` reads `node.category` for the CATEGORY_CONFIG lookup which adds the teal `CLAIM` chip), no minibar (because `AssetNode` reads `node.displayHealth || node.health` for the HealthBar), no badges (because `AssetNode` reads `node._activeBadges`).

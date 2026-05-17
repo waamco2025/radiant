@@ -1531,7 +1531,21 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
           zIndex: 150,
           left: tooltipPos.x,
           top: tooltipPos.y,
-          transform: 'translate(-50%, -50%) scale(0.85)',
+          // Phase 16.2.9 Item 2: shift the wrapper right by half of the
+          // scaled ACTION_BAR_W so the VISIBLE card body (left CARD_W of
+          // the CARD_W + ACTION_BAR_W = 244 px wrapper) centers on
+          // `tooltipPos`, not the wrapper's geometric centre. Without
+          // this shift, the visible body sits 14.45 px left of the
+          // anchor — invisible on parent canvas at typical zooms (mini
+          // card scales with zoom), but obvious on Directory at
+          // unscaled 160 px mini-cards where the mini-card's amber
+          // hover border peeks out on the right of the preview. The
+          // translate is applied in post-scale visual px (the CSS
+          // matrix combines scale + translate so the translate value
+          // already reads as visual px), so the shift is
+          // `(ACTION_BAR_W × 0.85) / 2 = 14.45 px`. Subtly improves
+          // parent-canvas mini-LOD preview alignment too.
+          transform: `translate(calc(-50% + ${(ACTION_BAR_W * 0.85) / 2}px), -50%) scale(0.85)`,
           transformOrigin: 'center center',
           pointerEvents: isSelected ? 'auto' : 'none',
           boxShadow: '0 4px 16px rgba(0,0,0,0.3)',

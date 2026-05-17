@@ -2078,12 +2078,13 @@ export default function DirectoryLayer({
     }
   }, [layout, onClaimDotClick, raycast, worldToScreen, animatedPanToWithZoom])
 
-  // ─── Phase 16.2.7: card click in mid-LOD / full-LOD ──────────────────
-  // Mirrors the dot click flow but skips the animated pan/zoom — the
-  // user clicked a card they can already see; no need to recenter.
-  // Updates pinned state so the card's isSelected styling reflects the
-  // current Detail Panel target, and routes the click through
-  // onClaimDotClick to open the panel.
+  // ─── Phase 16.2.7 / 16.2.9: card click in mid-LOD / full-LOD ─────────
+  // Mirrors the dot click flow including the animated pan-to-center
+  // (added in 16.2.9 after correcting the 16.2.7 design decision — the
+  // user is "already viewing the card" rationale missed that the Detail
+  // Panel opens on the right and partially covers the card without the
+  // panelOffsetWorld correction). targetZoom = current zoom — no zoom
+  // change, just pan. 500ms animation matches dot click for continuity.
   const onCardClick = useCallback((d, dotIdx) => {
     const screen = worldToScreen(d.x, d.y)
     setPinned({
@@ -2094,7 +2095,17 @@ export default function DirectoryLayer({
       dotIndex: dotIdx,
     })
     onClaimDotClick?.(d.claim)
-  }, [onClaimDotClick, worldToScreen])
+    // Phase 16.2.9 Item 1: pan-to-center on card click, mirroring the
+    // dot-click handler — Detail Panel opens on the right, so the camera
+    // shifts left by panelOffsetWorld = (PANEL_W/2) / zoom so the clicked
+    // card sits in the visible left portion of the viewport.
+    const container = containerRef.current
+    if (container) {
+      const targetZoom = zoomRef.current
+      const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+      animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+    }
+  }, [onClaimDotClick, worldToScreen, animatedPanToWithZoom])
 
   // ─── Zoom controls (top-right, parent-parity) ────────────────────────
   const handleWheel = useCallback((e) => {
