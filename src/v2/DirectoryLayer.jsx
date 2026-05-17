@@ -1971,7 +1971,11 @@ export default function DirectoryLayer({
         letterSpacing: '0.18em',
         textTransform: 'uppercase',
         pointerEvents: 'none',
-        zIndex: 11,
+        // Phase 16.2.6.4 follow-up (2026-05-17): bumped 11 → 2000 so the
+        // RADIANT NETWORK header pillbox sits above every cluster label
+        // (z=100-175) and every RFP owner label (z=1100), while staying
+        // well below Detail Panels / modals / EdgeHoverMenu (5900+).
+        zIndex: 2000,
       }}>Radiant Network</div>
 
       {/* SVG overlay — umbrella subset concave/convex hull outline (Phase
