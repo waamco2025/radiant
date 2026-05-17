@@ -34,6 +34,13 @@ import * as THREE from 'three'
 import { Delaunay } from 'd3-delaunay'
 import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals } from './v2_2Data.js'
 import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
+// Phase 16.2.7: reuse parent-canvas card components verbatim for the LOD
+// swap. AssetNode = full-size card (210×96 px). AssetNodeMini = compact
+// card (160×48 px). Both exported from AssetNode.jsx. The dimension
+// constants (CARD_W, CARD_H, MINI_CARD_W, MINI_CARD_H) are file-internal
+// there; we mirror them in this file as a sync'd duplicate (see the
+// LOD_THRESHOLD constants block below).
+import AssetNode, { AssetNodeMini } from './AssetNode.jsx'
 
 // ─── Layout constants (world units) ────────────────────────────────────
 // Phase 16.2.5 — Grid alignment + dot rendering hotfix.
@@ -52,7 +59,7 @@ const DOT_GRID = 48
 // the cap-threshold zoom (~0.54). At zoom ≤ cap-threshold the scale is
 // 1.0; at higher zoom the scale shrinks the dots so their on-screen
 // pixel size stays at MAX_SCREEN_DOT_PX. See computeDotWorldSize below.
-const BASE_DOT_FACTOR = 0.85                           // unscaled world diameter = DOT_GRID × this
+const BASE_DOT_FACTOR = 0.70                           // 16.2.7: 0.85 → 0.70 — slimmer dots in linear regime
 const MAX_SCREEN_DOT_PX = 22                           // on-screen size cap at high zoom
 const DOT_RADIUS = DOT_GRID * BASE_DOT_FACTOR / 2      // 20.4 — geometry radius at zoom ≤ cap-threshold
 const ACTOR_SQUARE = 6
@@ -67,7 +74,7 @@ const ACTOR_BORDER = 1                // hollow square border thickness (world u
 //     visually comparable at every zoom.
 //   • RFP_FILL_ALPHA puts a low-opacity indigo plane behind the outline
 //     so the marker reads as filled rather than as an empty rectangle.
-const BASE_RFP_FACTOR = 0.95
+const BASE_RFP_FACTOR = 0.80                           // 16.2.7: 0.95 → 0.80 — parallel reduction
 const MAX_SCREEN_RFP_PX = 22
 const RFP_FILL_ALPHA = 0.15
 const RFP_BASE_OUTER = DOT_GRID * BASE_RFP_FACTOR        // 45.6 wu — base outer at unscaled zoom
@@ -100,11 +107,31 @@ const OWN_CLUSTER_ANCHOR_Y = CANVAS_HEIGHT * 0.8       // 5957.6 — 20% up from
 // Phase 16.2.4: galactic-view default — load fully zoomed out (0.15 = 15%)
 // so the whole 11520×7447 canvas fits in the viewport.
 const MIN_ZOOM = 0.15
-// Phase 16.2.6.2: 4.0 → 1.5. At 22k dots + the new on-screen dot-size
-// cap (BASE_DOT_FACTOR / MAX_SCREEN_DOT_PX above), zoom levels above
-// ~150% don't reveal more useful detail until the mini-card swap ships
-// (deferred — see polish-backlog #200).
-const MAX_ZOOM = 1.5
+// Phase 16.2.6.2: 4.0 → 1.5 — capped at 150% because dot-LOD reveals no
+// new detail beyond that point.
+// Phase 16.2.7: 1.5 → 5.0 — re-opens the zoom range to make room for the
+// mini-card LOD (zoom ≥ 3.333) and full-card LOD (zoom ≥ 4.375) swaps.
+// MAX_ZOOM 5.0 leaves ~14% headroom above the full-card threshold.
+const MAX_ZOOM = 5.0
+
+// Phase 16.2.7: LOD swap thresholds. At zoom ≥ MID_LOD_THRESHOLD, dot
+// InstancedMesh hides and AssetNodeMini overlays render at each Claim
+// dot's screen position (no scale transform — natural 160×48 px). At
+// zoom ≥ LOD_THRESHOLD, AssetNodeMini swaps to full-size AssetNode
+// (210×96 px). Thresholds derived from the density invariant: cards
+// fit horizontally when `zoom × DOT_GRID ≥ card_width_px`.
+//
+// Card dimensions mirrored from AssetNode.jsx (CARD_W / CARD_H /
+// MINI_CARD_W / MINI_CARD_H). Those constants are file-internal there
+// (no `export` keyword) and the phase brief's hard rule forbids
+// modifying AssetNode.jsx, so we mirror the values here. If AssetNode's
+// dimensions ever change, this block needs to be kept in sync.
+const CARD_W = 210
+const CARD_H = 96
+const MINI_CARD_W = 160
+const MINI_CARD_H = 48
+const MID_LOD_THRESHOLD = MINI_CARD_W / DOT_GRID       // 160 / 48 = 3.333…
+const LOD_THRESHOLD = CARD_W / DOT_GRID                // 210 / 48 = 4.375
 const INITIAL_ZOOM = 0.15
 // Phase 16.2.6.2: Voronoi-domain insets shrink the tessellation
 // rectangle inward from the full canvas bounds. Left/right reserve a
@@ -1741,6 +1768,33 @@ export default function DirectoryLayer({
     dirtyRef.current = true
   }, [zoom, threeReady])
 
+  // ─── Phase 16.2.7: hide Claim-dots InstancedMesh in mid/full-LOD ────
+  // Once zoom ≥ MID_LOD_THRESHOLD the Claim dots are replaced by the
+  // AssetNodeMini / AssetNode HTML overlays in the render tree above.
+  // Hiding the dot mesh prevents Three.js from drawing both at the same
+  // time. RFP meshes (outline + fill) stay visible at all zooms — RFP
+  // card swap is deferred to a future phase. `dirtyRef.current = true`
+  // marks the next animate-loop tick to call renderer.render so the
+  // visibility change flushes immediately.
+  useEffect(() => {
+    if (!threeReady) return
+    const dotsMesh = dotsMeshRef.current
+    if (!dotsMesh) return
+    dotsMesh.visible = zoom < MID_LOD_THRESHOLD
+    dirtyRef.current = true
+  }, [zoom, threeReady])
+
+  // ─── Phase 16.2.7: clear hover when crossing into mid/full-LOD ──────
+  // Raycast against the now-hidden dot mesh returns no hits, so a stale
+  // hover state would linger past the LOD transition and continue to
+  // show the dot-LOD tooltip (also suppressed by the same threshold —
+  // see the JSX render gate below). Clear it explicitly. `pinned` is
+  // intentionally NOT cleared — it must survive LOD transitions so the
+  // relevant card / dot renders with isSelected={true}.
+  useEffect(() => {
+    if (zoom >= MID_LOD_THRESHOLD && hover) setHover(null)
+  }, [zoom, hover])
+
   // ─── Hover repaint via per-instance colors ───────────────────────────
   // Phase 16.2.3: consolidated into `flushDotColors` so the load-animation
   // wave + hover state + base color all blend via the same code path. The
@@ -2008,6 +2062,24 @@ export default function DirectoryLayer({
     }
   }, [layout, onClaimDotClick, raycast, worldToScreen, animatedPanToWithZoom])
 
+  // ─── Phase 16.2.7: card click in mid-LOD / full-LOD ──────────────────
+  // Mirrors the dot click flow but skips the animated pan/zoom — the
+  // user clicked a card they can already see; no need to recenter.
+  // Updates pinned state so the card's isSelected styling reflects the
+  // current Detail Panel target, and routes the click through
+  // onClaimDotClick to open the panel.
+  const onCardClick = useCallback((d, dotIdx) => {
+    const screen = worldToScreen(d.x, d.y)
+    setPinned({
+      claim: d.claim,
+      x: d.x, y: d.y,
+      screenX: screen.x, screenY: screen.y,
+      ownerParty: d.claim?.owner,
+      dotIndex: dotIdx,
+    })
+    onClaimDotClick?.(d.claim)
+  }, [onClaimDotClick, worldToScreen])
+
   // ─── Zoom controls (top-right, parent-parity) ────────────────────────
   const handleWheel = useCallback((e) => {
     e.preventDefault()
@@ -2252,8 +2324,62 @@ export default function DirectoryLayer({
         })
       })()}
 
-      {/* Tooltip (singleton). */}
-      {(hover || pinned) && (() => {
+      {/* Phase 16.2.7: LOD card overlay. At zoom ≥ MID_LOD_THRESHOLD,
+          Claim dots are replaced by AssetNodeMini (mid-LOD) or AssetNode
+          (full-LOD) HTML overlays positioned at the dot's projected
+          screen position. Cards render at natural pixel size — no scale
+          transform — so they fit cleanly given the density invariant
+          (zoom × DOT_GRID ≥ card_width_px at the threshold). Viewport
+          culled: only dots whose screen position falls inside the viewport
+          plus a one-card buffer on each edge are rendered. RFPs stay as
+          hollow squares throughout; cluster pillbox labels stay as well. */}
+      {layout && zoom >= MID_LOD_THRESHOLD && (() => {
+        const isFullLOD = zoom >= LOD_THRESHOLD
+        const cardW = isFullLOD ? CARD_W : MINI_CARD_W
+        const cardH = isFullLOD ? CARD_H : MINI_CARD_H
+        const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp' && d.claim)
+        const minX = -cardW
+        const maxX = viewport.w + cardW
+        const minY = -cardH
+        const maxY = viewport.h + cardH
+        return claimDots.map((d, i) => {
+          const screen = worldToScreen(d.x, d.y)
+          // Viewport-cull. Skip cards outside viewport + one-card buffer.
+          if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) return null
+          if (screen.x < minX || screen.x > maxX || screen.y < minY || screen.y > maxY) return null
+          const isSelected = pinned?.claim === d.claim
+          const Card = isFullLOD ? AssetNode : AssetNodeMini
+          return (
+            <div
+              key={`claim-card-${i}`}
+              style={{
+                position: 'absolute',
+                left: screen.x,
+                top: screen.y,
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'auto',
+                // z=1500 sits between the highest RFP owner label (z=1100)
+                // and the existing tooltip/modal stack. Selected card pops
+                // to 1600 so it draws above its un-pinned peers.
+                zIndex: isSelected ? 1600 : 1500,
+              }}
+            >
+              <Card
+                node={d.claim}
+                isSelected={isSelected}
+                onSelect={() => onCardClick(d, i)}
+                activeParty={layout.activeParty}
+              />
+            </div>
+          )
+        })
+      })()}
+
+      {/* Tooltip (singleton). Phase 16.2.7: legacy tooltip only renders
+          in dot-LOD. In mid-LOD and full-LOD, AssetNodeMini / AssetNode
+          have their own internal hover behavior — suppress the Directory's
+          tooltip to avoid duplication. */}
+      {zoom < MID_LOD_THRESHOLD && (hover || pinned) && (() => {
         const t = pinned || hover
         return <ClaimTooltipCard claim={t.claim} x={t.screenX ?? 0} y={t.screenY ?? 0} viewportW={viewport.w} />
       })()}

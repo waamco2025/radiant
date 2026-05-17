@@ -2673,6 +2673,60 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.7 completion notes (2026-05-17) — Mini-card + full-card LOD on Directory + size tweak
+
+Closes polish-backlog #200 (Directory mini-card swap at higher zoom). Three coordinated changes in `DirectoryLayer.jsx`:
+
+**Item 1 — size tweak.** `BASE_DOT_FACTOR` 0.85 → 0.70 and `BASE_RFP_FACTOR` 0.95 → 0.80. Linear-regime marker sizes shrink ~16-18% at zoom 15-30%. Above the on-screen caps (zoom ≥ ~0.65 for dots, ~0.57 for squares with the new factors), the appearance is unchanged. New cap-threshold zooms: dots 0.539 → 0.654, RFPs 0.482 → 0.573. Both still fall comfortably below `MID_LOD_THRESHOLD = 3.333` so the cap-engaged regime spans most of the zoom range.
+
+**Item 2 — `MAX_ZOOM` 1.5 → 5.0.** Re-opens the zoom range to make room for the two LOD swap thresholds without overlap. `MAX_ZOOM = 5.0` leaves ~14% headroom above the full-card threshold (4.375). Existing zoom clamps (wheel handler, clampZoom, zoomFit) already read `MAX_ZOOM` so no callsite changes were needed. Zoom indicator's `Math.round(zoom × 100) + '%'` formula re-scales naturally — zoom 1.0 now displays as ~26%, zoom 5.0 as 500%. Acceptable for this phase.
+
+**Item 3 — LOD swap for Claim dots only.** At zoom ≥ `MID_LOD_THRESHOLD = MINI_CARD_W / DOT_GRID = 160 / 48 = 3.333…`, Claim dots are replaced by `AssetNodeMini` HTML overlays positioned at each dot's screen position via `worldToScreen`. At zoom ≥ `LOD_THRESHOLD = CARD_W / DOT_GRID = 210 / 48 = 4.375`, they swap to full-size `AssetNode` (210×96 px). RFP markers stay as hollow squares throughout — RFP card swap deferred to a future phase paired with RFP Detail Panels. Cluster pillbox labels stay as `PillboxLabel` at all LODs.
+
+**The density invariant.** Directory cards render at FIXED NATURAL PIXEL SIZE — only `translate(-50%, -50%)` to center on the dot's screen position, no `transform: scale(${zoom})`. On parent canvas, cards do scale with zoom because node spacing is hundreds of wu, so card-to-spacing ratio stays comfortable. On Directory, the dot grid is dense (DOT_GRID = 48 wu); scaling cards with zoom would produce a constant 3.33× horizontal overlap regardless of zoom level (both card width and inter-dot spacing scale at the same rate). Fixing the card at natural pixel size means the LOD thresholds fall out from the math:
+- Mini-cards (160 px) fit horizontally when `zoom × DOT_GRID ≥ 160` → `zoom ≥ 3.333`.
+- Full cards (210 px) fit horizontally when `zoom × DOT_GRID ≥ 210` → `zoom ≥ 4.375`.
+
+**Card components reused verbatim** from `AssetNode.jsx`. Brief's hard rule: NO modifications to that file. `AssetNode` (default export) and `AssetNodeMini` (named export) imported directly. Card dimension constants `CARD_W = 210`, `CARD_H = 96`, `MINI_CARD_W = 160`, `MINI_CARD_H = 48` are file-internal in `AssetNode.jsx` (no `export` keyword) — mirrored in `DirectoryLayer.jsx` as a sync'd duplicate with an explicit comment noting the sync constraint. The brief's literal `import { CARD_W, CARD_H, ... } from './AssetNode.jsx'` would have failed because those constants aren't exported; the hard-rule-vs-import contradiction was resolved in favour of the hard rule.
+
+**Implementation**:
+- New render block in JSX (between the Phase 16.2.6.3 RFP-owner-label block and the Phase 16.0 tooltip block) iterates `layout.allDots.filter(d => d.kind !== 'rfp' && d.claim)`, projects each to screen via `worldToScreen`, viewport-culls (skip cards outside `viewport.w/h ± cardW/cardH` buffer on each edge), wraps in absolutely-positioned `<div>` with `translate(-50%, -50%)` and z-index 1500 (1600 if `pinned?.claim === d.claim`).
+- `useEffect` toggles `dotsMesh.visible = zoom < MID_LOD_THRESHOLD`. RFP outline + fill meshes (Phase 16.2.6.6) stay visible at all zooms.
+- `useEffect` clears `hover` when `zoom >= MID_LOD_THRESHOLD` — raycast against the hidden dot mesh would yield no hits, so a stale hover state would linger. `pinned` is intentionally NOT cleared; it survives LOD transitions so the relevant card/dot renders with `isSelected={true}`.
+- `ClaimTooltipCard` render gated on `zoom < MID_LOD_THRESHOLD` — cards have their own internal hover behavior, so the legacy tooltip would duplicate it.
+- New `onCardClick` `useCallback` mirrors the dot click flow (`setPinned`, `onClaimDotClick?.(claim)`) but skips the animated pan/zoom — user clicked a card they can already see; no need to recenter.
+
+**Acceptance criteria assessment**:
+1. ✅ Build clean.
+2. ✅ `BASE_DOT_FACTOR = 0.70`, `BASE_RFP_FACTOR = 0.80`, `MAX_ZOOM = 5.0`.
+3. ✅ `MID_LOD_THRESHOLD` and `LOD_THRESHOLD` constants with derivation comments.
+4. ✅ `AssetNode`, `AssetNodeMini` imported (dimension constants mirrored due to no-export-modification rule).
+5. ✅ `onCardClick` `useCallback` defined.
+6. ✅ `useEffect` toggles `dotsMesh.visible`.
+7. ✅ `useEffect` clears `hover` at LOD entry.
+8. ✅ Card overlay render block between RFP-owner-label and tooltip blocks.
+9. ✅ Tooltip render gated by `zoom < MID_LOD_THRESHOLD`.
+10. ✅ No edits to `AssetNode.jsx`.
+
+**Verification** (dev server, 1400×900 viewport, Bob's view, default zoom 0.15):
+- Wave fade-in opacity gates labels at 0 until the wave completes; skip-click bypasses successfully.
+- At zoom 366% (mid-LOD): DOM probe reports 23 elements with z-index 1500 (AssetNodeMini overlays). Screenshot shows correctly-spaced mini cards (Citadel Aerospace's "Cable Cutter PYR-447 Q…", "Frangible Joint PYR-714…", "Pin Puller FRJ-491 Qualific…", etc.). Dot mesh hidden underneath.
+- At zoom 500% (full-LOD): screenshot shows full AssetNode cards with detail rows visible. Cards positioned at world-coord dot positions, projected to screen, non-overlapping.
+- Zoom-out through both thresholds returns dots correctly.
+
+**Files changed**:
+- `src/v2/DirectoryLayer.jsx` — only file changed. Import line, 3 new constants for thresholds + 4 mirrored card dimensions, `BASE_DOT_FACTOR` / `BASE_RFP_FACTOR` / `MAX_ZOOM` updates, new card-overlay render block, dot-mesh-visibility `useEffect`, hover-clear `useEffect`, tooltip render gate, `onCardClick` `useCallback`.
+- `architecture-spec.md` — §8.2 Phase 16.2.7 changelog bullet; Round 17 status line updated.
+- `polish-backlog.md` — Update Log Phase 16.2.7 entry; #200 moved to Completed section with full ship summary.
+- `CLAUDE.md` — "Current state of the world" + active phase queue + phase-log reference updated.
+- `CLAUDE-phase-log.md` — this entry.
+
+**Footer**: stays at v0.16.2.0 per backtrack-hotfix convention.
+
+**Status**: [x] Complete.
+
+---
+
 ### Phase 16.2.6.6 completion notes (2026-05-17) — RFP marker scaling + tinted fill
 
 QA on Phase 16.2.6.5's RFP cluster expansion surfaced four related issues — all rooted in the marker's fixed-world-unit outer (`RFP_OUTER_SIZE = DOT_GRID × 1.2`) clashing with the zoom-aware dot sizing from Phase 16.2.6.2:
