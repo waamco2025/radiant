@@ -436,11 +436,28 @@ export default function AssetNode({
     if (!revealPhase) setFlipMidpoint(false)
   }, [revealPhase])
 
+  // ─── Phase 17.0.2: hoist `hoverSelectColor` ──────────────────────────
+  // Phase 17.0.1 introduced the RFP early-return branch BELOW (line ~448)
+  // but left the `hoverSelectColor` declaration in its Phase 16.2.11
+  // position further down (just before the main `borderColor` chain). The
+  // early-return reads `hoverSelectColor` for its inner-div border + outer
+  // selection ring, which triggered a TDZ `ReferenceError: Cannot access
+  // 'hoverSelectColor' before initialization` whenever `node.category ===
+  // 'rfp'` (every RFP card at mid-LOD and full-LOD, every RFP hover, every
+  // RFP click). Hoisting the declaration above the early-return is a
+  // 3-line move with no semantic change for non-RFP renders — the value
+  // depends only on `node.category`, which is always available at function
+  // entry. Phase 16.2.11 + 17.0.1 commentary preserved below; the original
+  // declaration site is removed to prevent a duplicate `const`.
+  const hoverSelectColor = (node.category === 'claim' || node.category === 'rfp')
+    ? 'var(--accent-amber, #C49A45)'
+    : 'var(--accent-indigo)'
+
   // ─── Phase 17.0.1: RFP schema branch (minimal layout) ──────────────────
   // RFPs render as a fifth schema next to Asset / Claim / Eval Result / PoE.
   // Content per Andrew's spec: type pill + name + "Posted by {owner}". No
   // badges, no minibars, no action bar, no expand affordance, no dive hint.
-  // Hover/select state uses the `hoverSelectColor` chain established above
+  // Hover/select state uses the hoisted `hoverSelectColor` const above
   // (amber for rfp + claim; indigo for everything else). RFPs have no
   // disclosure type → the disclosure-type branches in `borderColor` fall
   // through cleanly to WARM_BORDER. handleClick is reused (RFPs have no
@@ -576,9 +593,9 @@ export default function AssetNode({
   // would clash with the WARM_BORDER default (which is itself a 40%
   // indigo blend). Amber on hover/select reads as a discrete state
   // change against the warm-grey default.
-  const hoverSelectColor = (node.category === 'claim' || node.category === 'rfp')
-    ? 'var(--accent-amber, #C49A45)'
-    : 'var(--accent-indigo)'
+  // Phase 17.0.2: `hoverSelectColor` declaration hoisted above the RFP
+  // early-return earlier in the function body — see the comment there
+  // for the TDZ rationale.
   const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional

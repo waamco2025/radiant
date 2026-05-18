@@ -2673,6 +2673,45 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.0.2 completion notes (2026-05-18) — Hotfix: TDZ crash in AssetNode RFP branch
+
+Phase 17.0.1 shipped RFP card LOD swap on `2026-05-17` (commit `296b879`). Runtime QA on Bob's view surfaced a crash that the 17.0.1 ship verification didn't catch: zooming the Directory into full-card LOD on Bob's view crashed the app to an all-black screen. Slow zoom could pass through mid-LOD without crashing, but clicking an RFP node at any card LOD crashed immediately.
+
+**Console error:**
+
+```
+ReferenceError: Cannot access 'hoverSelectColor' before initialization
+  at AssetNode.jsx:487
+An error occurred in the <AssetNode> component.
+```
+
+**Root cause.** Phase 17.0.1's RFP early-return branch in `AssetNode` (full) was inserted at line ~439 of the function body — strictly after all React hooks per the rules-of-hooks invariant, but BEFORE the `const hoverSelectColor` declaration introduced in Phase 16.2.11 at line ~579. The early-return branch reads `hoverSelectColor` in two places (inner-div border + outer selection ring), and JavaScript evaluates the JSX subtree before returning the React element, so the read at line 487 happened before the `const` initialization at line 579 → TDZ `ReferenceError`. Every RFP card render via `AssetNode` (full) — every full-card RFP at zoom ≥ LOD_THRESHOLD, every full-card render inside an `AssetNodeMini` hover-preview portal — crashed.
+
+`AssetNodeMini`'s RFP early-return branch was added later in its function body (line ~1546), after its own `const hoverSelectColor` declaration (line ~1481). No TDZ in mini.
+
+**Fix.** Hoist the `hoverSelectColor` const declaration above the RFP early-return in `AssetNode` (full). The value depends only on `node.category` which is always available at function entry — no other dependencies — so the hoist is a 3-line move with no semantic change for non-RFP renders. The Phase 16.2.11 declaration site is removed to prevent a duplicate `const` (would itself be a runtime error). The Phase 16.2.11 + 17.0.1 commentary is preserved at the hoist site; a small Phase 17.0.2 stub comment marks the original site noting "see the hoist".
+
+**Sweep result.** Both components reviewed for other `const` / `let` variables declared after the RFP early-return but referenced inside it. None found in either component:
+
+- `AssetNode` (full) RFP branch references: `hovered` (useState at line ~377), `isSelected` (prop), `scale` (prop), `handleClick` (useCallback at line ~384), `hoverSelectColor` (now hoisted), `WARM_BORDER` (module constant), `CARD_W` / `CARD_H` / `ACTION_BAR_W` (module constants), `node.name` / `node.rfp.name` / `node.ownerParty` / `node.owner` (props). All resolved by the time the early-return executes.
+- `AssetNodeMini` RFP branch references the same set plus `tooltipPos` / `setTooltipPos` (useState above), `miniRef` (useRef above), `handleMouseEnter` (function defined above), `showTooltip` (`const` declared at line ~1536, just above the RFP early-return at ~1546). All resolved.
+
+**Per-file changes:**
+
+- `src/v2/AssetNode.jsx` — `hoverSelectColor` declaration hoisted from line ~579 to line ~452 (above the RFP early-return at ~466). Original declaration removed. Phase 17.0.2 comment block added at the new declaration site explaining the TDZ rationale; a Phase 17.0.2 stub comment marks the original site.
+- `src/v2/V2App.jsx` — footer literal `v0.17.0.1` → `v0.17.0.2`. Changelog modal entry prepended for `v0.17.0.2` (3 bullets: symptom, root cause + fix, footer roll-forward).
+- `architecture-spec.md` — `Hotfix — Phase 17.0.2 (TDZ in AssetNode RFP branch)` bullet appended to §8 Changelog. No §8.8 content change (the RFP architecture from 17.0.1 is correct; only implementation order needed fixing). Process note included on the verification-convention lapse.
+- `polish-backlog.md` — Update Log entry with a verbose process note: 17.0.1's structured review marked items as "Code-verified" for state-dependent render paths that should have been runtime-verified per CLAUDE.md. The bug would have been caught by an actual zoom-to-full-LOD walkthrough; 17.0.1's QA used a fiber-state-mutation probe that bypassed the React render path entirely. Future render-path phases must runtime-verify zoom + hover + click at every LOD threshold.
+- `CLAUDE.md` — Footer version rolled. Last shipped phase rewritten for Phase 17.0.2. Phase-log reference rolled to 17.0.2. The existing "Runtime verification is required" convention note extended with a one-line reminder that state-dependent render paths require LOD-swap + hover + selection + click exercises at every affected LOD — referencing the 17.0.1 → 17.0.2 incident as the canonical example.
+
+**Verification.** Build clean. Dev server runtime walkthrough — zoom from default 15% scroll-wheel-style up through MID_LOD_THRESHOLD (~333%) into LOD_THRESHOLD (~437%) and beyond to 500% on Bob's view. App stable through every threshold transition. Sentinel-4 RFP renders correctly at every LOD: hollow indigo square at low zoom, AssetNodeMini at mid-LOD, AssetNode (full) at full-LOD with "RFP" type pill + name + "Posted by GovCo" row. RFP card click at every LOD opens RfpDetailPanel without crash. Hover at full-LOD without click also stable. Claim card LOD swap unbroken. Console clean beyond the pre-existing V2Canvas2 setState-in-render warning + pre-existing 500-KB chunk warning + pre-existing `packClusterDense overflow` warnings (Phase 16.2.6.x documented).
+
+**Process note.** Phase 17.0.1's "Structured review" marked the RFP card render acceptance criteria as `✓ Verified` based on a fiber-state-mutation probe (writing directly to `camPosRef.current` + dispatching a `WheelEvent` with `deltaY: 0` to force a re-render, then probing the resulting DOM for cards with width 244). The probe DID find rendered cards in DOM — but this verification path doesn't reflect the user's normal interaction. A real user reaches full-LOD via scroll-wheel zoom triggering `handleWheel → setZoom(...)`, which causes a clean React re-render where AssetNode's RFP branch executes the TDZ-trapped JSX. The fiber probe must have rendered a cached subtree or bypassed the React render queue somehow — in any case, the test pattern was unsound for this kind of bug. **Future phases that introduce render-path branches must exercise the full user-interaction flow at every relevant LOD; fiber-state mutation is insufficient for catching init-order bugs.**
+
+**Footer rolls forward to v0.17.0.2.**
+
+**Status:** [x] Complete.
+
 ### Phase 17.0.1 completion notes (2026-05-17) — RFP card LOD swap + hover-preview pinning
 
 Continued sub-phase against polish-backlog #192 (Item J). Two goals: (1) bring RFP markers to LOD parity with Claims (hollow-square → mini-card → full-card at the same zoom thresholds); (2) structurally fix the stale-pinned-tooltip bug surfaced in 17.0 QA (clicking from Claim to RFP or vice versa left the previous artifact's tooltip pinned).

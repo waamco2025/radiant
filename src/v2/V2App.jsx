@@ -7810,7 +7810,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.0.1 &middot; Changelog
+          v0.17.0.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7857,6 +7857,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.0.2', date: '2026-05-17', label: 'Phase 17.0.2', items: [
+                  'Hotfix: TDZ `ReferenceError: Cannot access \'hoverSelectColor\' before initialization` crashing Directory full-card LOD on Bob\'s view and every RFP card click.',
+                  'Root cause: Phase 17.0.1\'s RFP early-return branch in `AssetNode` (full) referenced `hoverSelectColor` before its `const` declaration — the Phase 16.2.11 declaration site sat further down in the function body, after the new early-return. Fix: hoist the declaration above the RFP early-return (3-line move, no semantic change for non-RFP renders since the value depends only on `node.category`). `AssetNodeMini`\'s RFP branch already had the declaration above it — no change needed there. Swept both components for other TDZ-trapped vars; none surfaced.',
+                  'Footer rolls forward to v0.17.0.2.',
+                ]},
                 { version: '0.17.0.1', date: '2026-05-17', label: 'Phase 17.0.1', items: [
                   'Phase 17.0.1 — RFP card LOD swap + hover-preview pinning. RFP markers now transition hollow-square → mini-card → full-card at the same zoom thresholds as Claims (Phase 16.2.7), and RFP click paths setPinned with an RFP discriminator so the pinned-tooltip + Detail Panel stay in sync.',
                   'AssetNode + AssetNodeMini extended with a 5th schema (`category: "rfp"`) — minimal layout per Andrew\'s spec: full-card = type pill + name + "Posted by {owner}"; mini-card = type pill + name only. No badges, no minibars, no action bar. RFPs join the amber-on-hover/select branch (`hoverSelectColor`); their default border is WARM_BORDER because RFPs carry no disclosure type (public-by-nature).',
