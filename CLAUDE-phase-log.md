@@ -2673,6 +2673,74 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.2.0.4 completion notes (2026-05-18) — LOD threshold revert + zoom control z-index + AI Shopper modal lag
+
+Three QA-driven fixes, including the AI Shopper performance investigation.
+
+**(1) LOD thresholds reverted.** Phase 17.2.0.3 widened the mini-card band to 2.5–5.5 (250 %–550 %). At the 2.5 lower bound, mini-cards overlapped visibly in dense clusters (Pinnacle Systems with 200+ Claims, similar density at GovCo, Marigold, ArrowGuard). The density invariant `zoom × DOT_GRID ≥ card_width_px` requires zoom ≥ `MINI_CARD_W / DOT_GRID = 160 / 48 = 3.333` for cards not to overlap horizontally — 2.5 was below that. Reverted to:
+- `MID_LOD_THRESHOLD`: 2.5 → 3.4 (a hair above the density-invariant value; 3.4 × 48 = 163.2 px screen spacing vs 160 px mini-card width = 3.2 px buffer per cell).
+- `LOD_THRESHOLD`: 5.5 → 5.0 (slightly wider than the pre-17.2.0.3 baseline of 4.375; keeps a moderately-extended mini-card range without the overlap pathology).
+- `MAX_ZOOM`: stays at 6.5 from 17.2.0.3 (no change).
+
+`selectRfp`'s zoom override `Math.max(zoomRef.current, LOD_THRESHOLD)` automatically picks up the new 5.0 — notification clicks from the 15 % galactic-view default now land at 500 % (full-card LOD), down from 550 % (17.2.0.3). Same UX outcome: card is immediately readable.
+
+**(2) Directory zoom controls raised.** The +/-/FIT buttons in the top-right of the Directory layer sat at `zIndex: 50`. Card overlay sits at `zIndex: 1500` default and `zIndex: 1600` when selected. At mid/full LOD with cards rendering near the top-right, cards covered the zoom buttons. Fix: bumped the Directory's zoom-control container to `zIndex: 1700`. The new value sits intentionally between the card layer (1500–1600) and the header pillbox (2000) / tooltip cards (2500), so contextual chrome still draws above the controls when triggered. Cluster labels stay at their existing z-tier (Z_BASE_CLUSTER_LABEL = 100 + rank inverse, capped well below 1700; RFP owner labels at Z_RFP_LABEL = 1100). Per the brief, cluster labels were NOT elevated alongside the zoom controls.
+
+V2Canvas's own zoom controls (the parent layer's set, also at zIndex 50) were intentionally NOT touched — they sit BEHIND the Directory's clip-path wipe while the Directory is open, so visibility-during-Directory is solely a function of the Directory's controls. DOM-probe-verified: both zoom-control containers exist (one in V2Canvas at z=50, one inside the Directory layer at z=1700); only the latter is visible while Directory is open.
+
+**(3) AI Shopper modal lag — investigation + surgical fix.** The brief documented a ~5 second click-to-modal lag. Investigation via standalone microbenchmark + puppeteer timing:
+
+```
+buildV22SharedArtifacts (cold call):  258 ms  (rebuilds ~23k Claims, ~92k DAs)
+buildV22SharedArtifacts (cached call): 0.001 ms
+Public-claims derivation BEFORE fix:  1605 ms (linear find per public DA)
+Public-claims derivation AFTER fix:     16 ms (Map lookup per public DA)
+```
+
+The IIFE at `v22AIShopperOpen && (() => { ... })()` in V2App's render evaluated synchronously on the open-state flip and did two expensive things: (a) called `buildV22SharedArtifacts()`, which rebuilds the entire seeded shared-artifact set from scratch (no module-level cache), and (b) ran `publicDas.map(d => shared.claims.find(c => c.id === d.subject.id))` — for each of ~22,987 public DAs, it linearly scanned ~22,994 Claims. The 5-second reported lag is the combined effect plus React reconciliation + browser paint.
+
+Two surgical fixes applied:
+
+**(a) Module-level cache for `buildV22SharedArtifacts`** in `v2_2Data.js`:
+```js
+let cachedV22SharedArtifacts = null
+export function buildV22SharedArtifacts() {
+  if (cachedV22SharedArtifacts) return cachedV22SharedArtifacts
+  const result = buildV22SharedArtifactsUncached()
+  cachedV22SharedArtifacts = result
+  return result
+}
+// Existing body moved into buildV22SharedArtifactsUncached().
+```
+
+The function takes no parameters and constructs a deterministic dataset; the cache returns the same object on subsequent calls. Verified that every existing caller treats the result as read-only (find / filter / map / `{...shared}` shallow-spread in `mergeProvisionals`, `mergeClosedRfps`, `mergeSolicitations` — none mutate the returned arrays or objects). The contract is documented in a comment above the cache: future mutations MUST either invalidate the cache or shape themselves as a new merge layer.
+
+**(b) `claimsById` Map in the AI Shopper IIFE** (V2App.jsx):
+```js
+const claimsById = new Map(shared.claims.map((c) => [c.id, c]))
+const publicClaims = publicDas
+  .map((d) => {
+    const claim = claimsById.get(d.subject.id)   // O(1) instead of O(n) find
+    if (!claim) return null
+    return { id: claim.id, name: claim.name, pin: claim.pin, owner: claim.owner, publishedDisclosureType: d.type }
+  })
+  .filter(Boolean)
+```
+
+The Map build is O(n) once; each lookup is O(1). Total drops from O(n²) ≈ 1.6 s to O(n) ≈ 16 ms.
+
+**Combined post-fix timing**: 81 ms click-to-modal-visible measured via puppeteer (waiting for an element whose `textContent` matches `/AI Shopper/i` to appear after a `data-ai-shopper` button click). Cold first render: under 500 ms target. Subsequent opens during the same session: 0 ms (cache hits) + 16 ms (Map). The fix is surgical — no structural changes, no state lifting, no component-tree refactor — and contained to one new closure variable in `v2_2Data.js` plus the existing IIFE rewrite.
+
+**Build clean.** `npm run build` exits 0 (2.26 s, 0 errors). Dev server smoke probe confirms no new console errors beyond the pre-existing `packClusterDense` overflow warnings.
+
+**Runtime-verification caveats.** Items 1–3 (LOD threshold visual quality at the new boundaries) are inherently visual and require manual mouse + scroll-wheel exercise — same caveat as 17.2.0.3. Threshold values changed to 3.4 / 5.0; the boolean `zoom >= MID_LOD_THRESHOLD` / `zoom >= LOD_THRESHOLD` comparisons in the render block automatically pick up the new constants. Item 7 (modal renders within 500 ms) **runtime-verified at 81 ms**. Item 5 (zoom controls visible at every LOD) is DOM-probe-verified at z=1700 with the card overlay at z=1500/1600 — the layering guarantees visibility without needing the LOD-active visual check. The visual verification of "cards near top-right at full LOD" is deferred to manual QA per the canvas-raycaster limitation.
+
+**Out of scope** (kept narrow per the brief): Directory-layer modal opening performance (separate from AI Shopper — the AI Shopper investigation surfaced its specific root cause; if other Directory-layer modal flows have a similar cost, file separately when symptoms arise); GovCo RFP placement next to Pinnacle Systems (still deferred — Directory layout polish); Phase 17.2.1's Accept flow / Request Agreement (still the next major phase).
+
+**Doc updates**: footer v0.17.2.0.3 → v0.17.2.0.4 in V2App.jsx; Changelog modal entry prepended above Phase 17.2.0.3; architecture-spec.md §8 Changelog gains a Phase 17.2.0.4 hotfix bullet (no §8 structural change); polish-backlog.md Update Log gains the Phase 17.2.0.4 entry; CLAUDE.md "Current state of the world" rolled forward; this CLAUDE-phase-log.md entry.
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.0.3 completion notes (2026-05-18) — RFP description in solicitation modal + expanded mini-card zoom range
 
 Two polish items batched before Phase 17.2.1's Accept-flow lift.

@@ -111,8 +111,8 @@ const MIN_ZOOM = 0.15
 // new detail beyond that point.
 // Phase 16.2.7: 1.5 → 5.0 — re-opens the zoom range to make room for the
 // mini-card LOD (zoom ≥ 3.333) and full-card LOD (zoom ≥ 4.375) swaps.
-// Phase 17.2.0.3: MAX_ZOOM bumped 5.0 → 6.5 so the new full-card
-// threshold (5.5) sits well below the cap with comparable headroom.
+// Phase 17.2.0.3: MAX_ZOOM bumped 5.0 → 6.5 to make room for a wider
+// mini-card range. Phase 17.2.0.4: MAX_ZOOM stays at 6.5 (650 %).
 const MAX_ZOOM = 6.5
 
 // Phase 16.2.7: LOD swap thresholds. At zoom ≥ MID_LOD_THRESHOLD, dot
@@ -121,29 +121,29 @@ const MAX_ZOOM = 6.5
 // zoom ≥ LOD_THRESHOLD, AssetNodeMini swaps to full-size AssetNode
 // (210×96 px).
 //
-// Phase 17.2.0.3: Mini-card zoom range widened from ~3.33–4.38 to
-// 2.5–5.5 so users have more headroom to read names + cluster contexts
-// at the mini-card LOD before the camera commits to full-cards. This
-// breaks the original "density invariant" (`zoom × DOT_GRID ≥
-// card_width_px` — cards never overlap horizontally at the threshold);
-// at 2.5 zoom × 48 DOT_GRID = 120 px screen spacing vs 160 px mini-card
-// width, so mini-cards may overlap horizontally inside dense clusters
-// at the low end of the band. Per Andrew, the readability win
-// outweighs the mild collision risk; intentional design choice.
+// Phase 17.2.0.3 widened the band to 2.5–5.5; Phase 17.2.0.4 reverts
+// the lower bound back close to the original density-invariant value
+// (3.4 ≈ 160/48 = 3.333) and keeps a slightly-wider upper bound at
+// 5.0. Mini-cards at 2.5 zoom × 48 DOT_GRID = 120 px screen spacing
+// (vs 160 px card width) overlapped visibly in dense clusters like
+// Pinnacle Systems; reverting to 3.4 puts screen spacing at ~163 px,
+// just above card width, so cards stop overlapping at the threshold.
+// Full-card threshold lifted from the original 4.375 to 5.0 to give a
+// slightly-larger mini-card range (~340–500 % vs the original 333–438 %).
 //
 // Card dimensions mirrored from AssetNode.jsx (CARD_W / CARD_H /
 // MINI_CARD_W / MINI_CARD_H). Those constants are file-internal there
 // (no `export` keyword) and the phase brief's hard rule forbids
-// modifying AssetNode.jsx, so we mirror the values here. If AssetNode's
-// dimensions ever change, this block needs to be kept in sync (the
-// values are only used for the LOD-swap-related debugging breadcrumbs
-// now — the thresholds themselves are explicit UX-driven constants).
+// modifying AssetNode.jsx, so we mirror the values here. The
+// thresholds themselves are now explicit UX-driven constants — the
+// CARD_W / MINI_CARD_W derivation is documented for reference but not
+// used as a hard formula.
 const CARD_W = 210
 const CARD_H = 96
 const MINI_CARD_W = 160
 const MINI_CARD_H = 48
-const MID_LOD_THRESHOLD = 2.5
-const LOD_THRESHOLD = 5.5
+const MID_LOD_THRESHOLD = 3.4
+const LOD_THRESHOLD = 5.0
 const INITIAL_ZOOM = 0.15
 // Phase 16.2.6.2: Voronoi-domain insets shrink the tessellation
 // rectangle inward from the full canvas bounds. Left/right reserve a
@@ -3143,7 +3143,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       })()}
 
       {/* Phase 16.1.3 Item 4: zoom controls top-right, vertical position
-          matches parent layer (below the 61px chrome bar). */}
+          matches parent layer (below the 61px chrome bar).
+          Phase 17.2.0.4: bumped zIndex 50 → 1700 so cards rendering in
+          the upper-right at mid/full LOD (z=1500 default, z=1600 when
+          selected) can't cover the buttons. Stays below the header
+          pillbox (z=2000) and tooltip cards (z=2500) so contextual
+          overlays still draw above. Cluster labels (z=100 + rank
+          inverse, capped well below 1700) stay underneath the
+          controls intentionally per the phase brief. */}
       <div style={{
         position: 'absolute',
         top: 73,
@@ -3151,7 +3158,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
-        zIndex: 50,
+        zIndex: 1700,
         pointerEvents: 'auto',
       }}>
         {[

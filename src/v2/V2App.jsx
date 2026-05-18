@@ -6261,12 +6261,18 @@ export default function V2App() {
             the Directory Layer (user already browsing). */}
         {v22AIShopperOpen && (() => {
           const shared = buildV22SharedArtifacts()
+          // Phase 17.2.0.4: O(n²) → O(n) rewrite. Previously the
+          // `.map(d => shared.claims.find(...))` chain ran a linear
+          // scan over all ~23k Claims for each of the ~23k public DAs
+          // (~500 M comparisons), causing the ~5 s click-to-open lag.
+          // Build a single id → claim Map once and look up in O(1).
+          const claimsById = new Map(shared.claims.map((c) => [c.id, c]))
           const publicDas = shared.disclosureAgreements.filter(
             (d) => d.grantee?.party === 'Radiant Network' && d.subject?.kind === 'claim',
           )
           const publicClaims = publicDas
             .map((d) => {
-              const claim = shared.claims.find((c) => c.id === d.subject.id)
+              const claim = claimsById.get(d.subject.id)
               if (!claim) return null
               return {
                 id: claim.id,
@@ -8122,7 +8128,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.0.3 &middot; Changelog
+          v0.17.2.0.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8169,6 +8175,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.0.4', date: '2026-05-18', label: 'Phase 17.2.0.4', items: [
+                  'LOD thresholds reverted from 17.2.0.3\'s overly-aggressive 2.5–5.5 band to 3.4–5.0 (mini-cards 340%–500%, full-cards 500%–650%). At the 17.2.0.3 lower bound (250 %), mini-cards visibly overlapped in dense clusters like Pinnacle Systems; reverting to 3.4 puts screen spacing back close to the original density-invariant value. `MAX_ZOOM` stays at 6.5. selectRfp\'s `Math.max(zoomRef.current, LOD_THRESHOLD)` resolves to the new 5.0 — notification clicks still land at full-card LOD.',
+                  'Zoom controls in the Directory layer raised above the card overlay (zIndex 50 → 1700). Mini-card and full-card overlays render at z=1500/1600 and were covering the +/-/FIT buttons when cards landed in the upper-right region. New value sits between the card overlay (1600) and the header pillbox (2000) so contextual chrome elements still render above the controls.',
+                  'AI Shopper modal click-to-render lag fixed (measured 81 ms post-fix vs ~5 s reported pre-fix). Two surgical fixes: (1) module-level cache for `buildV22SharedArtifacts` in `v2_2Data.js` — the function rebuilds a ~23k-Claim, ~92k-DA dataset (320 ms cold) on every call, with 20+ call sites in V2App; the cache returns the same object on subsequent calls in 0.001 ms. Safe because every existing caller treats the result as read-only and the function has no inputs. (2) O(n²) → O(n) rewrite of the AI Shopper IIFE\'s public-claims derivation: replaced `publicDas.map(d => shared.claims.find(c => c.id === d.subject.id))` with a precomputed `claimsById` Map for O(1) lookups. The find-loop was ~1.6 s alone on the seeded data.',
+                  'Footer rolls forward to v0.17.2.0.4.',
+                ]},
                 { version: '0.17.2.0.3', date: '2026-05-18', label: 'Phase 17.2.0.3', items: [
                   'SolicitationCreateModal now surfaces the RFP\'s description above the Required Standards accordion, between the modal subtitle and the RS list. Matches the RfpDetailPanel description treatment (prose body, multiline-preserving via `white-space: pre-wrap`, muted-italic "No description provided." fallback when empty).',
                   'Directory mini-card zoom range widened: `MID_LOD_THRESHOLD` 3.33 → 2.5 (mini-cards now appear at 250% zoom, was 350%); `LOD_THRESHOLD` 4.38 → 5.5 (full-cards now appear at 550% zoom, was 450%). `MAX_ZOOM` bumped 5.0 → 6.5 so the new full-card threshold sits well below the cap with comparable headroom. selectRfp\'s `Math.max(zoomRef.current, LOD_THRESHOLD)` override resolves to the new 5.5 — notification click still lands at full-card LOD. Trade-off: the original "density invariant" (cards never overlap horizontally at the threshold) breaks at the low end of the band — at 250% zoom × 48 wu DOT_GRID = 120 px screen spacing vs 160 px mini-card width, so mini-cards may overlap horizontally inside dense clusters. Per Andrew\'s judgement, readability win > collision risk.',

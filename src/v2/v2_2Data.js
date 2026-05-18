@@ -2028,7 +2028,33 @@ export function generateRfpsForActor(actor, count) {
   return rfps
 }
 
+// Phase 17.2.0.4: module-level cache for buildV22SharedArtifacts. The
+// function has no inputs and constructs a deterministic ~23k-Claim,
+// ~92k-DA dataset that takes hundreds of milliseconds to rebuild. V2App
+// calls it from 20+ sites; the synchronous AI-Shopper-modal mount path
+// in particular hit a ~5 s lag because the call landed during render
+// alongside an O(n²) find-loop over the result. Caching the result on
+// the first call drops subsequent calls to O(1) reference returns and
+// is safe because:
+//   • The function has no parameters — there is no input to invalidate.
+//   • Every existing caller treats the result as read-only (find /
+//     filter / map / `{...shared}` shallow-spread in mergeProvisionals
+//     and friends). None mutate the returned arrays or objects.
+//   • The data is invariant per app session by design — the seeded
+//     world doesn't change.
+// If a future change does mutate the returned data, that change MUST
+// also invalidate this cache (export a `__resetV22SharedArtifactsCache`
+// or shape the mutation as a new merge layer like
+// `mergeProvisionals`).
+let cachedV22SharedArtifacts = null
 export function buildV22SharedArtifacts() {
+  if (cachedV22SharedArtifacts) return cachedV22SharedArtifacts
+  const result = buildV22SharedArtifactsUncached()
+  cachedV22SharedArtifacts = result
+  return result
+}
+
+function buildV22SharedArtifactsUncached() {
   // ── Actors ────────────────────────────────────────────────────────────
   const bob = makeActor({
     id: 'bob-govco',
