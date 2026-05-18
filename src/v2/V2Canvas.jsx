@@ -3424,6 +3424,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                   onOpenSubgraph={(node.id === subchainFocusId || depth > 0) ? undefined : onOpenSubgraph}
                   onV22CardAction={transitioning ? undefined : onV22CardAction}
                   activeParty={activeParty}
+                  disclosureType={node.category === 'claim' ? node._disclosureType : undefined}
                 />
               </div>
             )
@@ -3556,6 +3557,7 @@ const V2Canvas = forwardRef(function V2Canvas({
                 onV22CardAction={transitioning ? undefined : onV22CardAction}
                 activeParty={activeParty}
                 revealPhase={revealAnim?.nodeId === node.id ? revealAnim.phase : null}
+                disclosureType={node.category === 'claim' ? node._disclosureType : undefined}
               />
             </div>
           )

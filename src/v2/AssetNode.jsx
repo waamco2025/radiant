@@ -457,12 +457,20 @@ export default function AssetNode({
   // Phase 16.2.10: new disclosure-type branch inserted between bad-health
   // and the WARM_BORDER fallback. Mirrors the AssetNodeMini chain so
   // mid-LOD and full-LOD render the same color signal.
+  // Phase 16.2.11: hover/select color depends on node type. Claims keep
+  // amber (distinguishes the discrete hover/select state from the
+  // disclosure-type indigo/amber/green default). Non-Claim node types
+  // (Actor, Asset, Eval Result, PoE) brighten to full indigo on hover
+  // and select — keeps them visually indigo-themed throughout.
+  const hoverSelectColor = node.category === 'claim'
+    ? 'var(--accent-amber, #C49A45)'
+    : 'var(--accent-indigo)'
   const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
-      ? 'var(--accent-amber, #C49A45)'
+      ? hoverSelectColor
       : hasBadHealth
         ? 'var(--accent-red)'
         : disclosureType === 'full' ? 'var(--accent-indigo)'
@@ -578,7 +586,10 @@ export default function AssetNode({
           borderRadius: (8 * scale) + 3,
           borderWidth: 2,
           borderStyle: 'solid',
-          borderColor: showAsProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)',
+          // Phase 16.2.11: non-Claim nodes use bright indigo for the
+          // outer selection ring; Claims stay amber to match the inner
+          // border hover/select rule.
+          borderColor: showAsProvisional ? 'var(--text-dim)' : hoverSelectColor,
           transition: 'border-color 600ms ease',
           pointerEvents: 'none',
           zIndex: 0,
@@ -630,6 +641,8 @@ export default function AssetNode({
           // wins. Directory cards always carry disclosureType, so they always
           // land in this branch; parent canvas Claims that haven't opted in fall
           // through to isCounterpartyNode (unchanged).
+          // Phase 16.2.11: hover background tint follows node type — Claims
+          // use amber (matches inner border hover), non-Claims use indigo.
           background: isRevoked
             ? 'color-mix(in srgb, var(--bg-deep) 90%, var(--accent-red))'
             : showAsProvisional
@@ -637,7 +650,9 @@ export default function AssetNode({
               : isNew
                 ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
                 : hovered
-                  ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+                  ? (node.category === 'claim'
+                    ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+                    : 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-indigo))')
                   : disclosureType === 'full' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-indigo))'
                   : disclosureType === 'selective' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-amber))'
                   : disclosureType === 'proofonly' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-green))'
@@ -1328,12 +1343,17 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
   // disclosure level visually. Color mapping matches the existing
   // disclosure-edge palette on parent canvas (indigo/amber/green for
   // full/selective/proofonly).
+  // Phase 16.2.11: hover/select color depends on node type — Claims keep
+  // amber, non-Claims brighten to indigo. Mirrors the full AssetNode chain.
+  const hoverSelectColor = node.category === 'claim'
+    ? 'var(--accent-amber, #C49A45)'
+    : 'var(--accent-indigo)'
   const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
     ? 'var(--text-dim)'
     : (hovered || isSelected)
-      ? 'var(--accent-amber, #C49A45)'
+      ? hoverSelectColor
       : hasBadHealth
         ? 'var(--accent-red)'
         : disclosureType === 'full' ? 'var(--accent-indigo)'
@@ -1447,7 +1467,9 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
           // Phase 9E (#107): longhand border props to avoid shorthand/longhand mix.
           borderWidth: 2,
           borderStyle: 'solid',
-          borderColor: isProvisional ? 'var(--text-dim)' : 'var(--accent-amber, #C49A45)',
+          // Phase 16.2.11: non-Claim nodes use bright indigo for the outer
+          // selection ring; Claims stay amber.
+          borderColor: isProvisional ? 'var(--text-dim)' : hoverSelectColor,
           pointerEvents: 'none',
           zIndex: 0,
         }} />
@@ -1462,10 +1484,14 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
         // (replaces plain bg-card when disclosureType is present). 12%
         // color-mix with bg-card gives a subtle wash — visible but not
         // aggressive.
+        // Phase 16.2.11: hover background tint follows node type — Claims
+        // use amber, non-Claims use indigo.
         background: isRevoked
           ? 'color-mix(in srgb, var(--bg-card) 90%, var(--accent-red))'
           : hovered
-            ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+            ? (node.category === 'claim'
+              ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+              : 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-indigo))')
             : disclosureType === 'full' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-indigo))'
             : disclosureType === 'selective' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-amber))'
             : disclosureType === 'proofonly' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-green))'

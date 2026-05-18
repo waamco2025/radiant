@@ -7755,7 +7755,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.2.0 &middot; Changelog
+          v0.16.2.11 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7802,6 +7802,17 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.16.2.11', date: '2026-05-17', label: 'Phase 16.2.11', items: [
+                  'Phase 16.2.11 — Phase 16 wrap-up: Alice grouping + footer version + parent-layer visual calibration. Closes the Directory + parent-canvas appearance arc.',
+                  'Alice per-Claim y-band grouping fix: `buildV22Canvas` chain anchor now reads the evaluated Claim\'s y as the primary anchor (was `EA.granteeAssetId` per Phase 16.2.2). The granteeAssetId Asset (Bob\'s `bAvionics`, Carol\'s `cAuditWorkspace`) isn\'t on grantor-direction views like Alice\'s, so chains were falling through to a symmetric-distribution fallback and scattering. With the new anchor, each Claim\'s chain lives on the Claim\'s exact y (pass 1) or the nearest free row (pass 2). Bob\'s view is unaffected because pulled Claims at `symmetricRowY(i)` coincide with owned Assets at `symmetricRowY(i)` by construction. Verified: Alice\'s 3 Claims now host chains within 0-2 rows of their Claim (was up to 7 rows scatter). Bob/Carol/Dave unchanged. Asset-clustering-near-Claim (separate concern from chain clustering) requires re-architecting Asset placement and is scoped to a future phase.',
+                  'Footer version label bumped v0.16.2.0 → v0.16.2.11. The backtrack-hotfix freeze formally ends here; future phases roll the footer to match the phase number.',
+                  'Parent canvas Claims now opt into the disclosure-type colored borders + tinted backgrounds (mirror of Phase 16.2.10\'s Directory treatment). `buildV22Canvas` computes a `_disclosureType` per Claim node — own Claims = `\'full\'`, pulled Claims = the type of the DA where `grantee.party === actor.party && subject.kind === \'claim\' && subject.id === claim.id`. V2Canvas passes `disclosureType={node.category === \'claim\' ? node._disclosureType : undefined}` to both `AssetNode` and `AssetNodeMini`. The 16.2.10 disclosure-type branches in `AssetNode.jsx` now fire on parent too. Bad-health overrides disclosure-type per the existing priority chain, so e.g. Bob\'s view of Alice\'s PRM Claim (selective) shows a red border (bad health) with an amber-tinted background (selective).',
+                  'Non-Claim node types (Actor, Asset, Eval Result, PoE) now use bright indigo (`var(--accent-indigo)`) for hover and select states — was amber. Implemented as a top-of-component `hoverSelectColor` derived from `node.category` in both `AssetNode` and `AssetNodeMini`. Three sites updated per component: inner border, outer selection ring, inner-div hover background. Claims keep amber so the discrete hover/select state stays distinct from the disclosure-type indigo/amber/green default. Net visual rule: non-Claim nodes are always indigo-themed (40%-indigo WARM_BORDER → 100%-indigo on hover/select); Claims carry disclosure-color defaults that yield to amber on hover/select.',
+                  'AssetNodeDot intentionally left unchanged in this phase — its existing hover/select treatment is orthogonal to the card-level rules. If QA surfaces a need for the same treatment on dots, follow-up phase.',
+                  'Docs updated: architecture-spec.md §8 Changelog gains a Phase 16.2.11 entry; polish-backlog.md Update Log gains an entry marking Phase 16 closed; CLAUDE.md "Current state of the world" rolled; phase-log entry added.',
+                  'Phase 16 (Directory Layer + parent-canvas visual calibration) is now closed. Forward queue: Phase 17.0 — RFP factory promotion + buyer post flow + clickable RFP dots + RFP Detail Panel.',
+                  'Footer rolls forward to v0.16.2.11.',
+                ]},
                 { version: '0.16.2.10', date: '2026-05-17', label: 'Phase 16.2.10', items: [
                   'Phase 16.2.10 — Disclosure-type colored borders + tinted backgrounds on Directory Claim cards. Adds the disclosure-type color signal to AssetNodeMini (mid-LOD) and AssetNode (full-LOD) cards on the Directory layer, mirroring the existing dot-color mapping (full → indigo, selective → amber, proof-only → green).',
                   'A new `disclosureType` prop is added to both `AssetNode` and `AssetNodeMini`. When present (and no higher-priority state — declined/revoked, provisional, hover/selected, bad-health — applies), the card\'s border color signals the disclosure level. A 12% color-mix tint applies the same color as a subtle background wash. The mapping uses CSS variables `var(--accent-indigo)`, `var(--accent-amber)`, `var(--accent-green)`.',

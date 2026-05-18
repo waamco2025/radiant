@@ -2673,6 +2673,77 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.11 completion notes (2026-05-17) — Phase 16 wrap-up: Alice grouping + footer version + parent-layer visual calibration
+
+Three loose ends closed before Phase 17 opens. Phase 16 (Directory Layer + parent-canvas visual calibration arc) is now formally closed.
+
+**Item 1 — Alice per-Claim y-band grouping fix.** `buildV22Canvas`'s chain-row allocator (introduced Phase 16.2.2) anchored each evaluation chain's y to `EA.granteeAssetId` Asset on canvas. On evaluator-direction views (Bob's, Carol's, Dave's) the granteeAssetId Asset is the evaluator's own — present and usable. On **grantor-direction views (Alice's)** the granteeAssetId Asset (Bob's `bAvionics`, Carol's `cAuditWorkspace`) is NOT on the active actor's canvas: Alice doesn't see Bob's owned Asset by default. The Phase 16.2.2 algorithm then fell through to a pass-2 symmetric-distribution fallback (`symmetricRowY(fallbackIdx++) + COL_Y_OFFSET`) which scattered chains across rows unrelated to their evaluated Claim. The fix: anchor to the **evaluated Claim's y** instead.
+
+Two changes in `v2_2Data.js`'s chain-placement block (`buildV22Canvas`):
+
+1. New `claimNodeForChainAnchor` map: built from `nodes.filter((n) => n.v22Type === 'CLAIM')` after both `ownedClaims` and `pulledClaims` push their nodes; provides id → node lookup for chains.
+2. `anchorIdForOrigin` returns `er.claimId` (was `ea.granteeAssetId`); falls back to `granteeAssetId` only when the Claim isn't on canvas (defensive). Pass 1's "one chain per anchor group" semantics now mean "one chain per evaluated Claim" — exactly the per-Claim y-band rule. `anchorYForOrigin` mirrors: Claim.y → granteeAssetId.y → `Number.POSITIVE_INFINITY`.
+
+**Verification (data probe across all 4 views):**
+- Bob: PRM Claim y=0, chain y=0; VReg Claim y=300, chain y=300 (unchanged ✓)
+- Alice: PRM Claim y=0, chains y=0 + y=600 (within 2-row tolerance ✓); VReg Claim y=300, chain y=300 (✓); EMI Claim y=-300, chain y=-300 (✓). Was: chains at y=100, 700, -200, 400 — scattered.
+- Carol: PRM y=0/chain y=0; EMI y=300/chain y=300 (clean ✓)
+- Dave: PRM Claim y=0, chain y=300 (1 row away — proof-only-pulled placement from Phase 11D.4.1, unchanged ✓)
+
+**Bob view unaffected** because his pulled Claims at `symmetricRowY(i)` coincide with his owned Assets at `symmetricRowY(i)` by construction — Phase 16.2.2's granteeAssetId-y and Phase 16.2.11's Claim-y both resolve to the same y for Bob's chains.
+
+**Asset-clustering-near-Claim deferred.** The brief mentioned "referenced Assets and chains within 2-3 rows of the Claim". Asset positions on parent canvas are placed via `symmetricRowY(i)` indexed by the Asset's place in the `ownedAssets` array — independent of which Claim references them. Aligning Assets to their referencing Claim's y requires re-architecting the Asset-placement pass (multi-Claim references, depth-grouping interaction with Phase 10.2's hierarchy, fallback ordering when an Asset has no Claim reference). Per the brief's escape clause, surfaced and scoped to a future dedicated phase. Chain clustering is the bigger user-visible win; Asset clustering can land independently.
+
+**Item 2 — Footer version label catchup.** `V2App.jsx`'s footer span text `v0.16.2.0 · Changelog` → `v0.16.2.11 · Changelog`. The backtrack-hotfix-convention footer freeze (which held the footer at v0.16.2.0 across the 16.2.1 → 16.2.10 cycle) formally ends with this phase. Future phases roll the footer to match the phase number per the standard convention.
+
+**Item 3a — Parent canvas Claim disclosure-type plumbing.** `buildV22Canvas` now computes a `disclosureTypeByClaimId` map at the top of the Claim placement section:
+- Own Claims → `'full'` (owner sees everything, no DA gate).
+- Pulled Claims → walk `view.disclosureAgreements`; first DA where `subject.kind === 'claim' && subject.id === claim.id && grantee.party === actor.party` wins; use its `type` (`'full' | 'selective' | 'proofonly'`).
+- Defensive: if no DA matches (shouldn't happen for visible Claims), leave `_disclosureType` undefined — falls through to AssetNode's WARM_BORDER default.
+
+A `stampDisclosureType(node, claim)` helper attaches `node._disclosureType` to each Claim node as it's pushed. `V2Canvas.jsx`'s `<AssetNode>` and `<AssetNodeMini>` invocations now pass `disclosureType={node.category === 'claim' ? node._disclosureType : undefined}` (line 3427 + 3559). The Phase 16.2.10 disclosure-type branches in AssetNode.jsx now fire on parent.
+
+**Verification (DOM inspection on Bob's view):**
+- PRM Claim (selective) → border `rgb(239, 68, 68)` (red) + background `color(srgb 0.16 0.13 0.08)` (warm). Red border is bad-health override per priority chain; warm background is the selective tint underneath. ✓
+- VReg Claim (full) → border `rgb(129, 140, 248)` (indigo) + indigo-tinted background. ✓
+- ChipCo Flash Memory / ADC-DAC (proofonly) → border `rgb(34, 197, 94)` (green) + green-tinted background. ✓
+
+Disclosure types verified across all 4 views via data probe: Bob's view has full/selective/proofonly mix; Alice/Carol see only full (own Claims); Dave sees mostly full + one pulled.
+
+**Item 3b — Non-Claim hover/select indigo.** Both `AssetNode` and `AssetNodeMini` gain a top-of-component `hoverSelectColor` constant:
+```js
+const hoverSelectColor = node.category === 'claim'
+  ? 'var(--accent-amber, #C49A45)'
+  : 'var(--accent-indigo)'
+```
+
+Three sites updated per component:
+1. Inner `borderColor` chain — `(hovered || isSelected) ? 'var(--accent-amber...)' : ...` becomes `... ? hoverSelectColor : ...`.
+2. Outer selection ring — `borderColor: showAsProvisional ? 'var(--text-dim)' : 'var(--accent-amber...)'` becomes `borderColor: ... ? 'var(--text-dim)' : hoverSelectColor`.
+3. Inner-div hover background — inline conditional preserves the `color-mix(...)` wrapping, swapping accent-amber for accent-indigo when `node.category !== 'claim'`.
+
+**Verification (DOM inspection with synthetic mouseenter):**
+- Asset card hover → border `rgb(129, 140, 248)` (bright indigo) + indigo-tinted background ✓
+- Claim VReg hover → border `rgb(245, 158, 11)` (amber) + amber-tinted background ✓
+
+`AssetNodeDot` intentionally not updated this phase — its dot-LOD treatment is orthogonal; if QA surfaces a need for the same rule, follow-up phase.
+
+**Cross-layer consistency rule (Phase 16.2.10 + 16.2.11 combined):**
+| Node type | Default border | Hover/select border |
+|---|---|---|
+| Claim (either layer) | disclosure color (indigo/amber/green) or WARM_BORDER if undefined | amber |
+| Actor / Asset / Eval Result / PoE (parent only — Directory has no other node types) | WARM_BORDER (40% indigo blend) | bright indigo (100%) |
+
+**Item 4 — Doc updates.** Architecture spec §6/§3.5/§8.2 changelog entry; polish-backlog Update Log entry marking Phase 16 closed; CLAUDE.md current-state rolled; phase-log entry (this one); V2App.jsx Changelog modal entry prepended for v0.16.2.11.
+
+**Phase 16 (Directory Layer + parent-canvas visual calibration) is now CLOSED.** Forward queue: Phase 17.0 (RFP factory + buyer post flow + clickable RFP dots + RFP Detail Panel).
+
+**Runtime verification.** Dev server reloaded after each edit; no console errors (the pre-existing V2Canvas2 setState-in-render warning is unrelated, documented since Phase 16.2.6.6). Footer reads `v0.16.2.11`. Alice's view shows clean horizontal banding across her 3 Claims (chains within 0-2 rows). Bob's parent Claim cards show disclosure-type borders + tints (selective with bad-health red override is visible). Asset card hover triggers bright indigo border/background. Claim hover triggers amber (existing behavior preserved).
+
+**Footer rolls forward to v0.16.2.11** — backtrack-hotfix freeze formally ends.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.10 completion notes (2026-05-17) — Disclosure-type colored borders + tinted backgrounds on Directory Claim cards
 
 Adds the disclosure-type color signal (already present on dots since Phase 16.1.3 Item 8) to AssetNodeMini (mid-LOD) and AssetNode (full-LOD) Claim cards on the Directory layer. Closes Round 17's priority #1 (Directory appearance and feel).

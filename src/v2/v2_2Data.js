@@ -6700,16 +6700,42 @@ export function buildV22Canvas(view) {
   // ── Claims (owned column 3; pulled-in column 5) ──────────────────────
   const ownedClaims = view.claims.filter((c) => view.ownedClaimIds.has(c.id))
   const pulledClaims = view.claims.filter((c) => !view.ownedClaimIds.has(c.id))
+  // Phase 16.2.11: per-Claim effective disclosure type for the active
+  // actor. Drives the disclosure-typed border + bg tint on the parent
+  // canvas (mirror of Directory's Phase 16.2.10 treatment). Own Claims
+  // → 'full' (no DA gate; the owner sees everything). Pulled Claims →
+  // type from the DA where grantee.party === actor.party AND
+  // subject.kind === 'claim' AND subject.id === claim.id (the disclosure
+  // that brought it onto this canvas). Multiple matching DAs (e.g.
+  // umbrella + direct) — first match wins; the seed is structured so
+  // disclosure type agrees across DAs that grant the same Claim.
+  // Fallback when no matching DA is found (defensive — shouldn't happen
+  // for visible Claims): undefined → AssetNode chain falls through to
+  // WARM_BORDER (safe default; doesn't misrepresent the disclosure).
+  const disclosureTypeByClaimId = new Map()
+  for (const c of ownedClaims) disclosureTypeByClaimId.set(c.id, 'full')
+  const activePartyForDA = actor.party
+  for (const da of view.disclosureAgreements || []) {
+    if (da.subject?.kind !== 'claim') continue
+    if (da.grantee?.party !== activePartyForDA) continue
+    if (disclosureTypeByClaimId.has(da.subject.id)) continue
+    disclosureTypeByClaimId.set(da.subject.id, da.type)
+  }
+  const stampDisclosureType = (node, claim) => {
+    const t = disclosureTypeByClaimId.get(claim.id)
+    if (t) node._disclosureType = t
+    return node
+  }
   ownedClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
     // Phase 10.2.1: symmetric distribution; Owned Claims at offset 0 (two
     // columns away from owned Assets, so no overlap risk on horizontal lines).
-    nodes.push(claimToNode(claim, rollup, COL_OWN_CLAIM_eff, symmetricRowY(i)))
+    nodes.push(stampDisclosureType(claimToNode(claim, rollup, COL_OWN_CLAIM_eff, symmetricRowY(i)), claim))
   })
   pulledClaims.forEach((claim, i) => {
     const rollup = rollupClaimHealth(claim.id, view.evaluationResults)
     // Phase 10.2.1: symmetric distribution; Pulled Claims at offset 0.
-    const node = claimToNode(claim, rollup, COL_PULLED_CLAIM_eff, symmetricRowY(i))
+    const node = stampDisclosureType(claimToNode(claim, rollup, COL_PULLED_CLAIM_eff, symmetricRowY(i)), claim)
     markProvisional(node, view.provisionalClaimIds)
     // Declined claims (Phase 5 / spec §11.4 + Phase 6.5 #3). AssetNode renders
     // its own DECLINED badge from `isDeclined`; we keep `_showAsProvisional`
@@ -6807,6 +6833,18 @@ export function buildV22Canvas(view) {
   const assetNodeById = new Map(
     nodes.filter((n) => n.v22Type === 'ASSET').map((n) => [n.id, n])
   )
+  // Phase 16.2.11: chain anchor lookup also consults the evaluated Claim
+  // node. On grantor-direction views (e.g., Alice's), the EA's
+  // granteeAssetId names the evaluator's Asset (Bob's `bAvionics`,
+  // Carol's `cAuditWorkspace`) which often isn't on the active actor's
+  // canvas — Phase 16.2.2's grantee-Asset-only anchor then fell through
+  // to the pass-2 symmetric fallback and chains scattered. The Claim is
+  // always on canvas when its chain is, so anchoring to Claim y first
+  // keeps "for each Claim, its chain" visually adjacent regardless of
+  // who's evaluating.
+  const claimNodeForChainAnchor = new Map(
+    nodes.filter((n) => n.v22Type === 'CLAIM').map((n) => [n.id, n])
+  )
   const orderedErsForY = [...erOwn, ...erProofOfEval]
   const seenOrigins = new Set()
   const orderedOrigins = []
@@ -6817,14 +6855,38 @@ export function buildV22Canvas(view) {
       orderedOrigins.push(origin)
     }
   }
+  // Phase 16.2.11: anchor identity is the evaluated Claim's id (was
+  // granteeAssetId in Phase 16.2.2). This shifts pass 1's "one chain
+  // per anchor group" semantics from "one chain per evaluator-Asset"
+  // to "one chain per evaluated Claim" — exactly the per-Claim y-band
+  // rule the brief calls for. Falls back to granteeAssetId for any edge
+  // case where the Claim isn't on canvas (defensive — shouldn't happen
+  // for chains that ARE on canvas; an ER's claimId always points to a
+  // visible Claim for the chain to exist on the active actor's view).
   const anchorIdForOrigin = (originId) => {
     const er = erIdToErArtifact.get(originId)
-    const ea = er ? eaById.get(er.evaluationAgreementId) : null
+    if (!er) return null
+    if (claimNodeForChainAnchor.has(er.claimId)) return er.claimId
+    const ea = eaById.get(er.evaluationAgreementId)
     return ea?.granteeAssetId ?? null
   }
+  // Phase 16.2.11: anchor y reads the evaluated Claim's y first; falls
+  // back to the EA's granteeAssetId Asset y when the Claim isn't on
+  // canvas (defensive). Together with the anchorId change above, this
+  // produces the per-Claim y-band: each Claim's first chain claims the
+  // Claim's exact y in pass 1; additional chains for the same Claim
+  // (rare — e.g., two evaluators evaluating one Claim) get the nearest
+  // free y via pass 2's symmetric outward search. Bob's view is
+  // unaffected because pulled Claims at symmetricRowY(i) coincide with
+  // his owned Assets at symmetricRowY(i); Alice's view chains now
+  // cluster near the evaluated Claim instead of scattering.
   const anchorYForOrigin = (originId) => {
-    const anchorId = anchorIdForOrigin(originId)
-    const asset = anchorId ? assetNodeById.get(anchorId) : null
+    const er = erIdToErArtifact.get(originId)
+    const claimNode = er ? claimNodeForChainAnchor.get(er.claimId) : null
+    if (claimNode) return claimNode.y
+    const ea = er ? eaById.get(er.evaluationAgreementId) : null
+    const fallbackAssetId = ea?.granteeAssetId
+    const asset = fallbackAssetId ? assetNodeById.get(fallbackAssetId) : null
     return asset ? asset.y : Number.POSITIVE_INFINITY
   }
   // Sort origins by anchor-asset y (then by origin id for stability) so
