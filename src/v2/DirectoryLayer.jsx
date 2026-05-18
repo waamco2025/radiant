@@ -29,7 +29,7 @@
 //   • Item 9: RFP rendered as hollow circle in cyan, border scales with
 //     zoom (same pattern as Item 2's Actor square).
 
-import { useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react'
 import * as THREE from 'three'
 import { Delaunay } from 'd3-delaunay'
 import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals } from './v2_2Data.js'
@@ -1117,7 +1117,7 @@ function computeLayout(directoryData, viewport) {
 }
 
 // ─── Main DirectoryLayer ───────────────────────────────────────────────
-export default function DirectoryLayer({
+const DirectoryLayer = forwardRef(function DirectoryLayer({
   open,
   activeParty,
   roleId,
@@ -1137,7 +1137,7 @@ export default function DirectoryLayer({
   // exclusion with `onClaimDotClick` is enforced on V2App's side.
   onRfpClick,
   wipeOrigin,
-}) {
+}, ref) {
   // ─── Entry/exit state machine ────────────────────────────────────────
   const [phase, setPhase] = useState('closed')
   const phaseRef = useRef(phase)
@@ -1467,6 +1467,28 @@ export default function DirectoryLayer({
     panAnimRef.current = requestAnimationFrame(tick)
   }, [clampPan, updateCamera])
 
+  // ─── Phase 17.2.0.1: imperative panToRfp for notification-driven nav. ──
+  // V2App's notification click handler resolves the target RFP, sets
+  // selection state on V2App, then calls this method to pan + zoom the
+  // Directory camera to the marker. Mirrors the in-component RFP click
+  // behaviour (panel-offset compensation, current-zoom retention, 500 ms
+  // ease). Resolves the dot via `layoutRef` so the most-recent layout
+  // is consulted (provisional updates and role switches refresh layout).
+  useImperativeHandle(ref, () => ({
+    panToRfp(rfp) {
+      if (!rfp || !rfp.id) return false
+      const layoutCur = layoutRef.current
+      if (!layoutCur) return false
+      const rfpDots = (layoutCur.allDots || []).filter((d) => d.kind === 'rfp')
+      const d = rfpDots.find((x) => x.rfp?.id === rfp.id)
+      if (!d) return false
+      const targetZoom = zoomRef.current
+      const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+      animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+      return true
+    },
+  }), [animatedPanToWithZoom])
+
   // ─── Overlay refresh ─────────────────────────────────────────────────
   const updateOverlayRef = useRef(() => {})
   useEffect(() => {
@@ -1603,14 +1625,17 @@ export default function DirectoryLayer({
     // tinted fill: scene.add(fill) BEFORE scene.add(outline). Both share
     // identical per-instance matrices (position + scale).
     const rfpFillGeometry = new THREE.PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)
-    // Phase 17.2: per-instance vertex colors enable hover/select brightening
-    // on RFP markers. Material's base `color` is multiplied by per-instance
-    // colors at fragment-shader time — both must be set to neutral white in
-    // the base attribute so the fill alpha + indigo come from the material
-    // color (the multiplier defaults to white when an instance is in the
-    // baseline state).
+    // Phase 17.2 / 17.2.0.1: per-instance colors carry the entire color
+    // signal for both outline + fill meshes. Material `color` is set to
+    // white so the per-instance value renders 1:1 (the fragment shader
+    // multiplies material.color × instanceColor; with material.color =
+    // white this reduces to instanceColor). Base instance color = indigo
+    // for baseline; `flushRfpColors` writes a lighter indigo on hover and
+    // an even lighter / near-white shade on select to drive visible
+    // brightening (Phase 17.2's white-on-white multiply produced no
+    // visible delta; this rewrite fixes that).
     const rfpFillMaterial = new THREE.MeshBasicMaterial({
-      color: cssVarToColor('--accent-indigo', '#6b8aff'),
+      color: 0xffffff,
       transparent: true,
       opacity: RFP_FILL_ALPHA,
     })
@@ -1623,7 +1648,7 @@ export default function DirectoryLayer({
     rfpFillMeshRef.current = rfpFillMesh
 
     const rfpGeometry = makeHollowSquareGeometry(RFP_BASE_OUTER, RFP_BORDER)
-    const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-indigo', '#6b8aff') })
+    const rfpMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff })
     const rfpMesh = new THREE.InstancedMesh(rfpGeometry, rfpMaterial, MAX_RFPS)
     rfpMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_RFPS * 3), 3)
     rfpMesh.count = 0
@@ -1899,11 +1924,14 @@ export default function DirectoryLayer({
       rfpHitMesh.instanceMatrix.needsUpdate = true
     }
 
-    // Phase 17.2: per-instance base colors on rfpMesh + rfpFillMesh —
-    // initialised to white (which leaves the material color unchanged at
-    // fragment-shader time). `flushRfpColors` writes brighter colors at
-    // the hovered/selected index after every state change.
-    const rfpBaseColor = new THREE.Color('#ffffff')
+    // Phase 17.2.0.1: per-instance base colors initialised to the indigo
+    // accent. Material `color` is white (set at mesh init); the instance
+    // color now carries the entire color signal. `flushRfpColors` lerps
+    // this base toward white on hover/select to brighten the marker —
+    // the Phase 17.2 implementation set base to white-on-indigo which
+    // produced no visible brightening on hover (the multiplier landed at
+    // identity).
+    const rfpBaseColor = cssVarToColor('--accent-indigo', '#6b8aff')
     const rfpBaseColors = new Array(rfpDots.length)
     for (let i = 0; i < rfpDots.length; i++) {
       rfpBaseColors[i] = rfpBaseColor.clone()
@@ -2263,21 +2291,22 @@ export default function DirectoryLayer({
     const pinnedRfp = pinnedRef.current?.rfp ? pinnedRef.current : null
     const selectedIdx = pinnedRfp ? (pinnedRfp.dotIndex ?? -1) : -1
     const hoveredIdx = hoveredRfpIdxRef.current
+    // Phase 17.2.0.1: visible brightening — hover lerps base indigo 35 %
+    // toward white, select lerps 65 % toward white. Phase 17.2's
+    // implementation wrote (1,1,1) baseline against an indigo material
+    // color, so the multiplier landed at identity — no visible delta.
+    // Now material color = white and instanceColor carries the full
+    // signal, so the lerp is the actual rendered color delta.
     const whiteColor = new THREE.Color('#ffffff')
-    // Open / non-closed RFP outline + fill via instanceColor multiplier.
-    // Base color = white (1,1,1) which multiplies out to the material's
-    // indigo color at baseline. Hovered = 1.5× lerp toward white from the
-    // already-saturated indigo (visible bump). Selected = the same brightening
-    // (we don't have a stronger ceiling on instanceColor; the slight visual
-    // difference between hover + select on the same marker is the +1.0
-    // pinned tooltip card overlaying the marker on click).
+    const tmp = new THREE.Color()
     for (let i = 0; i < baseColors.length; i++) {
-      let c = baseColors[i]    // base = white
-      if (i === selectedIdx || i === hoveredIdx) {
-        // Brighten by overshoot multiplier so the indigo perceptibly
-        // brightens. Anything above 1.0 on an instanceColor channel pushes
-        // the indigo base toward white at fragment-shader time.
-        c = whiteColor
+      let c = baseColors[i]
+      if (i === selectedIdx) {
+        tmp.copy(baseColors[i]).lerp(whiteColor, 0.65)
+        c = tmp
+      } else if (i === hoveredIdx) {
+        tmp.copy(baseColors[i]).lerp(whiteColor, 0.35)
+        c = tmp
       }
       rfpMesh.setColorAt(i, c)
       rfpFillMesh.setColorAt(i, c)
@@ -2295,16 +2324,17 @@ export default function DirectoryLayer({
         const arr = colorAttr.array
         const c = new THREE.Color()
         for (let k = 0; k < closedBase.length; k++) {
-          // Resolve overall rfp-index from the closed-subset index.
-          let targetIsHighlighted = false
+          // Resolve overall rfp-index from the closed-subset index, and
+          // distinguish hover vs select so the brightening matches the
+          // open-RFP delta (hover 0.35, select 0.65).
+          let highlightT = 0
           for (const [overallIdx, closedIdx] of closedIdxMap.entries()) {
-            if (closedIdx === k && (overallIdx === selectedIdx || overallIdx === hoveredIdx)) {
-              targetIsHighlighted = true
-              break
-            }
+            if (closedIdx !== k) continue
+            if (overallIdx === selectedIdx) { highlightT = 0.65; break }
+            if (overallIdx === hoveredIdx) { highlightT = 0.35; break }
           }
-          if (targetIsHighlighted) {
-            c.copy(closedBase[k]).lerp(new THREE.Color('#ffffff'), 0.55)
+          if (highlightT > 0) {
+            c.copy(closedBase[k]).lerp(whiteColor, highlightT)
           } else {
             c.copy(closedBase[k])
           }
@@ -2504,6 +2534,17 @@ export default function DirectoryLayer({
       return
     }
     const hit = raycast(e.clientX, e.clientY)
+    // Phase 17.2.0.1: cursor `pointer` when hovering any interactive
+    // Directory primitive (Claim dot, RFP open marker, closed-and-owned
+    // RFP — all routed through the same dotsMesh + rfpHitMesh raycast).
+    // Parent layer achieves this via per-node HTML wrappers; Directory
+    // renders to a single canvas, so we set it imperatively here. The
+    // canvas's inline style sets cursor to `default` (rendered above the
+    // container in z-order), so we set on the canvas element directly.
+    const canvasEl = canvasRef.current
+    if (canvasEl) {
+      canvasEl.style.cursor = hit ? 'pointer' : 'default'
+    }
     // Phase 17.0: hover is Claim-only — RFP hover-preview (the tooltip
     // card) is deferred. Phase 17.2: but we DO track RFP hover for marker
     // brightening (the QA's "hover over an RFP hollow square → outline
@@ -2762,7 +2803,22 @@ export default function DirectoryLayer({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={() => { draggingRef.current = false; setHover(null) }}
+      onMouseLeave={() => {
+        draggingRef.current = false
+        setHover(null)
+        // Phase 17.2.0.1: reset cursor on layer-exit so a subsequent
+        // re-entry over an empty region starts at `default` rather than
+        // the last-hit `pointer`.
+        const canvasEl = canvasRef.current
+        if (canvasEl) canvasEl.style.cursor = 'default'
+        // Also clear any RFP hover so brightening doesn't stick when
+        // pointer leaves the layer.
+        if (hoveredRfpIdxRef.current !== -1) {
+          hoveredRfpIdxRef.current = -1
+          rfpDirtyRef.current = true
+          dirtyRef.current = true
+        }
+      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -3107,4 +3163,6 @@ export default function DirectoryLayer({
       </div>
     </div>
   )
-}
+})
+
+export default DirectoryLayer

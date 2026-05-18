@@ -3285,6 +3285,12 @@ export default function V2App() {
   const [v22AddCreditsOpen, setV22AddCreditsOpen] = useState(false)
   const [layerInfo, setLayerInfo] = useState({ depth: 0, anchorId: null })
   const canvasRef = useRef(null)
+  // Phase 17.2.0.1: imperative handle to DirectoryLayer for notification-
+  // driven RFP navigation. `panToRfp(rfp)` returns true on success, false
+  // when the Directory isn't ready (still opening / layout not built). The
+  // notification click handler retries via rAF until success or a 60-frame
+  // cap, so the pan fires as soon as DirectoryLayer is ready.
+  const directoryLayerRef = useRef(null)
   // Phase 9B.2 Fix 3: fade-during-animation tooltip handling. When edgeMenu
   // becomes set, the pan/zoom framing animation (animatedPanToWithZoom,
   // 600ms) is about to start. We hide the tooltip while it runs and
@@ -4335,19 +4341,27 @@ export default function V2App() {
                   // prior node-double-click so the next open animates from
                   // the corner.
                   setV22DirectoryWipeOrigin(null)
-                  setV22DirectoryOpen((open) => {
-                    if (open) {
-                      setV22DirectorySelectedClaim(null)
-                      // Phase 17.0: clear any selected RFP on Directory close
-                      // so the RfpDetailPanel doesn't persist over the canvas.
-                      setV22DirectorySelectedRfp(null)
-                    }
-                    // Phase 16.1.1 Item 5: clear parent-layer edge tooltip
-                    // and any related hover state when Directory opens, so
-                    // the tooltip doesn't persist behind the wipe.
-                    if (!open) canvasRef.current?.clearHoverState?.()
-                    return !open
-                  })
+                  // Phase 17.2.0.1: lift side effects out of the functional
+                  // setState updater. The previous form called
+                  // `canvasRef.current.clearHoverState()` inside the updater
+                  // callback, which runs during React's reducer phase (i.e.
+                  // during V2App's render). That triggered V2Canvas's
+                  // setState from V2App's render and fired the
+                  // "setState-in-render" warning. The fix reads the current
+                  // open state from closure (this is an onClick handler, so
+                  // `v22DirectoryOpen` is fresh) and runs all side effects
+                  // BEFORE the toggle.
+                  if (v22DirectoryOpen) {
+                    // Closing the Directory.
+                    setV22DirectorySelectedClaim(null)
+                    setV22DirectorySelectedRfp(null)
+                  } else {
+                    // Opening the Directory — clear any open Parent-layer
+                    // edge tooltip / hover state so it doesn't persist
+                    // behind the wipe.
+                    canvasRef.current?.clearHoverState?.()
+                  }
+                  setV22DirectoryOpen((open) => !open)
                 }}
                 style={{
                   ...iconBtnStyle,
@@ -4806,6 +4820,23 @@ export default function V2App() {
                             setV22DirectoryOpen(true)
                             setV22DirectorySelectedClaim(null)
                             setV22DirectorySelectedRfp(targetRfp)
+                            // Phase 17.2.0.1: pan + zoom the Directory camera
+                            // to the target RFP marker. DirectoryLayer may
+                            // still be opening (phase machine + load animation
+                            // run before layout is built), so the imperative
+                            // panToRfp returns false until ready. Retry on
+                            // each rAF tick until success or the 60-frame cap
+                            // (~1 s @ 60fps — Directory opening transition is
+                            // ~600 ms; cap is defensive against runaway loops
+                            // if the RFP isn't in the active actor's view).
+                            let attempts = 0
+                            const tryPan = () => {
+                              attempts += 1
+                              const ok = directoryLayerRef.current?.panToRfp?.(targetRfp)
+                              if (ok || attempts > 60) return
+                              requestAnimationFrame(tryPan)
+                            }
+                            requestAnimationFrame(tryPan)
                           }
                         } else if (req.type === 'v22-poe-created') {
                           // Phase 14.2: click navigates to the PoE Detail
@@ -5861,6 +5892,7 @@ export default function V2App() {
             so the reverse wipe can play. */}
         {(
           <DirectoryLayer
+            ref={directoryLayerRef}
             open={v22DirectoryOpen}
             activeParty={activeRole.party}
             // Phase 16.0: roleId + provisionals threaded so DirectoryLayer
@@ -8080,7 +8112,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2 &middot; Changelog
+          v0.17.2.0.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8127,6 +8159,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.0.1', date: '2026-05-18', label: 'Phase 17.2.0.1', items: [
+                  'Hotfix: notification click routing + Directory cursor/hover + V2Canvas2 setState-in-render fix. Three runtime QA items from Phase 17.2 closed in one pass.',
+                  'Notification click routing for both `v22-rfp-solicitation-received` (Bob\'s inbox) and `v22-rfp-solicitation-rejected` (Alice\'s inbox): the click now opens Directory (if closed), clears Claim panel, sets RFP panel, AND pans + zooms the Directory camera to the target RFP marker. The 17.2 implementation registered the first three sub-steps but omitted the camera pan. The new path uses an imperative `useImperativeHandle`-exposed `panToRfp(rfp)` method on DirectoryLayer, with a rAF-driven retry loop in V2App that fires the pan once the Directory\'s phase machine reaches `in` and the layout is built (the 600ms opening transition makes synchronous pan calls a no-op when Directory was closed before the click).',
+                  'Directory cursor pointer on interactive hover (Claim dot / open RFP square / closed-and-owned RFP / mini-card / full-card). The canvas\'s inline cursor style sat at `default`, masking any container-level cursor change. Fix: imperatively set `canvasEl.style.cursor` in handleMouseMove based on raycast hit; reset on layer-exit via onMouseLeave. AssetNode / AssetNodeMini wrappers already carry `cursor: pointer`, so card hover works automatically.',
+                  'RFP open-marker hover/select brightening (Items 19+20 from 17.2 QA) now visibly renders. The 17.2 path set `instanceColor = (1,1,1)` against an indigo material color — the multiplier landed at identity, no visible delta. Fix: switch material color to white and let the per-instance color carry the entire color signal. Base instance color = indigo; flushRfpColors lerps base 0.35 toward white on hover, 0.65 on select. Closed-RFP per-vertex colors get the same hover/select delta (was: single 0.55 lerp for both).',
+                  'V2Canvas2 setState-in-render fix: `setV22DirectoryOpen((open) => ...)` functional updater called `canvasRef.current.clearHoverState()` as a side effect inside the reducer, which ran during V2App\'s render and triggered V2Canvas\'s setState. React\'s docs explicitly disallow side effects inside functional updaters. Surgical fix: lift the side effect out of the updater — read the current `v22DirectoryOpen` from closure, run the side effect, then call setState. No structural refactor.',
+                  'Footer rolls forward to v0.17.2.0.1.',
+                ]},
                 { version: '0.17.2', date: '2026-05-18', label: 'Phase 17.2', items: [
                   'Phase 17.2 — RFP solicitation flow (submit + deliver + reject loop). Opens the seller→buyer engagement axis: sellers solicit their existing public Claims against a buyer\'s open RFP from the RfpDetailPanel; buyers see incoming solicitations in the panel and can reject with an optional reply.',
                   'New `makeRfpSolicitation(...)` factory in v2_2Data.js with status taxonomy `\'pending\' | \'rejected\' | \'accepted\'` (the accepted branch is reserved for Phase 17.2.1\'s Request Agreement flow). New `mergeSolicitations(shared, solicitations)` overlay (mirror of mergeProvisionals / mergeClosedRfps shape — Map storage so updates mutate in place).',
