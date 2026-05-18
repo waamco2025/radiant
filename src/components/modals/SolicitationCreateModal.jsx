@@ -219,6 +219,39 @@ export default function SolicitationCreateModal({
         />
         <ModalBody>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {/* Phase 17.2.0.3: RFP description block. Pairs with the
+                RfpDetailPanel's description treatment so the modal
+                surfaces the buyer-written prose alongside the formal RS
+                list. `white-space: pre-wrap` preserves any line breaks
+                the buyer included. Empty case mirrors RfpDetailPanel's
+                muted-italic "No description provided." fallback. */}
+            <div>
+              <FieldLabel label="RFP Description" />
+              {rfp?.description ? (
+                <div style={{
+                  fontSize: 13,
+                  color: 'var(--text-secondary)',
+                  lineHeight: 1.5,
+                  wordBreak: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                }}>{rfp.description}</div>
+              ) : (
+                <div style={{
+                  fontSize: 12,
+                  color: 'var(--text-dim)',
+                  fontStyle: 'italic',
+                }}>No description provided.</div>
+              )}
+            </div>
+
+            {/* Section divider between RFP Description and Required
+                Standards — matches the divider below the accordion. */}
+            <div style={{
+              height: 1,
+              background: 'var(--border)',
+              opacity: 0.6,
+            }} />
+
             {/* Phase 17.2.0.2: RS details accordion above the Claim picker
                 so the solicitor can review what each RS requires before
                 choosing a Claim. */}

@@ -8122,7 +8122,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.0.2 &middot; Changelog
+          v0.17.2.0.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8169,6 +8169,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.0.3', date: '2026-05-18', label: 'Phase 17.2.0.3', items: [
+                  'SolicitationCreateModal now surfaces the RFP\'s description above the Required Standards accordion, between the modal subtitle and the RS list. Matches the RfpDetailPanel description treatment (prose body, multiline-preserving via `white-space: pre-wrap`, muted-italic "No description provided." fallback when empty).',
+                  'Directory mini-card zoom range widened: `MID_LOD_THRESHOLD` 3.33 → 2.5 (mini-cards now appear at 250% zoom, was 350%); `LOD_THRESHOLD` 4.38 → 5.5 (full-cards now appear at 550% zoom, was 450%). `MAX_ZOOM` bumped 5.0 → 6.5 so the new full-card threshold sits well below the cap with comparable headroom. selectRfp\'s `Math.max(zoomRef.current, LOD_THRESHOLD)` override resolves to the new 5.5 — notification click still lands at full-card LOD. Trade-off: the original "density invariant" (cards never overlap horizontally at the threshold) breaks at the low end of the band — at 250% zoom × 48 wu DOT_GRID = 120 px screen spacing vs 160 px mini-card width, so mini-cards may overlap horizontally inside dense clusters. Per Andrew\'s judgement, readability win > collision risk.',
+                  'Footer rolls forward to v0.17.2.0.3.',
+                ]},
                 { version: '0.17.2.0.2', date: '2026-05-18', label: 'Phase 17.2.0.2', items: [
                   'Notification click on a solicitation now fully selects the target RFP — pan + zoom to full-card LOD, RfpDetailPanel opens, AND the marker shows the pinned tooltip + select-state brightening (parallel to a manual marker click). Phase 17.2.0.1 panned at current zoom without selecting on-canvas; 17.2.0.2 introduces a `selectRfp` imperative handle that mirrors the internal click path end-to-end via a new `focusRfpInternal` helper shared between the marker / card click handlers and the imperative path.',
                   'Active actor\'s own-cluster label on the Directory layer renders with amber pillbox fill + dark text so the user can orient at a glance. Bob → GovCo styled; Alice → MicroCo styled; Dave → ChipCo styled; Carol → no styling (Carol/AuditCo has no cluster on the Directory, so the gating naturally degenerates). Same `--accent-amber` variable used by the chrome notification + Directory-active signals.',

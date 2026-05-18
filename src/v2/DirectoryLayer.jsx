@@ -111,27 +111,39 @@ const MIN_ZOOM = 0.15
 // new detail beyond that point.
 // Phase 16.2.7: 1.5 → 5.0 — re-opens the zoom range to make room for the
 // mini-card LOD (zoom ≥ 3.333) and full-card LOD (zoom ≥ 4.375) swaps.
-// MAX_ZOOM 5.0 leaves ~14% headroom above the full-card threshold.
-const MAX_ZOOM = 5.0
+// Phase 17.2.0.3: MAX_ZOOM bumped 5.0 → 6.5 so the new full-card
+// threshold (5.5) sits well below the cap with comparable headroom.
+const MAX_ZOOM = 6.5
 
 // Phase 16.2.7: LOD swap thresholds. At zoom ≥ MID_LOD_THRESHOLD, dot
 // InstancedMesh hides and AssetNodeMini overlays render at each Claim
 // dot's screen position (no scale transform — natural 160×48 px). At
 // zoom ≥ LOD_THRESHOLD, AssetNodeMini swaps to full-size AssetNode
-// (210×96 px). Thresholds derived from the density invariant: cards
-// fit horizontally when `zoom × DOT_GRID ≥ card_width_px`.
+// (210×96 px).
+//
+// Phase 17.2.0.3: Mini-card zoom range widened from ~3.33–4.38 to
+// 2.5–5.5 so users have more headroom to read names + cluster contexts
+// at the mini-card LOD before the camera commits to full-cards. This
+// breaks the original "density invariant" (`zoom × DOT_GRID ≥
+// card_width_px` — cards never overlap horizontally at the threshold);
+// at 2.5 zoom × 48 DOT_GRID = 120 px screen spacing vs 160 px mini-card
+// width, so mini-cards may overlap horizontally inside dense clusters
+// at the low end of the band. Per Andrew, the readability win
+// outweighs the mild collision risk; intentional design choice.
 //
 // Card dimensions mirrored from AssetNode.jsx (CARD_W / CARD_H /
 // MINI_CARD_W / MINI_CARD_H). Those constants are file-internal there
 // (no `export` keyword) and the phase brief's hard rule forbids
 // modifying AssetNode.jsx, so we mirror the values here. If AssetNode's
-// dimensions ever change, this block needs to be kept in sync.
+// dimensions ever change, this block needs to be kept in sync (the
+// values are only used for the LOD-swap-related debugging breadcrumbs
+// now — the thresholds themselves are explicit UX-driven constants).
 const CARD_W = 210
 const CARD_H = 96
 const MINI_CARD_W = 160
 const MINI_CARD_H = 48
-const MID_LOD_THRESHOLD = MINI_CARD_W / DOT_GRID       // 160 / 48 = 3.333…
-const LOD_THRESHOLD = CARD_W / DOT_GRID                // 210 / 48 = 4.375
+const MID_LOD_THRESHOLD = 2.5
+const LOD_THRESHOLD = 5.5
 const INITIAL_ZOOM = 0.15
 // Phase 16.2.6.2: Voronoi-domain insets shrink the tessellation
 // rectangle inward from the full canvas bounds. Left/right reserve a

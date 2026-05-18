@@ -2673,6 +2673,48 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.2.0.3 completion notes (2026-05-18) — RFP description in solicitation modal + expanded mini-card zoom range
+
+Two polish items batched before Phase 17.2.1's Accept-flow lift.
+
+**(1) RFP description block in SolicitationCreateModal.** New section between the modal subtitle and the Required Standards accordion. `<FieldLabel label="RFP Description" />` (matches the "Required Standards (N)" label so the two sections visually pair). Body renders `rfp.description` with `white-space: pre-wrap` + `word-break: break-word` + `line-height: 1.5` + `font-size: 13` + `color: var(--text-secondary)` — same shape as `RfpDetailPanel`'s description block. Empty case renders `No description provided.` in `font-style: italic` + `color: var(--text-dim)`, mirror of the same fallback in `RfpDetailPanel`. Section divider `1px` line at 60 % opacity below the description pairs with the existing divider between the accordion and the Claim picker. Modal-body scrolling already handled by `ModalShared`'s `maxHeight: 90vh` + `ModalBody { flex: 1; overflow: auto }` — the new section participates in that scroll naturally.
+
+Section ordering in modal body (post-17.2.0.3):
+1. RFP Description (new, between subtitle and RS accordion)
+2. Section divider
+3. RFP Required Standards accordion (17.2.0.2)
+4. Section divider (existing)
+5. Claim picker
+6. Message field
+
+**(2) Mini-card zoom range widened in `DirectoryLayer.jsx`.** Three constant changes:
+- `MID_LOD_THRESHOLD`: `MINI_CARD_W / DOT_GRID` (= 3.333) → explicit `2.5`. Mini-cards now begin rendering at 250 % zoom (was 350 %).
+- `LOD_THRESHOLD`: `CARD_W / DOT_GRID` (= 4.375) → explicit `5.5`. Full-cards now begin rendering at 550 % zoom (was 450 %).
+- `MAX_ZOOM`: `5.0` → `6.5`. The new full-card threshold (5.5) is above the old MAX_ZOOM, so without bumping MAX_ZOOM users couldn't reach full-card LOD. 6.5 leaves ~18 % headroom above LOD_THRESHOLD, comparable to the prior 14 % headroom (5.0 above 4.375).
+
+The values are now explicit UX-driven constants rather than derived from the density invariant (`zoom × DOT_GRID ≥ card_width_px` — cards never overlap horizontally at the threshold). At 2.5 zoom × 48 wu DOT_GRID = 120 px screen spacing; mini-card width = 160 px → mini-cards CAN visibly overlap horizontally inside dense clusters at the low end of the band. Per the brief's "readability win outweighs the mild collision risk" framing, this is the intentional design choice.
+
+`selectRfp` (Phase 17.2.0.2 imperative handle) uses `Math.max(zoomRef.current, LOD_THRESHOLD)` as the override target. With `LOD_THRESHOLD = 5.5`, notification clicks from the 15 % galactic-view default now land at 550 % zoom — full-card LOD where the marker reads clearly. No changes needed to `selectRfp` itself — the reference automatically picks up the new value.
+
+Audited all other threshold uses in the file (grep for `MID_LOD_THRESHOLD`, `LOD_THRESHOLD`, `MAX_ZOOM`, `3.333`, `4.375`, `5.0`):
+- `cardLOD = zoom >= MID_LOD_THRESHOLD` (mid-LOD detection in card render block) — uses the constant, automatically picks up 2.5.
+- `isFullLOD = zoom >= LOD_THRESHOLD` (full-card vs mini-card selection) — uses the constant, picks up 5.5.
+- `Math.min(MAX_ZOOM, ...)` in wheel + zoom-button handlers — uses the constant, picks up 6.5.
+- `selectRfp(rfp)`'s zoom override — uses the constant, picks up 5.5.
+- `if (zoom >= MID_LOD_THRESHOLD && hover) setHover(null)` — uses the constant.
+
+One pre-existing stale code comment ("at every supported zoom level (up to MAX_ZOOM = 4.0)" near `dotGeometry` construction) drifted further with this change. It was already stale (MAX_ZOOM has been 5.0 since 16.2.7); not corrected here to keep this phase's scope tight. Filed mentally as a future tidy-up; no functional impact.
+
+**Build clean.** `npm run build` succeeds at 2.23 s, 0 errors. **Dev server smoke**: `npm run dev` launches; the puppeteer probe confirms no new console errors beyond the pre-existing `packClusterDense` overflow warnings (16.2.6.x; documented + accepted).
+
+**Runtime-verification caveats.** Items 5–8 (LOD threshold visual quality at the new boundaries) are inherently visual and require manual mouse + scroll-wheel exercise — the puppeteer probe's programmatic zoom-button click didn't reliably advance zoom beyond 100 % in headless mode, so I couldn't statistically validate the LOD swap points. The new threshold values are explicit numerics with clear boolean comparisons in the render block; the static verification is solid. Item 1 (description renders when present) is structurally guaranteed by the conditional render block; item 2 (empty fallback) is the explicit else-branch; item 3 (multiline preservation) is the `white-space: pre-wrap` declaration; item 4 (modal body scrolls) is preserved via the existing ModalShared cap. If the user finds 250 % too cramped or 550 % too late in actual use, surface for a follow-up adjustment within the brief's ±30 % envelope.
+
+**Out of scope** (kept narrow per the brief): Modal opening performance in the Directory layer (still deferred); GovCo RFP placement next to Pinnacle Systems (still deferred — Directory layout polish); Phase 17.2.1's Accept flow / Request Agreement (still the next major phase).
+
+**Doc updates**: footer v0.17.2.0.2 → v0.17.2.0.3 in V2App.jsx; Changelog modal entry prepended above Phase 17.2.0.2; architecture-spec.md §8 Changelog gains a Phase 17.2.0.3 hotfix bullet (no §8 structural change); polish-backlog.md Update Log gains the Phase 17.2.0.3 entry; CLAUDE.md "Current state of the world" rolled forward; this CLAUDE-phase-log.md entry.
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.0.2 completion notes (2026-05-18) — Notification click completion + own-cluster label + RS accordion in solicitation modal
 
 Three items, all polish on top of 17.2 / 17.2.0.1.
