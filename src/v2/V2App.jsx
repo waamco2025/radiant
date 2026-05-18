@@ -55,6 +55,8 @@ import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
 import EvaluationAgreementDetailPanel from '../components/DetailPanel/EvaluationAgreementDetailPanel.jsx'
 import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
+// Phase 17.0: read-only Detail Panel for RFP markers on the Directory.
+import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
@@ -242,6 +244,12 @@ export default function V2App() {
   // state machine (which materialized a Claim card on top of a cluster
   // hit-area). Setting null dismisses both the tooltip pin and the panel.
   const [v22DirectorySelectedClaim, setV22DirectorySelectedClaim] = useState(null)
+  // Phase 17.0: clicking an RFP marker on the Directory opens the read-only
+  // `RfpDetailPanel` (mounted below). Mutual exclusion with
+  // `v22DirectorySelectedClaim` is enforced at the click-handler level —
+  // each setter clears the other so only one Detail Panel is visible at a
+  // time. `v22DirectoryOpen` toggling clears both.
+  const [v22DirectorySelectedRfp, setV22DirectorySelectedRfp] = useState(null)
   const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
@@ -4207,7 +4215,12 @@ export default function V2App() {
                   // the corner.
                   setV22DirectoryWipeOrigin(null)
                   setV22DirectoryOpen((open) => {
-                    if (open) setV22DirectorySelectedClaim(null)
+                    if (open) {
+                      setV22DirectorySelectedClaim(null)
+                      // Phase 17.0: clear any selected RFP on Directory close
+                      // so the RfpDetailPanel doesn't persist over the canvas.
+                      setV22DirectorySelectedRfp(null)
+                    }
                     // Phase 16.1.1 Item 5: clear parent-layer edge tooltip
                     // and any related hover state when Directory opens, so
                     // the tooltip doesn't persist behind the wipe.
@@ -5705,12 +5718,28 @@ export default function V2App() {
             onClose={() => {
               setV22DirectoryOpen(false)
               setV22DirectorySelectedClaim(null)
+              // Phase 17.0: clear any open RFP panel on Directory close.
+              setV22DirectorySelectedRfp(null)
             }}
             // Phase 16.0: per-dot click. Replaces Phase 11B's onClusterClick
             // + materializedClaim props. The DirectoryLayer pins its own
             // tooltip; here we just stash the selected Claim so the Detail
             // Panel mount path picks it up. Null = dismiss.
-            onClaimDotClick={(claim) => setV22DirectorySelectedClaim(claim)}
+            //
+            // Phase 17.0: mutual exclusion with the selected RFP — clicking
+            // a Claim dot clears any open RFP Detail Panel so only one is
+            // visible at a time. A null Claim (empty-canvas click) clears
+            // both since the user is dismissing whichever panel is open.
+            onClaimDotClick={(claim) => {
+              setV22DirectorySelectedClaim(claim)
+              setV22DirectorySelectedRfp(null)
+            }}
+            // Phase 17.0: clicking an RFP marker opens the read-only
+            // RfpDetailPanel. Mirror of the Claim mutual-exclusion rule.
+            onRfpClick={(rfp) => {
+              setV22DirectorySelectedRfp(rfp)
+              setV22DirectorySelectedClaim(null)
+            }}
           />
         )}
 
@@ -5896,6 +5925,32 @@ export default function V2App() {
             </div>
           )
         })()}
+
+        {/* Phase 17.0 — Read-only RFP Detail Panel. Mounted parallel to the
+            Claim Detail Panel block above; mutual exclusion is enforced at
+            the click-handler level (each setter clears the other) so only
+            one of these is ever non-null at a time. Panel shell positioning
+            mirrors the Claim mount: position:fixed, top:61 (clears chrome),
+            right:0, bottom:28 (clears footer), width:480, zIndex:200.
+            `requirementsSets` lookup uses `publishedRequirementSets` (the
+            same state V2App threads to Run Eval / Create Claim flows). */}
+        {v22DirectoryOpen && v22DirectorySelectedRfp && (
+          <div style={{
+            position: 'fixed',
+            top: 61,
+            right: 0,
+            bottom: 28,
+            width: 480,
+            zIndex: 200,
+          }}>
+            <RfpDetailPanel
+              rfp={v22DirectorySelectedRfp}
+              activeParty={activeRole.party}
+              requirementsSets={publishedRequirementSets || []}
+              onClose={() => setV22DirectorySelectedRfp(null)}
+            />
+          </div>
+        )}
 
         {/* V2.2 Phase 7 — AI Shopper modal (spec §9). Opens either from the
             chrome icon (user had no Directory context in mind) or from within
@@ -7755,7 +7810,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.16.2.11 &middot; Changelog
+          v0.17.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7802,6 +7857,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.0', date: '2026-05-17', label: 'Phase 17.0', items: [
+                  'Phase 17.0 — Clickable RFP markers + read-only RFP Detail Panel (Directory only). Opens the Phase 17 RFP arc against polish-backlog #192 (Item J). First time RFPs become interactive — 118 seeded RFPs (Bob\'s Sentinel-4 + 20 RFP-only buyer mocks + 4 mixed actors) are now clickable.',
+                  'New invisible solid-square hit-test InstancedMesh in DirectoryLayer.jsx — sized to RFP_BASE_OUTER, opacity 0, depthWrite off, matrices in lockstep with the visible outline + fill meshes. The visible hollow-square outline\'s centre would otherwise miss raycasts; the hit mesh fills that dead zone so any click inside the marker resolves. Defensive InstancedMesh settings preserved (frustumCulled = false, unbounded boundingSphere).',
+                  'New RfpDetailPanel component (src/components/DetailPanel/RfpDetailPanel.jsx) — read-only. Header pill "RFP" + status badge + close button + name. Body: "Posted by" + owner ACTOR pill + YOU badge when applicable; description (or muted "No description provided"); "Required Standards" chip list (each rsId → "{name} v{version}" if found in publishedRequirementSets; muted raw id fallback); posted date (YYYY-MM-DD · HH:MM UTC). No footer / action buttons.',
+                  'V2App.jsx wiring: new v22DirectorySelectedRfp state; DirectoryLayer onRfpClick prop; mutual exclusion with v22DirectorySelectedClaim (each setter clears the other so only one Detail Panel is visible at a time); both states cleared on Directory close + globe-button toggle. Panel mount shell mirrors the existing Claim mount: position:fixed top:61 right:0 bottom:28 width:480 zIndex:200.',
+                  'Click flow: raycast extended to consult both dot-mesh and RFP hit-test mesh; closer hit wins (defensive — RFPs are placed outside cluster dots so concurrent hits are vanishingly unlikely). RFP hit fires onRfpClick + the same animatedPanToWithZoom pan-to-center mirror of the Claim dot pipeline (Phase 16.1.3 Item 6 / 16.2.9 Item 1 pattern). RFP hover-preview / pinned tooltip is deferred to Phase 17.0.1 alongside the RFP card LOD swap.',
+                  'Out of scope (per brief): RFP mini-card + full-card LOD variants (17.0.1); RS chip click behaviour (17.0.1); makeRfp lifecycle metadata (17.1 post flow); parent canvas RFP rendering (later); Claim Detail Panel changes (17.3); umbrella DA edges (17.4+).',
+                  'Footer rolls forward to v0.17.0 — first forward-progress phase after the Phase 16.2.11 footer freeze ended.',
+                ]},
                 { version: '0.16.2.11', date: '2026-05-17', label: 'Phase 16.2.11', items: [
                   'Phase 16.2.11 — Phase 16 wrap-up: Alice grouping + footer version + parent-layer visual calibration. Closes the Directory + parent-canvas appearance arc.',
                   'Alice per-Claim y-band grouping fix: `buildV22Canvas` chain anchor now reads the evaluated Claim\'s y as the primary anchor (was `EA.granteeAssetId` per Phase 16.2.2). The granteeAssetId Asset (Bob\'s `bAvionics`, Carol\'s `cAuditWorkspace`) isn\'t on grantor-direction views like Alice\'s, so chains were falling through to a symmetric-distribution fallback and scattering. With the new anchor, each Claim\'s chain lives on the Claim\'s exact y (pass 1) or the nearest free row (pass 2). Bob\'s view is unaffected because pulled Claims at `symmetricRowY(i)` coincide with owned Assets at `symmetricRowY(i)` by construction. Verified: Alice\'s 3 Claims now host chains within 0-2 rows of their Claim (was up to 7 rows scatter). Bob/Carol/Dave unchanged. Asset-clustering-near-Claim (separate concern from chain clustering) requires re-architecting Asset placement and is scoped to a future phase.',

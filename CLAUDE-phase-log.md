@@ -2673,6 +2673,81 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.0 completion notes (2026-05-17) — Clickable RFP markers + read-only RFP Detail Panel (Directory only)
+
+Opens the Phase 17 RFP arc against polish-backlog #192 (Item J: RFP / Public Directory request flow with self-evaluation). First sub-phase: read pipeline only.
+
+**Context.** 118 RFPs are already seeded across the Directory from Phase 16.2.6.5 (Bob's Sentinel-4 + 20 RFP-only buyer mocks at 98 RFPs + 4 mixed actors at 19 RFPs). Phase 16.0 introduced the skeletal `makeRfp` factory and rendered RFPs as hollow indigo squares; Phase 16.2.6.6 polished the marker rendering (tinted fill, scaled border, capped screen-px size). Until 17.0, RFPs had no click pipeline — they were decorative.
+
+**Hit-test approach.** The visible `rfpMesh` uses `makeHollowSquareGeometry`, which is a ring with a hole through the centre. A raycast against the centre of an RFP misses the ring entirely. Fix: a companion invisible **solid-square** `THREE.InstancedMesh` with `PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)`, `MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })`. Matrices are written in lockstep with the visible outline + fill meshes via the existing populate loop and the rescale-on-zoom `useEffect`. Defensive InstancedMesh settings preserved per Round 16 lessons (`frustumCulled = false`, `boundingSphere = new THREE.Sphere(origin, Infinity)`).
+
+**Per-file changes:**
+
+`src/v2/DirectoryLayer.jsx`:
+
+- New `rfpHitMeshRef` declared alongside `rfpMeshRef` / `rfpFillMeshRef`.
+- Scene-init block creates the hit mesh after the outline mesh; same `MAX_RFPS` capacity, defensive settings, scene-add order. Cleanup disposes the new geometry + material and nulls the ref.
+- Populate loop writes the same per-instance matrix to all three RFP meshes (outline + fill + hit), and sets `rfpHitMesh.count` to match.
+- Rescale-on-zoom effect writes to all three meshes; `instanceMatrix.needsUpdate = true` on all three.
+- New `onRfpClick` prop declared in the component signature.
+- `raycast` rewritten to consult both `dotsMeshRef` and `rfpHitMeshRef` via `Raycaster.intersectObjects(targets, false)` (returns hits sorted by distance ascending — closer first). Returns `{ kind: 'dot'|'rfp', index: instanceId }` instead of a raw integer.
+- `handleMouseMove` updated: RFP hits don't update `hover` state (Claim-only hover-preview in 17.0 — RFP hover-preview deferred to 17.0.1 alongside the card LOD swap).
+- `handleMouseUp` updated: RFP hits resolve to `layout.allDots[kind === 'rfp'][hit.index]`, fire `onRfpClick(d.rfp)`, and run the standard `animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)` pan-to-center (mirror of the Phase 16.1.3 Item 6 / 16.2.9 Item 1 Claim pipeline). No `pinned` state for RFPs.
+
+`src/components/DetailPanel/RfpDetailPanel.jsx` (new file):
+
+- Read-only panel; props `{ rfp, activeParty, requirementsSets, onClose }`.
+- Panel shell — `background: var(--bg-card); borderLeft: 1px solid var(--border); display: flex; flexDirection: column` matching `V22NodeDetailPanel`'s `PanelLayout`.
+- Header — `RFP` type pillbox + `OPEN` status badge (green-tinted; uppercases any status value for forward-compat) + close button + name (large 16px bold).
+- Body sections (top → bottom):
+  - **Posted by** — `ACTOR` pillbox + `rfp.owner` party name + optional `YOU` badge when `activeParty === rfp.owner`.
+  - **Description** — plain prose. Muted italic "No description provided." fallback when empty.
+  - **Required Standards** — chip list. Each `rsId` resolves against the `requirementsSets` lookup (V2App passes `publishedRequirementSets`); chip renders `{name}` + small `v{version}` when found. Unknown ids render as muted raw-id text with `var(--font-mono)`. Chips are visual-only — no `onClick`.
+  - **Posted** — `createdDate` formatted via local `formatDateTime` helper (mirror of `V22NodeDetailPanel`'s `formatDateTime`) as `YYYY-MM-DD · HH:MM UTC`.
+- No footer / action buttons.
+- All colours via CSS variables; SVG / unicode glyphs only.
+
+`src/v2/V2App.jsx`:
+
+- New import `RfpDetailPanel` from `../components/DetailPanel/RfpDetailPanel.jsx`.
+- New state `v22DirectorySelectedRfp` declared adjacent to `v22DirectorySelectedClaim`.
+- DirectoryLayer's `onClaimDotClick` extended to clear the RFP state (mutual exclusion).
+- DirectoryLayer's `onClose` extended to clear the RFP state.
+- New DirectoryLayer prop `onRfpClick={(rfp) => { setV22DirectorySelectedRfp(rfp); setV22DirectorySelectedClaim(null) }}`.
+- Chrome globe-button toggle clears the RFP state too (so the panel doesn't survive a Directory toggle).
+- New mount block `{v22DirectoryOpen && v22DirectorySelectedRfp && (...)}` parallel to the Claim mount. Panel shell mirrors the Claim mount: `position: fixed; top: 61; right: 0; bottom: 28; width: 480; zIndex: 200`. Passes `publishedRequirementSets || []` as the RS lookup source.
+- Footer version literal `v0.16.2.11` → `v0.17.0`.
+- Changelog modal entry prepended: `{ version: '0.17.0', date: '2026-05-17', label: 'Phase 17.0', items: [...] }` — 7 bullets summarizing the phase, the hit-test mesh approach, the panel content, the mutual-exclusion semantics, the out-of-scope deferrals, and the footer roll-forward.
+
+`architecture-spec.md`:
+
+- New §8.8 "RFP — buyer-side public posting (Phase 17.0+)" subsection (§8.7 was already taken by the Expand modal). Covers the unchanged factory shape, the click pipeline (hit-test mesh + closer-wins raycast + pan-to-center), the read-only Detail Panel content, mutual-exclusion semantics with the Claim panel, and forward pointers to 17.0.1 / 17.1 / 17.2 / 17.2.1 / 17.5+. Prototype-vs-Production annotation on RFP visibility.
+- §8 Changelog bullet for Phase 17.0.
+
+`polish-backlog.md`:
+
+- Update Log entry dated 2026-05-17 with `#192` reference (item J), explicit out-of-scope list, and footer-rolls-forward note.
+
+`CLAUDE.md`:
+
+- "Footer version" rolled to v0.17.0; backtrack-hotfix freeze formally ended at 16.2.11.
+- "Last shipped phase" rewritten for Phase 17.0; previous Phase 16.2.11 entry pushed to "prior phase" with a one-line summary.
+- "Active phase queue" updated to point at Phase 17.0.1 (RFP card LOD swap + hover-preview) as the next forward-progress phase.
+
+**Mutual exclusion semantics.** Two states `v22DirectorySelectedClaim` and `v22DirectorySelectedRfp` live side-by-side in V2App. Mutual exclusion is enforced at every click-handler entry point — each setter clears the other. Both states clear on Directory close (`onClose` extension) + globe-button toggle. The mount blocks are independent `&&` JSX conditionals, but the click-handler invariant guarantees at most one of them resolves true at a time. Empty-canvas click (raycast miss) clears both via `onClaimDotClick?.(null)` + `setPinned(null)` in `handleMouseUp`.
+
+**Click ordering — closer-wins.** `Raycaster.intersectObjects` returns hits sorted by distance ascending (closer first). We pick `hits[0]` and branch on which mesh the hit's `object` is. RFPs are seeded outside cluster Voronoi cells (Phase 16.2.6.5's ACTOR_KIND taxonomy keeps RFP-only seeds in the bottom third, mixed in the cross-zone band), so concurrent dot+RFP hits at the same screen position are vanishingly unlikely. The closer-wins rule is defensive.
+
+**Hover/preview deferred.** Phase 17.0 ships click-only behaviour for RFPs. Hovering an RFP marker triggers the underlying `mouseenter` (cursor change resolves natively from CSS), but the `hover` state stays Claim-only and no pinned tooltip / preview card renders. The RFP card LOD swap (mini-card at zoom ≥ MID_LOD_THRESHOLD, full-card at zoom ≥ LOD_THRESHOLD) + the matching hover-preview pinning pattern are Phase 17.0.1's scope. The existing `ClaimTooltipCard` render path is gated on `zoom < MID_LOD_THRESHOLD && (hover || pinned)` and doesn't fire for RFPs.
+
+**Forward queue.** Phase 17.0.1: RFP mini-card + full-card LOD swap; RFP card hover-preview / pinned tooltip; RS chip click behaviour (if needed). Phase 17.1: buyer post flow + `makeRfp` lifecycle metadata. Phase 17.2: supplier discovery + self-evaluation response. Phase 17.2.1: buyer review + initiate formal EA. Phase 17.5+: create-RFP entry point + post-and-edit lifecycle.
+
+**Runtime verification.** Build clean. Dev server walkthrough: Bob's view → click own Sentinel-4 RFP marker → RfpDetailPanel opens with name, "Posted by GovCo" + YOU badge, description, two RS chips ("MIL-PRF-55681 v2" + "System Integration Requirements v1"), `2026-04-15 · 09:00 UTC` posted date. Close → panel closes; Directory remains. Switch to Alice → orphan GovCo RFP marker visible at bottom; click → same panel content (no YOU badge — Alice isn't the owner). Mutual exclusion: open RFP, click Claim → Claim panel opens, RFP panel closes; vice versa. Empty-canvas click clears both panels. Footer reads `v0.17.0`. Changelog modal top entry is Phase 17.0. Console clean beyond the pre-existing V2Canvas2 setState-in-render warning and the pre-existing 500 KB chunk-size warning.
+
+**Footer rolls forward to v0.17.0** — first forward-progress phase after the Phase 16.2.x backtrack-hotfix freeze formally ended at 16.2.11.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.11 completion notes (2026-05-17) — Phase 16 wrap-up: Alice grouping + footer version + parent-layer visual calibration
 
 Three loose ends closed before Phase 17 opens. Phase 16 (Directory Layer + parent-canvas visual calibration arc) is now formally closed.

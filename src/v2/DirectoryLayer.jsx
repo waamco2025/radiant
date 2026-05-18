@@ -1083,6 +1083,10 @@ export default function DirectoryLayer({
   onOpenAIShopper,
   onClose,
   onClaimDotClick,
+  // Phase 17.0: clicking an RFP marker fires this with the underlying
+  // `rfp` artifact. V2App routes to a read-only RfpDetailPanel; mutual
+  // exclusion with `onClaimDotClick` is enforced on V2App's side.
+  onRfpClick,
   wipeOrigin,
 }) {
   // ─── Entry/exit state machine ────────────────────────────────────────
@@ -1209,6 +1213,15 @@ export default function DirectoryLayer({
   // position matrices as `rfpMeshRef`. PlaneGeometry, never rebuilt on zoom
   // (visual size driven entirely by the per-instance scale).
   const rfpFillMeshRef = useRef(null)
+  // Phase 17.0: invisible solid-square hit-test InstancedMesh for RFP markers.
+  // The visible `rfpMesh` uses `makeHollowSquareGeometry` (a ring), so a
+  // raycast against the centre of an RFP marker misses entirely. This
+  // companion mesh uses a solid `PlaneGeometry` at the same per-instance
+  // size + position as the outline, with `opacity: 0` and `depthWrite: false`
+  // so it contributes nothing visually but resolves a click on the marker's
+  // interior. Matrices are written in lockstep with `rfpMeshRef` (same
+  // populate loop + same rescale-on-zoom effect).
+  const rfpHitMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
   const dirtyRef = useRef(true)
   // Phase 16.2.3: initial camera target = canvas-horizontal-center +
@@ -1513,6 +1526,23 @@ export default function DirectoryLayer({
     scene.add(rfpMesh)
     rfpMeshRef.current = rfpMesh
 
+    // Phase 17.0: invisible hit-test mesh — solid PlaneGeometry, opacity 0,
+    // depthWrite off; matrices written in lockstep with rfpMesh. Resolves
+    // raycasts on the marker's interior (the outline ring's hole leaves a
+    // dead zone otherwise).
+    const rfpHitGeometry = new THREE.PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)
+    const rfpHitMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+    const rfpHitMesh = new THREE.InstancedMesh(rfpHitGeometry, rfpHitMaterial, MAX_RFPS)
+    rfpHitMesh.count = 0
+    rfpHitMesh.frustumCulled = false
+    rfpHitMesh.boundingSphere = unboundedSphere()
+    scene.add(rfpHitMesh)
+    rfpHitMeshRef.current = rfpHitMesh
+
     let animId
     const animate = () => {
       animId = requestAnimationFrame(animate)
@@ -1568,6 +1598,9 @@ export default function DirectoryLayer({
       // disposes whatever the current geometry is at unmount time.
       rfpFillGeometry.dispose()
       rfpFillMaterial.dispose()
+      // Phase 17.0: dispose hit-test mesh geom + material.
+      rfpHitGeometry.dispose()
+      rfpHitMaterial.dispose()
       renderer.dispose()
       rendererRef.current = null
       sceneRef.current = null
@@ -1577,6 +1610,7 @@ export default function DirectoryLayer({
       actorSquaresMeshRef.current = null
       rfpMeshRef.current = null
       rfpFillMeshRef.current = null
+      rfpHitMeshRef.current = null
       setThreeReady(false)
     }
   }, [shouldMountScene, updateCamera])
@@ -1678,6 +1712,7 @@ export default function DirectoryLayer({
     // meshes (outline + fill) receive identical per-instance matrices.
     const initialRfpScale = computeRfpWorldSize(zoomRef.current) / RFP_BASE_OUTER
     rfpScaleRef.current = initialRfpScale
+    const rfpHitMesh = rfpHitMeshRef.current
     for (let i = 0; i < MAX_RFPS; i++) {
       if (i < rfpDots.length) {
         const d = rfpDots[i]
@@ -1685,15 +1720,22 @@ export default function DirectoryLayer({
         m.setPosition(d.x, -d.y, 0)
         rfpMesh.setMatrixAt(i, m)
         rfpFillMesh.setMatrixAt(i, m)
+        // Phase 17.0: hit-test mesh tracks the same per-instance matrix.
+        if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
       } else {
         rfpMesh.setMatrixAt(i, hidden)
         rfpFillMesh.setMatrixAt(i, hidden)
+        if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, hidden)
       }
     }
     rfpMesh.count = rfpDots.length
     rfpFillMesh.count = rfpDots.length
     rfpMesh.instanceMatrix.needsUpdate = true
     rfpFillMesh.instanceMatrix.needsUpdate = true
+    if (rfpHitMesh) {
+      rfpHitMesh.count = rfpDots.length
+      rfpHitMesh.instanceMatrix.needsUpdate = true
+    }
 
     dirtyRef.current = true
 
@@ -1751,15 +1793,19 @@ export default function DirectoryLayer({
     if (Math.abs(desiredScale - rfpScaleRef.current) < 1e-4) return
     const rfpDots = layout.allDots.filter((d) => d.kind === 'rfp')
     const m = new THREE.Matrix4()
+    // Phase 17.0: rescale the hit-test mesh in lockstep with outline + fill.
+    const rfpHitMesh = rfpHitMeshRef.current
     for (let i = 0; i < rfpDots.length; i++) {
       const d = rfpDots[i]
       m.makeScale(desiredScale, desiredScale, 1)
       m.setPosition(d.x, -d.y, 0)
       rfpMesh.setMatrixAt(i, m)
       rfpFillMesh.setMatrixAt(i, m)
+      if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
     }
     rfpMesh.instanceMatrix.needsUpdate = true
     rfpFillMesh.instanceMatrix.needsUpdate = true
+    if (rfpHitMesh) rfpHitMesh.instanceMatrix.needsUpdate = true
     rfpScaleRef.current = desiredScale
     dirtyRef.current = true
   }, [zoom, threeReady, layout])
@@ -1998,8 +2044,9 @@ export default function DirectoryLayer({
   const raycast = useCallback((clientX, clientY) => {
     const renderer = rendererRef.current
     const camera = cameraRef.current
-    const mesh = dotsMeshRef.current
-    if (!renderer || !camera || !mesh || mesh.count === 0) return null
+    const dotsMesh = dotsMeshRef.current
+    const rfpHitMesh = rfpHitMeshRef.current
+    if (!renderer || !camera) return null
     const rect = renderer.domElement.getBoundingClientRect()
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -2007,9 +2054,25 @@ export default function DirectoryLayer({
     )
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(ndc, camera)
-    const hits = raycaster.intersectObject(mesh, false)
-    if (hits.length > 0) return hits[0].instanceId ?? null
-    return null
+    // Phase 17.0: raycast against both dot + RFP-hit meshes; pick the
+    // closer hit by `distance`. `intersectObjects` sorts by distance
+    // descending vs ascending? Per Three.js docs, `intersectObjects`
+    // returns hits sorted by distance ascending (closer first) when
+    // `recursive` is false on each object. We still consult both arrays
+    // because we need to map an instanceId back to its source list (dot
+    // vs RFP). RFPs are placed outside cluster dots so concurrent hits
+    // are vanishingly unlikely; the closer-wins rule is defensive.
+    const targets = []
+    if (dotsMesh && dotsMesh.count > 0) targets.push(dotsMesh)
+    if (rfpHitMesh && rfpHitMesh.count > 0) targets.push(rfpHitMesh)
+    if (targets.length === 0) return null
+    const hits = raycaster.intersectObjects(targets, false)
+    if (hits.length === 0) return null
+    const closest = hits[0]
+    const instanceId = closest.instanceId ?? null
+    if (instanceId === null) return null
+    if (closest.object === rfpHitMesh) return { kind: 'rfp', index: instanceId }
+    return { kind: 'dot', index: instanceId }
   }, [])
 
   const handleMouseMove = useCallback((e) => {
@@ -2025,13 +2088,17 @@ export default function DirectoryLayer({
       updateCamera()
       return
     }
-    const dotIdx = raycast(e.clientX, e.clientY)
-    if (dotIdx === null) {
+    const hit = raycast(e.clientX, e.clientY)
+    // Phase 17.0: hover is Claim-only — RFP hover-preview is deferred to
+    // 17.0.1 (alongside the RFP card LOD swap). RFP hits don't update
+    // `hover` state; the cursor change comes for free from the underlying
+    // raycast resolving non-null.
+    if (!hit || hit.kind !== 'dot') {
       if (hover) setHover(null)
       return
     }
     const claimDots = layout?.allDots.filter((d) => d.kind !== 'rfp') || []
-    const d = claimDots[dotIdx]
+    const d = claimDots[hit.index]
     if (!d || !d.claim) {
       if (hover) setHover(null)
       return
@@ -2042,7 +2109,7 @@ export default function DirectoryLayer({
       x: d.x, y: d.y,
       screenX: screen.x, screenY: screen.y,
       ownerParty: d.claim.owner,
-      dotIndex: dotIdx,
+      dotIndex: hit.index,
     })
   }, [hover, layout, clampPan, raycast, updateCamera, worldToScreen])
 
@@ -2050,8 +2117,8 @@ export default function DirectoryLayer({
     if (!draggingRef.current) return
     draggingRef.current = false
     if (wasDragRef.current) return
-    const dotIdx = raycast(e.clientX, e.clientY)
-    if (dotIdx === null) {
+    const hit = raycast(e.clientX, e.clientY)
+    if (!hit) {
       // Phase 16.2.3: empty-canvas click during the load animation snaps
       // the wave to completion. Click missed a dot AND no drag → skip.
       if (animationHandleRef.current) {
@@ -2061,8 +2128,24 @@ export default function DirectoryLayer({
       onClaimDotClick?.(null)
       return
     }
+    // Phase 17.0: RFP hit → fire onRfpClick + pan-to-center, mirror of
+    // the Claim dot pipeline. No `pinned` state for RFPs (deferred to
+    // 17.0.1 with the card LOD swap). `hover` stays Claim-only too.
+    if (hit.kind === 'rfp') {
+      const rfpDots = layout?.allDots.filter((d) => d.kind === 'rfp') || []
+      const d = rfpDots[hit.index]
+      if (!d || !d.rfp) return
+      onRfpClick?.(d.rfp)
+      const container = containerRef.current
+      if (container) {
+        const targetZoom = zoomRef.current
+        const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+        animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+      }
+      return
+    }
     const claimDots = layout?.allDots.filter((d) => d.kind !== 'rfp') || []
-    const d = claimDots[dotIdx]
+    const d = claimDots[hit.index]
     if (!d || !d.claim) return
     const screen = worldToScreen(d.x, d.y)
     setPinned({
@@ -2070,7 +2153,7 @@ export default function DirectoryLayer({
       x: d.x, y: d.y,
       screenX: screen.x, screenY: screen.y,
       ownerParty: d.claim.owner,
-      dotIndex: dotIdx,
+      dotIndex: hit.index,
     })
     onClaimDotClick?.(d.claim)
     // Phase 16.1.3 Item 6: pan to center the clicked dot. Mirrors V2Canvas
@@ -2082,7 +2165,7 @@ export default function DirectoryLayer({
       const panelOffsetWorld = (PANEL_W / 2) / targetZoom
       animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
     }
-  }, [layout, onClaimDotClick, raycast, worldToScreen, animatedPanToWithZoom])
+  }, [layout, onClaimDotClick, onRfpClick, raycast, worldToScreen, animatedPanToWithZoom])
 
   // ─── Phase 16.2.7 / 16.2.9: card click in mid-LOD / full-LOD ─────────
   // Mirrors the dot click flow including the animated pan-to-center
