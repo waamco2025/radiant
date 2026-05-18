@@ -2673,6 +2673,61 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.0.1 completion notes (2026-05-17) — RFP card LOD swap + hover-preview pinning
+
+Continued sub-phase against polish-backlog #192 (Item J). Two goals: (1) bring RFP markers to LOD parity with Claims (hollow-square → mini-card → full-card at the same zoom thresholds); (2) structurally fix the stale-pinned-tooltip bug surfaced in 17.0 QA (clicking from Claim to RFP or vice versa left the previous artifact's tooltip pinned).
+
+**Approach.** Two coupled changes — neither works without the other:
+
+1. **AssetNode dispatcher extension** — RFP becomes a 5th schema (existing: Asset, Claim, Eval Result, PoE, plus the various subtype configs in `CATEGORY_CONFIG`). `node.category === 'rfp'` routes both `AssetNode` (full) and `AssetNodeMini` to early-return branches that render the minimal RFP layout. No badges, no minibars, no action bar, no dive-hint, no edge-endpoint indicator — per Andrew's spec, content stays at type pill + name (+ owner row for full card).
+
+2. **`pinned` state as discriminated union** — exactly one of `{ claim, ... }` or `{ rfp, ... }` at any time. `setPinned` overwrites in a single atomic call, so clicking from a Claim to an RFP (or vice versa) cleanly swaps the pinned tooltip without a race between "clear old" and "set new." This is the structural fix for the 17.0 stale-tooltip bug.
+
+**Per-file changes:**
+
+`src/v2/AssetNode.jsx`:
+
+- `CATEGORY_CONFIG` gains an `'rfp'` entry (`icon: '⬚'`, `color: 'var(--accent-indigo)'`, `label: 'RFP'`). The icon/color aren't used by the RFP early-return branches (they render the type pill inline), but the entry is kept for completeness and forward-compat.
+- `hoverSelectColor` in both `AssetNode` (full) and `AssetNodeMini` extended: `(node.category === 'claim' || node.category === 'rfp') ? amber : indigo`. RFPs join Claims on the amber-on-hover/select branch. Rationale: WARM_BORDER (the default) is itself a 40% indigo blend, so brightening to 100% indigo on hover would not read as a clear state change; amber against warm-grey reads cleanly. Claims use amber for a different reason (distinguishing the discrete hover/select state from the disclosure-type indigo/amber/green default) — but the same colour serves both.
+- New early-return branch in `AssetNode` (full), placed after all hooks (the last is the `useEffect` watching `revealPhase` on line ~431). The branch renders the standard outer wrapper + isSelected selection ring + inner card with type pill + name + "Posted by {owner}" row. Reuses `hovered` state (from `useState` above) and `handleClick` (from `useCallback` above). RFPs have no children, so `handleClick`'s double-click branch is a no-op.
+- New early-return branch in `AssetNodeMini`, placed after the last useEffect cleanup hook. Renders the standard mini wrapper + selection ring + inner card with type pill + name (no owner row). Reuses `hovered` + `tooltipPos` state + `handleClick` + `handleMouseEnter`. Includes the portal-rendered AssetNode preview (wrapped in `createPortal`) so hovering the RFP mini-card on Directory pins the same full-card preview that hovering a Claim mini-card does — the preview itself takes the AssetNode (full) RFP early-return.
+
+`src/v2/DirectoryLayer.jsx`:
+
+- New `RfpTooltipCard` component (placed adjacent to `ClaimTooltipCard`). Mirrors the Claim tooltip's positioning + clip-right anchoring + zIndex + box-shadow; type pill reads "RFP"; body renders `rfp.name` + `rfp.owner`.
+- LOD-visibility `useEffect` extended: when `zoom >= MID_LOD_THRESHOLD`, hide `rfpMesh` (outline), `rfpFillMesh` (tinted fill), AND `rfpHitMesh` (invisible hit-test mesh). The hit-test mesh hiding is the critical part — leaving it visible would intercept clicks meant for the cards rendered above.
+- `handleMouseUp`'s RFP-hit branch now sets `pinned` with the RFP discriminator (`{ rfp, x, y, screenX, screenY, ownerParty, dotIndex }`) before calling `onRfpClick(d.rfp)`. The single `setPinned` call overwrites any previously-pinned Claim, resolving the stale-tooltip bug for hollow-square clicks at low zoom.
+- `onCardClick` (used by mid/full LOD card clicks) branches on `d.kind === 'rfp'`: if RFP, set the RFP discriminator + fire `onRfpClick`; else, set the Claim discriminator + fire `onClaimDotClick`. Same atomic-overwrite semantics. Dep list extended to include `onRfpClick`.
+- Card-overlay render block extended to iterate both `kind !== 'rfp' && d.claim` AND `kind === 'rfp' && d.rfp` entries from `allDots`. Per-entry branch builds the synthetic node — for RFPs: `{ id, category: 'rfp', rfp, name, ownerParty, owner }`. Both routes use the same `AssetNode` / `AssetNodeMini` Card component (selected by LOD threshold); only the inner schema differs. Selected state computed against the matching discriminator: `pinned?.rfp === d.rfp` for RFP cards, `pinned?.claim === d.claim` for Claim cards. zIndex (1600 selected / 1500 default) is shared.
+- Pinned-tooltip render block (the dot-LOD `ClaimTooltipCard` mount, gated on `zoom < MID_LOD_THRESHOLD`) replaced with a discriminator branch: `if (t.rfp) → RfpTooltipCard; else if (t.claim) → ClaimTooltipCard; else return null`. Defensive null fallback covers transient render states.
+- Empty-canvas click in `handleMouseUp` now also calls `onRfpClick(null)` alongside the existing `setPinned(null)` + `onClaimDotClick(null)`. V2App's `onRfpClick` handler with `rfp=null` clears the RFP Detail Panel state.
+
+`src/v2/V2App.jsx`:
+
+- Footer literal `v0.17.0` → `v0.17.0.1`.
+- Changelog modal entry prepended for `v0.17.0.1` (7 bullets covering the AssetNode dispatcher extension, the card overlay extension, the pinned discriminator, the new RfpTooltipCard, the empty-canvas wiring, and the footer roll-forward).
+
+**Docs:**
+
+- `architecture-spec.md` — new §8.8.5 (Card LOD swap), §8.8.6 (Pinned tooltip discriminator), §8.8.7 (Forward pointers, now starting from Phase 17.1). Existing §8.8.5 (Forward pointers) renumbered to §8.8.7 with the 17.0.1 entry removed (since this phase landed). §8 Changelog bullet for Phase 17.0.1 prepended.
+- `polish-backlog.md` — Update Log entry with #192 reference, LOD-parity note, and forward queue (17.1, 17.2, 17.2.1, 17.5+).
+- `CLAUDE.md` — Footer version + current state + phase queue + phase-log reference all rolled to 17.0.1.
+
+**Verification.**
+
+- Build clean — 126 modules.
+- AssetNode + AssetNodeMini RFP early-return branches don't disturb the hook order (placed strictly after all hooks).
+- `pinned` discriminator: at most one of `pinned.claim` / `pinned.rfp` is set at any time (every setter call uses exactly one).
+- LOD visibility: at `zoom < MID_LOD_THRESHOLD`, hollow squares visible + hit-test mesh raycastable. At `zoom ≥ MID_LOD_THRESHOLD`, all three RFP meshes hidden, cards take over via the overlay render block.
+- Cross-LOD click swap: hollow-square click at low zoom → pinned RFP tooltip + RfpDetailPanel; zoom up → tooltip dismisses (low-zoom render gate fails) but card renders as `isSelected={true}` (via `pinned.rfp === d.rfp`); zoom down → tooltip re-renders.
+- LOD-swap walkthrough (data-layer trustable; canvas raycast verification falls under the documented CLAUDE.md Three.js Raycaster limitation): code-verified via review of render block + click handler + mesh visibility effect.
+
+**Stale-tooltip bug-fix mechanism.** The bug surfaced in 17.0 because RFP click paths called `onRfpClick(d.rfp)` and the V2App-side mutual-exclusion cleared the Claim Detail Panel — but the DirectoryLayer-side `pinned` state, which drives the pinned floating tooltip near the click point, was never touched. So the Claim's pinned tooltip persisted on top of the new RFP click target. The fix: every RFP click path (hollow-square + onCardClick) sets `pinned` with the RFP discriminator. `setPinned` is a single atomic state setter; setting `{ rfp, ... }` overwrites the previous `{ claim, ... }` in one call. The render block branches on which discriminator is set, so the previously-rendered ClaimTooltipCard is replaced by an RfpTooltipCard in the next render pass. Same logic for RFP → Claim direction.
+
+**Footer rolls forward to v0.17.0.1.**
+
+**Status:** [x] Complete.
+
 ### Phase 17.0 completion notes (2026-05-17) — Clickable RFP markers + read-only RFP Detail Panel (Directory only)
 
 Opens the Phase 17 RFP arc against polish-backlog #192 (Item J: RFP / Public Directory request flow with self-evaluation). First sub-phase: read pipeline only.

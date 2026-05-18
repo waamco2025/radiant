@@ -343,6 +343,49 @@ function ClaimTooltipCard({ claim, x, y, viewportW }) {
   )
 }
 
+// Phase 17.0.1: RFP-flavoured tooltip pinned near the click point at
+// low zoom (dot-LOD; below MID_LOD_THRESHOLD). Mirror of ClaimTooltipCard
+// but type label reads "RFP" and the body shows name + owner. Shares
+// positioning + clip-right anchoring logic so the visual feels identical
+// across the two artifact types.
+function RfpTooltipCard({ rfp, x, y, viewportW }) {
+  const wouldClipRight = x + DOT_RADIUS + TOOLTIP_OFFSET + TOOLTIP_W > (viewportW || 1280) - 16
+  const anchorX = wouldClipRight
+    ? x - DOT_RADIUS - TOOLTIP_OFFSET
+    : x + DOT_RADIUS + TOOLTIP_OFFSET
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: anchorX,
+        top: y,
+        width: TOOLTIP_W,
+        transform: wouldClipRight ? 'translate(-100%, -50%)' : 'translateY(-50%)',
+        padding: '10px 14px 12px 14px',
+        borderRadius: 8,
+        background: 'var(--bg-card)',
+        border: '1px solid color-mix(in srgb, var(--accent-indigo) 35%, var(--border))',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        pointerEvents: 'none',
+        zIndex: 2500,
+      }}
+    >
+      <span style={{
+        fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        padding: '1px 4px', borderRadius: 3, letterSpacing: '0.1em',
+        color: 'var(--text-tertiary)', background: 'var(--bg-raised)',
+        display: 'inline-block', marginBottom: 6,
+      }}>RFP</span>
+      <div style={{
+        fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 600,
+        color: 'var(--text-primary)', lineHeight: 1.3, marginBottom: 4,
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+      }}>{rfp.name}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{rfp.owner}</div>
+    </div>
+  )
+}
+
 function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11, zIndex = 4 }) {
   // Phase 16.2.3: outer opacity multiplies the loaded fade-in opacity (0..1
   // during the wave animation, then 1 thereafter) with the existing
@@ -1840,15 +1883,26 @@ export default function DirectoryLayer({
   // Once zoom ≥ MID_LOD_THRESHOLD the Claim dots are replaced by the
   // AssetNodeMini / AssetNode HTML overlays in the render tree above.
   // Hiding the dot mesh prevents Three.js from drawing both at the same
-  // time. RFP meshes (outline + fill) stay visible at all zooms — RFP
-  // card swap is deferred to a future phase. `dirtyRef.current = true`
-  // marks the next animate-loop tick to call renderer.render so the
-  // visibility change flushes immediately.
+  // time.
+  // Phase 17.0.1: RFP meshes (outline + fill + hit-test) join the hide-
+  // on-card-LOD pattern. Below MID_LOD_THRESHOLD the hollow squares render
+  // and are clickable via the hit-test mesh; at or above the threshold the
+  // mini-card / full-card HTML overlays take over (rendered in the card
+  // overlay block) and the meshes hide. `rfpHitMesh` hiding matters
+  // because the hit-test mesh is invisible but still raycastable — leaving
+  // it visible would intercept clicks meant for the cards above.
   useEffect(() => {
     if (!threeReady) return
     const dotsMesh = dotsMeshRef.current
+    const rfpMesh = rfpMeshRef.current
+    const rfpFillMesh = rfpFillMeshRef.current
+    const rfpHitMesh = rfpHitMeshRef.current
     if (!dotsMesh) return
-    dotsMesh.visible = zoom < MID_LOD_THRESHOLD
+    const cardLOD = zoom >= MID_LOD_THRESHOLD
+    dotsMesh.visible = !cardLOD
+    if (rfpMesh) rfpMesh.visible = !cardLOD
+    if (rfpFillMesh) rfpFillMesh.visible = !cardLOD
+    if (rfpHitMesh) rfpHitMesh.visible = !cardLOD
     dirtyRef.current = true
   }, [zoom, threeReady])
 
@@ -2124,17 +2178,35 @@ export default function DirectoryLayer({
       if (animationHandleRef.current) {
         animationHandleRef.current.skip()
       }
+      // Phase 17.0.1: clear BOTH possible pinned discriminators —
+      // setPinned(null) handles the local tooltip; onClaimDotClick(null)
+      // and onRfpClick(null) clear V2App's Detail Panel state on whichever
+      // side is open. (Per the 17.0 wiring, V2App's onClaimDotClick(null)
+      // dismisses the Claim panel; onRfpClick(null) was not invoked from
+      // empty canvas before — extending here closes the loop.)
       setPinned(null)
       onClaimDotClick?.(null)
+      onRfpClick?.(null)
       return
     }
-    // Phase 17.0: RFP hit → fire onRfpClick + pan-to-center, mirror of
-    // the Claim dot pipeline. No `pinned` state for RFPs (deferred to
-    // 17.0.1 with the card LOD swap). `hover` stays Claim-only too.
+    // Phase 17.0 + 17.0.1: RFP hit → fire onRfpClick + pan-to-center +
+    // setPinned with RFP shape. setPinned with the RFP discriminator
+    // overwrites any previously-pinned Claim tooltip, fixing the stale-
+    // tooltip bug surfaced in 17.0 QA (click Claim → click RFP left the
+    // Claim's pinned tooltip visible). The discriminator is presence of
+    // `claim` XOR `rfp`; downstream render block branches on which one.
     if (hit.kind === 'rfp') {
       const rfpDots = layout?.allDots.filter((d) => d.kind === 'rfp') || []
       const d = rfpDots[hit.index]
       if (!d || !d.rfp) return
+      const screen = worldToScreen(d.x, d.y)
+      setPinned({
+        rfp: d.rfp,
+        x: d.x, y: d.y,
+        screenX: screen.x, screenY: screen.y,
+        ownerParty: d.rfp.owner,
+        dotIndex: hit.index,
+      })
       onRfpClick?.(d.rfp)
       const container = containerRef.current
       if (container) {
@@ -2174,16 +2246,32 @@ export default function DirectoryLayer({
   // Panel opens on the right and partially covers the card without the
   // panelOffsetWorld correction). targetZoom = current zoom — no zoom
   // change, just pan. 500ms animation matches dot click for continuity.
+  //
+  // Phase 17.0.1: branch on `d.kind === 'rfp'` to fire onRfpClick + pin
+  // an RFP tooltip. setPinned overwrites previously-pinned state, so the
+  // stale-tooltip bug (clicking from Claim to RFP card or vice versa)
+  // resolves naturally — `pinned` carries exactly one of `claim` / `rfp`.
   const onCardClick = useCallback((d, dotIdx) => {
     const screen = worldToScreen(d.x, d.y)
-    setPinned({
-      claim: d.claim,
-      x: d.x, y: d.y,
-      screenX: screen.x, screenY: screen.y,
-      ownerParty: d.claim?.owner,
-      dotIndex: dotIdx,
-    })
-    onClaimDotClick?.(d.claim)
+    if (d.kind === 'rfp') {
+      setPinned({
+        rfp: d.rfp,
+        x: d.x, y: d.y,
+        screenX: screen.x, screenY: screen.y,
+        ownerParty: d.rfp?.owner,
+        dotIndex: dotIdx,
+      })
+      onRfpClick?.(d.rfp)
+    } else {
+      setPinned({
+        claim: d.claim,
+        x: d.x, y: d.y,
+        screenX: screen.x, screenY: screen.y,
+        ownerParty: d.claim?.owner,
+        dotIndex: dotIdx,
+      })
+      onClaimDotClick?.(d.claim)
+    }
     // Phase 16.2.9 Item 1: pan-to-center on card click, mirroring the
     // dot-click handler — Detail Panel opens on the right, so the camera
     // shifts left by panelOffsetWorld = (PANEL_W/2) / zoom so the clicked
@@ -2194,7 +2282,7 @@ export default function DirectoryLayer({
       const panelOffsetWorld = (PANEL_W / 2) / targetZoom
       animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
     }
-  }, [onClaimDotClick, worldToScreen, animatedPanToWithZoom])
+  }, [onClaimDotClick, onRfpClick, worldToScreen, animatedPanToWithZoom])
 
   // ─── Zoom controls (top-right, parent-parity) ────────────────────────
   const handleWheel = useCallback((e) => {
@@ -2447,24 +2535,69 @@ export default function DirectoryLayer({
           transform — so they fit cleanly given the density invariant
           (zoom × DOT_GRID ≥ card_width_px at the threshold). Viewport
           culled: only dots whose screen position falls inside the viewport
-          plus a one-card buffer on each edge are rendered. RFPs stay as
-          hollow squares throughout; cluster pillbox labels stay as well. */}
+          plus a one-card buffer on each edge are rendered. Cluster
+          pillbox labels stay as well.
+          Phase 17.0.1: RFPs join the LOD card overlay — each RFP entry
+          renders an AssetNode (full-LOD) / AssetNodeMini (mid-LOD) with
+          a synthetic node carrying `category: 'rfp'` so the new RFP
+          early-return branch in AssetNode.jsx fires. The visible hollow-
+          square outline + hit-test mesh are hidden at this LOD (see the
+          `useEffect` above). */}
       {layout && zoom >= MID_LOD_THRESHOLD && (() => {
         const isFullLOD = zoom >= LOD_THRESHOLD
         const cardW = isFullLOD ? CARD_W : MINI_CARD_W
         const cardH = isFullLOD ? CARD_H : MINI_CARD_H
-        const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp' && d.claim)
+        // Phase 17.0.1: iterate both Claim and RFP entries from allDots.
+        // Each entry decides locally whether to render a Claim or RFP card.
+        const cardDots = layout.allDots.filter((d) =>
+          (d.kind !== 'rfp' && d.claim) || (d.kind === 'rfp' && d.rfp)
+        )
         const minX = -cardW
         const maxX = viewport.w + cardW
         const minY = -cardH
         const maxY = viewport.h + cardH
-        return claimDots.map((d, i) => {
+        return cardDots.map((d, i) => {
           const screen = worldToScreen(d.x, d.y)
           // Viewport-cull. Skip cards outside viewport + one-card buffer.
           if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) return null
           if (screen.x < minX || screen.x > maxX || screen.y < minY || screen.y > maxY) return null
-          const isSelected = pinned?.claim === d.claim
           const Card = isFullLOD ? AssetNode : AssetNodeMini
+          if (d.kind === 'rfp') {
+            const isSelected = pinned?.rfp === d.rfp
+            // Phase 17.0.1: synthetic node shape consumed by AssetNode's
+            // RFP early-return. category='rfp' routes the dispatcher; the
+            // `rfp` field carries the original artifact for downstream
+            // lookups (e.g. tooltip preview).
+            const rfpSyntheticNode = {
+              id: d.rfp.id,
+              category: 'rfp',
+              rfp: d.rfp,
+              name: d.rfp.name,
+              ownerParty: d.rfp.owner,
+              owner: d.rfp.owner,
+            }
+            return (
+              <div
+                key={`rfp-card-${i}`}
+                style={{
+                  position: 'absolute',
+                  left: screen.x,
+                  top: screen.y,
+                  transform: 'translate(-50%, -50%)',
+                  pointerEvents: 'auto',
+                  zIndex: isSelected ? 1600 : 1500,
+                }}
+              >
+                <Card
+                  node={rfpSyntheticNode}
+                  isSelected={isSelected}
+                  onSelect={() => onCardClick(d, i)}
+                  activeParty={layout.activeParty}
+                />
+              </div>
+            )
+          }
+          const isSelected = pinned?.claim === d.claim
           return (
             <div
               key={`claim-card-${i}`}
@@ -2495,10 +2628,21 @@ export default function DirectoryLayer({
       {/* Tooltip (singleton). Phase 16.2.7: legacy tooltip only renders
           in dot-LOD. In mid-LOD and full-LOD, AssetNodeMini / AssetNode
           have their own internal hover behavior — suppress the Directory's
-          tooltip to avoid duplication. */}
+          tooltip to avoid duplication.
+          Phase 17.0.1: discriminator branch — `pinned`/`hover` may carry
+          either `claim` or `rfp` (never both). Render the matching tooltip
+          variant. `hover` stays Claim-only (RFP hover preview at dot-LOD
+          is deferred — the hover-preview portal on cards handles preview
+          at mid/full LOD), so the rfp branch is reachable via `pinned`. */}
       {zoom < MID_LOD_THRESHOLD && (hover || pinned) && (() => {
         const t = pinned || hover
-        return <ClaimTooltipCard claim={t.claim} x={t.screenX ?? 0} y={t.screenY ?? 0} viewportW={viewport.w} />
+        if (t.rfp) {
+          return <RfpTooltipCard rfp={t.rfp} x={t.screenX ?? 0} y={t.screenY ?? 0} viewportW={viewport.w} />
+        }
+        if (t.claim) {
+          return <ClaimTooltipCard claim={t.claim} x={t.screenX ?? 0} y={t.screenY ?? 0} viewportW={viewport.w} />
+        }
+        return null
       })()}
 
       {/* Phase 16.1.3 Item 4: zoom controls top-right, vertical position

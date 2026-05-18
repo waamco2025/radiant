@@ -7810,7 +7810,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.0 &middot; Changelog
+          v0.17.0.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7857,6 +7857,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.0.1', date: '2026-05-17', label: 'Phase 17.0.1', items: [
+                  'Phase 17.0.1 — RFP card LOD swap + hover-preview pinning. RFP markers now transition hollow-square → mini-card → full-card at the same zoom thresholds as Claims (Phase 16.2.7), and RFP click paths setPinned with an RFP discriminator so the pinned-tooltip + Detail Panel stay in sync.',
+                  'AssetNode + AssetNodeMini extended with a 5th schema (`category: "rfp"`) — minimal layout per Andrew\'s spec: full-card = type pill + name + "Posted by {owner}"; mini-card = type pill + name only. No badges, no minibars, no action bar. RFPs join the amber-on-hover/select branch (`hoverSelectColor`); their default border is WARM_BORDER because RFPs carry no disclosure type (public-by-nature).',
+                  'DirectoryLayer card-overlay render block now iterates both Claim AND RFP entries from `allDots`. Each RFP entry builds a synthetic node `{ id, category: "rfp", rfp, name, ownerParty, owner }` and routes to AssetNode (full-LOD) / AssetNodeMini (mid-LOD). Hollow-square outline + fill + hit-test meshes all hide at zoom ≥ MID_LOD_THRESHOLD (extending the dot-mesh hide path).',
+                  'Stale-pinned-tooltip bug fix (surfaced in 17.0 QA): `pinned` state extended to a discriminated union — exactly one of `{ claim, ... }` or `{ rfp, ... }` at any time. All RFP click paths (hollow-square at low zoom + mini-card + full-card via onCardClick) call setPinned with the RFP shape, which overwrites any previously-pinned Claim — and vice versa. Clicking from Claim to RFP (or RFP to Claim) now cleanly swaps the pinned tooltip.',
+                  'New `RfpTooltipCard` mirrors `ClaimTooltipCard` for the dot-LOD pinned tooltip path (the small floating card pinned near the click point at low zoom). Pinned tooltip render block branches on `pinned.claim` vs `pinned.rfp` and renders the matching variant.',
+                  'Empty-canvas click clears BOTH discriminators (calls onRfpClick(null) alongside onClaimDotClick(null)) — V2App\'s onRfpClick handler with `rfp=null` clears the RFP Detail Panel state.',
+                  'Footer rolls forward to v0.17.0.1.',
+                ]},
                 { version: '0.17.0', date: '2026-05-17', label: 'Phase 17.0', items: [
                   'Phase 17.0 — Clickable RFP markers + read-only RFP Detail Panel (Directory only). Opens the Phase 17 RFP arc against polish-backlog #192 (Item J). First time RFPs become interactive — 118 seeded RFPs (Bob\'s Sentinel-4 + 20 RFP-only buyer mocks + 4 mixed actors) are now clickable.',
                   'New invisible solid-square hit-test InstancedMesh in DirectoryLayer.jsx — sized to RFP_BASE_OUTER, opacity 0, depthWrite off, matrices in lockstep with the visible outline + fill meshes. The visible hollow-square outline\'s centre would otherwise miss raycasts; the hit mesh fills that dead zone so any click inside the marker resolves. Defensive InstancedMesh settings preserved (frustumCulled = false, unbounded boundingSphere).',

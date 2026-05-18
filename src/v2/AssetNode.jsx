@@ -50,6 +50,13 @@ const CATEGORY_CONFIG = {
   parse:      { icon: '⊞', color: 'var(--accent-purple, #a78bfa)', label: 'PARSE' },
   evaluation: { icon: '✦', color: 'var(--accent-indigo, #7e8ef8)', label: 'EVALUATION' },
   claim:      { icon: '◇', color: 'var(--accent-teal, #2dd4bf)', label: 'CLAIM' },
+  // Phase 17.0.1: RFP joins as a 5th schema. AssetNode + AssetNodeMini
+  // render a minimal layout for `node.category === 'rfp'` (type pill + name
+  // for mini; +"Posted by {owner}" for full). No badges, no minibars, no
+  // action bar, no expand affordance — see the early-return blocks below
+  // in each component. RFPs don't carry a disclosure type so the
+  // disclosure-type branches in the borderColor chain fall through cleanly.
+  rfp:        { icon: '⬚', color: 'var(--accent-indigo)', label: 'RFP' },
 }
 
 const CARD_W = 210
@@ -428,6 +435,108 @@ export default function AssetNode({
     }
     if (!revealPhase) setFlipMidpoint(false)
   }, [revealPhase])
+
+  // ─── Phase 17.0.1: RFP schema branch (minimal layout) ──────────────────
+  // RFPs render as a fifth schema next to Asset / Claim / Eval Result / PoE.
+  // Content per Andrew's spec: type pill + name + "Posted by {owner}". No
+  // badges, no minibars, no action bar, no expand affordance, no dive hint.
+  // Hover/select state uses the `hoverSelectColor` chain established above
+  // (amber for rfp + claim; indigo for everything else). RFPs have no
+  // disclosure type → the disclosure-type branches in `borderColor` fall
+  // through cleanly to WARM_BORDER. handleClick is reused (RFPs have no
+  // children so the double-click branch is a no-op).
+  if (node.category === 'rfp') {
+    const rfpName = node.name || node.rfp?.name || '—'
+    const rfpOwner = node.ownerParty || node.rfp?.owner || node.owner || '—'
+    return (
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          position: 'relative',
+          width: CARD_W + ACTION_BAR_W,
+          height: CARD_H,
+          overflow: 'visible',
+        }}
+      >
+        {isSelected && (
+          <div style={{
+            position: 'absolute',
+            top: -3, left: -3,
+            width: CARD_W * scale + 6,
+            height: CARD_H * scale + 6,
+            borderRadius: (8 * scale) + 3,
+            borderWidth: 2,
+            borderStyle: 'solid',
+            borderColor: hoverSelectColor,
+            transition: 'border-color 600ms ease',
+            pointerEvents: 'none',
+            zIndex: 0,
+          }} />
+        )}
+        <div
+          onClick={handleClick}
+          style={{
+            width: CARD_W * scale,
+            height: CARD_H * scale,
+            background: hovered
+              ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+              : 'var(--bg-card)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: (hovered || isSelected) ? hoverSelectColor : WARM_BORDER,
+            borderRadius: 8 * scale,
+            padding: `${9 * scale}px ${12 * scale}px`,
+            cursor: 'pointer',
+            position: 'relative',
+            zIndex: 1,
+            boxShadow: hovered ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
+            transition: 'border-color 120ms, box-shadow 120ms',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+          }}
+        >
+          <div>
+            <span style={{
+              display: 'inline-block',
+              fontSize: 9 * scale,
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              padding: '2px 6px',
+              background: 'var(--bg-raised)',
+              borderRadius: 3,
+            }}>RFP</span>
+            <div style={{
+              fontSize: 13 * scale,
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              marginTop: 6 * scale,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>{rfpName}</div>
+          </div>
+          <div style={{
+            fontSize: 11 * scale,
+            color: 'var(--text-tertiary)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            <span style={{ color: 'var(--text-dim)' }}>Posted by </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{rfpOwner}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Only render the "+" Connect Asset action when an onConnect handler is
   // actually provided. In V2.2 mode V2App passes `onConnect={undefined}` so
   // the no-op console.log placeholder previously showed an inert button on
@@ -462,7 +571,12 @@ export default function AssetNode({
   // disclosure-type indigo/amber/green default). Non-Claim node types
   // (Actor, Asset, Eval Result, PoE) brighten to full indigo on hover
   // and select — keeps them visually indigo-themed throughout.
-  const hoverSelectColor = node.category === 'claim'
+  // Phase 17.0.1: RFPs join the amber-on-hover/select branch. RFPs are
+  // public-by-nature and carry no disclosure type, so the indigo accent
+  // would clash with the WARM_BORDER default (which is itself a 40%
+  // indigo blend). Amber on hover/select reads as a discrete state
+  // change against the warm-grey default.
+  const hoverSelectColor = (node.category === 'claim' || node.category === 'rfp')
     ? 'var(--accent-amber, #C49A45)'
     : 'var(--accent-indigo)'
   const borderColor = (isDeclined || isRevoked)
@@ -1345,7 +1459,9 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
   // full/selective/proofonly).
   // Phase 16.2.11: hover/select color depends on node type — Claims keep
   // amber, non-Claims brighten to indigo. Mirrors the full AssetNode chain.
-  const hoverSelectColor = node.category === 'claim'
+  // Phase 17.0.1: RFPs join the amber branch (public-by-nature, no
+  // disclosure type, so amber reads cleanly against WARM_BORDER default).
+  const hoverSelectColor = (node.category === 'claim' || node.category === 'rfp')
     ? 'var(--accent-amber, #C49A45)'
     : 'var(--accent-indigo)'
   const borderColor = (isDeclined || isRevoked)
@@ -1418,6 +1534,110 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
   }, [])
 
   const showTooltip = (hovered || isSelected) && tooltipPos
+
+  // ─── Phase 17.0.1: RFP schema branch (minimal mini layout) ─────────────
+  // Mini card content per Andrew's spec: type pill + name only — no owner
+  // row, no minibar, no edge-endpoint indicator. Hover-preview portal is
+  // reused via the same hovered/tooltipPos state; the portal renders the
+  // full AssetNode preview, which itself takes the Phase 17.0.1 RFP
+  // early-return (so the preview shows RFP / name / "Posted by {owner}").
+  // Reuses handleClick + handleMouseEnter; no children → double-click
+  // branch is a no-op for RFPs.
+  if (node.category === 'rfp') {
+    const rfpName = node.name || node.rfp?.name || '—'
+    return (
+      <div
+        ref={miniRef}
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => { setHovered(false); if (!isSelected) setTooltipPos(null) }}
+        style={{
+          width: MINI_CARD_W,
+          height: MINI_CARD_H,
+          position: 'relative',
+          cursor: 'pointer',
+        }}
+      >
+        {isSelected && (
+          <div style={{
+            position: 'absolute',
+            top: -3, left: -3,
+            width: MINI_CARD_W + 6,
+            height: MINI_CARD_H + 6,
+            borderRadius: 9,
+            borderWidth: 2,
+            borderStyle: 'solid',
+            borderColor: hoverSelectColor,
+            pointerEvents: 'none',
+            zIndex: 0,
+          }} />
+        )}
+        <div style={{
+          width: MINI_CARD_W,
+          height: MINI_CARD_H,
+          background: hovered
+            ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+            : 'var(--bg-card)',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: (hovered || isSelected) ? hoverSelectColor : WARM_BORDER,
+          borderRadius: 6,
+          padding: '4px 8px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: 1,
+          boxShadow: hovered ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
+          transition: 'border-color 120ms, box-shadow 120ms',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          position: 'relative',
+          zIndex: 1,
+        }}>
+          <span style={{
+            fontSize: 7,
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            color: 'var(--text-tertiary)',
+            lineHeight: 1,
+          }}>RFP</span>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            fontFamily: 'var(--font-display)',
+            lineHeight: 1.2,
+          }}>{rfpName}</span>
+        </div>
+        {showTooltip && createPortal(
+          <div style={{
+            position: 'fixed',
+            zIndex: 150,
+            left: tooltipPos.x,
+            top: tooltipPos.y,
+            transform: `translate(calc(-50% + ${(ACTION_BAR_W * 0.85) / 2}px), -50%) scale(0.85)`,
+            transformOrigin: 'center center',
+            pointerEvents: isSelected ? 'auto' : 'none',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            borderRadius: 8,
+          }}>
+            <AssetNode
+              node={node}
+              isSelected={isSelected}
+              zoom={1}
+              scale={1}
+              activeParty={activeParty}
+            />
+          </div>,
+          document.body
+        )}
+      </div>
+    )
+  }
 
   // Phase 9A.2 item 1: mini-LOD endpoint indicator. Same right/left-of-card
   // vertical indigo line as the full card, scaled for the smaller footprint.
