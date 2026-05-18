@@ -1122,6 +1122,12 @@ export default function DirectoryLayer({
   activeParty,
   roleId,
   v22Provisionals,
+  // Phase 17.1: session-state Map<rfpId, ISO closedDate> threaded from
+  // V2App. Closed RFPs are visible only to their owner (with a dashed-
+  // outline visual treatment); non-owners see the RFP filtered out by
+  // `buildV22DirectoryDataForRole`. See §8.8 in the architecture spec
+  // for the asymmetric-visibility rationale.
+  v22ClosedRfpIds,
   // eslint-disable-next-line no-unused-vars
   onOpenAIShopper,
   onClose,
@@ -1176,7 +1182,7 @@ export default function DirectoryLayer({
   // ─── Per-role data + viewport + layout ──────────────────────────────
   const directoryData = useMemo(() => {
     if (!roleId) return null
-    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals)
+    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds)
     // Phase 16.1.3 Item 8: enrich the directory data with per-Claim
     // disclosure-type lookup tables for both public DAs and umbrella DAs.
     // The view-builder currently doesn't expose these directly; we look
@@ -1213,7 +1219,7 @@ export default function DirectoryLayer({
     } catch (_e) {
       return base
     }
-  }, [roleId, v22Provisionals])
+  }, [roleId, v22Provisionals, v22ClosedRfpIds])
 
   const [viewport, setViewport] = useState({
     w: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -1264,7 +1270,22 @@ export default function DirectoryLayer({
   // so it contributes nothing visually but resolves a click on the marker's
   // interior. Matrices are written in lockstep with `rfpMeshRef` (same
   // populate loop + same rescale-on-zoom effect).
+  //
+  // Phase 17.1 update: the hit-test mesh continues to carry ALL RFP
+  // instances regardless of status — closed-and-owned RFPs are still
+  // clickable so the owner can reopen them. Only the visible outline +
+  // fill meshes partition on status (closed-owned instances hide there
+  // and render via `closedRfpMeshRef` below).
   const rfpHitMeshRef = useRef(null)
+  // Phase 17.1: dashed-outline LineSegments for closed-and-owned RFPs.
+  // Single `THREE.LineSegments` whose `BufferGeometry` is rebuilt on
+  // every layout / zoom change (the closed-owned set is bounded — a
+  // demo session typically has 0-5 closed RFPs — so rebuilding a few
+  // hundred bytes of vertex data per change is trivial). Material uses
+  // `LineDashedMaterial`; the geometry's per-vertex line distances are
+  // computed via `computeLineDistances()` after each rebuild (required
+  // for the dashing to render at all).
+  const closedRfpMeshRef = useRef(null)
   const gridGroupRef = useRef(null)
   const dirtyRef = useRef(true)
   // Phase 16.2.3: initial camera target = canvas-horizontal-center +
@@ -1586,6 +1607,27 @@ export default function DirectoryLayer({
     scene.add(rfpHitMesh)
     rfpHitMeshRef.current = rfpHitMesh
 
+    // Phase 17.1: dashed-outline LineSegments for closed-and-owned RFPs.
+    // BufferGeometry is empty at construction; the populate effect below
+    // fills its `position` attribute on every layout / zoom change. The
+    // material's dashSize / gapSize are in world units; values picked so
+    // the dashing reads as roughly 4-on-2 at default zoom against the
+    // ~45 wu RFP_BASE_OUTER outline. Defensive InstancedMesh-style
+    // settings apply to LineSegments too (the boundingSphere is computed
+    // from geometry vertices — empty geometry → tiny default sphere →
+    // frustum + raycast cull the whole mesh).
+    const closedRfpGeometry = new THREE.BufferGeometry()
+    const closedRfpMaterial = new THREE.LineDashedMaterial({
+      color: cssVarToColor('--accent-indigo', '#6b8aff'),
+      dashSize: 8,
+      gapSize: 4,
+    })
+    const closedRfpMesh = new THREE.LineSegments(closedRfpGeometry, closedRfpMaterial)
+    closedRfpMesh.frustumCulled = false
+    closedRfpMesh.boundingSphere = unboundedSphere()
+    scene.add(closedRfpMesh)
+    closedRfpMeshRef.current = closedRfpMesh
+
     let animId
     const animate = () => {
       animId = requestAnimationFrame(animate)
@@ -1644,6 +1686,13 @@ export default function DirectoryLayer({
       // Phase 17.0: dispose hit-test mesh geom + material.
       rfpHitGeometry.dispose()
       rfpHitMaterial.dispose()
+      // Phase 17.1: dispose closed-RFP dashed-outline geometry + material.
+      // Geometry may have been rebuilt many times across the component
+      // lifetime; the current attached geometry is what we dispose here
+      // (the populate effect always disposes the previous one before
+      // attaching a fresh BufferGeometry).
+      closedRfpMesh.geometry.dispose()
+      closedRfpMaterial.dispose()
       renderer.dispose()
       rendererRef.current = null
       sceneRef.current = null
@@ -1654,6 +1703,7 @@ export default function DirectoryLayer({
       rfpMeshRef.current = null
       rfpFillMeshRef.current = null
       rfpHitMeshRef.current = null
+      closedRfpMeshRef.current = null
       setThreeReady(false)
     }
   }, [shouldMountScene, updateCamera])
@@ -1756,14 +1806,28 @@ export default function DirectoryLayer({
     const initialRfpScale = computeRfpWorldSize(zoomRef.current) / RFP_BASE_OUTER
     rfpScaleRef.current = initialRfpScale
     const rfpHitMesh = rfpHitMeshRef.current
+    // Phase 17.1: partition rfpMesh + rfpFillMesh on closed-and-owned.
+    // The active actor sees their own closed RFPs rendered via the
+    // dashed-outline `closedRfpMesh` below — the visible solid outline +
+    // tinted fill at the same instance index are set to `hidden`. The
+    // hit-test mesh (rfpHitMesh) carries ALL instances so the owner can
+    // still click to reopen.
+    const activePartyForClosed = layout?.activeParty
     for (let i = 0; i < MAX_RFPS; i++) {
       if (i < rfpDots.length) {
         const d = rfpDots[i]
+        const isClosedOwned = d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed
         m.makeScale(initialRfpScale, initialRfpScale, 1)
         m.setPosition(d.x, -d.y, 0)
-        rfpMesh.setMatrixAt(i, m)
-        rfpFillMesh.setMatrixAt(i, m)
-        // Phase 17.0: hit-test mesh tracks the same per-instance matrix.
+        if (isClosedOwned) {
+          rfpMesh.setMatrixAt(i, hidden)
+          rfpFillMesh.setMatrixAt(i, hidden)
+        } else {
+          rfpMesh.setMatrixAt(i, m)
+          rfpFillMesh.setMatrixAt(i, m)
+        }
+        // Phase 17.0: hit-test mesh tracks the same per-instance matrix
+        // regardless of status (closed-owned still clickable for reopen).
         if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
       } else {
         rfpMesh.setMatrixAt(i, hidden)
@@ -1778,6 +1842,49 @@ export default function DirectoryLayer({
     if (rfpHitMesh) {
       rfpHitMesh.count = rfpDots.length
       rfpHitMesh.instanceMatrix.needsUpdate = true
+    }
+
+    // Phase 17.1: rebuild closed-RFP dashed outline geometry. Build a
+    // BufferGeometry with 4 line segments per closed-owned RFP (each
+    // segment = 2 vertices × 3 coords). With the bounded closed-owned
+    // set the buffer is small enough that disposing + reattaching on
+    // every layout / zoom change is trivial. `computeLineDistances()` is
+    // REQUIRED after attaching the position attribute — without it the
+    // LineDashedMaterial renders as a solid line.
+    const closedRfpMesh = closedRfpMeshRef.current
+    if (closedRfpMesh) {
+      const closedOwnedRfps = rfpDots.filter(
+        (d) => d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed,
+      )
+      const halfBase = RFP_BASE_OUTER / 2
+      const half = halfBase * initialRfpScale
+      const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
+      let vIdx = 0
+      for (const d of closedOwnedRfps) {
+        const x = d.x
+        const y = -d.y
+        // top edge
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        // right edge
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        // bottom edge
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        // left edge
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+      }
+      // Dispose previous geometry before replacing — the mesh keeps a
+      // reference to its current `geometry`, so unattached old geometries
+      // would leak otherwise.
+      const prevGeom = closedRfpMesh.geometry
+      const nextGeom = new THREE.BufferGeometry()
+      nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      closedRfpMesh.geometry = nextGeom
+      closedRfpMesh.computeLineDistances()
+      if (prevGeom) prevGeom.dispose()
     }
 
     dirtyRef.current = true
@@ -1836,20 +1943,68 @@ export default function DirectoryLayer({
     if (Math.abs(desiredScale - rfpScaleRef.current) < 1e-4) return
     const rfpDots = layout.allDots.filter((d) => d.kind === 'rfp')
     const m = new THREE.Matrix4()
+    // Phase 17.1: local hidden-matrix mirror of the populate-effect's
+    // `hidden` (each useEffect has its own scope). Used to suppress
+    // outline + fill rendering for closed-owned instances at rescale time
+    // — they'll render via the dashed-outline LineSegments below.
+    const hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0)
     // Phase 17.0: rescale the hit-test mesh in lockstep with outline + fill.
+    // Phase 17.1: preserve the closed-owned partition during rescale —
+    // closed-owned instances keep their outline + fill hidden, hit-test
+    // stays normal at every zoom.
     const rfpHitMesh = rfpHitMeshRef.current
+    const activePartyForClosed = layout?.activeParty
     for (let i = 0; i < rfpDots.length; i++) {
       const d = rfpDots[i]
+      const isClosedOwned = d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed
       m.makeScale(desiredScale, desiredScale, 1)
       m.setPosition(d.x, -d.y, 0)
-      rfpMesh.setMatrixAt(i, m)
-      rfpFillMesh.setMatrixAt(i, m)
+      if (isClosedOwned) {
+        rfpMesh.setMatrixAt(i, hiddenMatrix)
+        rfpFillMesh.setMatrixAt(i, hiddenMatrix)
+      } else {
+        rfpMesh.setMatrixAt(i, m)
+        rfpFillMesh.setMatrixAt(i, m)
+      }
       if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
     }
     rfpMesh.instanceMatrix.needsUpdate = true
     rfpFillMesh.instanceMatrix.needsUpdate = true
     if (rfpHitMesh) rfpHitMesh.instanceMatrix.needsUpdate = true
     rfpScaleRef.current = desiredScale
+
+    // Phase 17.1: rebuild closed-RFP dashed outline at the new scale.
+    // The vertex buffer was baked at the previous scale; replacing it
+    // here keeps the on-screen dashing size proportional to the rest of
+    // the RFP markers as zoom changes. computeLineDistances() is
+    // required after each rebuild.
+    const closedRfpMesh = closedRfpMeshRef.current
+    if (closedRfpMesh) {
+      const closedOwnedRfps = rfpDots.filter(
+        (d) => d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed,
+      )
+      const half = (RFP_BASE_OUTER / 2) * desiredScale
+      const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
+      let vIdx = 0
+      for (const d of closedOwnedRfps) {
+        const x = d.x
+        const y = -d.y
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
+        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+      }
+      const prevGeom = closedRfpMesh.geometry
+      const nextGeom = new THREE.BufferGeometry()
+      nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      closedRfpMesh.geometry = nextGeom
+      closedRfpMesh.computeLineDistances()
+      if (prevGeom) prevGeom.dispose()
+    }
     dirtyRef.current = true
   }, [zoom, threeReady, layout])
 
@@ -1897,12 +2052,18 @@ export default function DirectoryLayer({
     const rfpMesh = rfpMeshRef.current
     const rfpFillMesh = rfpFillMeshRef.current
     const rfpHitMesh = rfpHitMeshRef.current
+    const closedRfpMesh = closedRfpMeshRef.current
     if (!dotsMesh) return
     const cardLOD = zoom >= MID_LOD_THRESHOLD
     dotsMesh.visible = !cardLOD
     if (rfpMesh) rfpMesh.visible = !cardLOD
     if (rfpFillMesh) rfpFillMesh.visible = !cardLOD
     if (rfpHitMesh) rfpHitMesh.visible = !cardLOD
+    // Phase 17.1: dashed-outline mesh joins the LOD-swap visibility group
+    // — at card LOD, the AssetNode / AssetNodeMini RFP card variants
+    // render the dashed-CSS-border treatment for closed-owned, replacing
+    // this LineSegments overlay.
+    if (closedRfpMesh) closedRfpMesh.visible = !cardLOD
     dirtyRef.current = true
   }, [zoom, threeReady])
 
@@ -2568,6 +2729,12 @@ export default function DirectoryLayer({
             // RFP early-return. category='rfp' routes the dispatcher; the
             // `rfp` field carries the original artifact for downstream
             // lookups (e.g. tooltip preview).
+            // Phase 17.1: `isClosed` drives the dashed-CSS-border treatment
+            // on the RFP card variants when the active actor owns a closed
+            // RFP. Closed-but-not-owned won't reach this point (the view-
+            // builder filters them out); defensive guard preserved on the
+            // owner match just in case.
+            const isClosedOwned = d.rfp?.status === 'closed' && d.rfp?.owner === layout.activeParty
             const rfpSyntheticNode = {
               id: d.rfp.id,
               category: 'rfp',
@@ -2575,6 +2742,7 @@ export default function DirectoryLayer({
               name: d.rfp.name,
               ownerParty: d.rfp.owner,
               owner: d.rfp.owner,
+              isClosed: isClosedOwned,
             }
             return (
               <div

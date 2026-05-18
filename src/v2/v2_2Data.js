@@ -1277,11 +1277,26 @@ export function getBadgesForRecipient(actorParty, allBadgeIssuances = [], allCla
 // renders open RFPs as green dots clustered around the posting Actor's
 // square (or the active Actor's corner card for own RFPs).
 //
-// Phase 16 ships only the data-model placeholder + one Bob-owned seed RFP
-// so the Directory dot rendering has something to show. Full RFP lifecycle
-// (post / open / close / response artifacts / buyer review) lands in
-// Phase 17 (#192). The factory shape is intentionally minimal — Phase 17
-// will extend it with response references, lifecycle metadata, etc.
+// Phase 16 shipped the data-model placeholder + a Bob-owned seed RFP. Phase
+// 17.0 introduced the click pipeline + read-only Detail Panel. Phase 17.0.1
+// brought RFPs to LOD parity with Claims. Phase 17.1 opens lifecycle:
+// owner-side Close / Reopen transitions with role-aware visibility.
+//
+// Lifecycle states (Phase 17.1):
+//   • `'open'` — default. Visible on every actor's Directory subject to the
+//     existing ownership / orphan-RFP rules.
+//   • `'closed'` — visible only on the OWNER's Directory (with a dashed-
+//     outline visual treatment at every LOD). Hidden from non-owners by
+//     `buildV22DirectoryDataForRole`'s `otherRfps` / `cluster.rfps` filter.
+//
+// `closedDate` (ISO 8601 string, optional) — set when transitioning to
+// `'closed'`; cleared (null) when transitioning back to `'open'`. Used by
+// the Detail Panel's "Closed YYYY-MM-DD · HH:MM UTC" row.
+//
+// Phase 17.2+ extends this with `responses[]` (supplier solicitations
+// against an open RFP) and EA-initiation lifecycle hooks.
+
+const RFP_STATUSES = new Set(['open', 'closed'])
 
 export function makeRfp({
   id,
@@ -1291,11 +1306,18 @@ export function makeRfp({
   description,
   requirementsSetIds = [],
   status = 'open',
+  closedDate = null,
   createdDate,
 }) {
   if (!id) throw new Error('makeRfp: id is required')
   if (!owner) throw new Error('makeRfp: owner is required')
   if (!name) throw new Error('makeRfp: name is required')
+  // Phase 17.1: validate status against the lifecycle taxonomy. Unknown
+  // values throw — surfaces seed-authoring typos that would otherwise
+  // silently default to behaving as `'open'`.
+  if (!RFP_STATUSES.has(status)) {
+    throw new Error(`makeRfp: unknown status '${status}' — expected one of ${[...RFP_STATUSES].join(' | ')}`)
+  }
   return {
     id,
     artifactType: 'rfp',
@@ -1306,8 +1328,40 @@ export function makeRfp({
     description: description || '',
     requirementsSetIds: [...requirementsSetIds],
     status,
+    closedDate,
     createdDate: createdDate || new Date().toISOString(),
   }
+}
+
+// Phase 17.1: pure transforms used by V2App's mergeClosedRfps + close /
+// reopen handlers. The merge layer is what wires session-state closures
+// into rendered RFPs; these helpers are intentionally stateless so seed
+// authoring + the merge layer + test code can all share one call site.
+export function closeRfp(rfp, closedDate = null) {
+  if (!rfp) throw new Error('closeRfp: rfp is required')
+  return { ...rfp, status: 'closed', closedDate: closedDate || new Date().toISOString() }
+}
+
+export function reopenRfp(rfp) {
+  if (!rfp) throw new Error('reopenRfp: rfp is required')
+  return { ...rfp, status: 'open', closedDate: null }
+}
+
+// Phase 17.1: overlays session-state closed-RFP closures on the shared
+// artifact collection. Mirror of `mergeProvisionals`'s shape — pure
+// function, returns a new shared object with RFPs replaced where ids
+// match. Storage shape is a Map<rfpId, closedDate ISO string> so each
+// closure keeps the timestamp that was recorded when the user clicked
+// Close (re-rendering doesn't shift the date). When the Map is empty
+// or missing, returns shared unchanged.
+export function mergeClosedRfps(shared, closedRfpIds) {
+  if (!closedRfpIds || (closedRfpIds.size ?? 0) === 0) return shared
+  const next = shared.rfps.map((r) => {
+    const closedDate = closedRfpIds.get ? closedRfpIds.get(r.id) : null
+    if (!closedDate) return r
+    return closeRfp(r, closedDate)
+  })
+  return { ...shared, rfps: next }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4509,8 +4563,17 @@ export function getV22DataForRole(roleId, provisionals) {
  *     otherRfps: RFP[],                   // non-active-Actor RFPs (status === 'open')
  *   }
  */
-export function buildV22DirectoryDataForRole(roleId, provisionals) {
-  const shared = mergeProvisionals(buildV22SharedArtifacts(), provisionals)
+export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds) {
+  // Phase 17.1: closedRfpIds (Map<id, ISO closedDate> | null) overlays
+  // session-state Close transitions on the seed RFPs. Threaded the same
+  // way provisionals are — merged in-place here so call sites don't
+  // need to pre-construct a wrapper. Order against mergeProvisionals
+  // doesn't matter (provisionals never touch RFPs) but we apply
+  // provisionals first for symmetry with other view-building paths.
+  const shared = mergeClosedRfps(
+    mergeProvisionals(buildV22SharedArtifacts(), provisionals),
+    closedRfpIds,
+  )
   const actor = (shared.actors || []).find((a) => a.id === roleId)
   const activeParty = actor?.party || null
 
@@ -4592,9 +4655,16 @@ export function buildV22DirectoryDataForRole(roleId, provisionals) {
   // backwards compatibility (any consumer iterating it sees an empty array).
   const umbrellaEdges = []
 
-  const allRfps = (shared.rfps || []).filter((r) => r.status === 'open')
+  // Phase 17.1: asymmetric visibility on `status === 'closed'`. The owner
+  // of a closed RFP still sees it (with the dashed-outline treatment on
+  // their Directory). Non-owners see only `'open'` RFPs — closed ones are
+  // filtered out of `otherRfpsBaseline` (which feeds both `cluster.rfps`
+  // and the `otherRfps` orphan path).
+  const allRfps = shared.rfps || []
   const ownRfps = allRfps.filter((r) => r.owner === activeParty)
-  const otherRfpsBaseline = allRfps.filter((r) => r.owner !== activeParty)
+  const otherRfpsBaseline = allRfps.filter(
+    (r) => r.owner !== activeParty && r.status === 'open',
+  )
 
   // Phase 16.2.6.5: RFPs flow through clusters now. Each cluster carries
   // its owner's RFPs in `cluster.rfps`. RFPs from the 4 primary parties

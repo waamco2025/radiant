@@ -6,8 +6,9 @@
 // top-right), without depending on its internals — RFPs are a distinct
 // schema with no shared Claim/Asset/EvalResult fields.
 //
-// Phase 17.0 is read-only: no footer actions, no clickable RS chips, no
-// post/respond/review flows. Those land in 17.1+.
+// Phase 17.0 was read-only — no footer actions. Phase 17.1 adds an
+// owner-only footer with Close / Reopen direct-action buttons and the
+// CLOSED status badge + Closed-date row.
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
 
@@ -27,22 +28,56 @@ function formatDateTime(iso) {
 }
 
 function StatusBadge({ status }) {
-  // Phase 17.0: skeletal status taxonomy — `open` is the only value
-  // seeded today. 17.1 introduces `closed`, `awarded`, etc. Render any
-  // unknown status as the raw uppercased token so future values surface
-  // without needing this component edited first.
-  const label = String(status || 'open').toUpperCase()
+  // Phase 17.0: skeletal status taxonomy. Phase 17.1: introduces 'closed'
+  // alongside 'open'. Future status values surface via the raw-uppercased
+  // fallback under a neutral treatment so this component doesn't need
+  // editing each time the taxonomy extends.
+  const value = String(status || 'open').toLowerCase()
+  const label = value.toUpperCase()
+  if (value === 'closed') {
+    // Phase 17.1: muted treatment — grey background, dim text, dim border.
+    // Visually quieter than OPEN to signal the dormant lifecycle state.
+    return (
+      <span style={{
+        fontSize: 9,
+        fontFamily: 'var(--font-mono)',
+        fontWeight: 700,
+        letterSpacing: '0.12em',
+        color: 'var(--text-tertiary)',
+        padding: '2px 6px',
+        borderRadius: 3,
+        border: '1px solid var(--border)',
+        background: 'var(--bg-deep)',
+      }}>{label}</span>
+    )
+  }
+  if (value === 'open') {
+    return (
+      <span style={{
+        fontSize: 9,
+        fontFamily: 'var(--font-mono)',
+        fontWeight: 700,
+        letterSpacing: '0.12em',
+        color: 'var(--accent-green)',
+        padding: '2px 6px',
+        borderRadius: 3,
+        border: '1px solid color-mix(in srgb, var(--accent-green) 40%, var(--border))',
+        background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-raised))',
+      }}>{label}</span>
+    )
+  }
+  // Fallback for unknown statuses (future-proofing).
   return (
     <span style={{
       fontSize: 9,
       fontFamily: 'var(--font-mono)',
       fontWeight: 700,
       letterSpacing: '0.12em',
-      color: 'var(--accent-green)',
+      color: 'var(--text-secondary)',
       padding: '2px 6px',
       borderRadius: 3,
-      border: '1px solid color-mix(in srgb, var(--accent-green) 40%, var(--border))',
-      background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-raised))',
+      border: '1px solid var(--border)',
+      background: 'var(--bg-raised)',
     }}>{label}</span>
   )
 }
@@ -95,7 +130,36 @@ function RsChip({ name, version, raw }) {
   )
 }
 
-export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = [], onClose }) {
+// Phase 17.1: owner-only footer action button. Close uses muted styling
+// (the action isn't destructive — the owner can always reopen — but it's
+// also not affirming, so neutral grey-on-dim reads as "discrete state
+// change"). Reopen uses indigo, matching the affirming-action treatment
+// V22NodeDetailPanel's accent buttons use.
+function ActionButton({ label, onClick, variant }) {
+  const isAffirm = variant === 'affirm'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: '10px 14px',
+        background: isAffirm ? 'var(--accent-indigo)' : 'var(--bg-raised)',
+        border: '1px solid ' + (isAffirm ? 'var(--accent-indigo)' : 'var(--border)'),
+        borderRadius: 4,
+        color: isAffirm ? 'var(--bg-deep)' : 'var(--text-primary)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        cursor: 'pointer',
+      }}
+    >{label}</button>
+  )
+}
+
+export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = [], onClose, onCloseRfp, onReopenRfp }) {
   if (!rfp) return null
 
   // Phase 17.0: requirementsSets is the lookup array (id → {name, version}).
@@ -110,6 +174,13 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
 
   const description = rfp.description || ''
   const reqIds = Array.isArray(rfp.requirementsSetIds) ? rfp.requirementsSetIds : []
+
+  // Phase 17.1: owner detection drives the action footer + the YOU badge.
+  // `activeParty` is the party of the currently-active actor (passed from
+  // V2App). When the RFP's owner matches, the active actor IS the owner
+  // and gets the Close / Reopen footer.
+  const isOwner = !!activeParty && rfp.owner === activeParty
+  const isClosed = rfp.status === 'closed'
 
   return (
     <div style={{
@@ -185,7 +256,7 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
               fontSize: 13,
               color: 'var(--text-primary)',
             }}>{rfp.owner || '—'}</span>
-            {activeParty && rfp.owner === activeParty && (
+            {isOwner && (
               <span style={{
                 fontSize: 9,
                 fontFamily: 'var(--font-mono)',
@@ -249,7 +320,48 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
             color: 'var(--text-primary)',
           }}>{formatDateTime(rfp.createdDate)}</div>
         </div>
+
+        {/* Phase 17.1: Closed date row (only when status === 'closed'). */}
+        {isClosed && (
+          <div style={{ marginBottom: 18 }}>
+            <SectionHeading>Closed</SectionHeading>
+            <div style={{
+              fontSize: 12,
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--text-primary)',
+            }}>{formatDateTime(rfp.closedDate)}</div>
+          </div>
+        )}
       </div>
+
+      {/* Phase 17.1: owner-only footer with single direct-action button —
+          Close (open) or Reopen (closed). Non-owners see no footer at all
+          (the body simply ends at "Posted" / "Closed"). Matches the
+          panel-footer convention from V22NodeDetailPanel: bottom-pinned,
+          border-top separator, flex row at 12px 18px padding. */}
+      {isOwner && (
+        <div style={{
+          padding: '12px 18px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          gap: 8,
+          flexShrink: 0,
+        }}>
+          {isClosed ? (
+            <ActionButton
+              label="Reopen this RFP"
+              variant="affirm"
+              onClick={() => onReopenRfp?.(rfp)}
+            />
+          ) : (
+            <ActionButton
+              label="Close this RFP"
+              variant="neutral"
+              onClick={() => onCloseRfp?.(rfp)}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

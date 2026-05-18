@@ -465,6 +465,14 @@ export default function AssetNode({
   if (node.category === 'rfp') {
     const rfpName = node.name || node.rfp?.name || '—'
     const rfpOwner = node.ownerParty || node.rfp?.owner || node.owner || '—'
+    // Phase 17.1: `node.isClosed` plumbed from DirectoryLayer's synthetic
+    // node. When true, the card border renders dashed at every state
+    // (default + hover + select) — signals "closed lifecycle state" while
+    // still allowing the amber hover/select discrete state to read. The
+    // outer selection ring also picks up the dashed treatment for
+    // consistency.
+    const rfpIsClosed = !!node.isClosed
+    const rfpBorderStyle = rfpIsClosed ? 'dashed' : 'solid'
     return (
       <div
         onMouseEnter={() => setHovered(true)}
@@ -484,7 +492,7 @@ export default function AssetNode({
             height: CARD_H * scale + 6,
             borderRadius: (8 * scale) + 3,
             borderWidth: 2,
-            borderStyle: 'solid',
+            borderStyle: rfpBorderStyle,
             borderColor: hoverSelectColor,
             transition: 'border-color 600ms ease',
             pointerEvents: 'none',
@@ -500,7 +508,7 @@ export default function AssetNode({
               ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
               : 'var(--bg-card)',
             borderWidth: 1,
-            borderStyle: 'solid',
+            borderStyle: rfpBorderStyle,
             borderColor: (hovered || isSelected) ? hoverSelectColor : WARM_BORDER,
             borderRadius: 8 * scale,
             padding: `${9 * scale}px ${12 * scale}px`,
@@ -1562,6 +1570,11 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
   // branch is a no-op for RFPs.
   if (node.category === 'rfp') {
     const rfpName = node.name || node.rfp?.name || '—'
+    // Phase 17.1: mirror of the AssetNode (full) RFP branch — `isClosed`
+    // drives a dashed border on the mini variant. Hover/select retains
+    // dashed; only the color changes to amber.
+    const rfpIsClosed = !!node.isClosed
+    const rfpBorderStyle = rfpIsClosed ? 'dashed' : 'solid'
     return (
       <div
         ref={miniRef}
@@ -1583,7 +1596,7 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
             height: MINI_CARD_H + 6,
             borderRadius: 9,
             borderWidth: 2,
-            borderStyle: 'solid',
+            borderStyle: rfpBorderStyle,
             borderColor: hoverSelectColor,
             pointerEvents: 'none',
             zIndex: 0,
@@ -1596,7 +1609,7 @@ export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDi
             ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
             : 'var(--bg-card)',
           borderWidth: 1,
-          borderStyle: 'solid',
+          borderStyle: rfpBorderStyle,
           borderColor: (hovered || isSelected) ? hoverSelectColor : WARM_BORDER,
           borderRadius: 6,
           padding: '4px 8px',

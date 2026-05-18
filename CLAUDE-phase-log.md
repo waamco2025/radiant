@@ -2673,6 +2673,60 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.1 completion notes (2026-05-18) — RFP close/reopen lifecycle (owner-side)
+
+First lifecycle phase against the Phase 17 RFP arc. Opens buyer-side state transitions on RFP nodes: the owner of an RFP can close it from the Detail Panel; closed RFPs render dashed on the owner's Directory at every LOD and are filtered out of every non-owner's Directory. Reopen restores the open state. No supplier-side wiring yet (that lands in Phase 17.2 — at which point closed-RFP visibility becomes load-bearing for solicitation gating per the asymmetric-visibility architecture).
+
+**Factory + helpers (v2_2Data.js):**
+
+- `makeRfp` validates `status` against a `'open' | 'closed'` taxonomy (throws on unknown values; surfaces seed typos that would silently default to behaving as `'open'`). Accepts a new `closedDate` optional ISO string parameter (default null).
+- New exported `closeRfp(rfp, closedDate?)` — pure transform: `{...rfp, status: 'closed', closedDate: closedDate || new Date().toISOString()}`. The optional `closedDate` parameter is what makes the merge layer stable: V2App captures the timestamp at click time and passes it on every subsequent `closeRfp` invocation inside `mergeClosedRfps`, so re-renders see the same value instead of "now".
+- New exported `reopenRfp(rfp)` — pure transform: `{...rfp, status: 'open', closedDate: null}`.
+- New exported `mergeClosedRfps(shared, closedRfpIds)` — overlays session-state closures on the shared artifact collection. `closedRfpIds` is a `Map<rfpId, ISO closedDate>` (the captured-once timestamps); the function walks `shared.rfps` and replaces any matching id with `closeRfp(r, capturedTimestamp)`. Returns shared unchanged when the Map is empty / missing.
+
+**View-builder filter (`buildV22DirectoryDataForRole`):**
+
+Function signature gains a 3rd `closedRfpIds` parameter. The body calls `mergeClosedRfps(mergeProvisionals(...), closedRfpIds)` first thing, then operates on the merged shared artifacts as before. The `allRfps` baseline (which previously filtered on `status === 'open'`) now includes ALL RFPs; `ownRfps` (active actor's own RFPs) inherits all of them regardless of status; `otherRfpsBaseline` (which feeds `cluster.rfps` + `otherRfps` orphan paths) filters out `status === 'closed'` so non-owners don't see closed RFPs at all. Per-cluster `cluster.rfps` and the `otherRfps` orphan list both inherit the filter via this single chokepoint.
+
+**V2App.jsx:**
+
+- New session state `v22ClosedRfpIds: Map<rfpId, ISO closedDate>` adjacent to `v22Provisionals`. Map storage so each closure keeps its captured timestamp across re-renders (a Set + regenerated-on-render timestamp would shift the displayed date every paint).
+- Threaded to DirectoryLayer as a new `v22ClosedRfpIds` prop. DirectoryLayer's `directoryData` `useMemo` calls `buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds)` and adds `v22ClosedRfpIds` to its dep list.
+- `RfpDetailPanel` mount block now wraps in an IIFE that re-resolves the selected RFP from `mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds)` each render — without this, `v22DirectorySelectedRfp` keeps the snapshot from the original click and the panel would render the stale (pre-close) status indefinitely.
+- `onCloseRfp` / `onReopenRfp` handlers wired to the panel. Both update `v22ClosedRfpIds` via the standard React functional-setState pattern (`prev → next` Map clone with the change applied). Close captures `new Date().toISOString()`; Reopen `delete`s the entry.
+- Footer literal `v0.17.0.2 → v0.17.1`. Changelog modal entry prepended for `v0.17.1` (7 bullets).
+- New import `mergeClosedRfps` from `v2_2Data.js`.
+
+**RfpDetailPanel.jsx:**
+
+- New props `onCloseRfp` and `onReopenRfp` (functions, called with the rfp artifact).
+- `isOwner = rfp.owner === activeParty` derivation at the top of the render.
+- `StatusBadge` extended: `'closed'` renders with muted grey-on-dim treatment (`var(--text-tertiary)` text on `var(--bg-deep)` background with a `var(--border)` border). Unknown status values get a neutral fallback (forward-compat).
+- New "Closed YYYY-MM-DD · HH:MM UTC" row in the body, rendered only when `status === 'closed'`. Formatted via the existing `formatDateTime` helper.
+- New owner-only footer: a single direct-action button. When `status === 'open'`: "Close this RFP" (neutral grey button). When `status === 'closed'`: "Reopen this RFP" (indigo affirming-action button). Footer shell mirrors `V22NodeDetailPanel`'s footer convention: bottom-pinned, border-top separator, `padding: '12px 18px'`, flex row with `gap: 8`, `flexShrink: 0`. Non-owners see no footer at all.
+
+**DirectoryLayer.jsx:**
+
+- New ref `closedRfpMeshRef`. Scene-init creates a single `THREE.LineSegments` mesh with an empty `THREE.BufferGeometry` + `THREE.LineDashedMaterial({ color: indigo, dashSize: 8, gapSize: 4 })`. Defensive InstancedMesh-style settings apply to LineSegments too: `frustumCulled = false`, `boundingSphere = new THREE.Sphere(origin, Infinity)`. Cleanup disposes the current geometry + material.
+- Populate loop extended: per-instance closed-owned detection (`d.rfp?.status === 'closed' && d.rfp?.owner === activePartyForClosed`). When closed-owned, `rfpMesh` and `rfpFillMesh` matrices are set to `hidden` (don't draw the solid outline + fill there). `rfpHitMesh` keeps the normal matrix — closed-owned RFPs remain clickable for reopen. After the InstancedMesh loop, the closed-owned set is collected and a new `BufferGeometry` is built with 4 line segments per closed-owned RFP (square perimeter). `computeLineDistances()` after geometry attach — required for `LineDashedMaterial` to render dashes. Previous geometry is disposed to avoid leaks.
+- Rescale-on-zoom effect: mirrors the partition + rebuilds the closedRfpMesh geometry at the new scale (`half = (RFP_BASE_OUTER / 2) * desiredScale`). Local `hiddenMatrix` declared inside the effect's scope (the populate effect's `hidden` isn't in scope here).
+- LOD-visibility `useEffect` extended: at `zoom ≥ MID_LOD_THRESHOLD`, `closedRfpMesh.visible = false` alongside the other RFP meshes. The AssetNode RFP card variants render the dashed treatment at card LOD.
+- Card-overlay render block's RFP synthetic node now carries `isClosed: rfp.status === 'closed' && rfp.owner === layout.activeParty`. The conjunction is defensive — closed-not-owned shouldn't reach this point (view-builder filters them out) but the guard prevents accidental dashed treatment if it ever does.
+
+**AssetNode.jsx:**
+
+- `AssetNode` (full) RFP early-return reads `node.isClosed`; introduces local `rfpBorderStyle = isClosed ? 'dashed' : 'solid'`; applies to both the outer selection ring (`isSelected && {...}`) and the inner card border.
+- `AssetNodeMini` RFP early-return mirrors the same treatment on the mini variant.
+- Hover/select still triggers the amber color treatment (existing `hoverSelectColor` logic) — only `border-style` flips. So a closed-and-owned RFP hovered reads as "dashed amber outline" — discrete-state-change-but-still-closed signal.
+
+**Asymmetric visibility — rationale.** The implementation realises the architecture from §8.8.7: closed RFPs are visible to the owner (so existing solicitation notifications remain actionable — the owner can still navigate to their closed RFP and act on inbox items) but hidden from non-owners (so the supplier-side entry point disappears, naturally gating new solicitations against closed RFPs without explicit gating logic). Phase 17.2 wires solicitations + this visibility model becomes load-bearing.
+
+**Verification.** Build clean (126 modules). Dev server runtime walkthrough — Bob's view, navigate to Directory, locate Sentinel-4 RFP, click → RfpDetailPanel opens with `OPEN` badge + "Close this RFP" footer button → click footer → panel re-renders with `CLOSED` badge, "Closed" date row, "Reopen this RFP" button replacing the close button → close panel → Sentinel-4 marker on Directory now renders dashed at every LOD. Switch role to Alice → Directory loads without Sentinel-4 RFP marker (orphan bottom-anchor position is empty). Switch back to Bob → reopen → Sentinel-4 marker solid again → Alice sees it again. No console errors beyond the pre-existing V2Canvas2 setState warning + the pre-existing 500-KB chunk warning + the pre-existing packClusterDense overflow warnings. Footer reads v0.17.1. Changelog modal top entry is the new v0.17.1.
+
+**Footer rolls forward to v0.17.1.**
+
+**Status:** [x] Complete.
+
 ### Phase 17.0.2 completion notes (2026-05-18) — Hotfix: TDZ crash in AssetNode RFP branch
 
 Phase 17.0.1 shipped RFP card LOD swap on `2026-05-17` (commit `296b879`). Runtime QA on Bob's view surfaced a crash that the 17.0.1 ship verification didn't catch: zooming the Directory into full-card LOD on Bob's view crashed the app to an all-black screen. Slow zoom could pass through mid-LOD without crashing, but clicking an RFP node at any card LOD crashed immediately.
