@@ -2673,6 +2673,66 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 16.2.10 completion notes (2026-05-17) — Disclosure-type colored borders + tinted backgrounds on Directory Claim cards
+
+Adds the disclosure-type color signal (already present on dots since Phase 16.1.3 Item 8) to AssetNodeMini (mid-LOD) and AssetNode (full-LOD) Claim cards on the Directory layer. Closes Round 17's priority #1 (Directory appearance and feel).
+
+**Item 1 — DirectoryLayer `disclosureType` propagation.** Three insertion points in `DirectoryLayer.jsx`. (a) `placed` dot construction inside `packClusterDense`'s populate loop adds `disclosureType: item.disclosureType` alongside the existing `kind` / `claim` / `node` / `rfp` / `clusterIdx` fields. (b) `allDots.push` in the cluster flatten loop propagates `d.disclosureType`. (c) Other-RFP `allDots.push` carries `disclosureType: 'full'` for shape consistency (RFPs don't render as cards but the field stays present). (d) JSX card overlay render block (Phase 16.2.7 LOD swap) passes `disclosureType={d.disclosureType}` to both `AssetNode` (full-LOD) and `AssetNodeMini` (mid-LOD) — `Card` reference picks the right component.
+
+**Item 2 — `AssetNodeMini` prop + chain edits.** Added `disclosureType` to the destructured props. `borderColor` chain gains three new branches inserted between `hasBadHealth` and `WARM_BORDER`:
+
+```
+hasBadHealth → 'var(--accent-red)'
+: disclosureType === 'full' ? 'var(--accent-indigo)'
+: disclosureType === 'selective' ? 'var(--accent-amber)'
+: disclosureType === 'proofonly' ? 'var(--accent-green)'
+: WARM_BORDER
+```
+
+Inner-div `background` chain gains the same three branches as the new default, replacing plain `var(--bg-card)` when `disclosureType` is set:
+
+```
+hovered → color-mix amber
+: disclosureType === 'full' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-indigo))'
+: 'selective' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-amber))'
+: 'proofonly' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-green))'
+: 'var(--bg-card)'
+```
+
+12% color-mix (`bg-card 88%, accent 12%`) gives a subtle wash — visible but not aggressive.
+
+**Item 3 — `AssetNode` (full) prop + chain edits.** Same prop addition. `borderColor` chain gets the identical insertion (same disclosure-type branches between `hasBadHealth` and `WARM_BORDER`). For the background chain — which is longer and includes the parent-canvas-specific `isCounterpartyNode` branch — the disclosure-type branches sit ABOVE `isCounterpartyNode`. Rationale: disclosure type is the more-specific signal (which-data-is-visible); counterparty is the less-specific signal (whose-data-is-it). Directory cards always carry `disclosureType` so they always land in the new branch; parent canvas Claims (which don't pass the prop) fall through to the existing `isCounterpartyNode` / `var(--bg-card)` chain unchanged.
+
+**Strict equality matters.** Conditionals are `disclosureType === 'full'` (strict equality), NOT `disclosureType && ...` (truthy check). Strict equality returns falsy for `undefined` and falls through cleanly, so parent canvas's existing default rendering is preserved.
+
+**Item 4 — Changelog catchup.** 11 missed entries prepended to the in-app Changelog modal in `src/v2/V2App.jsx`:
+
+| Version | Phase | Date |
+|---|---|---|
+| `v0.16.2.10` | 16.2.10 | 2026-05-17 |
+| `v0.16.2.9` | 16.2.9 | 2026-05-17 |
+| `v0.16.2.8` | 16.2.8 | 2026-05-17 |
+| `v0.16.2.7` | 16.2.7 | 2026-05-17 |
+| `v0.16.2.6.6` | 16.2.6.6 | 2026-05-17 |
+| `v0.16.2.6.5` | 16.2.6.5 | 2026-05-17 |
+| `v0.16.2.6.4` | 16.2.6.4 | 2026-05-16 |
+| `v0.16.2.6.3` | 16.2.6.3 | 2026-05-16 |
+| `v0.16.2.6.2` | 16.2.6.2 | 2026-05-16 |
+| `v0.16.2.6.1` | 16.2.6.1 | 2026-05-16 |
+| `v0.16.2.6` | 16.2.6 | 2026-05-16 |
+
+Format matches the existing convention: `{ version: 'X.Y.Z', date: 'YYYY-MM-DD', label: 'Phase X.Y.Z', items: [...] }`. Z-index hotfix notes between 16.2.6.4 and 16.2.6.5 are folded into the 16.2.6.4 entry's items rather than receiving their own entries (the file's existing format doesn't have hotfix entries between phase versions).
+
+**Hover/select precedence.** Preserved per brief: hover switches border to amber; selection adds the outer thick amber ring on top. Disclosure-type color disappears under those states. Worth assessing in a future polish pass whether disclosure color should peek through (e.g., bottom-edge accent or persistent left-edge stripe). Deferred.
+
+**Doc updates.** Architecture spec §8 Changelog gains a Phase 16.2.10 entry. polish-backlog.md Update Log gains a Phase 16.2.10 entry; priority #1 (Directory appearance and feel) marked complete. CLAUDE.md "Current state of the world" updated; phase queue updated; phase-log reference rolled to 16.2.10.
+
+**Runtime verification.** Build clean (verified via `npm run build`). Dev server verified — mini-card and full-card cards on the Directory show the three distinct disclosure-type border colors + tinted backgrounds. Parent canvas regression check confirmed: V2Canvas Claim cards (which don't pass `disclosureType`) render identically to pre-16.2.10 (no new colors, no new tints, no console warnings).
+
+**Footer stays at v0.16.2.0** per backtrack-hotfix convention.
+
+**Status:** [x] Complete.
+
 ### Phase 16.2.9 completion notes (2026-05-17) — Card-click pan + hover-preview offset fix
 
 Two surgical QA-driven polish fixes following Phase 16.2.8:

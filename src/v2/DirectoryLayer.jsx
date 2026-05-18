@@ -945,6 +945,8 @@ function computeLayout(directoryData, viewport) {
           rfp: item.rfp || null,
           type: item.kind === 'umbrella' ? 'umbrella' : (item.kind || 'public'),
           clusterIdx: ci,
+          // Phase 16.2.10: drives card border + bg tint at mid/full LOD.
+          disclosureType: item.disclosureType,
         }
         placedDots.push(placed)
       }
@@ -1037,6 +1039,8 @@ function computeLayout(directoryData, viewport) {
         node: d.node || null,
         rfp: d.rfp || null,
         clusterIdx: ci,
+        // Phase 16.2.10: propagate disclosureType for card border/bg tint.
+        disclosureType: d.disclosureType,
       })
       clusterByDotIndex.push(ci)
     }
@@ -1049,6 +1053,8 @@ function computeLayout(directoryData, viewport) {
       claim: null,
       rfp: entry.rfp,
       clusterIdx: -1,
+      // Phase 16.2.10: RFPs don't render as cards; field stays for shape consistency.
+      disclosureType: 'full',
     })
     clusterByDotIndex.push(-1)
   }
@@ -2396,6 +2402,7 @@ export default function DirectoryLayer({
                 isSelected={isSelected}
                 onSelect={() => onCardClick(d, i)}
                 activeParty={layout.activeParty}
+                disclosureType={d.disclosureType}
               />
             </div>
           )

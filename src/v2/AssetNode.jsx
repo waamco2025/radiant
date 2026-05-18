@@ -350,6 +350,7 @@ function StackPeeks({ count, isHovered, categoryColor }) {
 export default function AssetNode({
   node,
   isSelected,
+  disclosureType,
   onSelect,
   onOpenSubgraph,
   onDive,
@@ -453,6 +454,9 @@ export default function AssetNode({
   // with edge indigo (edges render at full accent-indigo). Value is now a
   // module-level constant (WARM_BORDER) shared with the mini + dot cards
   // per Phase 9A.1.5 item 1.
+  // Phase 16.2.10: new disclosure-type branch inserted between bad-health
+  // and the WARM_BORDER fallback. Mirrors the AssetNodeMini chain so
+  // mid-LOD and full-LOD render the same color signal.
   const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
@@ -461,6 +465,9 @@ export default function AssetNode({
       ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
+        : disclosureType === 'full' ? 'var(--accent-indigo)'
+        : disclosureType === 'selective' ? 'var(--accent-amber)'
+        : disclosureType === 'proofonly' ? 'var(--accent-green)'
         : WARM_BORDER
 
   // Phase 9A item 2: counterparty visual distinction. Pulled-in nodes owned
@@ -616,6 +623,13 @@ export default function AssetNode({
           // underlying canvas content show through, which the zoomed-out
           // LODs make obvious. Red tint + full opacity reads as "frozen +
           // revoked" rather than "provisional + in-flight."
+          // Phase 16.2.10: disclosure-type tint inserted ABOVE isCounterpartyNode
+          // in the priority chain. Rationale: disclosure type is the more
+          // specific signal (which-data-is-visible), counterparty is the
+          // less-specific signal (whose-data-is-it). When both apply, disclosure
+          // wins. Directory cards always carry disclosureType, so they always
+          // land in this branch; parent canvas Claims that haven't opted in fall
+          // through to isCounterpartyNode (unchanged).
           background: isRevoked
             ? 'color-mix(in srgb, var(--bg-deep) 90%, var(--accent-red))'
             : showAsProvisional
@@ -624,6 +638,9 @@ export default function AssetNode({
                 ? 'color-mix(in srgb, var(--bg-card) 85%, var(--accent-amber, #C49A45))'
                 : hovered
                   ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+                  : disclosureType === 'full' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-indigo))'
+                  : disclosureType === 'selective' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-amber))'
+                  : disclosureType === 'proofonly' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-green))'
                   : isCounterpartyNode
                     // Phase 9A.1 item 5: stronger mix (82% → 55% bg-card) plus a
                     // subtle cooler shift via accent-blue so counterparty nodes
@@ -1288,7 +1305,7 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
 }
 
 // ─── Mid-LOD Mini Card ───
-export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, onV22CardAction, activeParty }) {
+export function AssetNodeMini({ node, isSelected, disclosureType, onSelect, onDive, onOpenSubgraph, onConnect, onDisclose, onAddEvidence, onParseEvidence, onRunEvaluation, onCreateClaim, onV22CardAction, activeParty }) {
   const [hovered, setHovered] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null)
   const miniRef = useRef(null)
@@ -1305,6 +1322,12 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
   // Phase 9A.1.5 item 1: mini cards now use the same WARM_BORDER treatment
   // as full-size cards so node terminations don't fade into the canvas at
   // MID_LOD zoom.
+  // Phase 16.2.10: new disclosure-type branch inserted between bad-health
+  // and the WARM_BORDER fallback. When disclosureType is present and no
+  // higher-priority state applies, the border color signals the
+  // disclosure level visually. Color mapping matches the existing
+  // disclosure-edge palette on parent canvas (indigo/amber/green for
+  // full/selective/proofonly).
   const borderColor = (isDeclined || isRevoked)
     ? 'var(--accent-red)'
     : isProvisional
@@ -1313,6 +1336,9 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
       ? 'var(--accent-amber, #C49A45)'
       : hasBadHealth
         ? 'var(--accent-red)'
+        : disclosureType === 'full' ? 'var(--accent-indigo)'
+        : disclosureType === 'selective' ? 'var(--accent-amber)'
+        : disclosureType === 'proofonly' ? 'var(--accent-green)'
         : WARM_BORDER
 
   const handleClick = useCallback((e) => {
@@ -1432,10 +1458,17 @@ export function AssetNodeMini({ node, isSelected, onSelect, onDive, onOpenSubgra
         // Phase 9D.1.3 Fix 5: revoked cards at mini LOD get an opaque red-
         // tinted background + full opacity so cards/edges behind don't show
         // through at zoomed-out viewing. Keeps the dashed red border signal.
+        // Phase 16.2.10: disclosure-type tint inserted as the new default
+        // (replaces plain bg-card when disclosureType is present). 12%
+        // color-mix with bg-card gives a subtle wash — visible but not
+        // aggressive.
         background: isRevoked
           ? 'color-mix(in srgb, var(--bg-card) 90%, var(--accent-red))'
           : hovered
             ? 'color-mix(in srgb, var(--bg-card) 92%, var(--accent-amber, #C49A45))'
+            : disclosureType === 'full' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-indigo))'
+            : disclosureType === 'selective' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-amber))'
+            : disclosureType === 'proofonly' ? 'color-mix(in srgb, var(--bg-card) 88%, var(--accent-green))'
             : 'var(--bg-card)',
         // Phase 9E (#107): longhand border props to avoid shorthand/longhand mix.
         borderWidth: 1,
