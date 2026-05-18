@@ -4820,23 +4820,28 @@ export default function V2App() {
                             setV22DirectoryOpen(true)
                             setV22DirectorySelectedClaim(null)
                             setV22DirectorySelectedRfp(targetRfp)
-                            // Phase 17.2.0.1: pan + zoom the Directory camera
-                            // to the target RFP marker. DirectoryLayer may
-                            // still be opening (phase machine + load animation
-                            // run before layout is built), so the imperative
-                            // panToRfp returns false until ready. Retry on
-                            // each rAF tick until success or the 60-frame cap
-                            // (~1 s @ 60fps — Directory opening transition is
-                            // ~600 ms; cap is defensive against runaway loops
-                            // if the RFP isn't in the active actor's view).
+                            // Phase 17.2.0.2: full select via DirectoryLayer's
+                            // imperative `selectRfp` — drives the same on-
+                            // canvas state as a manual marker click (setPinned
+                            // → tooltip + select-state brightening) plus pan
+                            // + zoom to full-card LOD when starting from a
+                            // lower zoom so the marker reads clearly on
+                            // arrival. Replaces 17.2.0.1's `panToRfp`, which
+                            // was pan-only at current zoom and appeared to do
+                            // nothing from the default 15% galactic view.
+                            // DirectoryLayer may still be opening (phase
+                            // machine + load animation), so the imperative
+                            // returns false until ready — retry on each rAF
+                            // tick until success or the 60-frame cap (~1 s
+                            // @ 60fps — Directory opening is ~600 ms).
                             let attempts = 0
-                            const tryPan = () => {
+                            const trySelect = () => {
                               attempts += 1
-                              const ok = directoryLayerRef.current?.panToRfp?.(targetRfp)
+                              const ok = directoryLayerRef.current?.selectRfp?.(targetRfp)
                               if (ok || attempts > 60) return
-                              requestAnimationFrame(tryPan)
+                              requestAnimationFrame(trySelect)
                             }
-                            requestAnimationFrame(tryPan)
+                            requestAnimationFrame(trySelect)
                           }
                         } else if (req.type === 'v22-poe-created') {
                           // Phase 14.2: click navigates to the PoE Detail
@@ -6222,6 +6227,11 @@ export default function V2App() {
             <SolicitationCreateModal
               rfp={v22SolicitOpenForRfp.rfp}
               activeClaims={myClaims}
+              // Phase 17.2.0.2: thread RS lookup so the modal renders
+              // a Required-Standards accordion above the Claim picker.
+              // `publishedRequirementSets` is the same source the RFP
+              // Detail Panel uses to resolve RS chips.
+              requirementsSets={publishedRequirementSets}
               onSubmit={handleCreateSolicitation}
               onCancel={() => setV22SolicitOpenForRfp(null)}
             />
@@ -8112,7 +8122,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.0.1 &middot; Changelog
+          v0.17.2.0.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8159,6 +8169,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.0.2', date: '2026-05-18', label: 'Phase 17.2.0.2', items: [
+                  'Notification click on a solicitation now fully selects the target RFP — pan + zoom to full-card LOD, RfpDetailPanel opens, AND the marker shows the pinned tooltip + select-state brightening (parallel to a manual marker click). Phase 17.2.0.1 panned at current zoom without selecting on-canvas; 17.2.0.2 introduces a `selectRfp` imperative handle that mirrors the internal click path end-to-end via a new `focusRfpInternal` helper shared between the marker / card click handlers and the imperative path.',
+                  'Active actor\'s own-cluster label on the Directory layer renders with amber pillbox fill + dark text so the user can orient at a glance. Bob → GovCo styled; Alice → MicroCo styled; Dave → ChipCo styled; Carol → no styling (Carol/AuditCo has no cluster on the Directory, so the gating naturally degenerates). Same `--accent-amber` variable used by the chrome notification + Directory-active signals.',
+                  'SolicitationCreateModal gains a Required Standards accordion above the Claim picker. Each RS the RFP references renders as a clickable header (name + version pill + chevron); expanding reveals the RS\'s requirements list with id (mono pill), label, description (secondary), and criterion (muted italic). Multiple entries can be open simultaneously. Missing-RS case surfaces "(Standard not found)"; empty case surfaces "No required standards specified." Section is scrollable at 240px max-height; modal body already had 90vh max-height via ModalShared.',
+                  'Footer rolls forward to v0.17.2.0.2.',
+                ]},
                 { version: '0.17.2.0.1', date: '2026-05-18', label: 'Phase 17.2.0.1', items: [
                   'Hotfix: notification click routing + Directory cursor/hover + V2Canvas2 setState-in-render fix. Three runtime QA items from Phase 17.2 closed in one pass.',
                   'Notification click routing for both `v22-rfp-solicitation-received` (Bob\'s inbox) and `v22-rfp-solicitation-rejected` (Alice\'s inbox): the click now opens Directory (if closed), clears Claim panel, sets RFP panel, AND pans + zooms the Directory camera to the target RFP marker. The 17.2 implementation registered the first three sub-steps but omitted the camera pan. The new path uses an imperative `useImperativeHandle`-exposed `panToRfp(rfp)` method on DirectoryLayer, with a rAF-driven retry loop in V2App that fires the pan once the Directory\'s phase machine reaches `in` and the layout is built (the 600ms opening transition makes synchronous pan calls a no-op when Directory was closed before the click).',

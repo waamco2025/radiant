@@ -386,7 +386,7 @@ function RfpTooltipCard({ rfp, x, y, viewportW }) {
   )
 }
 
-function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11, zIndex = 4 }) {
+function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11, zIndex = 4, isOwn = false }) {
   // Phase 16.2.3: outer opacity multiplies the loaded fade-in opacity (0..1
   // during the wave animation, then 1 thereafter) with the existing
   // hover-pillbox-fade behaviour (faded = 0.25 when a dot is hovered near
@@ -420,8 +420,15 @@ function PillboxLabel({ ownerParty, x, y, faded, opacity = 1, fontPx = 11, zInde
         padding: '0.3em 0.7em',
         lineHeight: 1,
         borderRadius: 999,
-        background: 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
-        color: 'var(--text-primary)',
+        // Phase 17.2.0.2: active actor's own cluster gets amber fill +
+        // dark text for contrast, so the user can orient at a glance.
+        // Same `--accent-amber` variable used elsewhere in the chrome
+        // (Directory globe active state, inbox-with-notifications icon,
+        // cross-role notification dot).
+        background: isOwn
+          ? 'var(--accent-amber)'
+          : 'color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))',
+        color: isOwn ? 'var(--bg-deep)' : 'var(--text-primary)',
         fontFamily: 'var(--font-display)',
         fontSize: fontPx,
         fontWeight: 600,
@@ -1467,27 +1474,63 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     panAnimRef.current = requestAnimationFrame(tick)
   }, [clampPan, updateCamera])
 
-  // ─── Phase 17.2.0.1: imperative panToRfp for notification-driven nav. ──
-  // V2App's notification click handler resolves the target RFP, sets
-  // selection state on V2App, then calls this method to pan + zoom the
-  // Directory camera to the marker. Mirrors the in-component RFP click
-  // behaviour (panel-offset compensation, current-zoom retention, 500 ms
-  // ease). Resolves the dot via `layoutRef` so the most-recent layout
-  // is consulted (provisional updates and role switches refresh layout).
+  // ─── Phase 17.2.0.2: focusRfpInternal helper — shared between internal
+  // marker / card click paths AND the externally-driven `selectRfp`
+  // imperative handle. Captures the "select an RFP" side effects:
+  // setPinned with the RFP shape (drives the on-canvas tooltip + select-
+  // state brightening via flushRfpColors), then animatedPanToWithZoom
+  // with panel-offset compensation. Callers handle their own
+  // onRfpClick fan-out (the internal click handlers fire it as part of
+  // their normal flow; the external selectRfp path has V2App already
+  // setting `v22DirectorySelectedRfp` before the imperative call, so it
+  // skips the fan-out to avoid double-setting).
+  //
+  // `opts.zoom`: optional explicit target zoom. Internal click paths
+  // pass nothing → keep current zoom (existing behaviour preserved).
+  // External selectRfp passes `Math.max(zoomRef.current, LOD_THRESHOLD)`
+  // so a notification click from the galactic view (15% zoom) lands at
+  // full-card LOD where the marker reads clearly.
+  const focusRfpInternal = useCallback((d, dotIndex, opts = {}) => {
+    if (!d || !d.rfp) return
+    const screen = worldToScreen(d.x, d.y)
+    setPinned({
+      rfp: d.rfp,
+      x: d.x, y: d.y,
+      screenX: screen.x, screenY: screen.y,
+      ownerParty: d.rfp.owner,
+      dotIndex,
+    })
+    const targetZoom = opts.zoom ?? zoomRef.current
+    const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+    animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+  }, [worldToScreen, animatedPanToWithZoom])
+
+  // ─── Phase 17.2.0.2: imperative `selectRfp(rfp)` for notification-
+  // driven full-select. Behavioural parity with a manual marker click —
+  // sets pinned (drives tooltip + brightening) AND pans + zooms — plus
+  // an explicit zoom-in to full-card LOD when starting from a lower
+  // zoom so the user lands somewhere the marker reads. Replaces
+  // 17.2.0.1's `panToRfp`, which was pan-only at current zoom and so
+  // appeared to do nothing from the default 15% galactic view.
+  // Resolves the dot via `layoutRef` so the most-recent layout is
+  // consulted (provisional updates and role switches refresh layout).
   useImperativeHandle(ref, () => ({
-    panToRfp(rfp) {
+    selectRfp(rfp) {
       if (!rfp || !rfp.id) return false
       const layoutCur = layoutRef.current
       if (!layoutCur) return false
-      const rfpDots = (layoutCur.allDots || []).filter((d) => d.kind === 'rfp')
-      const d = rfpDots.find((x) => x.rfp?.id === rfp.id)
-      if (!d) return false
-      const targetZoom = zoomRef.current
-      const panelOffsetWorld = (PANEL_W / 2) / targetZoom
-      animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+      const rfpDots = (layoutCur.allDots || []).filter((dot) => dot.kind === 'rfp')
+      const dotIndex = rfpDots.findIndex((dot) => dot.rfp?.id === rfp.id)
+      if (dotIndex < 0) return false
+      const d = rfpDots[dotIndex]
+      // Zoom up to at least LOD_THRESHOLD so the marker swaps to its
+      // full-card representation. If the user is already zoomed in
+      // beyond that, keep their current zoom (don't zoom out).
+      const targetZoom = Math.max(zoomRef.current, LOD_THRESHOLD)
+      focusRfpInternal(d, dotIndex, { zoom: targetZoom })
       return true
     },
-  }), [animatedPanToWithZoom])
+  }), [focusRfpInternal])
 
   // ─── Overlay refresh ─────────────────────────────────────────────────
   const updateOverlayRef = useRef(() => {})
@@ -2624,21 +2667,13 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       const rfpDots = layout?.allDots.filter((d) => d.kind === 'rfp') || []
       const d = rfpDots[hit.index]
       if (!d || !d.rfp) return
-      const screen = worldToScreen(d.x, d.y)
-      setPinned({
-        rfp: d.rfp,
-        x: d.x, y: d.y,
-        screenX: screen.x, screenY: screen.y,
-        ownerParty: d.rfp.owner,
-        dotIndex: hit.index,
-      })
+      // Phase 17.2.0.2: shared focus helper replaces inline setPinned +
+      // pan logic. Internal click keeps current zoom (no explicit
+      // override). `onRfpClick` fan-out stays inline so the existing
+      // V2App flow (sets v22DirectorySelectedRfp, clears Claim panel)
+      // fires the same way.
+      focusRfpInternal(d, hit.index)
       onRfpClick?.(d.rfp)
-      const container = containerRef.current
-      if (container) {
-        const targetZoom = zoomRef.current
-        const panelOffsetWorld = (PANEL_W / 2) / targetZoom
-        animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
-      }
       return
     }
     const claimDots = layout?.allDots.filter((d) => d.kind !== 'rfp') || []
@@ -2662,7 +2697,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       const panelOffsetWorld = (PANEL_W / 2) / targetZoom
       animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
     }
-  }, [layout, onClaimDotClick, onRfpClick, raycast, worldToScreen, animatedPanToWithZoom])
+  }, [layout, onClaimDotClick, onRfpClick, raycast, worldToScreen, animatedPanToWithZoom, focusRfpInternal])
 
   // ─── Phase 16.2.7 / 16.2.9: card click in mid-LOD / full-LOD ─────────
   // Mirrors the dot click flow including the animated pan-to-center
@@ -2677,26 +2712,22 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // stale-tooltip bug (clicking from Claim to RFP card or vice versa)
   // resolves naturally — `pinned` carries exactly one of `claim` / `rfp`.
   const onCardClick = useCallback((d, dotIdx) => {
-    const screen = worldToScreen(d.x, d.y)
     if (d.kind === 'rfp') {
-      setPinned({
-        rfp: d.rfp,
-        x: d.x, y: d.y,
-        screenX: screen.x, screenY: screen.y,
-        ownerParty: d.rfp?.owner,
-        dotIndex: dotIdx,
-      })
+      // Phase 17.2.0.2: shared focus helper. Card-click keeps current
+      // zoom (no override) — same behaviour as before this refactor.
+      focusRfpInternal(d, dotIdx)
       onRfpClick?.(d.rfp)
-    } else {
-      setPinned({
-        claim: d.claim,
-        x: d.x, y: d.y,
-        screenX: screen.x, screenY: screen.y,
-        ownerParty: d.claim?.owner,
-        dotIndex: dotIdx,
-      })
-      onClaimDotClick?.(d.claim)
+      return
     }
+    const screen = worldToScreen(d.x, d.y)
+    setPinned({
+      claim: d.claim,
+      x: d.x, y: d.y,
+      screenX: screen.x, screenY: screen.y,
+      ownerParty: d.claim?.owner,
+      dotIndex: dotIdx,
+    })
+    onClaimDotClick?.(d.claim)
     // Phase 16.2.9 Item 1: pan-to-center on card click, mirroring the
     // dot-click handler — Detail Panel opens on the right, so the camera
     // shifts left by panelOffsetWorld = (PANEL_W/2) / zoom so the clicked
@@ -2707,7 +2738,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       const panelOffsetWorld = (PANEL_W / 2) / targetZoom
       animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
     }
-  }, [onClaimDotClick, onRfpClick, worldToScreen, animatedPanToWithZoom])
+  }, [onClaimDotClick, onRfpClick, worldToScreen, animatedPanToWithZoom, focusRfpInternal])
 
   // ─── Zoom controls (top-right, parent-parity) ────────────────────────
   const handleWheel = useCallback((e) => {
@@ -2917,6 +2948,12 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
           // from `labelOpacities[party]` set by the helper.
           const op = labelOpacities[cluster.ownerParty]
           const labelOp = op === undefined ? 1 : op
+          // Phase 17.2.0.2: active actor's own cluster gets amber pillbox
+          // styling. `layout.activeParty` is the party id from
+          // buildV22DirectoryDataForRole (e.g. "GovCo" for Bob).
+          // Carol/AuditCo has no cluster on the Directory, so this
+          // gracefully degenerates to all-neutral on her view.
+          const isOwn = !!layout.activeParty && cluster.ownerParty === layout.activeParty
           return (
             <PillboxLabel
               key={cluster.ownerParty}
@@ -2927,6 +2964,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               opacity={labelOp}
               fontPx={labelFontPx}
               zIndex={clusterZByParty.get(cluster.ownerParty) ?? Z_BASE_CLUSTER_LABEL}
+              isOwn={isOwn}
             />
           )
         })

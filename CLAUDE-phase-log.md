@@ -2673,6 +2673,47 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.2.0.2 completion notes (2026-05-18) — Notification click completion + own-cluster label + RS accordion in solicitation modal
+
+Three items, all polish on top of 17.2 / 17.2.0.1.
+
+**(1) Notification click completion.** Phase 17.2.0.1's `panToRfp` was pan-only at current zoom, so a notification click from the default 15 % galactic view pannned negligibly and did not select the target marker on-canvas (no pinned tooltip, no brightening). Replaced with `selectRfp(rfp)` (imperative handle), backed by a new shared helper:
+
+```js
+const focusRfpInternal = useCallback((d, dotIndex, opts = {}) => {
+  const screen = worldToScreen(d.x, d.y)
+  setPinned({ rfp: d.rfp, x: d.x, y: d.y, screenX: screen.x, screenY: screen.y, ownerParty: d.rfp.owner, dotIndex })
+  const targetZoom = opts.zoom ?? zoomRef.current
+  const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+  animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+}, [worldToScreen, animatedPanToWithZoom])
+```
+
+Both the internal `handleMouseUp` RFP branch and the `onCardClick` RFP branch now call `focusRfpInternal(d, dotIndex)` (no zoom override — current zoom preserved). The external `selectRfp` calls `focusRfpInternal(d, dotIndex, { zoom: Math.max(zoomRef.current, LOD_THRESHOLD) })` so a notification click from the galactic view lands at full-card LOD where the marker reads clearly; from already-zoomed-in views the current zoom is preserved (no zoom-out surprise). V2App's notification handler swaps `directoryLayerRef.current?.panToRfp?.(targetRfp)` → `directoryLayerRef.current?.selectRfp?.(targetRfp)`; the rAF retry loop guard from 17.2.0.1 (cap 60 frames / ~1 s @ 60 fps) is preserved verbatim. V2App's own setV22DirectorySelectedRfp / setV22DirectorySelectedClaim calls still fire before the imperative — those drive the Detail Panel mount path; the imperative drives only the on-canvas state. The shared helper guarantees behavioural parity between manual marker / card click and notification-driven select.
+
+**(2) Active actor's own-cluster label amber styling.** `PillboxLabel` accepts a new `isOwn` boolean prop. When true, `background: var(--accent-amber)` + `color: var(--bg-deep)` (dark text for contrast against amber). Otherwise the existing neutral `color-mix(in srgb, var(--bg-card) 92%, var(--text-dim))` styling stays unchanged. The cluster label render block computes `isOwn = !!layout.activeParty && cluster.ownerParty === layout.activeParty` per rendered cluster. Carol/AuditCo has no cluster on the Directory (no Claims, no Assets — AuditCo is an evaluator that doesn't own a catalog), so this gating naturally degenerates to "no cluster to style" on Carol's view. DOM-probe-verified at runtime: opening the Directory on Bob's view yields exactly 1 amber pillbox (GovCo, computed `rgb(245, 158, 11)`) and 98 neutral. The `--accent-amber` variable is the same one used for the Directory globe active-state, inbox-with-notifications icon, and cross-role notification dot — orthogonal to the indigo avatar-circle gradient on the role-indicator chip itself, but matches the "active-actor signal" amber convention elsewhere in the chrome.
+
+**(3) SolicitationCreateModal — Required Standards accordion.** New section rendered above the Claim picker so the solicitor can review what each RS the RFP references actually requires before choosing a Claim to suggest. Modal accepts a new `requirementsSets` prop (array); V2App threads `publishedRequirementSets` (same source the RFP Detail Panel uses to resolve RS chips). New `RsAccordionEntry` sub-component:
+
+- **Closed state** — clickable row with chevron (`▸`) + name + version pill on the right. Hover lifts background to `var(--bg-raised)`.
+- **Open state** — chevron rotates to `▾`. Expanded panel below shows the RS's `description` (if present) and a list of requirement items. Each item card carries the requirement `id` (mono pill, uppercase), `label` (body, primary text), `description` (secondary, if distinct from label), and `criterion` (muted italic prefixed with "Criterion: ").
+- **Multi-expand** — state is `useState(() => new Set())`; clicking a header toggles that rsId in the set.
+- **Missing-RS** — when an `rsId` in `rfp.requirementsSetIds` doesn't resolve in the `requirementsSets` lookup, the row renders with the raw id in muted text and the expanded body shows "(Standard not found)". (Defensive — the seeded RFP's two RSes are both in `publishedRequirementSets`, but future RFPs referencing unseeded RSes would surface this state.)
+- **Zero RSes** — if `rfp.requirementsSetIds.length === 0`, the section renders muted italic "No required standards specified."
+- **Scrollbox** — section has `max-height: 240px` + `overflow-y: auto`. Bounds modal growth so the Claim picker below remains visible regardless of RS count.
+- **Modal-body scroll** — already handled by ModalShared's `maxHeight: 90vh` + `ModalBody { flex: 1; overflow: auto }`, so the acceptance requirement (modal body scrolls when modal exceeds viewport) is satisfied via existing infrastructure; header + footer stay pinned via flex-shrink: 0.
+- **Section ordering** in the modal body: (1) RFP Required Standards accordion → (2) thin section divider (`1px` line at 60 % opacity) → (3) Claim picker → (4) message field.
+
+**Build clean.** `npm run build` exits 0 with no new warnings. `npm run dev` brought up at port 5173; puppeteer + CDP probe confirms: console clean (only pre-existing `packClusterDense` overflow warnings); GovCo's cluster pillbox on Bob's view renders amber per the DOM inspection above; the V2Canvas2 setState-in-render warning fixed in 17.2.0.1 stays gone.
+
+**Runtime-verification caveats.** Acceptance items 1–3 (notification click → full select with pan + zoom + tooltip + brightening) and items 4–7 from 17.2.0.1 (cursor + hover) require manual mouse interaction — the Three.js raycaster doesn't respond to DOM-dispatched synthetic events per the documented limitation in CLAUDE.md. Items 9–15 (accordion in SolicitationCreateModal) also require a manual flow: switch to Alice → open Bob's Sentinel-4 RFP via Directory → click "Solicit with my Claim" → exercise the accordion. The code paths are statically verified: `RsAccordionEntry` renders with the full requirement schema (id/label/description/criterion all from the seeded MIL-PRF-55681 and System Integration RSes); accordion state uses idempotent Set toggling; the scrollbox + modal-cap chain is already exercised by other modal flows; `requirementsSets={publishedRequirementSets}` prop wiring on the V2App side passes the same seeded RS pool the RFP Detail Panel uses.
+
+**Out of scope** (kept narrow per the brief): Modal opening performance in the Directory layer (still deferred); GovCo RFP placement next to Pinnacle Systems (still deferred); Phase 17.2.1's Accept flow / Request Agreement (still the next major phase); Parent-layer own-cluster styling (this phase is Directory-only per brief); RS-chip → Library click-through (still deferred).
+
+**Doc updates**: footer v0.17.2.0.1 → v0.17.2.0.2 in V2App.jsx; Changelog modal entry prepended above Phase 17.2.0.1; architecture-spec.md §8 Changelog gains a Phase 17.2.0.2 hotfix bullet (no §8 structural change); polish-backlog.md Update Log gains the Phase 17.2.0.2 entry; CLAUDE.md "Current state of the world" rolled forward; this CLAUDE-phase-log.md entry.
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.0.1 completion notes (2026-05-18) — Hotfix: notification routing + Directory cursor/hover + V2Canvas2 setState fix
 
 Three runtime-QA items from Phase 17.2 closed in one pass:
