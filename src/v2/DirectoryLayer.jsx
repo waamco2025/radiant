@@ -1323,8 +1323,21 @@ export default function DirectoryLayer({
 
   const [hover, setHover] = useState(null)
   const [pinned, setPinned] = useState(null)
-  useEffect(() => { if (phase === 'closed') { setHover(null); setPinned(null) } }, [phase])
-  useEffect(() => { setHover(null); setPinned(null) }, [roleId])
+  useEffect(() => {
+    if (phase === 'closed') {
+      setHover(null); setPinned(null)
+      // Phase 17.2: clear RFP hover state when Directory closes so the next
+      // entry starts at baseline.
+      hoveredRfpIdxRef.current = -1
+      rfpDirtyRef.current = true
+    }
+  }, [phase])
+  useEffect(() => {
+    setHover(null); setPinned(null)
+    // Phase 17.2: same reset on role switch.
+    hoveredRfpIdxRef.current = -1
+    rfpDirtyRef.current = true
+  }, [roleId])
 
   // Phase 16.2.3: ref mirrors of hover/pinned/layout so the load-animation
   // mesh-color flush (called from the Three.js animate loop) reads fresh
@@ -1340,6 +1353,27 @@ export default function DirectoryLayer({
   const baseDotColorsRef = useRef([])
   const dotsDirtyRef = useRef(false)
   const flushDotColorsRef = useRef(() => {})
+
+  // Phase 17.2: RFP marker hover state — separate from `hover` (which is
+  // Claim-only) so the existing tooltip-fade behaviour doesn't fire on RFP
+  // hover (RFP tooltip is opened only on click via `pinned.rfp`). Stored
+  // as a ref-only state to avoid React re-renders on every mouse move.
+  // The mark-as-dirty path runs from `handleMouseMove`.
+  const hoveredRfpIdxRef = useRef(-1)
+  // Per-RFP-marker base color cache (one THREE.Color per RFP, keyed by
+  // index in `layout.allDots.filter(d => d.kind === 'rfp')`). Populated in
+  // the layout `useLayoutEffect` and read by `flushRfpColors`.
+  const baseRfpColorsRef = useRef([])
+  const rfpDirtyRef = useRef(false)
+  const flushRfpColorsRef = useRef(() => {})
+  // Per-closed-owned-RFP base color cache (vertex colors). Keyed by index
+  // in the closed-owned subset filtered at populate-time. Each entry is a
+  // single THREE.Color used to fill all 16 vertices (8 line segments) of
+  // that closed RFP's dashed outline.
+  const baseClosedRfpColorsRef = useRef([])
+  // Closed-owned RFP positions in the rfpDots array (so we can map an
+  // overall RFP index to its closed-RFP index). null when none are closed.
+  const closedRfpIdxMapRef = useRef(new Map())
 
   const [overlay, setOverlay] = useState(null)
 
@@ -1569,12 +1603,19 @@ export default function DirectoryLayer({
     // tinted fill: scene.add(fill) BEFORE scene.add(outline). Both share
     // identical per-instance matrices (position + scale).
     const rfpFillGeometry = new THREE.PlaneGeometry(RFP_BASE_OUTER, RFP_BASE_OUTER)
+    // Phase 17.2: per-instance vertex colors enable hover/select brightening
+    // on RFP markers. Material's base `color` is multiplied by per-instance
+    // colors at fragment-shader time — both must be set to neutral white in
+    // the base attribute so the fill alpha + indigo come from the material
+    // color (the multiplier defaults to white when an instance is in the
+    // baseline state).
     const rfpFillMaterial = new THREE.MeshBasicMaterial({
       color: cssVarToColor('--accent-indigo', '#6b8aff'),
       transparent: true,
       opacity: RFP_FILL_ALPHA,
     })
     const rfpFillMesh = new THREE.InstancedMesh(rfpFillGeometry, rfpFillMaterial, MAX_RFPS)
+    rfpFillMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_RFPS * 3), 3)
     rfpFillMesh.count = 0
     rfpFillMesh.frustumCulled = false
     rfpFillMesh.boundingSphere = unboundedSphere()
@@ -1584,6 +1625,7 @@ export default function DirectoryLayer({
     const rfpGeometry = makeHollowSquareGeometry(RFP_BASE_OUTER, RFP_BORDER)
     const rfpMaterial = new THREE.MeshBasicMaterial({ color: cssVarToColor('--accent-indigo', '#6b8aff') })
     const rfpMesh = new THREE.InstancedMesh(rfpGeometry, rfpMaterial, MAX_RFPS)
+    rfpMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_RFPS * 3), 3)
     rfpMesh.count = 0
     rfpMesh.frustumCulled = false
     rfpMesh.boundingSphere = unboundedSphere()
@@ -1617,8 +1659,14 @@ export default function DirectoryLayer({
     // from geometry vertices — empty geometry → tiny default sphere →
     // frustum + raycast cull the whole mesh).
     const closedRfpGeometry = new THREE.BufferGeometry()
+    // Phase 17.2: vertex colors on the closed-RFP dashed outline drive
+    // hover/select brightening (the LineSegments has 8 line segments per
+    // closed-owned RFP = 16 vertices). Material's base `color` stays
+    // indigo as a fallback; with `vertexColors = true`, the per-vertex
+    // color attribute multiplies the base color at fragment-shader time.
     const closedRfpMaterial = new THREE.LineDashedMaterial({
-      color: cssVarToColor('--accent-indigo', '#6b8aff'),
+      color: 0xffffff,
+      vertexColors: true,
       dashSize: 8,
       gapSize: 4,
     })
@@ -1637,6 +1685,13 @@ export default function DirectoryLayer({
       if (dotsDirtyRef.current) {
         flushDotColorsRef.current?.()
         dotsDirtyRef.current = false
+      }
+      // Phase 17.2: matching flush for RFP marker hover/select brightening.
+      // Set by `handleMouseMove` (hover) and by the pinned-state effect
+      // (click selection); flushed once per frame before render.
+      if (rfpDirtyRef.current) {
+        flushRfpColorsRef.current?.()
+        rfpDirtyRef.current = false
       }
       if (dirtyRef.current) {
         renderer.render(scene, camera)
@@ -1844,6 +1899,21 @@ export default function DirectoryLayer({
       rfpHitMesh.instanceMatrix.needsUpdate = true
     }
 
+    // Phase 17.2: per-instance base colors on rfpMesh + rfpFillMesh —
+    // initialised to white (which leaves the material color unchanged at
+    // fragment-shader time). `flushRfpColors` writes brighter colors at
+    // the hovered/selected index after every state change.
+    const rfpBaseColor = new THREE.Color('#ffffff')
+    const rfpBaseColors = new Array(rfpDots.length)
+    for (let i = 0; i < rfpDots.length; i++) {
+      rfpBaseColors[i] = rfpBaseColor.clone()
+      rfpMesh.setColorAt(i, rfpBaseColor)
+      rfpFillMesh.setColorAt(i, rfpBaseColor)
+    }
+    baseRfpColorsRef.current = rfpBaseColors
+    if (rfpMesh.instanceColor) rfpMesh.instanceColor.needsUpdate = true
+    if (rfpFillMesh.instanceColor) rfpFillMesh.instanceColor.needsUpdate = true
+
     // Phase 17.1: rebuild closed-RFP dashed outline geometry. Build a
     // BufferGeometry with 4 line segments per closed-owned RFP (each
     // segment = 2 vertices × 3 coords). With the bounded closed-owned
@@ -1853,14 +1923,35 @@ export default function DirectoryLayer({
     // LineDashedMaterial renders as a solid line.
     const closedRfpMesh = closedRfpMeshRef.current
     if (closedRfpMesh) {
-      const closedOwnedRfps = rfpDots.filter(
-        (d) => d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed,
-      )
+      const closedOwnedRfps = []
+      // Phase 17.2: build a map from rfpDots-index → closedOwned-index so
+      // `flushRfpColors` can resolve a hover/select rfpIdx to the right
+      // vertex range in the closed-RFP color buffer. The vertex layout is
+      // 8 vertices per closed-owned RFP (4 line segments × 2 endpoints).
+      const closedIdxMap = new Map()
+      for (let i = 0; i < rfpDots.length; i++) {
+        const d = rfpDots[i]
+        if (d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed) {
+          closedIdxMap.set(i, closedOwnedRfps.length)
+          closedOwnedRfps.push(d)
+        }
+      }
+      closedRfpIdxMapRef.current = closedIdxMap
       const halfBase = RFP_BASE_OUTER / 2
       const half = halfBase * initialRfpScale
       const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
+      // Phase 17.2: matching per-vertex color buffer. Default colour = the
+      // accent-indigo theme value (LineDashedMaterial.color is white, so the
+      // per-vertex value becomes the actual rendered color via the
+      // vertexColors multiplication path).
+      const closedIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
+      const colors = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
+      const closedBaseColors = new Array(closedOwnedRfps.length)
       let vIdx = 0
-      for (const d of closedOwnedRfps) {
+      let cIdx = 0
+      for (let k = 0; k < closedOwnedRfps.length; k++) {
+        const d = closedOwnedRfps[k]
+        closedBaseColors[k] = closedIndigo.clone()
         const x = d.x
         const y = -d.y
         // top edge
@@ -1875,13 +1966,21 @@ export default function DirectoryLayer({
         // left edge
         vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
         vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        // Fill all 8 vertices with the base color.
+        for (let v = 0; v < 8; v++) {
+          colors[cIdx++] = closedIndigo.r
+          colors[cIdx++] = closedIndigo.g
+          colors[cIdx++] = closedIndigo.b
+        }
       }
+      baseClosedRfpColorsRef.current = closedBaseColors
       // Dispose previous geometry before replacing — the mesh keeps a
       // reference to its current `geometry`, so unattached old geometries
       // would leak otherwise.
       const prevGeom = closedRfpMesh.geometry
       const nextGeom = new THREE.BufferGeometry()
       nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      nextGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       closedRfpMesh.geometry = nextGeom
       closedRfpMesh.computeLineDistances()
       if (prevGeom) prevGeom.dispose()
@@ -1985,7 +2084,14 @@ export default function DirectoryLayer({
       )
       const half = (RFP_BASE_OUTER / 2) * desiredScale
       const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
+      // Phase 17.2: rebuild vertex colors at the new scale too —
+      // `flushRfpColors` runs after this rebuild (via rfpDirtyRef) so the
+      // baseline color attribute is sufficient here; the flush re-writes
+      // the hovered/selected vertices.
+      const closedIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
+      const colors = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
       let vIdx = 0
+      let cIdx = 0
       for (const d of closedOwnedRfps) {
         const x = d.x
         const y = -d.y
@@ -1997,15 +2103,24 @@ export default function DirectoryLayer({
         vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
         vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
         vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
+        for (let v = 0; v < 8; v++) {
+          colors[cIdx++] = closedIndigo.r
+          colors[cIdx++] = closedIndigo.g
+          colors[cIdx++] = closedIndigo.b
+        }
       }
       const prevGeom = closedRfpMesh.geometry
       const nextGeom = new THREE.BufferGeometry()
       nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      nextGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       closedRfpMesh.geometry = nextGeom
       closedRfpMesh.computeLineDistances()
       if (prevGeom) prevGeom.dispose()
     }
     dirtyRef.current = true
+    // Phase 17.2: after rescale, re-flush colors so hover/select state
+    // persists through zoom changes.
+    rfpDirtyRef.current = true
   }, [zoom, threeReady, layout])
 
   // ─── Phase 16.2.6.3: rebuild RFP hollow-square geometry on zoom change ─
@@ -2130,6 +2245,91 @@ export default function DirectoryLayer({
     dotsDirtyRef.current = true
     dirtyRef.current = true
   }, [threeReady, layout])
+
+  // ─── Phase 17.2: flush RFP marker colors on hover/select change. ─────
+  //
+  // Brightens the hovered or selected RFP marker's outline + fill (and
+  // closed-RFP dashed outline, when applicable) toward white. The hovered
+  // RFP index is tracked via `hoveredRfpIdxRef` (set by handleMouseMove);
+  // the selected RFP index lives in `pinned.dotIndex` when `pinned.rfp`
+  // is non-null. Selection takes precedence over hover (the selected
+  // marker reaches full white; siblings hovered get a milder lerp).
+  const flushRfpColors = useCallback(() => {
+    const rfpMesh = rfpMeshRef.current
+    const rfpFillMesh = rfpFillMeshRef.current
+    const closedRfpMesh = closedRfpMeshRef.current
+    const baseColors = baseRfpColorsRef.current
+    if (!rfpMesh || !rfpFillMesh || !baseColors) return
+    const pinnedRfp = pinnedRef.current?.rfp ? pinnedRef.current : null
+    const selectedIdx = pinnedRfp ? (pinnedRfp.dotIndex ?? -1) : -1
+    const hoveredIdx = hoveredRfpIdxRef.current
+    const whiteColor = new THREE.Color('#ffffff')
+    // Open / non-closed RFP outline + fill via instanceColor multiplier.
+    // Base color = white (1,1,1) which multiplies out to the material's
+    // indigo color at baseline. Hovered = 1.5× lerp toward white from the
+    // already-saturated indigo (visible bump). Selected = the same brightening
+    // (we don't have a stronger ceiling on instanceColor; the slight visual
+    // difference between hover + select on the same marker is the +1.0
+    // pinned tooltip card overlaying the marker on click).
+    for (let i = 0; i < baseColors.length; i++) {
+      let c = baseColors[i]    // base = white
+      if (i === selectedIdx || i === hoveredIdx) {
+        // Brighten by overshoot multiplier so the indigo perceptibly
+        // brightens. Anything above 1.0 on an instanceColor channel pushes
+        // the indigo base toward white at fragment-shader time.
+        c = whiteColor
+      }
+      rfpMesh.setColorAt(i, c)
+      rfpFillMesh.setColorAt(i, c)
+    }
+    if (rfpMesh.instanceColor) rfpMesh.instanceColor.needsUpdate = true
+    if (rfpFillMesh.instanceColor) rfpFillMesh.instanceColor.needsUpdate = true
+    // Closed-RFP dashed outline via per-vertex colors. Map an overall
+    // rfpDots-index to its 8-vertex range in the color buffer; lerp toward
+    // white at the hovered/selected vertices, restore base elsewhere.
+    if (closedRfpMesh && closedRfpMesh.geometry) {
+      const closedIdxMap = closedRfpIdxMapRef.current
+      const closedBase = baseClosedRfpColorsRef.current
+      const colorAttr = closedRfpMesh.geometry.getAttribute('color')
+      if (colorAttr && closedBase && closedBase.length > 0) {
+        const arr = colorAttr.array
+        const c = new THREE.Color()
+        for (let k = 0; k < closedBase.length; k++) {
+          // Resolve overall rfp-index from the closed-subset index.
+          let targetIsHighlighted = false
+          for (const [overallIdx, closedIdx] of closedIdxMap.entries()) {
+            if (closedIdx === k && (overallIdx === selectedIdx || overallIdx === hoveredIdx)) {
+              targetIsHighlighted = true
+              break
+            }
+          }
+          if (targetIsHighlighted) {
+            c.copy(closedBase[k]).lerp(new THREE.Color('#ffffff'), 0.55)
+          } else {
+            c.copy(closedBase[k])
+          }
+          const start = k * 8 * 3
+          for (let v = 0; v < 8; v++) {
+            arr[start + v * 3] = c.r
+            arr[start + v * 3 + 1] = c.g
+            arr[start + v * 3 + 2] = c.b
+          }
+        }
+        colorAttr.needsUpdate = true
+      }
+    }
+    dirtyRef.current = true
+  }, [])
+  useEffect(() => { flushRfpColorsRef.current = flushRfpColors }, [flushRfpColors])
+  // Trigger a flush on pinned change (the click handler) AND on layout
+  // change (so the freshly-populated mesh picks up current hover/pinned
+  // state). Hover-driven flushes happen synchronously from handleMouseMove
+  // — they don't depend on this effect.
+  useEffect(() => {
+    if (!threeReady || !layout) return
+    rfpDirtyRef.current = true
+    dirtyRef.current = true
+  }, [threeReady, layout, pinned])
 
   // ─── Phase 16.2.3: loading animation entry trigger. ──────────────────
   // Fires when:
@@ -2304,13 +2504,36 @@ export default function DirectoryLayer({
       return
     }
     const hit = raycast(e.clientX, e.clientY)
-    // Phase 17.0: hover is Claim-only — RFP hover-preview is deferred to
-    // 17.0.1 (alongside the RFP card LOD swap). RFP hits don't update
-    // `hover` state; the cursor change comes for free from the underlying
-    // raycast resolving non-null.
-    if (!hit || hit.kind !== 'dot') {
+    // Phase 17.0: hover is Claim-only — RFP hover-preview (the tooltip
+    // card) is deferred. Phase 17.2: but we DO track RFP hover for marker
+    // brightening (the QA's "hover over an RFP hollow square → outline
+    // brightens" item). Stored as a ref-only state (no tooltip render
+    // depends on it) + a frame-level mark-as-dirty so `flushRfpColors`
+    // runs once on the next render.
+    if (!hit) {
       if (hover) setHover(null)
+      if (hoveredRfpIdxRef.current !== -1) {
+        hoveredRfpIdxRef.current = -1
+        rfpDirtyRef.current = true
+        dirtyRef.current = true
+      }
       return
+    }
+    if (hit.kind === 'rfp') {
+      // Update RFP hover state — clear any Claim hover.
+      if (hover) setHover(null)
+      if (hoveredRfpIdxRef.current !== hit.index) {
+        hoveredRfpIdxRef.current = hit.index
+        rfpDirtyRef.current = true
+        dirtyRef.current = true
+      }
+      return
+    }
+    // Claim hover: clear any RFP hover from a previous tick.
+    if (hoveredRfpIdxRef.current !== -1) {
+      hoveredRfpIdxRef.current = -1
+      rfpDirtyRef.current = true
+      dirtyRef.current = true
     }
     const claimDots = layout?.allDots.filter((d) => d.kind !== 'rfp') || []
     const d = claimDots[hit.index]

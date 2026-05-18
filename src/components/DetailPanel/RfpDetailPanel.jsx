@@ -9,6 +9,20 @@
 // Phase 17.0 was read-only — no footer actions. Phase 17.1 adds an
 // owner-only footer with Close / Reopen direct-action buttons and the
 // CLOSED status badge + Closed-date row.
+//
+// Phase 17.2 — Solicitations section above the footer:
+//   • Owner (status open): heading "Incoming Solicitations (N)" + cards
+//     listing every solicitation; empty case shows muted "No solicitations yet."
+//   • Solicitor (non-owner, has existing solicitation): heading "Your
+//     Solicitation" + single card; footer Solicit button replaced by
+//     muted "Already solicited" text.
+//   • Other non-owner (open): no section; footer Solicit button is the entry
+//     point to SolicitationCreateModal.
+// Closed-status RFPs: the owner still sees their incoming solicitations
+// (must be able to act on them); the Solicit button is hidden because
+// closed RFPs aren't visible to non-owners (Phase 17.1 directory filter).
+
+import SolicitationCard from './SolicitationCard.jsx'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
 
@@ -159,7 +173,20 @@ function ActionButton({ label, onClick, variant }) {
   )
 }
 
-export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = [], onClose, onCloseRfp, onReopenRfp }) {
+export default function RfpDetailPanel({
+  rfp,
+  activeParty,
+  requirementsSets = [],
+  onClose,
+  onCloseRfp,
+  onReopenRfp,
+  // Phase 17.2: solicitations + activeClaims + handlers.
+  solicitations = [],
+  activeClaims = [],
+  claimsById = null,    // optional Map<claimId, claim> used to resolve Claim metadata for SolicitationCard
+  onOpenSolicitModal,    // ({ rfp }) => void — parent opens SolicitationCreateModal
+  onRejectSolicitation,  // (solicitation) => void — parent opens SolicitationRejectModal
+}) {
   if (!rfp) return null
 
   // Phase 17.0: requirementsSets is the lookup array (id → {name, version}).
@@ -181,6 +208,21 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
   // and gets the Close / Reopen footer.
   const isOwner = !!activeParty && rfp.owner === activeParty
   const isClosed = rfp.status === 'closed'
+
+  // Phase 17.2: solicitation view-state.
+  // userSolicitation — the active actor's own outgoing solicitation against
+  //   this RFP (null when none exists). Identifies the "solicitor" branch.
+  // incomingSolicitations — owner view shows all; everyone else gets [].
+  // showSolicitButton — non-owner + status open + no existing solicitation.
+  // The Solicit button is gated on `status === 'open'`; closed RFPs aren't
+  // reachable by non-owners (Directory filter, Phase 17.1) but the gate is
+  // defensive in case future code surfaces the panel anyway.
+  const userSolicitation = !isOwner
+    ? (solicitations || []).find((s) => s.solicitor === activeParty) || null
+    : null
+  const incomingSolicitations = isOwner ? (solicitations || []) : []
+  const showSolicitButton = !isOwner && !userSolicitation && rfp.status === 'open'
+  const showAlreadySolicited = !isOwner && !!userSolicitation && rfp.status === 'open'
 
   return (
     <div style={{
@@ -332,13 +374,65 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
             }}>{formatDateTime(rfp.closedDate)}</div>
           </div>
         )}
+
+        {/* Phase 17.2: Solicitations section.
+            Three branches drive what renders:
+              • Owner view → "Incoming Solicitations (N)" + cards (or muted
+                empty-state copy when N === 0). Owner sees this on BOTH open
+                and closed RFPs (must be able to act on existing solicitations
+                even after closing).
+              • Solicitor view → "Your Solicitation" + the single card showing
+                their own outgoing solicitation.
+              • Other non-owner → no section.
+            Section sits inside the scrollable body so long lists scroll
+            with the rest of the body content (Required Standards, etc). */}
+        {isOwner && (
+          <div style={{ marginBottom: 18 }}>
+            <SectionHeading>Incoming Solicitations ({incomingSolicitations.length})</SectionHeading>
+            {incomingSolicitations.length === 0 ? (
+              <div style={{
+                fontSize: 12,
+                color: 'var(--text-dim)',
+                fontStyle: 'italic',
+              }}>No solicitations yet.</div>
+            ) : (
+              <div>
+                {incomingSolicitations.map((s) => {
+                  const claim = claimsById ? claimsById.get(s.claimId) : null
+                  return (
+                    <SolicitationCard
+                      key={s.id}
+                      solicitation={s}
+                      claim={claim}
+                      viewerRole="owner"
+                      onReject={onRejectSolicitation}
+                    />
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {!isOwner && userSolicitation && (
+          <div style={{ marginBottom: 18 }}>
+            <SectionHeading>Your Solicitation</SectionHeading>
+            <SolicitationCard
+              solicitation={userSolicitation}
+              claim={claimsById ? claimsById.get(userSolicitation.claimId) : null}
+              viewerRole="solicitor"
+            />
+          </div>
+        )}
       </div>
 
       {/* Phase 17.1: owner-only footer with single direct-action button —
-          Close (open) or Reopen (closed). Non-owners see no footer at all
-          (the body simply ends at "Posted" / "Closed"). Matches the
-          panel-footer convention from V22NodeDetailPanel: bottom-pinned,
-          border-top separator, flex row at 12px 18px padding. */}
+          Close (open) or Reopen (closed).
+          Phase 17.2: non-owner footer extension — "Solicit with my Claim"
+          button on open RFPs without an existing solicitation, or a muted
+          "Already solicited" line when the active actor has one. Other
+          non-owner cases (closed RFP) see no footer; that path is also
+          gated by the Directory filter (closed RFPs aren't visible to
+          non-owners) but the defensive render is intentional. */}
       {isOwner && (
         <div style={{
           padding: '12px 18px',
@@ -361,6 +455,32 @@ export default function RfpDetailPanel({ rfp, activeParty, requirementsSets = []
             />
           )}
         </div>
+      )}
+      {showSolicitButton && (
+        <div style={{
+          padding: '12px 18px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          gap: 8,
+          flexShrink: 0,
+        }}>
+          <ActionButton
+            label="Solicit with my Claim"
+            variant="affirm"
+            onClick={() => onOpenSolicitModal?.({ rfp })}
+          />
+        </div>
+      )}
+      {showAlreadySolicited && (
+        <div style={{
+          padding: '12px 18px',
+          borderTop: '1px solid var(--border)',
+          flexShrink: 0,
+          fontSize: 12,
+          color: 'var(--text-dim)',
+          fontStyle: 'italic',
+          textAlign: 'center',
+        }}>Already solicited — see above.</div>
       )}
     </div>
   )

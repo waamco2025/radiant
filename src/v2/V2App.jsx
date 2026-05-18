@@ -24,6 +24,8 @@ import {
   buildV22SharedArtifacts, mergeProvisionals,
   // Phase 17.1: closed-RFP lifecycle merge layer.
   mergeClosedRfps,
+  // Phase 17.2: RFP solicitation factory + merge layer.
+  makeRfpSolicitation, mergeSolicitations,
   // Phase 11B: synthetic-node helper used by the directory cluster-click
   // flow so V22NodeDetailPanel can render for a Claim that lives only on
   // the directory layer (no parent-canvas node present).
@@ -59,6 +61,9 @@ import EvaluationAgreementDetailPanel from '../components/DetailPanel/Evaluation
 import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx'
 // Phase 17.0: read-only Detail Panel for RFP markers on the Directory.
 import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
+// Phase 17.2: solicitation create / reject modals.
+import SolicitationCreateModal from '../components/modals/SolicitationCreateModal.jsx'
+import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
@@ -261,6 +266,20 @@ export default function V2App() {
   // a dashed-outline visual treatment at every Directory LOD; non-owners
   // see them filtered out by `buildV22DirectoryDataForRole`.
   const [v22ClosedRfpIds, setV22ClosedRfpIds] = useState(() => new Map())
+  // Phase 17.2: session-state Map<solicitationId, RfpSolicitation> for
+  // seller-initiated solicitations against an RFP. Mirror of
+  // `v22ClosedRfpIds` shape — Map so updates (rejection, response date)
+  // mutate in place via setV22Solicitations(prev => new Map(prev).set(...)).
+  // Overlaid on the shared artifact set via `mergeSolicitations`. Demo
+  // participants create these in real time; seed set is empty.
+  const [v22Solicitations, setV22Solicitations] = useState(() => new Map())
+  // Phase 17.2: transient UI state for the solicitation modals.
+  // `v22SolicitOpenForRfp` — non-null when SolicitationCreateModal should
+  // render (`{ rfp }`); null when closed.
+  // `v22SolicitationToReject` — non-null when SolicitationRejectModal
+  // should render (the target solicitation object); null when closed.
+  const [v22SolicitOpenForRfp, setV22SolicitOpenForRfp] = useState(null)
+  const [v22SolicitationToReject, setV22SolicitationToReject] = useState(null)
   const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
@@ -2515,6 +2534,97 @@ export default function V2App() {
     }
   }, [activeRole.party, activeRole.partyDot, updateRoleState])
 
+  // ── Phase 17.2: RFP Solicitation handlers ────────────────────────────
+  //
+  // Submit creates an RfpSolicitation in v22Solicitations + fires a
+  // v22-rfp-solicitation-received notification on the RFP owner's inbox.
+  // Reject updates the existing solicitation status to 'rejected', stamps
+  // respondedDate + rejectionMessage, and fires a v22-rfp-solicitation-
+  // rejected notification on the solicitor's inbox.
+  const handleCreateSolicitation = useCallback(({ rfpId, claimId, message }) => {
+    // Resolve the target RFP from the seed set + closed-RFP merge so the
+    // owner party is available for notification routing. The seed `rfps`
+    // never moves between owners, so a plain lookup is sufficient.
+    const sharedForLookup = mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds)
+    const rfp = (sharedForLookup.rfps || []).find((r) => r.id === rfpId)
+    if (!rfp) return
+    const id = `solicit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const solicitation = makeRfpSolicitation({
+      id,
+      rfpId,
+      claimId,
+      solicitor: activeRole.party,
+      recipient: rfp.owner,
+      message: message || '',
+    })
+    setV22Solicitations((prev) => {
+      const next = new Map(prev)
+      next.set(id, solicitation)
+      return next
+    })
+    // Deliver notification to the RFP owner. ROLES lookup mirrors the
+    // existing notification fan-out pattern; if the owner isn't a
+    // switchable role (mock supplier actor), the notification simply has
+    // no inbox to land in — that's OK, the demo flow only exercises
+    // primary-party RFPs (Bob's Sentinel-4).
+    const recipientRole = ROLES.find((r) => r.party === rfp.owner)
+    if (recipientRole) {
+      enqueueV22NotificationForRequester(recipientRole.id, {
+        id: `v22-rfp-solicitation-received-${id}`,
+        type: 'v22-rfp-solicitation-received',
+        from: { name: activeRole.party, dot: activeRole.partyDot },
+        asset: { name: rfp.name, pin: null },
+        connectTo: null,
+        solicitationId: id,
+        rfpId,
+        rfpName: rfp.name,
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+    // Close the create modal.
+    setV22SolicitOpenForRfp(null)
+  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
+
+  const handleRejectSolicitation = useCallback(({ solicitationId, rejectionMessage }) => {
+    let updated = null
+    setV22Solicitations((prev) => {
+      const existing = prev.get(solicitationId)
+      if (!existing) return prev
+      const next = new Map(prev)
+      updated = {
+        ...existing,
+        status: 'rejected',
+        respondedDate: new Date().toISOString(),
+        rejectionMessage: rejectionMessage || null,
+      }
+      next.set(solicitationId, updated)
+      return next
+    })
+    // Resolve outside the setter so notification payload reads the final
+    // shape. We close over `updated` set inside the updater; React calls
+    // the updater synchronously in the same tick.
+    if (updated) {
+      const sharedForLookup = mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds)
+      const rfp = (sharedForLookup.rfps || []).find((r) => r.id === updated.rfpId)
+      const solicitorRole = ROLES.find((r) => r.party === updated.solicitor)
+      if (solicitorRole) {
+        enqueueV22NotificationForRequester(solicitorRole.id, {
+          id: `v22-rfp-solicitation-rejected-${updated.id}`,
+          type: 'v22-rfp-solicitation-rejected',
+          from: { name: activeRole.party, dot: activeRole.partyDot },
+          asset: { name: rfp?.name || 'an RFP', pin: null },
+          connectTo: null,
+          solicitationId: updated.id,
+          rfpId: updated.rfpId,
+          rfpName: rfp?.name || '',
+          rejectionMessage: updated.rejectionMessage,
+          date: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+    setV22SolicitationToReject(null)
+  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
+
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, terms, note }) => {
     if (!v22AmendingDaId) return
     // Phase 7 carry-over #2: compute notification targets BEFORE the
@@ -4377,11 +4487,17 @@ export default function V2App() {
                     const isV22BadgeTemplateNewVersion = req.type === 'v22-badge-template-new-version'
                     // Phase 14.2: PoE creation notification.
                     const isV22PoeCreated = req.type === 'v22-poe-created'
+                    // Phase 17.2: RFP solicitation notifications. Received
+                    // lands on the RFP owner (Bob); rejected lands on the
+                    // solicitor (Alice). Click on either routes Directory →
+                    // RFP marker → RfpDetailPanel.
+                    const isV22RfpSolicitationReceived = req.type === 'v22-rfp-solicitation-received'
+                    const isV22RfpSolicitationRejected = req.type === 'v22-rfp-solicitation-rejected'
                     // Phase 11.6 (#164): amendment-proposal accept/reject get
                     // their own colors — green for accepted, red for rejected
                     // — to match the actionable consequence (vs. the
                     // generic indigo "informational amendment" badges).
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked || isV22RfpSolicitationRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale || isV22RfpSolicitationReceived ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
@@ -4393,7 +4509,7 @@ export default function V2App() {
                     // consequences (accept/reject), distinct from the
                     // informational AMENDMENT category used for DA
                     // amendments and the rolled-back unilateral EA model.
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : 'REQUEST'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : isV22RfpSolicitationReceived ? 'SOLICITATION' : isV22RfpSolicitationRejected ? 'REJECTED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -4665,6 +4781,32 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
+                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected') {
+                          // Phase 17.2: click navigates to Directory → RFP
+                          // marker → RfpDetailPanel. Both notification types
+                          // route to the same RFP — received lands on the
+                          // owner (Bob); rejected lands on the solicitor
+                          // (Alice). Each side sees their own perspective
+                          // (incoming list vs. own solicitation card) via
+                          // the panel's three-way visibility branch.
+                          //
+                          // Click is auto-dismissed since the loop terminates
+                          // after the rejection — no further action needed
+                          // (the panel surfaces the latest state).
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          // Resolve the RFP from the seed + closed-RFP merge.
+                          const sharedRfps = mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds).rfps || []
+                          const targetRfp = sharedRfps.find((r) => r.id === req.rfpId) || null
+                          if (targetRfp) {
+                            // Ensure Directory is open. Mutual exclusion:
+                            // clear any open Claim panel.
+                            setV22DirectoryOpen(true)
+                            setV22DirectorySelectedClaim(null)
+                            setV22DirectorySelectedRfp(targetRfp)
+                          }
                         } else if (req.type === 'v22-poe-created') {
                           // Phase 14.2: click navigates to the PoE Detail
                           // Panel on the recipient's canvas.
@@ -4872,7 +5014,11 @@ export default function V2App() {
                                                                       ? `${req.from.name} published v${req.badge?.version ?? '?'} of "${req.badge?.name || 'Badge Template'}". Your existing badge of this template remains valid.`
                                                                       : isV22PoeCreated
                                                                         ? `${req.from.name} created a Proof of Evaluation${req.claimName ? ` on your Claim "${req.claimName}"` : ''}.`
-                                                                        : req.asset?.name || ''
+                                                                        : isV22RfpSolicitationReceived
+                                                                          ? `${req.from.name} solicited your RFP${req.rfpName ? ` — Re: ${req.rfpName}` : ''}.`
+                                                                          : isV22RfpSolicitationRejected
+                                                                            ? `${req.from.name} rejected your solicitation${req.rfpName ? ` — Re: ${req.rfpName}` : ''}.${req.rejectionMessage ? ` "${req.rejectionMessage}"` : ''}`
+                                                                            : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -5865,7 +6011,10 @@ export default function V2App() {
               // app footer (footer ≈ 28px tall at z-300). Previously
               // bottom: 0 made the Detail Panel extend behind the footer,
               // cutting off the "Request Evaluation Agreement" button.
-              bottom: 28,
+              // Phase 17.2 Item 11: bumped 28 → 27 to close a 1px hairline
+              // gap visible on the Directory-layer Claim Detail Panel.
+              // Matches the parallel adjustment on the RFP panel mount.
+              bottom: 27,
               width: 480,
               zIndex: 200,
             }}>
@@ -5958,19 +6107,38 @@ export default function V2App() {
           // snapshot from the original click). Fall back to the snapshot
           // if the artifact isn't in shared (defensive — shouldn't
           // happen for seeded RFPs).
-          const mergedShared = mergeClosedRfps(
-            buildV22SharedArtifacts(),
-            v22ClosedRfpIds,
+          // Phase 17.2: also chain mergeSolicitations so the panel sees
+          // session-state solicitations on every render. claimsById Map
+          // is built once here and passed to the panel (which forwards
+          // to each SolicitationCard for name + owner resolution).
+          const mergedShared = mergeSolicitations(
+            mergeClosedRfps(
+              mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals),
+              v22ClosedRfpIds,
+            ),
+            v22Solicitations,
           )
           const currentRfp = (mergedShared.rfps || []).find(
             (r) => r.id === v22DirectorySelectedRfp.id,
           ) || v22DirectorySelectedRfp
+          const solicitationsForRfp = (mergedShared.rfpSolicitations || []).filter(
+            (s) => s.rfpId === currentRfp.id,
+          )
+          const claimsByIdMap = new Map((mergedShared.claims || []).map((c) => [c.id, c]))
+          // Active actor's own Claims — passed to the create modal as the
+          // pickable list. Owner of a Claim is the active actor's party.
+          const myClaims = (mergedShared.claims || []).filter((c) => c.owner === activeRole.party)
           return (
             <div style={{
               position: 'fixed',
               top: 61,
               right: 0,
-              bottom: 28,
+              // Phase 17.2 Item 11: close the 1px gap between Detail
+              // Panel and the app footer. The footer measures 27px at
+              // its DOM bounding box at the canonical viewport zoom; the
+              // Phase 16.1.3 Item 5 value of 28px left a 1px hairline
+              // gap visible to the user. Setting bottom:27 closes it.
+              bottom: 27,
               width: 480,
               zIndex: 200,
             }}>
@@ -5998,8 +6166,51 @@ export default function V2App() {
                     return next
                   })
                 }}
+                // Phase 17.2: solicitation props.
+                solicitations={solicitationsForRfp}
+                activeClaims={myClaims}
+                claimsById={claimsByIdMap}
+                onOpenSolicitModal={({ rfp: targetRfp }) => setV22SolicitOpenForRfp({ rfp: targetRfp })}
+                onRejectSolicitation={(solicitation) => setV22SolicitationToReject(solicitation)}
               />
             </div>
+          )
+        })()}
+
+        {/* Phase 17.2: SolicitationCreateModal — opened from the
+            non-owner RfpDetailPanel footer. Single-Claim picker against
+            the active actor's own Claims. On submit, V2App's
+            handleCreateSolicitation builds the artifact + fires a
+            v22-rfp-solicitation-received notification on the owner's
+            inbox. */}
+        {v22SolicitOpenForRfp && (() => {
+          const sharedForModal = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const myClaims = (sharedForModal.claims || []).filter((c) => c.owner === activeRole.party)
+          return (
+            <SolicitationCreateModal
+              rfp={v22SolicitOpenForRfp.rfp}
+              activeClaims={myClaims}
+              onSubmit={handleCreateSolicitation}
+              onCancel={() => setV22SolicitOpenForRfp(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 17.2: SolicitationRejectModal — opened from
+            SolicitationCard's Reject button on the owner view. Submit
+            transitions the solicitation to 'rejected' + fires a
+            v22-rfp-solicitation-rejected notification on the solicitor's
+            inbox. */}
+        {v22SolicitationToReject && (() => {
+          const sharedForReject = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const claim = (sharedForReject.claims || []).find((c) => c.id === v22SolicitationToReject.claimId)
+          return (
+            <SolicitationRejectModal
+              solicitation={v22SolicitationToReject}
+              solicitorClaimName={claim?.name || v22SolicitationToReject.claimId}
+              onSubmit={handleRejectSolicitation}
+              onCancel={() => setV22SolicitationToReject(null)}
+            />
           )
         })()}
 
@@ -6866,7 +7077,15 @@ export default function V2App() {
                     setForceExpandSda(null)
                     setV22DirectoryOpen(false)
                     setV22DirectorySelectedClaim(null)
+                    setV22DirectorySelectedRfp(null)
                     setV22DirectoryWipeOrigin(null)
+                    // Phase 17.1 + 17.2: clear session-state RFP closures
+                    // and outgoing solicitations so the demo returns to the
+                    // seeded RFP set (no closed RFPs, no solicitations).
+                    setV22ClosedRfpIds(new Map())
+                    setV22Solicitations(new Map())
+                    setV22SolicitOpenForRfp(null)
+                    setV22SolicitationToReject(null)
                     setV22ResetConfirmOpen(false)
                   }}
                 />
@@ -7861,7 +8080,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.1 &middot; Changelog
+          v0.17.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -7908,6 +8127,17 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2', date: '2026-05-18', label: 'Phase 17.2', items: [
+                  'Phase 17.2 — RFP solicitation flow (submit + deliver + reject loop). Opens the seller→buyer engagement axis: sellers solicit their existing public Claims against a buyer\'s open RFP from the RfpDetailPanel; buyers see incoming solicitations in the panel and can reject with an optional reply.',
+                  'New `makeRfpSolicitation(...)` factory in v2_2Data.js with status taxonomy `\'pending\' | \'rejected\' | \'accepted\'` (the accepted branch is reserved for Phase 17.2.1\'s Request Agreement flow). New `mergeSolicitations(shared, solicitations)` overlay (mirror of mergeProvisionals / mergeClosedRfps shape — Map storage so updates mutate in place).',
+                  'V2App `v22Solicitations: Map<id, RfpSolicitation>` session state. Two new handlers: `handleCreateSolicitation` builds the artifact + fires a `v22-rfp-solicitation-received` notification on the RFP owner\'s inbox; `handleRejectSolicitation` updates status + respondedDate + rejectionMessage + fires a `v22-rfp-solicitation-rejected` notification on the solicitor\'s inbox.',
+                  'New SolicitationCreateModal (Claim picker + optional message field, max 500 chars, picker defaults to zero selected per CLAUDE.md convention) + SolicitationRejectModal (optional 300-char reply, red destructive submit) + SolicitationCard (renders a single solicitation inside RfpDetailPanel with status badge, message blocks, action bar — `Request Agreement` disabled with `Coming in Phase 17.2.1` tooltip; `Reject` enabled on pending).',
+                  'RfpDetailPanel three-way visibility branch on solicitations: owner sees `Incoming Solicitations (N)` with all cards (empty case shows muted `No solicitations yet.`); solicitor sees `Your Solicitation` with their single card (REJECTED state surfaces buyer\'s reply in a separate block); other non-owner sees no section. Footer extension: non-owner + status open + no existing solicitation → `Solicit with my Claim` button; non-owner + existing solicitation → muted `Already solicited — see above.` line.',
+                  'Notification routing: both new types (`v22-rfp-solicitation-received` lands on owner; `v22-rfp-solicitation-rejected` lands on solicitor) navigate to Directory → RFP marker → RfpDetailPanel on click. Auto-dismissed since the loop terminates after rejection.',
+                  'DirectoryLayer RFP marker hover + select brightening (Item 19 + 20): per-instance `instanceColor` attribute on rfpMesh + rfpFillMesh (brightens to white on hover/select index); per-vertex `color` attribute on the closed-RFP `LineDashedMaterial` (lerp toward white on the hovered/selected closed RFP\'s 8-vertex range). New `flushRfpColors` flush callback parallel to flushDotColors.',
+                  'Detail Panel 1px gap fix (Item 21): bumped both Directory-layer Detail Panel mount blocks (Claim + RFP) from `bottom: 28` to `bottom: 27` to close a 1px hairline gap above the app footer.',
+                  'Footer rolls forward to v0.17.2.',
+                ]},
                 { version: '0.17.1', date: '2026-05-18', label: 'Phase 17.1', items: [
                   'Phase 17.1 — RFP close/reopen lifecycle (owner-side). Bob (or any RFP owner) can now close an RFP from its Detail Panel; closed RFPs render dashed on the owner\'s Directory at every LOD and disappear from non-owners\' Directories.',
                   '`makeRfp` factory validates `status` against a `\'open\' | \'closed\'` taxonomy + accepts a `closedDate` ISO string (null when open). New exported `closeRfp(rfp, closedDate)` and `reopenRfp(rfp)` pure transforms; new `mergeClosedRfps(shared, closedRfpIds)` overlays session state on shared artifacts (mirror of mergeProvisionals shape, Map storage so each closure keeps its captured timestamp).',

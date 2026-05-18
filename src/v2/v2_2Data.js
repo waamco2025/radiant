@@ -1364,6 +1364,67 @@ export function mergeClosedRfps(shared, closedRfpIds) {
   return { ...shared, rfps: next }
 }
 
+// Phase 17.2: RFP Solicitation — a seller invites a buyer to consider one of
+// the seller's existing public Claims against the buyer's open RFP. One
+// solicitation per (solicitor, rfpId) pair (enforced at the call site in V2App;
+// the factory itself doesn't deduplicate).
+//
+// The 'accepted' status validates here but isn't reachable from the UI in
+// Phase 17.2 — reserved for Phase 17.2.1's Request Agreement flow which
+// will route through the existing cold-path EA+DA wiring.
+const RFP_SOLICITATION_STATUSES = new Set(['pending', 'rejected', 'accepted'])
+
+export function makeRfpSolicitation({
+  id,
+  rfpId,
+  claimId,
+  solicitor,
+  recipient,
+  message = '',
+  status = 'pending',
+  createdDate,
+  respondedDate = null,
+  rejectionMessage = null,
+}) {
+  if (!id) throw new Error('makeRfpSolicitation: id required')
+  if (!rfpId) throw new Error('makeRfpSolicitation: rfpId required')
+  if (!claimId) throw new Error('makeRfpSolicitation: claimId required')
+  if (!solicitor) throw new Error('makeRfpSolicitation: solicitor required')
+  if (!recipient) throw new Error('makeRfpSolicitation: recipient required')
+  if (!RFP_SOLICITATION_STATUSES.has(status)) {
+    throw new Error(`makeRfpSolicitation: invalid status ${status}`)
+  }
+  return {
+    id,
+    type: 'rfp-solicitation',
+    rfpId,
+    claimId,
+    solicitor,
+    recipient,
+    message,
+    status,
+    createdDate: createdDate || new Date().toISOString(),
+    respondedDate,
+    rejectionMessage,
+  }
+}
+
+// Phase 17.2: overlays session-state solicitations on the shared artifact
+// collection. Mirror of `mergeProvisionals` / `mergeClosedRfps` shape — pure
+// function, returns a new shared object with `rfpSolicitations` extended.
+// Storage shape is a Map<solicitationId, RfpSolicitation>. Empty / missing
+// Map returns shared unchanged.
+export function mergeSolicitations(shared, solicitations) {
+  if (!solicitations || (solicitations.size ?? 0) === 0) return shared
+  return {
+    ...shared,
+    rfpSolicitations: [
+      ...(shared.rfpSolicitations || []),
+      ...Array.from(solicitations.values()),
+    ],
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SHARED ARTIFACT COLLECTION
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4023,6 +4084,10 @@ export function buildV22SharedArtifacts() {
     badgeIssuances,
     // Phase 16.0: RFPs. Skeletal placeholder; Phase 17 owns lifecycle.
     rfps,
+    // Phase 17.2: seed solicitation set is empty — demo participants create
+    // them in real time via the SolicitationCreateModal. V2App's session-
+    // state Map overlays via `mergeSolicitations` at every view-builder call.
+    rfpSolicitations: [],
   }
 }
 

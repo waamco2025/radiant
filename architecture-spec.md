@@ -708,6 +708,77 @@ This means closed-RFP visibility is intentionally asymmetric (owner sees, non-ow
 
 > **Prototype note — RFP visibility.** In V2.2 RFPs are seeded in `buildV22SharedArtifacts()` and rendered for every viewer of the Directory. **In production:** RFP visibility is managed via the Network's discoverability layer — published RFPs are indexed in the Public Directory; "buyer-only" or "shortlisted-supplier-only" RFPs would carry scoped visibility metadata. **Authority:** SDP (publication lifecycle) + Network discovery service.
 
+### 8.9 RFP Solicitations (Phase 17.2+)
+
+A **Solicitation** is a seller's introductory pointer to an RFP — "I have a Claim that may match your requirements, take a look." It is NOT a formal Evaluation Agreement; it's the cheap, reversible pre-EA stage where the seller offers a candidate and the buyer can dismiss or formalize. Solicitations live entirely inside the RfpDetailPanel; they do not render as nodes on the Directory map or on either party's parent canvas.
+
+#### 8.9.1 Artifact shape
+
+```
+RfpSolicitation = {
+  id: string,                   // 'solicit-{timestamp}-{nonce}'
+  type: 'rfp-solicitation',
+  rfpId: string,                // target RFP
+  claimId: string,              // solicitor's existing public Claim
+  solicitor: string,            // seller party (e.g., 'MicroCo')
+  recipient: string,            // RFP owner party (e.g., 'GovCo')
+  message: string,              // optional seller note (default '')
+  status: 'pending' | 'rejected' | 'accepted',
+  createdDate: ISO,             // captured at submission
+  respondedDate: ISO | null,    // null until rejected/accepted
+  rejectionMessage: string|null // optional buyer reply on reject
+}
+```
+
+`'accepted'` validates here but isn't reachable from UI in Phase 17.2 — reserved for Phase 17.2.1's Request Agreement flow, which will route through the existing cold-path EA+DA pipeline and land a provisional Claim node on the buyer's parent canvas.
+
+**Cardinality.** One solicitation per `(solicitor, rfpId)` pair. The picker UI enforces single-Claim-per-solicitation in 17.2; multi-Claim solicitations are deferred. Withdraw / amend an existing solicitation is also deferred — the solicitor cannot edit their own card once submitted in 17.2.
+
+#### 8.9.2 Three-way visibility model
+
+The RfpDetailPanel branches its solicitations section on `(viewer === owner)` and `(viewer has own solicitation)`:
+
+| Viewer | Section above footer | Footer addition |
+|---|---|---|
+| RFP owner | "Incoming Solicitations (N)" + cards (or muted "No solicitations yet." when N=0) | unchanged (Close/Reopen) |
+| Solicitor (non-owner, has own) | "Your Solicitation" + their single card | "Already solicited — see above." (muted) |
+| Other non-owner (no own) | none | "Solicit with my Claim" affirm button |
+
+A SolicitationCard has different action affordances per viewer:
+- **Owner view + pending status** — `Request Agreement` (disabled, "Coming in Phase 17.2.1" tooltip) + `Reject` (enabled).
+- **Owner view + rejected status** — no buttons (no undo in 17.2).
+- **Solicitor view (any status)** — no buttons; status display only. When rejected and `rejectionMessage` is non-empty, a "Buyer's reply:" message block surfaces above the dates.
+
+#### 8.9.3 Notification flow
+
+Two notification types fire on state transitions; both route on click to Directory → RFP marker → RfpDetailPanel.
+
+| Type | Recipient | Trigger | Body copy |
+|---|---|---|---|
+| `v22-rfp-solicitation-received` | RFP owner | Solicitor submits | "{solicitorParty} solicited your RFP — Re: {rfpName}" |
+| `v22-rfp-solicitation-rejected` | Solicitor | Owner rejects | "{rejectorParty} rejected your solicitation — Re: {rfpName}.{ rejectionMessage when present}" |
+
+Notification badge color: `received` = amber (matches the "request awaiting your action" pattern of `v22-transfer-request` / `v22-request-ea-only`); `rejected` = red (matches `v22-transfer-declined` / `v22-ea-declined`).
+
+Click handler logic: `setV22DirectoryOpen(true)` + clear `v22DirectorySelectedClaim` (mutual exclusion) + set `v22DirectorySelectedRfp` to the target RFP (resolved from the merged shared artifacts via `mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds).rfps.find(...)`). Auto-dismissed on click — the loop terminates after rejection.
+
+#### 8.9.4 Session-state merge layer
+
+V2App holds `v22Solicitations: Map<solicitationId, RfpSolicitation>` (Map storage so per-id updates mutate in place via `setV22Solicitations(prev => new Map(prev).set(id, updated))`). New `mergeSolicitations(shared, solicitations)` helper appends Map values to `shared.rfpSolicitations`; returns shared unchanged on empty Map.
+
+`buildV22SharedArtifacts` returns `rfpSolicitations: []` so consumers can rely on the field's existence. Solicitations do NOT flow through `buildV22DirectoryDataForRole` — they surface only in the RfpDetailPanel mount, which chains `mergeSolicitations` after `mergeClosedRfps + mergeProvisionals` to assemble the current artifact set.
+
+**Persistence.** Solicitations created during a session do not persist across reload (same prototype convention as `v22Provisionals` / `v22ClosedRfpIds`). The full Reset all data flow clears `v22Solicitations` alongside `v22ClosedRfpIds`.
+
+#### 8.9.5 Closed-RFP solicitations
+
+If an RFP transitions from open to closed while solicitations exist on it, the owner still sees them in their panel (they need to act on them). The solicitations section renders normally. New solicitations cannot be created because the "Solicit with my Claim" button is gated on `status === 'open'`. The asymmetric closed-RFP visibility from §8.8.7 also gates against non-owners reaching a closed RFP at all — the seller-side entry point disappears.
+
+#### 8.9.6 Forward pointers
+
+- **Phase 17.2.1** — Accept flow / "Request Agreement": the disabled `Request Agreement` button on owner-view SolicitationCards opens an Asset-picker + the existing CombinedRequestModal pre-populated with `{ claim: solicitedClaim, ownerParty: claim.owner, requesterParty: rfp.owner }`. Submitting fires the standard cold-path EA+DA notification chain; a provisional Claim node lands on the buyer's parent canvas. Solicitation status transitions to `'accepted'` + `respondedDate` is stamped; the SolicitationCard re-renders in accepted state (green badge, no further actions). Acceptance is also non-destructive — rejecting a different solicitation in the same RFP after accepting one is still allowed.
+- **Phase 17.3+** — Solicitation withdraw / amend (seller-side); multi-Claim solicitations per (seller, RFP) pair.
+
 ---
 
 ## 9. AI Shopper
@@ -1889,6 +1960,7 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§8.9 (new) — Phase 17.2 (RFP solicitation flow — submit + deliver + reject loop):** Opens the seller→buyer engagement axis. A Solicitation is the cheap, reversible pre-EA pointer from seller to buyer — "I have a Claim that may match your requirements, take a look." New `makeRfpSolicitation` factory with shape `{ id, type: 'rfp-solicitation', rfpId, claimId, solicitor, recipient, message, status, createdDate, respondedDate, rejectionMessage }`; status taxonomy `'pending' | 'rejected' | 'accepted'` (accepted reserved for Phase 17.2.1). New `mergeSolicitations(shared, solicitations)` overlay (mirror of `mergeProvisionals` / `mergeClosedRfps` — Map-backed, identity on empty). `buildV22SharedArtifacts` returns `rfpSolicitations: []` so consumers can rely on the field's existence. V2App holds `v22Solicitations: Map<id, RfpSolicitation>` session-state; `handleCreateSolicitation` builds the artifact + fires `v22-rfp-solicitation-received` notification on the owner's inbox; `handleRejectSolicitation` updates status + respondedDate + rejectionMessage + fires `v22-rfp-solicitation-rejected` notification on the solicitor's inbox. Both notification types route on click to Directory → RFP marker → RfpDetailPanel; auto-dismiss since the loop terminates after rejection. Three new components ship: `SolicitationCard` (renders a single solicitation with status badge + message blocks + action bar — `Request Agreement` disabled with "Coming in Phase 17.2.1" tooltip; `Reject` enabled on pending), `SolicitationCreateModal` (Claim picker defaulting to zero selected + 500-char optional message), `SolicitationRejectModal` (300-char optional reply + red destructive submit). `RfpDetailPanel` gains a three-way visibility branch above the footer: owner sees "Incoming Solicitations (N)" + cards (empty case "No solicitations yet."); solicitor sees "Your Solicitation" + their single card (REJECTED state surfaces buyer's reply); other non-owner sees no section. Footer extensions: non-owner + open + no existing → "Solicit with my Claim" affirm button; non-owner + existing → muted "Already solicited — see above." DirectoryLayer adds RFP marker hover + select brightening: per-instance `instanceColor` attribute on `rfpMesh` + `rfpFillMesh` (white-multiplier; hovered/selected index brightens); per-vertex `color` attribute on closed-RFP `LineDashedMaterial` with `vertexColors: true` (lerp toward white on the matching 8-vertex range). New `flushRfpColors` callback parallel to `flushDotColors`; flushed via `rfpDirtyRef` from the animation loop. Detail Panel 1px gap fix: both Directory-layer panel mount blocks (Claim + RFP) bumped `bottom: 28` → `bottom: 27`. Closed-RFP solicitations stay visible to the owner (so existing notifications remain actionable); the asymmetric closed-RFP filter from §8.8.7 naturally gates new solicitations against closed RFPs (the seller-side entry point disappears). Existing §8.8.8 forward pointer for 17.2 is now satisfied by this section.
 - **§8.8 extension — Phase 17.1 (RFP close/reopen lifecycle, owner-side):** First lifecycle phase against the RFP arc. `makeRfp` validates `status` against a `'open' | 'closed'` taxonomy and accepts `closedDate` (ISO string, null when open). New exported `closeRfp(rfp, closedDate?)` / `reopenRfp(rfp)` pure transforms. New `mergeClosedRfps(shared, closedRfpIds)` session-state overlay; `closedRfpIds` is a `Map<rfpId, ISO closedDate>` (Map storage so each closure keeps its captured timestamp across re-renders). `buildV22DirectoryDataForRole` extended with a 3rd `closedRfpIds` param; chains the merge internally and filters `otherRfps` + `cluster.rfps` on `status === 'open'` for non-owners while keeping `ownRfps` unfiltered. V2App holds `v22ClosedRfpIds` state next to `v22Provisionals`; threaded to DirectoryLayer; close/reopen handlers wired to RfpDetailPanel; the panel re-resolves the selected RFP from merged shared artifacts each render so stale snapshots don't surface. RfpDetailPanel gains a CLOSED status badge (muted treatment), a "Closed YYYY-MM-DD · HH:MM UTC" row, and an owner-only footer with a single direct-action button ("Close this RFP" or "Reopen this RFP"). DirectoryLayer's `rfpMesh` + `rfpFillMesh` partition on closed-owned (hidden) and `rfpHitMesh` keeps all instances (closed still clickable). New `closedRfpMesh` (single `THREE.LineSegments` with `LineDashedMaterial`); `BufferGeometry` rebuilt on layout / zoom change with 4 segments per closed-owned RFP; `computeLineDistances()` after each rebuild. AssetNode + AssetNodeMini's RFP early-return branches read `node.isClosed` and switch `border-style: solid → dashed` on both inner card border and outer selection ring; hover-preview portal inherits the same treatment via the shared synthetic node. New §8.8.7 (Lifecycle states) covers the factory shape extension, asymmetric visibility table, dashed-outline / dashed-card implementation, and the architectural rationale for asymmetric visibility (solicitation notifications are independent of the RFP node). Existing §8.8.7 (Forward pointers) renumbered to §8.8.8 with the 17.1 entry removed and remaining 17.2 / 17.2.1 / 17.5+ unchanged.
 - **Hotfix — Phase 17.0.2 (TDZ in AssetNode RFP branch):** Phase 17.0.1's RFP early-return branch in `AssetNode` (full) referenced `hoverSelectColor` before its `const` declaration (the Phase 16.2.11 declaration site sat further down in the function body, after the early-return). Every RFP card render and every RFP card click triggered a TDZ `ReferenceError: Cannot access 'hoverSelectColor' before initialization`. Fast zoom-to-full-LOD on Bob's view crashed the app to a black screen. Fix: hoist the `hoverSelectColor` declaration above the RFP early-return (3-line move; the value depends only on `node.category` which is available at function entry, so no semantic change for non-RFP renders). `AssetNodeMini` already declared `hoverSelectColor` above its RFP early-return — no change needed there. Swept both components for parallel TDZ-trapped vars; none surfaced. No §8.8 content change — the RFP architecture from 17.0.1 is correct; only implementation order needed fixing. Process note: 17.0.1's structured review marked items as "Code-verified" for paths that should have been runtime-verified per CLAUDE.md's runtime-verification convention; the 17.0.1 → 17.0.2 incident is now the canonical example for the convention.
 - **§8.8 extension — Phase 17.0.1 (RFP card LOD swap + hover-preview pinning):** Brings RFPs to LOD parity with Claims and fixes the stale-pinned-tooltip bug surfaced in 17.0 QA. **AssetNode + AssetNodeMini** dispatcher extended with a 5th schema (`category: 'rfp'`) — minimal layout per Andrew's spec: full-card = type pill `RFP` + name + "Posted by {owner}"; mini-card = type pill + name only. No badges, no minibars, no action bar. RFPs join the amber-on-hover/select branch in `hoverSelectColor`. Default border falls through cleanly to WARM_BORDER (RFPs carry no disclosure type). `CATEGORY_CONFIG.rfp` added for type-label uniformity, though the early-return branches render the type pill inline rather than via the config (no functional impact). **DirectoryLayer card-overlay render block** now iterates both Claim AND RFP entries from `allDots`; each RFP entry builds an inline synthetic node `{ id, category: 'rfp', rfp, name, ownerParty, owner }` and routes to the same `AssetNode` / `AssetNodeMini` Card the Claim branch uses (only the inner schema differs). **Hollow-square outline + tinted-fill + hit-test meshes** all hide at `zoom ≥ MID_LOD_THRESHOLD` (extending the dot-mesh hide path) so the cards don't render behind the hollow squares and the hit-test mesh doesn't intercept clicks meant for the cards above. **Pinned state extended to discriminated union** — exactly one of `{ claim, ... }` or `{ rfp, ... }` at any time. All click paths (hollow-square at low zoom, onCardClick at mid/full LOD) call `setPinned` with the appropriate discriminator; setting the new shape overwrites the previous in a single call, so clicking from Claim to RFP (or vice versa) cleanly swaps the pinned tooltip — structural fix for the 17.0 stale-tooltip bug. **New `RfpTooltipCard`** mirrors `ClaimTooltipCard` for the dot-LOD pinned-tooltip path; pinned-tooltip render block branches on `pinned.claim` vs `pinned.rfp`. **Empty-canvas click** clears both discriminators (calls `onRfpClick(null)` alongside the existing `onClaimDotClick(null)` + `setPinned(null)`). **V2App.jsx** minor changes only: footer rolls forward to v0.17.0.1; Changelog modal entry prepended. New §8.8.5 (Card LOD swap), §8.8.6 (Pinned tooltip discriminator), and §8.8.7 (Forward pointers — Phase 17.0.1 now landed; remaining 17.1 / 17.2 / 17.2.1 / 17.5+ unchanged) added under §8.8.
