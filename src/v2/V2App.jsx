@@ -2705,14 +2705,16 @@ export default function V2App() {
       name: anchorAsset.name,
       pin: anchorAsset.pin,
     })
-    // Reuse the AI Shopper pre-fill mechanism: claimPin + first RS id.
-    // The mount block wraps suggestedRequirementsSetId into a single-
-    // element array; multi-RS RFPs surface the rest via the modal's
-    // own multi-select UI.
-    const firstRsId = (rfp.requirementsSetIds && rfp.requirementsSetIds[0]) || null
+    // Reuse the AI Shopper pre-fill mechanism: claimPin + all RS ids.
+    // Phase 17.2.1.2: thread the full RFP `requirementsSetIds` array
+    // (was: just the first id) so multi-RS RFPs pre-check every
+    // referenced RS, not only the first. The mount block prefers the
+    // plural `suggestedRequirementsSetIds` field; falls back to the
+    // singular `suggestedRequirementsSetId` for the AI Shopper path.
+    const rfpRsIds = Array.isArray(rfp.requirementsSetIds) ? rfp.requirementsSetIds : []
     setV22AIShopperResult({
       claimPin: sharedClaim.pin,
-      suggestedRequirementsSetId: firstRsId,
+      suggestedRequirementsSetIds: rfpRsIds,
     })
     setV22RequestOpen(true)
   }, [])
@@ -6516,11 +6518,16 @@ export default function V2App() {
               setV22RequestAnchor(null)
             }}
             // Phase 7: AI Shopper pre-populates PIN + suggested Req Set.
+            // Phase 17.2.1.2: prefer the plural `suggestedRequirementsSetIds`
+            // (Accept-flow entry, full RFP RS array) over the singular
+            // `suggestedRequirementsSetId` (AI Shopper entry, single id).
             initialPin={v22AIShopperResult?.claimPin || ''}
             initialRequirementsSetIds={
-              v22AIShopperResult?.suggestedRequirementsSetId
-                ? [v22AIShopperResult.suggestedRequirementsSetId]
-                : []
+              Array.isArray(v22AIShopperResult?.suggestedRequirementsSetIds)
+                ? v22AIShopperResult.suggestedRequirementsSetIds
+                : v22AIShopperResult?.suggestedRequirementsSetId
+                  ? [v22AIShopperResult.suggestedRequirementsSetId]
+                  : []
             }
           />
         )}
@@ -8314,7 +8321,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.1.1 &middot; Changelog
+          v0.17.2.1.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8361,6 +8368,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.1.2', date: '2026-05-19', label: 'Phase 17.2.1.2', items: [
+                  'CombinedRequestModal RS pre-selection: all RFP-referenced Requirements Sets now pre-checked when CombinedRequestModal opens via the Accept flow. Previously only the first id from `rfp.requirementsSetIds` was pre-checked because `handleRequestAgreement` stored only the singular `suggestedRequirementsSetId`. Fix threads the full array as `suggestedRequirementsSetIds` (plural); cold-path AI Shopper entry (singular id) still works. CombinedRequestModal\'s state initializer was already correct — the bug was entirely upstream at the V2App handler + mount.',
+                  'Footer rolls to v0.17.2.1.2.',
+                ]},
                 { version: '0.17.2.1.1', date: '2026-05-19', label: 'Phase 17.2.1.1', items: [
                   'Phase 17.2.1.1 — Hotfix: RFP-bound Asset + Claim greying + EA+DA notification Directory close + CombinedRequestModal RS scrollbox. Four QA-driven items closing out the 17.2 arc before 17.3+ opens.',
                   'RFP factory `makeRfp` extends required field set with `assetId` (validated, throws on missing). All 118 seeded RFPs populated: Bob\'s Sentinel-4 RFP binds to his `bAvionics` Asset ("Avionics Module"); each of the 20 RFP-only mock-cluster owners gets one stub Asset (`asset-{actor.id}-rfp-anchor`, owner = actor.party) so the seed-data integrity check passes; the 4 mixed-cluster owners reuse their first existing Asset. `generateRfpsForActor(actor, count, defaultAssetId)` factory entry-point now requires `defaultAssetId` (throws if absent — surfaces missing-Asset seed inconsistencies at build time, not at render time). Architecture spec §8.7 + §8.9.6 updated.',

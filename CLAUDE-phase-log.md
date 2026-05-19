@@ -2673,6 +2673,33 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.2.1.2 completion notes (2026-05-19) — Hotfix: CombinedRequestModal RS pre-selection + Detail Panel label backlog entry
+
+Single bug fix closing the last QA item against the 17.2 arc, plus one backlog filing.
+
+**Diff.**
+
+- `src/v2/V2App.jsx` — `handleRequestAgreement` Accept-flow handler now threads `rfp.requirementsSetIds` (full array) as `suggestedRequirementsSetIds` (plural) instead of just the first id as `suggestedRequirementsSetId` (singular). CombinedRequestModal mount block reads the plural form first, falling back to the singular for the AI Shopper cold-path entry. Footer constant rolled forward to v0.17.2.1.2. Changelog modal entry prepended for v0.17.2.1.2.
+- `polish-backlog.md` — new backlog item **#202** filed (Remove "ACTOR" and "ASSET" small-caps labels from Detail Panels — Effort S, pairs with Phase 17.3). Update Log entry prepended for Phase 17.2.1.2.
+- `architecture-spec.md` — §8 Changelog gains a single-line bullet for Phase 17.2.1.2 covering the pre-selection fix.
+- `CLAUDE.md` — Current state of the world updated to reflect Phase 17.2.1.2 as last shipped; active phase queue updated.
+
+**Bug root cause.** Phase 17.2.1.1's data-source expansion for CombinedRequestModal's RS scrollbox worked correctly — all published RSes were appearing in the list (including the two Sentinel-4 RFP references `MIL-PRF-55681 Compliance v2` + `System Integration Requirements v1`). But only the first row was pre-checked. The CombinedRequestModal's own state initializer (`useState(() => [...initialRequirementsSetIds])`) was correct — spreads the entire input array. The bug was entirely upstream: V2App's `handleRequestAgreement` extracted only `rfp.requirementsSetIds[0]` and stored it as a single id (`suggestedRequirementsSetId` — singular field name inherited from the AI Shopper context), then the CombinedRequestModal mount block re-wrapped that single id into `[id]` for the `initialRequirementsSetIds` prop. Two truncation points compounding. Fix: change the data shape at the upstream end — store the full array as `suggestedRequirementsSetIds` (plural). The mount block prefers the plural array when present; falls back to the singular id (wrapped in `[id]`) for the unchanged AI Shopper path.
+
+**Cold-path preservation.** AI Shopper entry path is untouched. `setV22AIShopperResult({ claimPin, suggestedRequirementsSetId })` (singular) still works — the mount block's fallback branch wraps it into `[id]` exactly as before. Cold-path Claim-PIN-click entry leaves `v22AIShopperResult` null entirely — zero RSes pre-checked, no regression.
+
+**Build clean** (`✓ 129 modules transformed`, no errors).
+
+**Backlog filing.** Andrew flagged removing the "ACTOR" and "ASSET" small-caps labels from Detail Panels during the QA pass. Filed as **#202** (Effort S, Open) under the Detail Panels section — pairs naturally with Phase 17.3's Claim Detail Panel content work (#58, #104, #116, #161, #180). Relational labels like "For Asset" on RfpDetailPanel are explicitly preserved per Andrew's note (they convey a relationship, not a category).
+
+**Known scope boundaries.**
+
+- The actual label removal is deferred — backlog only.
+- The CombinedRequestModal's internal state shape was confirmed structurally sound (array-based, not single-selection); no scrollbox refactor needed.
+- Phase 17.3+ remains the next major forward-progress phase.
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.1.1 completion notes (2026-05-19) — Hotfix: RFP-bound Asset + Claim greying + EA+DA notification Directory close + CombinedRequestModal RS scrollbox
 
 Four QA-driven items closing out the 17.2 arc before 17.3+ opens.
