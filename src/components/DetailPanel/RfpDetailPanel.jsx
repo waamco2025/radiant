@@ -188,8 +188,14 @@ export default function RfpDetailPanel({
   onRejectSolicitation,  // (solicitation) => void — parent opens SolicitationRejectModal
   // Phase 17.2.1: owner-side accept entry point. Click on the
   // SolicitationCard's "Request Agreement" button fires this; V2App opens
-  // the AssetPickerModal which in turn opens the CombinedRequestModal.
+  // the CombinedRequestModal pre-filled with the RFP's assetId + Claim.
+  // (Phase 17.2.1.1 simplified the chain — the intermediate AssetPickerModal
+  // step is gone; the RFP carries its anchor Asset from creation.)
   onRequestAgreement,    // (solicitation) => void
+  // Phase 17.2.1.1: assetsById Map<id, asset> used to resolve the RFP's
+  // bound Asset for the "For Asset" row. Optional; if absent or the
+  // assetId doesn't resolve, the row renders "(Asset not found)".
+  assetsById = null,
 }) {
   if (!rfp) return null
 
@@ -316,6 +322,47 @@ export default function RfpDetailPanel({
               }}>YOU</span>
             )}
           </div>
+        </div>
+
+        {/* Phase 17.2.1.1: For Asset row — the buyer-side Asset that
+            anchors this RFP. Set at RFP creation; flows to the Accept
+            flow's CombinedRequestModal pre-fill so the requested EA+DA
+            pair attaches to this specific Asset on the buyer's parent
+            canvas. */}
+        <div style={{ marginBottom: 18 }}>
+          <SectionHeading>For Asset</SectionHeading>
+          {(() => {
+            const boundAsset = rfp.assetId && assetsById ? assetsById.get(rfp.assetId) : null
+            if (!boundAsset) {
+              return (
+                <div style={{
+                  fontSize: 12,
+                  color: 'var(--text-dim)',
+                  fontStyle: 'italic',
+                }}>(Asset not found)</div>
+              )
+            }
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  fontSize: 9,
+                  fontFamily: 'var(--font-mono)',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: 'var(--text-tertiary)',
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  background: 'var(--bg-deep)',
+                  textTransform: 'uppercase',
+                }}>ASSET</span>
+                <span style={{
+                  fontSize: 13,
+                  color: 'var(--text-primary)',
+                  wordBreak: 'break-word',
+                }}>{boundAsset.name || boundAsset.id}</span>
+              </div>
+            )
+          })()}
         </div>
 
         {/* Description */}

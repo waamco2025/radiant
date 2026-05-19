@@ -24,6 +24,19 @@ import {
 
 const PIN_PREFIX = 'PIN-0x'
 
+// Phase 17.2.1.1 — globe icon, matches the LibraryModal / BadgesPanel /
+// RequirementsPanel convention. Indicates a Requirements Set is published
+// on the public network.
+function GlobeIcon({ size = 11, color = 'var(--accent-blue)' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, color }}>
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+      <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+      <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+    </svg>
+  )
+}
+
 function isValidPinShape(pin) {
   return typeof pin === 'string' && pin.startsWith(PIN_PREFIX) && pin.length >= PIN_PREFIX.length + 8
 }
@@ -211,6 +224,12 @@ export default function CombinedRequestModal({
                 ) : (
                   availableRequirementsSets.map((rs) => {
                     const selected = selectedReqSets.includes(rs.id)
+                    // Phase 17.2.1.1 — published RSes carry isPublished +
+                    // ownerParty so the row can render a globe icon and a
+                    // "Published by {owner}" line. Rows without those
+                    // fields render in the pre-17.2.1.1 minimal form.
+                    const isPublished = !!rs.isPublished
+                    const ownerParty = rs.ownerParty || null
                     return (
                       <div
                         key={rs.id}
@@ -238,10 +257,23 @@ export default function CombinedRequestModal({
                           )}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{rs.name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                            {rs.id} · v{rs.version ?? 1}
+                          <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {isPublished && <GlobeIcon size={11} />}
+                            <span>{rs.name}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontWeight: 400 }}>
+                              v{rs.version ?? 1}
+                            </span>
                           </div>
+                          {isPublished && ownerParty && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                              Published by <span style={{ color: 'var(--text-secondary)' }}>{ownerParty}</span>
+                            </div>
+                          )}
+                          {!isPublished && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                              {rs.id}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )

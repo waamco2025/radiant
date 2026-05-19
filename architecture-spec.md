@@ -593,9 +593,9 @@ Modal: 720px wide × 80vh tall, portal-rendered via the shared Backdrop, closes 
 
 An **RFP** (Request For Proposal) is a buyer-side public posting on the Directory layer. A buyer (any Actor) posts an RFP describing what they're looking for — typically references to one or more published Requirements Sets — and supplier Actors discover, self-evaluate, and respond. Phase 17 builds the RFP arc incrementally: read pipeline (17.0), card LOD swap (17.0.1), buyer post + supplier respond + buyer review (17.1 → 17.2.1), create-RFP entry point (17.5+).
 
-#### 8.8.1 Factory shape (Phase 17.0)
+#### 8.8.1 Factory shape (Phase 17.0, extended in 17.2.1.1)
 
-The `makeRfp` factory ships unchanged from the Phase 16.0 skeletal definition:
+The `makeRfp` factory:
 
 ```
 {
@@ -606,13 +606,17 @@ The `makeRfp` factory ships unchanged from the Phase 16.0 skeletal definition:
   ownerDot,              // standard DOT
   name,                  // human-readable title
   description,           // free-text rationale
+  assetId,               // required, references an Asset (Phase 17.2.1.1)
   requirementsSetIds,    // array of rsId references
-  status,                // 'open' in 17.0; lifecycle taxonomy extended in 17.1
+  status,                // 'open' | 'closed' (lifecycle extended in 17.1)
   createdDate,           // ISO 8601 timestamp
+  closedDate,            // ISO 8601 timestamp | null (Phase 17.1)
 }
 ```
 
-Lifecycle metadata (`responses[]`, `closedDate`, etc.) lands with the post flow in **Phase 17.1**. Phase 17.0 ships read-only.
+**`assetId` (Phase 17.2.1.1, required).** Every RFP binds to exactly one of the owner's Assets at creation time. This anchors the eventual EA+DA pair: when a solicitation against the RFP is accepted, the requesting Actor's anchor on their parent canvas is the RFP's `assetId` — no separate "pick an Asset" step at solicitation-accept time. The factory throws on missing `assetId` so missing-Asset seed inconsistencies surface at build time rather than at render time.
+
+Lifecycle metadata (`closedDate`) lands with Phase 17.1 (close/reopen).
 
 #### 8.8.2 Click pipeline (Phase 17.0)
 
@@ -774,32 +778,65 @@ V2App holds `v22Solicitations: Map<solicitationId, RfpSolicitation>` (Map storag
 
 If an RFP transitions from open to closed while solicitations exist on it, the owner still sees them in their panel (they need to act on them). The solicitations section renders normally. New solicitations cannot be created because the "Solicit with my Claim" button is gated on `status === 'open'`. The asymmetric closed-RFP visibility from §8.8.7 also gates against non-owners reaching a closed RFP at all — the seller-side entry point disappears.
 
-#### 8.9.6 Accept flow (Phase 17.2.1)
+#### 8.9.6 Accept flow (Phase 17.2.1, simplified in 17.2.1.1)
 
-Owner-side acceptance of a pending solicitation routes through a two-modal chain so the requested EA+DA pair gets anchored to one of the requester's own Assets — the architectural rule that disclosure + evaluation requests must originate from an Asset (so the parent canvas can lay out the request-node + edge).
+Owner-side acceptance of a pending solicitation routes the requested EA+DA pair to the RFP's bound Asset — the architectural rule that disclosure + evaluation requests must originate from an Asset (so the parent canvas can lay out the request-node + edge). Phase 17.2.1.1 made `assetId` a required field on RFPs (§8.8.1), which collapses the Phase 17.2.1 two-modal AssetPickerModal → CombinedRequestModal chain into a single direct open of CombinedRequestModal.
 
-**Chain.**
+**Chain (Phase 17.2.1.1).**
 
 1. **Trigger.** RFP owner (e.g. Bob) opens the RfpDetailPanel on a solicitation in `'pending'` status, clicks "Request Agreement" on the SolicitationCard. V2App captures the in-flight context in `v22AcceptingSolicitation = { solicitationId, solicitorClaimId, rfpId }`.
-2. **AssetPickerModal.** Single-select scrollable list of the requester's owned Assets. Context block shows solicitor party + RFP name + Claim name so the picker decision is unambiguous. Continue is gated on selection; Cancel clears `v22AcceptingSolicitation` with no side effects.
-3. **CombinedRequestModal pre-fill.** The Continue handler pre-fills the existing CombinedRequestModal via the existing mechanism (used by AI Shopper):
-   - `requesterAsset` ← the picked Asset, supplied as a `{ id, name, pin }` shape directly from `shared.assets` (compatible with the modal's existing prop contract).
+2. **CombinedRequestModal pre-fill (direct).** No intermediate AssetPickerModal — the handler resolves the RFP's `assetId` against `shared.assets` and opens CombinedRequestModal pre-filled via the existing mechanism (used by AI Shopper):
+   - `requesterAsset` ← the Asset referenced by `rfp.assetId`, supplied as a `{ id, name, pin }` shape directly from `shared.assets`.
    - `initialPin` ← the solicitor's Claim PIN (resolves to the target Claim on Step 1 of the modal).
-   - `initialRequirementsSetIds` ← the first id from the RFP's `requirementsSetIds` (further RSes are reachable via the modal's own multi-select picker).
+   - `initialRequirementsSetIds` ← the first id from the RFP's `requirementsSetIds` (further RSes are reachable via the modal's own multi-select picker, which lists all published RSes — §8.9.6.1).
    - `v22AcceptingSolicitation` stays set across this transition so the submit handler can detect the Accept entry path.
-4. **Submit-side effect.** Inside `handleV22RequestSubmit`, after the existing provisional EA+DA creation, a conditional branch on `v22AcceptingSolicitation`:
+3. **Submit-side effect.** Inside `handleV22RequestSubmit`, after the existing provisional EA+DA creation, a conditional branch on `v22AcceptingSolicitation`:
    - Calls `acceptSolicitation(solicitation, pair.evaluationAgreement.id)` to transition the solicitation to `'accepted'` with `respondedDate` stamped and `acceptedEaId` linking to the new EA.
    - Writes the updated solicitation back into `v22Solicitations`.
    - Fires a `v22-rfp-solicitation-accepted` notification on the solicitor's inbox.
    - Clears `v22AcceptingSolicitation`.
    - The existing cold-path side effects (parent-canvas navigation, provisional-node pan/zoom, standard `v22-request` notification) run unchanged.
-5. **Dual notification on Alice's inbox.** Both `v22-rfp-solicitation-accepted` (informational, click routes to RFP panel) AND the standard `v22-request` (actionable, click routes to the new EA+DA on Alice's parent canvas) are delivered. The two coexist intentionally: the first surfaces the solicitation status transition for posterity; the second is the live actionable artifact for the rest of the EA+DA lifecycle.
+4. **Dual notification on Alice's inbox.** Both `v22-rfp-solicitation-accepted` (informational, click routes to RFP panel) AND the standard `v22-request` (actionable, click routes to the new EA+DA on Alice's parent canvas) are delivered. The two coexist intentionally: the first surfaces the solicitation status transition for posterity; the second is the live actionable artifact for the rest of the EA+DA lifecycle.
 
-**`acceptedEaId` linkage.** The `makeRfpSolicitation` factory accepts a new optional `acceptedEaId` field (default null). Set by `acceptSolicitation`. Future work (e.g. solicitor-side "open the resulting EA" deep-link from the accepted SolicitationCard) reads this id to resolve the EA artifact.
+**`acceptedEaId` linkage.** The `makeRfpSolicitation` factory accepts an optional `acceptedEaId` field (default null). Set by `acceptSolicitation`. Future work (e.g. solicitor-side "open the resulting EA" deep-link from the accepted SolicitationCard) reads this id to resolve the EA artifact.
 
 **Cold-path preservation.** The existing CombinedRequestModal entry point (Claim PIN click on the parent canvas, AI Shopper result) leaves `v22AcceptingSolicitation` null, so the submit-side conditional branch is a no-op — cold-path behaviour is bit-identical to before 17.2.1.
 
-**Cancel paths.** Both AssetPickerModal Cancel and CombinedRequestModal close (Phase 17.2.1 extends onClose to clear `v22AcceptingSolicitation` and `v22RequestAnchor` alongside the existing AI-Shopper-result cleanup). Mid-flow cancellation leaves the solicitation in `'pending'` — re-clicking Request Agreement starts a fresh flow.
+**AssetPickerModal component.** Phase 17.2.1's AssetPickerModal stays in the codebase (`src/components/modals/AssetPickerModal.jsx`) for future use by the create-RFP flow (Phase 17.5+) where the buyer picks which Asset their new RFP binds to. The V2App mount + handlers were removed from the Accept flow path in 17.2.1.1; the component itself was not deleted.
+
+#### 8.9.6.1 Claim greying in SolicitationCreateModal (Phase 17.2.1.1)
+
+When a seller (e.g. Alice) opens the SolicitationCreateModal against a buyer's (e.g. Bob's) RFP, the Claim picker greys out any Claim that's already mapped to the buyer via an active or pending Evaluation Agreement. The predicate is:
+
+```
+isClaimOnBuyerNetwork(claimId) =
+  ∃ ea ∈ shared.evaluationAgreements:
+    ea.grantee.party === rfp.owner &&
+    ea.grantor.party === activeRole.party &&
+    ea.subject.kind === 'claim' &&
+    ea.subject.id === claimId &&
+    !ea._declineMeta && !ea._revokedMeta
+```
+
+A greyed row renders at `opacity: 0.45` with `cursor: not-allowed`, no click handler, an "ON NETWORK" pillbox, and a tooltip "Already on {ownerParty}'s network". Submit gating blocks selection of greyed Claims defensively.
+
+**Rationale.** Without this gate, the seller could submit a solicitation pointing at a Claim that's already disclosed to the buyer. The buyer's Accept flow would then error because the cold-path CombinedRequestModal flags the Claim's PIN as `already-disclosed` (Phase 11D #134). Surfacing the impossible state at the solicitation entry point lets the seller pick a different Claim before the cycle starts.
+
+#### 8.9.6.2 EA+DA notification Directory close (Phase 17.2.1.1)
+
+When the active actor receives an EA+DA notification (`v22-request`, `v22-request-ea-only`, `v22-ea-accepted`, `v22-ea-declined`) while currently viewing the Directory layer, clicking the notification closes the Directory overlay before running cold-path navigation. Previously the Directory stayed open behind the response modal / over the parent canvas. This is a small UX fix that ensures the user always lands on their parent canvas at the target artifact when responding to an EA+DA event.
+
+#### 8.9.6.3 CombinedRequestModal RS scrollbox (Phase 17.2.1.1)
+
+CombinedRequestModal's Step 1 Requirements Set scrollbox lists **all published Requirements Sets** (network-wide), not just the active actor's own RS pool. Each published row renders:
+
+- Globe icon (canonical `GlobeIcon`, matches LibraryModal / BadgesPanel / RequirementsPanel)
+- RS name + version
+- "Published by {owner party}" muted line below
+
+Own (non-published) RSes are appended below the published rows with their pre-17.2.1.1 minimal treatment (no globe, no owner line — just name + id + version). Dedupe by id (own wins so own-private RSes can never disappear).
+
+**Pre-selection.** The existing `initialRequirementsSetIds` prop wire-through works against the expanded data source — RFP-bound pre-selection (Accept flow) now finds the RFP's referenced RSes because they're present in the list. The cold-path entry (Claim PIN click on parent canvas) is unaffected — same modal, same per-row rendering, no RFP pre-selection.
 
 #### 8.9.7 Forward pointers
 
@@ -1986,6 +2023,7 @@ The following systems exist in production but are not modeled in the prototype:
 
 Each entry names the section updated, the phase that surfaced the deviation, and a one-line summary. The implementation is the source of truth for shipped reality; these entries record where the Round 11 baseline has been corrected.
 
+- **§8.8.1 + §8.9.6 + §8.9.6.1 + §8.9.6.2 + §8.9.6.3 — Phase 17.2.1.1 (Hotfix: RFP-bound Asset + Claim greying + EA+DA notification Directory close + CombinedRequestModal RS scrollbox):** Four QA-driven items closing out the 17.2 arc. **§8.8.1 (extended)**: `makeRfp` factory adds required `assetId` field — every RFP binds to exactly one of its owner's Assets at creation time. Factory throws on missing `assetId`. All 118 seeded RFPs populated: Bob's Sentinel-4 RFP → `bAvionics` "Avionics Module"; 20 RFP-only mock-cluster owners each get one stub Asset (`asset-{actor.id}-rfp-anchor`, owner = actor.party); mixed-cluster owners reuse their first existing Asset. `generateRfpsForActor(actor, count, defaultAssetId)` requires `defaultAssetId` so missing-Asset seed inconsistencies surface at build time. **§8.9.6 (simplified)**: Accept flow collapses Phase 17.2.1's two-modal AssetPickerModal → CombinedRequestModal chain into a single direct open of CombinedRequestModal, pre-filled with the RFP's bound Asset (via `requesterAsset`), the solicitor's Claim PIN (`initialPin`), and the RFP's `requirementsSetIds` (`initialRequirementsSetIds`). AssetPickerModal component file stays in the codebase for future create-RFP work (Phase 17.5+); only the V2App mount + handlers were removed from the Accept flow path. **§8.9.6.1 (new)**: SolicitationCreateModal Claim picker greys out Claims already mapped to the RFP owner via an active or pending EA (predicate documented). Greyed rows render at opacity 0.45 with `cursor: not-allowed`, no click handler, "ON NETWORK" pillbox, tooltip "Already on {ownerParty}'s network". Rationale: prevents the seller from submitting a solicitation pointing at a Claim that's already disclosed (which would error the buyer's Accept flow at the cold-path PIN-already-disclosed gate). **§8.9.6.2 (new)**: EA+DA notification click handlers (`v22-request`, `v22-request-ea-only`, `v22-ea-accepted`, `v22-ea-declined`) close the Directory layer if open before running cold-path navigation. Previously the Directory stayed open behind the response modal / over the parent canvas. **§8.9.6.3 (new)**: CombinedRequestModal Step 1 Requirements Set scrollbox data source extended to all published Requirements Sets (network-wide), not just the active actor's own pool. Per-row rendering: globe icon (canonical GlobeIcon) + RS name + version + "Published by {owner party}" muted line. Own (non-published) RSes appended below with the pre-17.2.1.1 minimal treatment. Dedupe by id (own wins). Pre-selection via `initialRequirementsSetIds` now works for any actor's published RS (the RFP's referenced RSes are guaranteed to be in the list). RfpDetailPanel gains a "For Asset" row between the Posted-by row and the Description block; V2App threads a derived `assetsById` Map. Footer rolls forward to v0.17.2.1.1.
 - **§8.9.6 (new) — Phase 17.2.1 (RFP Accept flow / Request Agreement):** Closes the placeholder-disabled "Request Agreement" button that's been deferred across 17.2 / 17.2.0.x. New two-modal chain — AssetPickerModal (Bob picks one of his Assets to anchor the requested mapping, per the architectural rule that requests must originate from an Asset) → the existing CombinedRequestModal pre-filled via the same prop mechanism the AI Shopper uses (`requesterAsset` + `initialPin` + `initialRequirementsSetIds`). Submit-side effect lives inside the existing `handleV22RequestSubmit` (conditional on `v22AcceptingSolicitation` being non-null); the cold-path remains bit-identical. `acceptSolicitation(solicitation, eaId)` pure transform + new `acceptedEaId` field on `makeRfpSolicitation` link the accepted solicitation back to the resulting EA. New `v22-rfp-solicitation-accepted` notification (green ACCEPTED badge) lands on the solicitor's inbox alongside the standard EA+DA request notification; click routes to Directory → RFP marker → RfpDetailPanel where the solicitor-view accepted state surfaces the "see your new EA on the parent canvas" pointer. SolicitationCard accepted-state treatment for both viewer modes (no action buttons; green badge + EA-pointer text). RfpDetailPanel's `onRequestAgreement` prop wired through to the SolicitationCard. Footer rolls forward to v0.17.2.1. Spec §8.9.6 contains the full Accept-flow chain documentation including the dual notification model rationale and the cold-path preservation guarantee.
 - **Hotfix — Phase 17.2.0.4 (LOD threshold revert + zoom control z-index + AI Shopper modal lag):** No §8 structural changes — all three items are polish + a perf fix on existing patterns. (1) **LOD thresholds reverted** from 17.2.0.3's 2.5–5.5 band to 3.4–5.0. Mini-cards at the 2.5 lower bound overlapped visibly in dense clusters (Pinnacle Systems et al.); 3.4 is close to the original density-invariant value (MINI_CARD_W / DOT_GRID = 3.333) so screen spacing exceeds card width at the threshold and overlap stops. Full-card threshold lifted slightly from the original 4.375 to 5.0 — keeps a moderately-wider mini-card range (340–500 %) than the pre-17.2.0.3 baseline (333–438 %). `MAX_ZOOM` stays at 6.5. `selectRfp`'s `Math.max(zoomRef.current, LOD_THRESHOLD)` automatically resolves to 5.0 — notification clicks still land at full-card LOD. (2) **Directory zoom controls raised** above the card overlay (zIndex `50 → 1700`). Card overlay sits at z=1500 default / z=1600 selected. New 1700 value sits between the card layer and the header pillbox (z=2000) / tooltip cards (z=2500) so contextual chrome still renders above. Cluster labels stay at their existing z-tier (intentional per brief). (3) **AI Shopper modal lag fixed.** Click-to-modal-visible measured at 81 ms post-fix (puppeteer in headless Chrome) versus ~5 s reported pre-fix. Two surgical fixes: (a) module-level cache for `buildV22SharedArtifacts` in `v2_2Data.js` — the function rebuilds a ~23k-Claim, ~92k-DA dataset (320 ms cold) on every call and has 20+ call sites in V2App; the cache returns the same object on subsequent calls in 0.001 ms. Safe because every existing caller treats the result as read-only (find / filter / map / `{...shared}` shallow-spread) and the function has no parameters. A future mutation MUST invalidate the cache or shape itself as a new merge layer. (b) O(n²) → O(n) rewrite of the AI Shopper IIFE's public-claims derivation in V2App: replaced `publicDas.map(d => shared.claims.find(c => c.id === d.subject.id))` (~1.6 s alone on the seeded data) with a precomputed `claimsById` Map for O(1) lookups. Footer rolls forward to v0.17.2.0.4.
 - **Hotfix — Phase 17.2.0.3 (RFP description in solicitation modal + expanded mini-card zoom range):** No §8 structural changes — both items are polish on existing patterns. (1) **RFP description block** added to `SolicitationCreateModal` between the modal subtitle and the Required Standards accordion. Matches `RfpDetailPanel`'s description treatment: prose body with `white-space: pre-wrap` for multiline preservation; `No description provided.` muted-italic fallback when `rfp.description` is empty/null. Thin section divider below pairs visually with the existing divider between the accordion and the Claim picker. (2) **Mini-card zoom range widened** in `DirectoryLayer.jsx`. `MID_LOD_THRESHOLD` changed from `MINI_CARD_W / DOT_GRID` (= 3.333) to an explicit `2.5` (250 % zoom); `LOD_THRESHOLD` changed from `CARD_W / DOT_GRID` (= 4.375) to an explicit `5.5` (550 % zoom). `MAX_ZOOM` bumped `5.0 → 6.5` so the new full-card threshold sits well below the cap with comparable headroom. This breaks the original "density invariant" (cards never overlap horizontally at the threshold) — at 2.5 zoom × 48 wu DOT_GRID = 120 px screen spacing vs 160 px mini-card width, mini-cards may overlap horizontally inside dense clusters at the low end of the band. Per Andrew, the readability win (larger band for reading mini-card content before commitment to full-cards) outweighs the mild collision risk. `selectRfp`'s `Math.max(zoomRef.current, LOD_THRESHOLD)` override now resolves to 5.5 — notification clicks still land at full-card LOD. Footer rolls forward to v0.17.2.0.3.

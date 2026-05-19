@@ -1304,6 +1304,14 @@ export function makeRfp({
   ownerDot,
   name,
   description,
+  // Phase 17.2.1.1: assetId is now required. The architectural rule is
+  // that disclosure + evaluation requests originate from the requester's
+  // Asset; previously this was supplied at solicitation-accept time via
+  // an Asset-picker modal. Specifying it at RFP-creation time pushes the
+  // anchor choice up to the buyer and lets the Accept flow skip the
+  // intermediate picker — the RFP's `assetId` flows through to the
+  // CombinedRequestModal pre-fill directly.
+  assetId,
   requirementsSetIds = [],
   status = 'open',
   closedDate = null,
@@ -1312,6 +1320,7 @@ export function makeRfp({
   if (!id) throw new Error('makeRfp: id is required')
   if (!owner) throw new Error('makeRfp: owner is required')
   if (!name) throw new Error('makeRfp: name is required')
+  if (!assetId) throw new Error('makeRfp: assetId is required')
   // Phase 17.1: validate status against the lifecycle taxonomy. Unknown
   // values throw — surfaces seed-authoring typos that would otherwise
   // silently default to behaving as `'open'`.
@@ -1326,6 +1335,7 @@ export function makeRfp({
     ownerDot: ownerDot || makeDot(owner),
     name,
     description: description || '',
+    assetId,
     requirementsSetIds: [...requirementsSetIds],
     status,
     closedDate,
@@ -1992,7 +2002,16 @@ const PHASE_16_2_6_5_MIXED_BUNDLES = [
  * @param {number} count - How many RFPs to generate.
  * @returns {Array<RFP>}
  */
-export function generateRfpsForActor(actor, count) {
+// Phase 17.2.1.1: third positional arg `defaultAssetId` makes the RFP
+// factory's new required field satisfiable for procedurally-generated
+// RFPs without changing the RFP-name procedural-generation logic.
+// Every RFP shares the same anchor Asset id — fine because (a) the
+// mock actors aren't switchable in the demo (no user navigates as a
+// mock-buyer-actor to invoke the Accept flow), (b) the field is only
+// read at Accept-time from `mergedShared.assets`, and (c) the lookup
+// is by id, so a single shared Asset id per cluster is consistent.
+export function generateRfpsForActor(actor, count, defaultAssetId) {
+  if (!defaultAssetId) throw new Error('generateRfpsForActor: defaultAssetId required (Phase 17.2.1.1)')
   const rand = seededRandom(hashString(`${actor.party}:rfps:${count}`))
 
   const TEMPLATES = [
@@ -2043,6 +2062,7 @@ export function generateRfpsForActor(actor, count) {
       ownerDot: actor.partyDot,
       name,
       description: `Solicitation for ${pick(COMPONENTS).toLowerCase()} qualifying against published requirements sets.`,
+      assetId: defaultAssetId,
       requirementsSetIds: [],
       status: 'open',
       createdDate: `${year}-${month}-${day}T09:00:00Z`,
@@ -2409,9 +2429,17 @@ function buildV22SharedArtifactsUncached() {
   }
 
   // ── Phase 16.2.6.5: 20 RFP-only buyer mock actors ─────────────────────
-  // Distinct from supplier mocks: no Claims, no Assets, no DAs — just an
-  // Actor + 1-12 RFPs each. Procedural RFP names via generateRfpsForActor.
+  // Pre-17.2.1.1: no Claims, no Assets, no DAs — just an Actor + 1-12 RFPs
+  // each. Phase 17.2.1.1 added a single stub Asset per RFP-only actor so
+  // `makeRfp`'s new required `assetId` field has a valid reference.
+  // Deviation surface: the brief's seed-data integrity rule said "STOP and
+  // surface if any cluster has zero Assets" — RFP-only clusters had zero;
+  // the resolution is a single deterministic stub Asset per cluster.
+  // Mock owners aren't switchable, so the stub doesn't surface in any
+  // user-facing canvas (no Detail Panel for these Assets ever opens via
+  // a demo flow).
   const rfpOnlyMockActors = []
+  const rfpOnlyMockAssets = []
   const rfpOnlyMockRfps = []
   for (const bundle of PHASE_16_2_6_5_RFP_ONLY_BUNDLES) {
     const actor = makeActor({
@@ -2422,13 +2450,33 @@ function buildV22SharedArtifactsUncached() {
       credits: 0,
     })
     rfpOnlyMockActors.push(actor)
-    rfpOnlyMockRfps.push(...generateRfpsForActor(actor, bundle.rfpCount))
+    const stubAssetId = `asset-${bundle.id}-rfp-anchor`
+    const stubAsset = makeAsset({
+      id: stubAssetId,
+      owner: actor.party,
+      ownerDot: actor.partyDot,
+      name: `${actor.party} Program Anchor`,
+      description: 'Auto-generated RFP anchor Asset (Phase 17.2.1.1 — see seed comment).',
+      file: {
+        uri: `provenance://evidence/${bundle.id}-rfp-anchor`,
+        filename: `${bundle.id}-rfp-anchor.pdf`,
+        size: 1024,
+        mimeType: 'application/pdf',
+        hash: `sha256:${bundle.id}-rfp-anchor`,
+      },
+      registrationDate: '2026-02-01T10:00:00Z',
+      parseResultIds: [],
+    })
+    rfpOnlyMockAssets.push(stubAsset)
+    rfpOnlyMockRfps.push(...generateRfpsForActor(actor, bundle.rfpCount, stubAssetId))
   }
 
   // ── Phase 16.2.6.5: 4 mixed actors (Claims + RFPs) ────────────────────
   // Use seedMockSupplierActor for the Claims half + generateRfpsForActor
   // for the RFP half. Both halves attach to the same Actor record so the
   // view builder sees them as a single owner with mixed artifacts.
+  // Phase 17.2.1.1: thread `supplierBundle.assets[0].id` as the RFP anchor
+  // so every mixed RFP has a valid `assetId` reference.
   const mixedMockActors = []
   const mixedMockAssets = []
   const mixedMockClaims = []
@@ -2448,7 +2496,11 @@ function buildV22SharedArtifactsUncached() {
     mixedMockClaims.push(...supplierBundle.claims)
     mixedMockOwnershipDas.push(...supplierBundle.ownershipDas)
     mixedMockPublicDas.push(...supplierBundle.publicDas)
-    mixedMockRfps.push(...generateRfpsForActor(supplierBundle.actor, bundle.rfpCount))
+    const mixedAnchor = supplierBundle.assets[0]
+    if (!mixedAnchor) {
+      throw new Error(`Phase 17.2.1.1 seed: mixed bundle ${bundle.id} has zero Assets — cannot anchor its RFPs`)
+    }
+    mixedMockRfps.push(...generateRfpsForActor(supplierBundle.actor, bundle.rfpCount, mixedAnchor.id))
   }
 
   // ── Alice's Assets ────────────────────────────────────────────────────
@@ -2742,6 +2794,12 @@ function buildV22SharedArtifactsUncached() {
     ...expandedMockAssets,
     // Phase 16.2.6.5: 170 stub Assets from the 4 mixed actors.
     ...mixedMockAssets,
+    // Phase 17.2.1.1: 20 stub Assets for the RFP-only buyer mock actors.
+    // Each anchors all of that buyer's RFPs. Single Asset per cluster
+    // (these actors aren't switchable in the demo, so a single shared
+    // anchor is sufficient and doesn't muddy the parent-canvas
+    // rendering — these actors don't appear on the parent canvas).
+    ...rfpOnlyMockAssets,
   ]
 
   // ── Parse Results (Alice's parsed datasheets) ─────────────────────────
@@ -3491,6 +3549,12 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: bob.partyDot,
     name: 'Sentinel-4 RF Module Compliance',
     description: 'Seeking suppliers for RF modules meeting MIL-PRF-55681 v2 + System Integration Requirements for the Sentinel-4 satellite program.',
+    // Phase 17.2.1.1: RFP anchors at bAvionics (Avionics Module) since the
+    // Sentinel-4 program's RF Module is housed within the avionics
+    // subsystem. Bob's three seeded Assets (Avionics, Guidance, Thermal)
+    // all sit under the Sentinel-4 program; the avionics one is the
+    // closest thematic anchor for an RF-Module compliance RFP.
+    assetId: bAvionics.id,
     requirementsSetIds: ['reqset-mil-prf-55681-v2', 'reqset-system-integration-v1'],
     status: 'open',
     createdDate: '2026-04-15T09:00:00Z',

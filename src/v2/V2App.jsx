@@ -66,7 +66,11 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
 // Phase 17.2: solicitation create / reject modals.
 import SolicitationCreateModal from '../components/modals/SolicitationCreateModal.jsx'
-import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
+// Phase 17.2.1.1: AssetPickerModal import removed — the Accept flow now
+// uses the RFP's `assetId` directly. The component file remains in the
+// codebase for the future Phase 17.6+ create-RFP flow which will pick
+// the Asset at RFP-creation time.
+// import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
@@ -2674,55 +2678,44 @@ export default function V2App() {
     setV22SolicitationToReject(null)
   }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
 
-  // Phase 17.2.1: RFP owner clicked "Request Agreement" on a SolicitationCard.
-  // Capture the in-flight Accept-flow context; AssetPickerModal mounts as a
-  // side effect of v22AcceptingSolicitation being non-null. We resolve the
-  // RFP id from the solicitation itself (not from v22DirectorySelectedRfp)
-  // because the owner could in principle accept from a notification-driven
-  // entry without the Directory panel being open on the same RFP — defensive.
+  // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
+  // on a SolicitationCard. Phase 17.2.1.1 collapses the prior two-modal
+  // chain (AssetPickerModal → CombinedRequestModal) into a single direct
+  // open of CombinedRequestModal — the RFP's `assetId` (set at RFP
+  // creation per the architectural correction) replaces the intermediate
+  // picker step. The submit-side effect in handleV22RequestSubmit is
+  // gated on v22AcceptingSolicitation; we still set it here so the
+  // post-submit branch can fire the solicitation-accepted side effects.
   const handleRequestAgreement = useCallback((solicitation) => {
     if (!solicitation) return
+    const shared = buildV22SharedArtifacts()
+    const rfp = (shared.rfps || []).find((r) => r.id === solicitation.rfpId)
+    if (!rfp) return
+    const anchorAsset = (shared.assets || []).find((a) => a.id === rfp.assetId)
+    if (!anchorAsset) return  // defensive — every seeded RFP has a valid assetId
+    const sharedClaim = (shared.claims || []).find((c) => c.id === solicitation.claimId)
+    if (!sharedClaim) return
     setV22AcceptingSolicitation({
       solicitationId: solicitation.id,
       solicitorClaimId: solicitation.claimId,
       rfpId: solicitation.rfpId,
     })
-  }, [])
-
-  // Phase 17.2.1: AssetPickerModal Continue handler. Pre-fills the existing
-  // CombinedRequestModal via v22RequestAnchor (the picked Asset, supplied
-  // as a node-like shape from `shared.assets`) + the existing v22AIShopperResult
-  // mechanism (claimPin + suggestedRequirementsSetId). We keep
-  // v22AcceptingSolicitation set across this transition so the
-  // CombinedRequestModal submit handler can detect the Accept entry path
-  // and run the solicitation-accept side effects.
-  const handleAssetPicked = useCallback(({ assetId, solicitationId }) => {
-    if (!assetId || !solicitationId) return
-    const shared = buildV22SharedArtifacts()
-    const sharedAsset = (shared.assets || []).find((a) => a.id === assetId)
-    if (!sharedAsset) return
-    const solicitation = v22Solicitations.get(solicitationId)
-    if (!solicitation) return
-    const sharedClaim = (shared.claims || []).find((c) => c.id === solicitation.claimId)
-    if (!sharedClaim) return
-    const rfp = (shared.rfps || []).find((r) => r.id === solicitation.rfpId)
-    // Pre-fill: anchor Asset + Claim PIN + (first) RS id. The
-    // CombinedRequestModal's initialRequirementsSetIds prop is wrapped in
-    // an array at the existing mount site — passing one id is enough for
-    // single-RS RFPs; for multi-RS RFPs the user can multi-select on
-    // Step 1 (the existing flow already supports it).
     setV22RequestAnchor({
-      id: sharedAsset.id,
-      name: sharedAsset.name,
-      pin: sharedAsset.pin,
+      id: anchorAsset.id,
+      name: anchorAsset.name,
+      pin: anchorAsset.pin,
     })
-    const firstRsId = (rfp?.requirementsSetIds && rfp.requirementsSetIds[0]) || null
+    // Reuse the AI Shopper pre-fill mechanism: claimPin + first RS id.
+    // The mount block wraps suggestedRequirementsSetId into a single-
+    // element array; multi-RS RFPs surface the rest via the modal's
+    // own multi-select UI.
+    const firstRsId = (rfp.requirementsSetIds && rfp.requirementsSetIds[0]) || null
     setV22AIShopperResult({
       claimPin: sharedClaim.pin,
       suggestedRequirementsSetId: firstRsId,
     })
     setV22RequestOpen(true)
-  }, [v22Solicitations])
+  }, [])
 
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, terms, note }) => {
     if (!v22AmendingDaId) return
@@ -4742,11 +4735,18 @@ export default function V2App() {
                           // terminal action (accept / decline in handleV22Accept
                           // / handleV22Decline). If the user closes the modal
                           // without resolving, the notification reappears.
+                          // Phase 17.2.1.1: if the user is on the Directory
+                          // layer, close it before opening the response modal
+                          // so the user lands on their parent canvas after
+                          // resolving the request.
+                          if (v22DirectoryOpen) setV22DirectoryOpen(false)
                           if (req.v22DaId) setV22RespondingTo({ daId: req.v22DaId })
                         } else if (req.type === 'v22-request-ea-only') {
                           // Phase 11C: warm-path EA-only request → open the
                           // CombinedResponseModal in eaOnlyMode (same dismiss-
                           // on-terminal-action semantics as v22-request).
+                          // Phase 17.2.1.1: close Directory if open (see above).
+                          if (v22DirectoryOpen) setV22DirectoryOpen(false)
                           if (req.v22EaId) setV22RespondingToEaOnly({ eaId: req.v22EaId })
                         } else if (req.type === 'v22-ea-accepted' || req.type === 'v22-ea-declined') {
                           // Phase 11C: informational EA-only notifications.
@@ -4758,6 +4758,9 @@ export default function V2App() {
                           // that fires for cold-path acceptances. Decline path
                           // skips reveal — declined Claims stay in declined
                           // visual state, no flip-to-active to play.
+                          // Phase 17.2.1.1: close Directory if open so the
+                          // user lands on the parent canvas at the target Claim.
+                          if (v22DirectoryOpen) setV22DirectoryOpen(false)
                           ensureParentLayer(() => {
                             updateRoleState(roleId, prev => ({
                               ...prev,
@@ -6278,6 +6281,10 @@ export default function V2App() {
             (s) => s.rfpId === currentRfp.id,
           )
           const claimsByIdMap = new Map((mergedShared.claims || []).map((c) => [c.id, c]))
+          // Phase 17.2.1.1: assetsById Map for the RFP "For Asset" row
+          // lookup. Built from the merged shared artifact set (same source
+          // RfpDetailPanel uses for everything else).
+          const assetsByIdMap = new Map((mergedShared.assets || []).map((a) => [a.id, a]))
           // Active actor's own Claims — passed to the create modal as the
           // pickable list. Owner of a Claim is the active actor's party.
           const myClaims = (mergedShared.claims || []).filter((c) => c.owner === activeRole.party)
@@ -6323,11 +6330,16 @@ export default function V2App() {
                 solicitations={solicitationsForRfp}
                 activeClaims={myClaims}
                 claimsById={claimsByIdMap}
+                // Phase 17.2.1.1: assetsById Map drives the "For Asset"
+                // row's Asset name resolution. Falls back to (Asset not
+                // found) muted text when the assetId doesn't resolve.
+                assetsById={assetsByIdMap}
                 onOpenSolicitModal={({ rfp: targetRfp }) => setV22SolicitOpenForRfp({ rfp: targetRfp })}
                 onRejectSolicitation={(solicitation) => setV22SolicitationToReject(solicitation)}
-                // Phase 17.2.1: owner-side Accept flow entry. Click on the
-                // SolicitationCard's "Request Agreement" button mounts
-                // AssetPickerModal (gated below on v22AcceptingSolicitation).
+                // Phase 17.2.1 / 17.2.1.1: owner-side Accept flow entry.
+                // Click on the SolicitationCard's "Request Agreement"
+                // button opens CombinedRequestModal directly (no Asset
+                // picker step — the RFP's assetId is the anchor).
                 onRequestAgreement={handleRequestAgreement}
               />
             </div>
@@ -6352,6 +6364,11 @@ export default function V2App() {
               // `publishedRequirementSets` is the same source the RFP
               // Detail Panel uses to resolve RS chips.
               requirementsSets={publishedRequirementSets}
+              // Phase 17.2.1.1: thread EA collection + solicitor party so
+              // the modal can grey out Claims already mapped to the RFP
+              // owner via an active or pending EA.
+              evaluationAgreements={sharedForModal.evaluationAgreements || []}
+              solicitorParty={activeRole.party}
               onSubmit={handleCreateSolicitation}
               onCancel={() => setV22SolicitOpenForRfp(null)}
             />
@@ -6376,33 +6393,14 @@ export default function V2App() {
           )
         })()}
 
-        {/* Phase 17.2.1: AssetPickerModal — first step of the Accept flow.
-            Mounts when the RFP owner clicks "Request Agreement" on a
-            SolicitationCard. Bob picks one of his own Assets to anchor
-            the requested mapping; Continue closes the AssetPickerModal
-            and opens the existing CombinedRequestModal pre-filled with
-            the picked Asset + the solicitor's Claim PIN + the RFP's
-            requirements-set ids. Cancel clears the in-flight Accept
-            context with no side effects. */}
-        {v22AcceptingSolicitation && !v22RequestOpen && (() => {
-          const shared = buildV22SharedArtifacts()
-          const solicitation = v22Solicitations.get(v22AcceptingSolicitation.solicitationId)
-          if (!solicitation) return null
-          const solicitorClaim = (shared.claims || []).find((c) => c.id === v22AcceptingSolicitation.solicitorClaimId)
-          const rfp = (shared.rfps || []).find((r) => r.id === v22AcceptingSolicitation.rfpId)
-          const ownedAssets = (shared.assets || []).filter((a) => a.owner === activeRole.party)
-          return (
-            <AssetPickerModal
-              solicitation={solicitation}
-              solicitorClaim={solicitorClaim}
-              rfp={rfp}
-              activeAssets={ownedAssets}
-              activeParty={activeRole.party}
-              onSubmit={handleAssetPicked}
-              onCancel={() => setV22AcceptingSolicitation(null)}
-            />
-          )
-        })()}
+        {/* Phase 17.2.1.1: AssetPickerModal mount block REMOVED. The
+            Accept flow no longer has an intermediate Asset-picker step —
+            the RFP carries its anchor Asset from creation via the
+            required `rfp.assetId` field. `handleRequestAgreement` opens
+            CombinedRequestModal directly with the RFP's Asset pre-filled.
+            AssetPickerModal.jsx is preserved in the codebase for the
+            future create-RFP flow (Phase 17.6+), which will pick the
+            Asset at RFP-creation time instead. */}
 
         {/* V2.2 Phase 7 — AI Shopper modal (spec §9). Opens either from the
             chrome icon (user had no Directory context in mind) or from within
@@ -6465,7 +6463,39 @@ export default function V2App() {
               || v22Data?.nodes.find(n => n.v22Type === 'ASSET' && n.owner === activeRole.party)
               || null
             }
-            availableRequirementsSets={requirementSets.map(rs => ({ id: rs.id, name: rs.name, version: rs.version ?? 1 }))}
+            availableRequirementsSets={(() => {
+              // Phase 17.2.1.1: scrollbox lists ALL published Requirements
+              // Sets (network-wide) so RFP pre-selection works — `rfp.requirementsSetIds`
+              // can reference any actor's published RS. The active actor's
+              // own (non-published) RSes are appended below so they remain
+              // selectable from this entry point. Dedupe by id (own wins so
+              // own-private RSes can never disappear if they're also published).
+              const rows = []
+              const seen = new Set()
+              for (const rs of (publishedRequirementSets || [])) {
+                if (seen.has(rs.id)) continue
+                seen.add(rs.id)
+                rows.push({
+                  id: rs.id,
+                  name: rs.name,
+                  version: rs.version ?? 1,
+                  isPublished: true,
+                  ownerParty: rs._publishedBy || null,
+                })
+              }
+              for (const rs of (requirementSets || [])) {
+                if (seen.has(rs.id)) continue
+                seen.add(rs.id)
+                rows.push({
+                  id: rs.id,
+                  name: rs.name,
+                  version: rs.version ?? 1,
+                  isPublished: false,
+                  ownerParty: null,
+                })
+              }
+              return rows
+            })()}
             resolveClaimByPin={(pin) => resolveClaimByPinInShared(pin, v22Provisionals)}
             // Phase 11D #134: pass the set of Claim ids already on the active
             // actor's canvas. The modal flags PINs that resolve to one of
@@ -8284,7 +8314,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.1 &middot; Changelog
+          v0.17.2.1.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8331,6 +8361,16 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.1.1', date: '2026-05-19', label: 'Phase 17.2.1.1', items: [
+                  'Phase 17.2.1.1 — Hotfix: RFP-bound Asset + Claim greying + EA+DA notification Directory close + CombinedRequestModal RS scrollbox. Four QA-driven items closing out the 17.2 arc before 17.3+ opens.',
+                  'RFP factory `makeRfp` extends required field set with `assetId` (validated, throws on missing). All 118 seeded RFPs populated: Bob\'s Sentinel-4 RFP binds to his `bAvionics` Asset ("Avionics Module"); each of the 20 RFP-only mock-cluster owners gets one stub Asset (`asset-{actor.id}-rfp-anchor`, owner = actor.party) so the seed-data integrity check passes; the 4 mixed-cluster owners reuse their first existing Asset. `generateRfpsForActor(actor, count, defaultAssetId)` factory entry-point now requires `defaultAssetId` (throws if absent — surfaces missing-Asset seed inconsistencies at build time, not at render time). Architecture spec §8.7 + §8.9.6 updated.',
+                  'RfpDetailPanel: new "For Asset" row rendered between the Posted-by row and the Description block. Renders the Asset name + inline ASSET pillbox; (Asset not found) muted fallback when `rfp.assetId` doesn\'t resolve in the passed `assetsById` Map. V2App threads a derived `assetsById` Map down to the mount.',
+                  'Accept flow simplified: AssetPickerModal removed from the Accept path. `handleRequestAgreement` now goes directly from the SolicitationCard click → CombinedRequestModal pre-filled with the RFP\'s bound Asset (via `requesterAsset`) + the solicitor\'s Claim PIN (via `initialPin`) + the RFP\'s `requirementsSetIds` (via `initialRequirementsSetIds`). No intermediate Asset-pick step. The `AssetPickerModal` component file stays in the codebase for future create-RFP work; only the V2App mount + handlers were removed from the Accept flow path. `v22AcceptingSolicitation` retained as the in-flight context object (still carries solicitationId + solicitorClaimId + rfpId for the submit-side branch).',
+                  'SolicitationCreateModal Claim picker now greys out Claims already mapped to the RFP owner via an active or pending EA. Predicate: scan `evaluationAgreements` for EAs where `grantee.party === rfp.owner` AND `grantor.party === solicitorParty` AND `subject.kind === \'claim\'` AND `!_declineMeta && !_revokedMeta`; the Claim row renders at opacity 0.45 with `cursor: not-allowed`, no click handler, a tooltip "Already on {ownerParty}\'s network", and an "ON NETWORK" pillbox. Submit gating blocks selection of greyed Claims defensively. Without this gate, the cold-path CombinedRequestModal would resolve the PIN to `already-disclosed` and block submission — surfacing the impossible state upstream lets the user pick a different Claim before opening the modal.',
+                  'EA+DA notification click handlers close the Directory layer if it\'s open before running cold-path navigation. Applies to `v22-request` (cold-path EA+DA request received), `v22-request-ea-only` (warm-path EA-only request received), and `v22-ea-accepted` / `v22-ea-declined` (informational acceptance/decline notifications). Previously the Directory stayed open behind the response modal / over the parent canvas; now the user lands on their parent canvas at the target node as expected.',
+                  'CombinedRequestModal RS scrollbox: data source extended to include all published Requirements Sets (network-wide), not just the active actor\'s own RS pool. Pre-selection via `initialRequirementsSetIds` now works for any actor\'s published RS (RFPs can reference any actor\'s published RS by design). Per-row rendering gains a globe icon (canonical GlobeIcon used in LibraryModal / BadgesPanel / RequirementsPanel) + "Published by {owner party}" muted line below the name. Own (non-published) RSes appended below published rows with their pre-17.2.1.1 minimal treatment (no globe, no owner line). Dedupe by id (own wins so own-private RSes can never disappear). Cold-path entry (Claim PIN click on parent canvas) unaffected — same modal, same per-row rendering.',
+                  'Footer rolls forward to v0.17.2.1.1.',
+                ]},
                 { version: '0.17.2.1', date: '2026-05-19', label: 'Phase 17.2.1', items: [
                   'Phase 17.2.1 — RFP Accept flow / Request Agreement. The Accept side of the solicitation loop (placeholder-disabled across 17.2 and 17.2.0.x) is now wired end-to-end. Bob clicks Request Agreement on Alice\'s solicitation card → AssetPickerModal opens → Bob picks one of his Assets → CombinedRequestModal opens pre-filled → submit creates a provisional EA+DA → Alice gets both a solicitation-accepted notification and the standard EA+DA request notification. The full RFP arc (post → solicit → reject/accept → formalize) is now demoable end-to-end.',
                   'New `AssetPickerModal` component (src/components/modals/AssetPickerModal.jsx) — single-select scrollable list of the active actor\'s Assets + context block (solicitor + RFP + Claim name) + Continue button gated on selection. Honours the architectural rule that disclosure + evaluation requests must originate from one of the requester\'s Assets so the parent canvas can lay out the request-node + edge.',

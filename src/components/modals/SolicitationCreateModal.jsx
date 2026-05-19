@@ -171,6 +171,16 @@ export default function SolicitationCreateModal({
   rfp,                       // target RFP
   activeClaims = [],         // active actor's Claims (filtered by parent)
   requirementsSets = [],     // RS lookup array (Phase 17.2.0.2)
+  // Phase 17.2.1.1: passed by V2App so the modal can grey out Claims
+  // that are already mapped to the RFP owner via an active or pending
+  // EA. Without this gate, Alice could solicit with a Claim already on
+  // Bob's network — Bob's Accept flow would then error out (the PIN
+  // resolves to an `already-disclosed` state in CombinedRequestModal).
+  // The list is the merged shared.evaluationAgreements collection.
+  evaluationAgreements = [],
+  // Phase 17.2.1.1: active actor's party label (the solicitor). Used to
+  // identify which EAs to consider as "already on the buyer's network".
+  solicitorParty = null,
   onSubmit,                  // ({ rfpId, claimId, message }) => void
   onCancel,
 }) {
@@ -180,8 +190,31 @@ export default function SolicitationCreateModal({
   // can be open simultaneously.
   const [openRsIds, setOpenRsIds] = useState(() => new Set())
 
+  // Phase 17.2.1.1: build the "Claims already on the buyer's network"
+  // predicate. A Claim counts if there's an EA where the buyer is the
+  // grantee, the solicitor is the grantor, and the EA isn't declined or
+  // revoked. Both active (live) and provisional ("pending") EAs count
+  // — declined / revoked EAs do NOT prevent a fresh solicitation.
+  const buyerParty = rfp?.owner || null
+  const claimsOnBuyerNetwork = new Map() // Map<claimId, true> for fast lookup + tooltip text
+  if (buyerParty && solicitorParty) {
+    for (const ea of evaluationAgreements) {
+      if (!ea) continue
+      if (ea._declineMeta || ea._revokedMeta) continue
+      if (ea.grantor?.party !== solicitorParty) continue
+      if (ea.grantee?.party !== buyerParty) continue
+      if (ea.claimId) claimsOnBuyerNetwork.set(ea.claimId, true)
+    }
+  }
+  const isClaimOnBuyerNetwork = (claimId) => claimsOnBuyerNetwork.has(claimId)
+
   const hasClaims = activeClaims.length > 0
-  const canSubmit = hasClaims && !!selectedClaimId
+  const selectedClaim = selectedClaimId ? activeClaims.find((c) => c.id === selectedClaimId) : null
+  // Submit gating: defensively block if the selected Claim is already
+  // greyed (shouldn't be reachable because click is gated, but covers
+  // the case where the underlying EAs change after a selection).
+  const selectedIsGreyed = selectedClaim ? isClaimOnBuyerNetwork(selectedClaim.id) : false
+  const canSubmit = hasClaims && !!selectedClaimId && !selectedIsGreyed
 
   // Phase 17.2.0.2: build RS lookup from the prop list. Missing entries
   // surface as "(Standard not found)" in the accordion row.
@@ -309,14 +342,26 @@ export default function SolicitationCreateModal({
                   {activeClaims.map((c) => {
                     const isSelected = selectedClaimId === c.id
                     const refCount = Array.isArray(c.referencedAssetIds) ? c.referencedAssetIds.length : 0
+                    // Phase 17.2.1.1: greyed row when the Claim already
+                    // sits on the buyer's network via an active or
+                    // provisional EA. Clicks are no-ops; cursor is
+                    // not-allowed; native title surfaces the reason on
+                    // hover. Submit can't land on a greyed Claim
+                    // (canSubmit gate above).
+                    const isGreyed = isClaimOnBuyerNetwork(c.id)
+                    const tooltipText = isGreyed && buyerParty
+                      ? `Already on ${buyerParty}'s network`
+                      : undefined
                     return (
                       <div
                         key={c.id}
-                        onClick={() => setSelectedClaimId(c.id)}
+                        title={tooltipText}
+                        onClick={isGreyed ? undefined : () => setSelectedClaimId(c.id)}
                         style={{
                           padding: '10px 14px',
                           borderBottom: '1px solid var(--border)',
-                          cursor: 'pointer',
+                          cursor: isGreyed ? 'not-allowed' : 'pointer',
+                          opacity: isGreyed ? 0.45 : 1,
                           background: isSelected
                             ? 'color-mix(in srgb, var(--accent-indigo) 12%, var(--bg-card))'
                             : 'transparent',
@@ -326,9 +371,11 @@ export default function SolicitationCreateModal({
                           transition: 'background 120ms',
                         }}
                         onMouseEnter={(e) => {
+                          if (isGreyed) return
                           if (!isSelected) e.currentTarget.style.background = 'var(--bg-raised)'
                         }}
                         onMouseLeave={(e) => {
+                          if (isGreyed) return
                           if (!isSelected) e.currentTarget.style.background = 'transparent'
                         }}
                       >
@@ -354,6 +401,21 @@ export default function SolicitationCreateModal({
                             flex: 1,
                             wordBreak: 'break-word',
                           }}>{c.name || c.id}</span>
+                          {isGreyed && (
+                            <span style={{
+                              fontSize: 9,
+                              fontFamily: 'var(--font-mono)',
+                              fontWeight: 700,
+                              letterSpacing: '0.08em',
+                              color: 'var(--text-tertiary)',
+                              padding: '2px 6px',
+                              borderRadius: 3,
+                              background: 'var(--bg-raised)',
+                              border: '1px solid var(--border)',
+                              textTransform: 'uppercase',
+                              flexShrink: 0,
+                            }}>ON NETWORK</span>
+                          )}
                           <span style={{
                             fontSize: 9,
                             fontFamily: 'var(--font-mono)',
