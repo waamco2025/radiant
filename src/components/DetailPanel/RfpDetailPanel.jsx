@@ -186,6 +186,10 @@ export default function RfpDetailPanel({
   claimsById = null,    // optional Map<claimId, claim> used to resolve Claim metadata for SolicitationCard
   onOpenSolicitModal,    // ({ rfp }) => void — parent opens SolicitationCreateModal
   onRejectSolicitation,  // (solicitation) => void — parent opens SolicitationRejectModal
+  // Phase 17.2.1: owner-side accept entry point. Click on the
+  // SolicitationCard's "Request Agreement" button fires this; V2App opens
+  // the AssetPickerModal which in turn opens the CombinedRequestModal.
+  onRequestAgreement,    // (solicitation) => void
 }) {
   if (!rfp) return null
 
@@ -406,6 +410,7 @@ export default function RfpDetailPanel({
                       claim={claim}
                       viewerRole="owner"
                       onReject={onRejectSolicitation}
+                      onRequestAgreement={onRequestAgreement}
                     />
                   )
                 })}

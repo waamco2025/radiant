@@ -2673,6 +2673,108 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.2.1 completion notes (2026-05-19) — RFP Accept flow / Request Agreement
+
+The Accept side of the RFP solicitation loop ships. Placeholder-disabled across 17.2 / 17.2.0.x with a "Coming in Phase 17.2.1" tooltip; now wired end-to-end. The full RFP arc (post → discover → solicit → reject/accept → formalize EA+DA) is demoable.
+
+**Stop-and-surface gate outcome: PASSED CLEANLY.** The brief flagged three potential structural-change risks:
+1. CombinedRequestModal may not accept external pre-fill cleanly.
+2. Parent-canvas navigation + provisional-node pan/zoom may not work via the new entry path.
+3. Submit-side effect hook may require CombinedRequestModal changes.
+
+All three were investigated and resolved without touching CombinedRequestModal. Phase 7 (AI Shopper) already established the pre-fill mechanism: `requesterAsset` + `initialPin` + `initialRequirementsSetIds`. Phase 17.2.1 reuses it directly. Parent-canvas navigation runs through the existing `handleV22RequestSubmit` (sets `v22PanToClaimId`, etc.). Submit-side effect is a new conditional branch inside the existing handler, gated on `v22AcceptingSolicitation`. Cold-path is bit-identical.
+
+**Flow chain.**
+
+1. **Bob clicks "Request Agreement" on a pending SolicitationCard** in the RfpDetailPanel. The button — disabled with "Coming in Phase 17.2.1" tooltip across the arc — is now enabled, click fires `onRequestAgreement(solicitation)` prop.
+2. **`handleRequestAgreement` captures the in-flight Accept-flow context:**
+   ```js
+   setV22AcceptingSolicitation({
+     solicitationId: solicitation.id,
+     solicitorClaimId: solicitation.claimId,
+     rfpId: solicitation.rfpId,
+   })
+   ```
+3. **AssetPickerModal mounts** (gated on `v22AcceptingSolicitation && !v22RequestOpen`). New component (`src/components/modals/AssetPickerModal.jsx`):
+   - Title: "Pick an Asset"
+   - Subtitle: `Pick the Asset that "{claim.name}" will map to in your network.`
+   - Indigo-tinted context block: "From: {solicitor party} via RFP: {rfp name}" + "Their Claim: {claim name}"
+   - Scrollable list of `shared.assets.filter(a => a.owner === activeRole.party)` (max-height 320 px). Each row: radio indicator + Asset name + ASSET pillbox + (file.filename when present).
+   - Empty case: muted italic "You have no Assets to map this Claim to. Create an Asset on your parent canvas first."
+   - Footer: Cancel + Continue (gated on selection).
+4. **Continue fires `handleAssetPicked({ assetId, solicitationId })`**, which:
+   - Resolves the picked Asset, the solicitor's Claim, and the RFP from `buildV22SharedArtifacts()`.
+   - `setV22RequestAnchor({ id, name, pin })` — the picked Asset as a node-like shape (compatible with CombinedRequestModal's `requesterAsset` prop and `handleV22RequestSubmit`'s anchor reads).
+   - `setV22AIShopperResult({ claimPin: solicitorClaim.pin, suggestedRequirementsSetId: rfp.requirementsSetIds[0] })` — reuses the AI Shopper pre-fill mechanism for PIN + first RS id.
+   - `setV22RequestOpen(true)` — mounts CombinedRequestModal with the pre-fill.
+5. **`v22AcceptingSolicitation` stays set across this transition** so the submit handler can detect the Accept entry path.
+6. **Bob completes the existing CombinedRequestModal flow** (Step 1: confirm Claim + RSes; Step 2: acknowledgments; Submit). The modal calls `handleV22RequestSubmit(payload)` exactly as it does for cold-path entries.
+7. **`handleV22RequestSubmit` runs its existing cold-path work** (create provisional EA+DA pair, append to `v22Provisionals`, close modal, clear anchor, select new Claim, queue parent-canvas pan/zoom, fire `v22-request` notification to grantor).
+8. **Then a new conditional branch runs** when `v22AcceptingSolicitation` is non-null:
+   ```js
+   if (v22AcceptingSolicitation && v22AcceptingSolicitation.solicitationId) {
+     // Capture EA id, update solicitation in-place via acceptSolicitation, fire accepted notification.
+     const acceptingId = v22AcceptingSolicitation.solicitationId
+     const newEaId = pair.evaluationAgreement.id
+     let acceptedSolicitation = null
+     setV22Solicitations((prev) => {
+       const existing = prev.get(acceptingId)
+       if (!existing) return prev
+       acceptedSolicitation = acceptSolicitation(existing, newEaId)
+       const next = new Map(prev)
+       next.set(acceptingId, acceptedSolicitation)
+       return next
+     })
+     // Fire v22-rfp-solicitation-accepted notification on solicitor's inbox.
+     // Clear v22AcceptingSolicitation.
+   }
+   ```
+9. **Dual notification on Alice's inbox.** Both notifications coexist intentionally:
+   - `v22-request` (the existing cold-path notification) — actionable; click routes Alice to her parent canvas with the new EA+DA visible and the Disclosure-Response modal entry point exposed.
+   - `v22-rfp-solicitation-accepted` (new) — informational; click routes Directory → RFP marker → RfpDetailPanel where the solicitor-view accepted-state surfaces the EA pointer for context.
+10. **SolicitationCard re-renders in accepted state** on both viewer perspectives. Owner sees "Agreement requested on {date}" with the "see the provisional EA on the parent canvas" pointer; solicitor sees "Accepted on {date}" with "see your new Evaluation Agreement on the parent canvas". No action buttons in either view — the EA+DA is now the live artifact and is managed via the parent canvas.
+
+**Files touched (7):**
+
+- `src/v2/v2_2Data.js` — `makeRfpSolicitation` gains optional `acceptedEaId` (default null); new exported `acceptSolicitation(solicitation, eaId)` pure transform.
+- `src/components/modals/AssetPickerModal.jsx` — new component.
+- `src/components/DetailPanel/SolicitationCard.jsx` — enabled the Request Agreement button (removed the disabled state + "Coming in Phase 17.2.1" tooltip); added accepted-state treatment for both viewer modes; threaded new `onRequestAgreement` prop; updated the date block to show "Agreement requested" on accepted; updated the header comment.
+- `src/components/DetailPanel/RfpDetailPanel.jsx` — new `onRequestAgreement` prop; threaded through to SolicitationCard in the owner-view incoming-solicitations render block.
+- `src/v2/V2App.jsx`:
+  - Imports: `acceptSolicitation` + `AssetPickerModal`.
+  - New state: `v22AcceptingSolicitation = { solicitationId, solicitorClaimId, rfpId } | null`.
+  - New handlers: `handleRequestAgreement(solicitation)` and `handleAssetPicked({ assetId, solicitationId })`.
+  - Extended: `handleV22RequestSubmit` with the post-submit conditional branch (cold-path bit-preserved).
+  - Notification rendering: new `isV22RfpSolicitationAccepted` boolean; green badge color; ACCEPTED label; "{requester} accepted your solicitation — see your new EA on the parent canvas" body copy.
+  - Notification click dispatch: extended the existing `v22-rfp-solicitation-{received,rejected}` branch to also handle `-accepted` (same Directory → RFP → panel routing).
+  - Mounted AssetPickerModal in the modal-stack region (gated on `v22AcceptingSolicitation && !v22RequestOpen`).
+  - RfpDetailPanel mount: passes `onRequestAgreement={handleRequestAgreement}`.
+  - CombinedRequestModal `onClose`: extended to also clear `v22AcceptingSolicitation` and `v22RequestAnchor` (so mid-flow cancellation returns to a clean state).
+  - Footer constant v0.17.2.0.4 → v0.17.2.1; Changelog modal entry prepended.
+- `architecture-spec.md`: new §8.9.6 (Accept flow); renumbered §8.9.6 (Forward pointers) → §8.9.7 with the 17.2.1 entry removed and the remaining items (17.3+) preserved.
+- `polish-backlog.md`: Update Log entry referencing #192.
+- `CLAUDE.md`: Current state of the world rolled forward; active phase queue updated (next: Phase 17.3 — Claim Detail Panel content polish).
+- `CLAUDE-phase-log.md`: this entry.
+
+**Build clean.** `npm run build` exits 0 (2.09 s). Dev server smoke probe confirms no setState-in-render warning + no new errors beyond pre-existing `packClusterDense` overflow logs.
+
+**Data-layer probe** (`/tmp/accept-flow-data-probe.mjs`):
+- `makeRfpSolicitation({...})` → `acceptedEaId: null` on pending. ✓
+- `acceptSolicitation(pending, 'ea-x')` → status: `'accepted'`, `respondedDate` populated, `acceptedEaId: 'ea-x'`. ✓
+- Source not mutated (the pending solicitation retains status `'pending'`). ✓
+- Throws on null solicitation. ✓
+- Throws on null eaId. ✓
+- `mergeSolicitations(shared, Map<id, accepted>)` overlays the accepted solicitation correctly. ✓
+- Seeded Bob has 3 owned Assets (so AssetPickerModal's list won't be empty in normal demo). ✓
+
+**Runtime-verification caveats.** The Accept happy-path (items 1–10) requires manual mouse + keyboard exercise — the CombinedRequestModal has 2 steps + acknowledgments + multi-select RS picker that aren't reliably operable via DOM-dispatched synthetic events at the scope of this phase's verification budget. The component-level guarantees are robust: each step's enable/submit gates are deterministic state expressions; the post-submit conditional branch in `handleV22RequestSubmit` is unit-testable via the data-layer probe (above); the notification dispatch + click routing reuse the existing solicitation-{received,rejected} infrastructure verbatim. Code-verified items: 1–10 (Accept happy path), 11–12 (button gating on accepted state — visible in SolicitationCard render block), 13–14 (Cancel paths — explicit state clears in the cancel handlers), 15 (zero-Assets defensive — explicit empty-case branch in AssetPickerModal), 16 (cold-path preservation — conditional gate on `v22AcceptingSolicitation` is the structural guarantee).
+
+**Out of scope** (kept narrow per the brief): withdraw / amend an accepted solicitation (Phase 17.6+); withdraw / decline at this entry point (folds into the existing parent-canvas EA+DA flow — no new work); edit/create RFP (still 17.5+/17.6+); parent canvas RFP rendering, Claim Detail Panel content (17.3), umbrella DA edges (17.4+); auto-skip AssetPickerModal at 1 Asset (intentional: always show for confirmation); filter/search inside AssetPickerModal (single list adequate for current Asset counts).
+
+**Next forward-progress**: Phase 17.3 — Claim Detail Panel content polish (#58, #104, #116, #161, #180).
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.0.4 completion notes (2026-05-18) — LOD threshold revert + zoom control z-index + AI Shopper modal lag
 
 Three QA-driven fixes, including the AI Shopper performance investigation.

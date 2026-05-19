@@ -1,15 +1,16 @@
 // Phase 17.2 — Renders a single RFP Solicitation inside RfpDetailPanel.
 //
-// Three viewer modes:
+// Two viewer modes:
 //   • viewerRole = 'owner'      → RFP buyer looking at incoming solicitations.
-//                                  Shows "Request Agreement" (disabled — 17.2.1)
-//                                  + "Reject" (enabled while status === 'pending').
+//                                  Pending: Request Agreement + Reject buttons.
+//                                  Accepted (17.2.1): green badge, "see EA on
+//                                  parent canvas" text, no actions.
+//                                  Rejected: red badge, reply, no actions.
 //   • viewerRole = 'solicitor'  → Seller looking at their own outgoing
 //                                  solicitation. No action bar — status display
-//                                  only. Rejection message visible when rejected.
+//                                  only. Accepted-state surfaces the EA pointer.
 //
-// Status taxonomy: 'pending' | 'rejected' | 'accepted' (accepted reserved
-// for Phase 17.2.1).
+// Status taxonomy: 'pending' | 'rejected' | 'accepted'.
 //
 // Date formatting matches RfpDetailPanel.jsx — `YYYY-MM-DD · HH:MM UTC`.
 
@@ -160,14 +161,16 @@ function CardActionBtn({ label, onClick, variant = 'neutral', disabled, tooltip 
 export default function SolicitationCard({
   solicitation,
   claim,
-  viewerRole,        // 'owner' | 'solicitor'
-  onReject,          // owner-only: () => void (parent opens reject modal)
+  viewerRole,            // 'owner' | 'solicitor'
+  onReject,              // owner-only: (solicitation) => void
+  onRequestAgreement,    // owner-only: (solicitation) => void  (Phase 17.2.1)
 }) {
   if (!solicitation) return null
 
   const status = solicitation.status || 'pending'
   const isPending = status === 'pending'
   const isRejected = status === 'rejected'
+  const isAccepted = status === 'accepted'
 
   const claimName = claim?.name || solicitation.claimId
   const claimOwner = claim?.owner || solicitation.solicitor
@@ -243,9 +246,38 @@ export default function SolicitationCard({
             <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
           </div>
         )}
+        {isAccepted && solicitation.respondedDate && (
+          <div>
+            <span style={{ color: 'var(--text-dim)' }}>Agreement requested </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
+          </div>
+        )}
       </div>
 
-      {/* Action bar — owner-only on pending status */}
+      {/* Phase 17.2.1: accepted-state pointer. The provisional EA+DA now
+          lives on the requester's parent canvas; both viewer roles get a
+          line pointing them there. No action buttons — the EA is the
+          live artifact and is managed via the parent canvas. */}
+      {isAccepted && (
+        <div style={{
+          marginTop: 10,
+          padding: '8px 10px',
+          background: 'color-mix(in srgb, var(--accent-green) 8%, var(--bg-deep))',
+          borderLeft: '2px solid color-mix(in srgb, var(--accent-green) 60%, var(--border))',
+          borderRadius: 3,
+          fontSize: 11,
+          color: 'var(--text-secondary)',
+          lineHeight: 1.5,
+        }}>
+          {viewerRole === 'solicitor'
+            ? 'Accepted — see your new Evaluation Agreement on the parent canvas.'
+            : 'Agreement requested — see the provisional EA on the parent canvas.'}
+        </div>
+      )}
+
+      {/* Action bar — owner-only on pending status. Phase 17.2.1: the
+          Request Agreement button is enabled; click fires the
+          onRequestAgreement prop, V2App opens AssetPickerModal. */}
       {viewerRole === 'owner' && isPending && (
         <div style={{
           display: 'flex',
@@ -255,8 +287,7 @@ export default function SolicitationCard({
           <CardActionBtn
             label="Request Agreement"
             variant="affirm"
-            disabled
-            tooltip="Coming in Phase 17.2.1"
+            onClick={() => onRequestAgreement?.(solicitation)}
           />
           <CardActionBtn
             label="Reject"

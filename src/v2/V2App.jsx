@@ -26,6 +26,9 @@ import {
   mergeClosedRfps,
   // Phase 17.2: RFP solicitation factory + merge layer.
   makeRfpSolicitation, mergeSolicitations,
+  // Phase 17.2.1: acceptSolicitation transitions a pending solicitation to
+  // accepted with a reference to the resulting EA's id.
+  acceptSolicitation,
   // Phase 11B: synthetic-node helper used by the directory cluster-click
   // flow so V22NodeDetailPanel can render for a Claim that lives only on
   // the directory layer (no parent-canvas node present).
@@ -63,6 +66,7 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
 // Phase 17.2: solicitation create / reject modals.
 import SolicitationCreateModal from '../components/modals/SolicitationCreateModal.jsx'
+import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
@@ -280,6 +284,14 @@ export default function V2App() {
   // should render (the target solicitation object); null when closed.
   const [v22SolicitOpenForRfp, setV22SolicitOpenForRfp] = useState(null)
   const [v22SolicitationToReject, setV22SolicitationToReject] = useState(null)
+  // Phase 17.2.1: in-flight Accept-flow context. Set when the RFP owner
+  // clicks "Request Agreement" on a SolicitationCard. Carries the
+  // solicitation id + solicitor's Claim id + RFP id so AssetPickerModal +
+  // CombinedRequestModal mount paths can resolve their inputs, and so
+  // handleV22RequestSubmit can detect this entry path on submit to fire
+  // the solicitation-accepted side effects (status update + notification).
+  // Shape: { solicitationId, solicitorClaimId, rfpId } | null.
+  const [v22AcceptingSolicitation, setV22AcceptingSolicitation] = useState(null)
   const [v22AIShopperOpen, setV22AIShopperOpen] = useState(false)
   // Pre-population carried from an AI Shopper candidate into the
   // CombinedRequestModal (Story 2 step 5 — spec §7.2).
@@ -804,7 +816,44 @@ export default function V2App() {
         date: new Date().toISOString().slice(0, 10),
       })
     }
-  }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor, enqueueV22NotificationForRequester])
+    // Phase 17.2.1: if this submit originated from a solicitation Accept
+    // flow, fire the solicitation-side effects. The cold path leaves
+    // v22AcceptingSolicitation null and this branch is a no-op — existing
+    // behaviour preserved.
+    if (v22AcceptingSolicitation && v22AcceptingSolicitation.solicitationId) {
+      const acceptingId = v22AcceptingSolicitation.solicitationId
+      const newEaId = pair.evaluationAgreement.id
+      let acceptedSolicitation = null
+      setV22Solicitations((prev) => {
+        const existing = prev.get(acceptingId)
+        if (!existing) return prev
+        acceptedSolicitation = acceptSolicitation(existing, newEaId)
+        const next = new Map(prev)
+        next.set(acceptingId, acceptedSolicitation)
+        return next
+      })
+      if (acceptedSolicitation) {
+        const sharedForLookup = mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds)
+        const rfp = (sharedForLookup.rfps || []).find((r) => r.id === acceptedSolicitation.rfpId)
+        const solicitorRole = ROLES.find((r) => r.party === acceptedSolicitation.solicitor)
+        if (solicitorRole) {
+          enqueueV22NotificationForRequester(solicitorRole.id, {
+            id: `v22-rfp-solicitation-accepted-${acceptedSolicitation.id}`,
+            type: 'v22-rfp-solicitation-accepted',
+            from: { name: activeRole.party, dot: activeRole.partyDot },
+            asset: { name: rfp?.name || 'an RFP', pin: null },
+            connectTo: null,
+            solicitationId: acceptedSolicitation.id,
+            rfpId: acceptedSolicitation.rfpId,
+            rfpName: rfp?.name || '',
+            eaId: newEaId,
+            date: new Date().toISOString().slice(0, 10),
+          })
+        }
+      }
+      setV22AcceptingSolicitation(null)
+    }
+  }, [activeRole.party, activeRole.partyDot, v22Data, v22RequestAnchor, enqueueV22NotificationForRequester, v22AcceptingSolicitation, v22ClosedRfpIds])
 
   const handleV22Accept = useCallback(({ type, scope, daTerms, eaTerms }) => {
     if (!v22RespondingTo) return
@@ -2624,6 +2673,56 @@ export default function V2App() {
     }
     setV22SolicitationToReject(null)
   }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
+
+  // Phase 17.2.1: RFP owner clicked "Request Agreement" on a SolicitationCard.
+  // Capture the in-flight Accept-flow context; AssetPickerModal mounts as a
+  // side effect of v22AcceptingSolicitation being non-null. We resolve the
+  // RFP id from the solicitation itself (not from v22DirectorySelectedRfp)
+  // because the owner could in principle accept from a notification-driven
+  // entry without the Directory panel being open on the same RFP — defensive.
+  const handleRequestAgreement = useCallback((solicitation) => {
+    if (!solicitation) return
+    setV22AcceptingSolicitation({
+      solicitationId: solicitation.id,
+      solicitorClaimId: solicitation.claimId,
+      rfpId: solicitation.rfpId,
+    })
+  }, [])
+
+  // Phase 17.2.1: AssetPickerModal Continue handler. Pre-fills the existing
+  // CombinedRequestModal via v22RequestAnchor (the picked Asset, supplied
+  // as a node-like shape from `shared.assets`) + the existing v22AIShopperResult
+  // mechanism (claimPin + suggestedRequirementsSetId). We keep
+  // v22AcceptingSolicitation set across this transition so the
+  // CombinedRequestModal submit handler can detect the Accept entry path
+  // and run the solicitation-accept side effects.
+  const handleAssetPicked = useCallback(({ assetId, solicitationId }) => {
+    if (!assetId || !solicitationId) return
+    const shared = buildV22SharedArtifacts()
+    const sharedAsset = (shared.assets || []).find((a) => a.id === assetId)
+    if (!sharedAsset) return
+    const solicitation = v22Solicitations.get(solicitationId)
+    if (!solicitation) return
+    const sharedClaim = (shared.claims || []).find((c) => c.id === solicitation.claimId)
+    if (!sharedClaim) return
+    const rfp = (shared.rfps || []).find((r) => r.id === solicitation.rfpId)
+    // Pre-fill: anchor Asset + Claim PIN + (first) RS id. The
+    // CombinedRequestModal's initialRequirementsSetIds prop is wrapped in
+    // an array at the existing mount site — passing one id is enough for
+    // single-RS RFPs; for multi-RS RFPs the user can multi-select on
+    // Step 1 (the existing flow already supports it).
+    setV22RequestAnchor({
+      id: sharedAsset.id,
+      name: sharedAsset.name,
+      pin: sharedAsset.pin,
+    })
+    const firstRsId = (rfp?.requirementsSetIds && rfp.requirementsSetIds[0]) || null
+    setV22AIShopperResult({
+      claimPin: sharedClaim.pin,
+      suggestedRequirementsSetId: firstRsId,
+    })
+    setV22RequestOpen(true)
+  }, [v22Solicitations])
 
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, terms, note }) => {
     if (!v22AmendingDaId) return
@@ -4507,11 +4606,18 @@ export default function V2App() {
                     // RFP marker → RfpDetailPanel.
                     const isV22RfpSolicitationReceived = req.type === 'v22-rfp-solicitation-received'
                     const isV22RfpSolicitationRejected = req.type === 'v22-rfp-solicitation-rejected'
+                    // Phase 17.2.1: the Accept flow lands here on Alice's
+                    // inbox when Bob completes the Request Agreement modal
+                    // chain. Click routing mirrors the
+                    // rejection-notification path (Directory → RFP marker
+                    // → RfpDetailPanel); the panel's solicitor-view
+                    // accepted-state surfaces the new EA pointer.
+                    const isV22RfpSolicitationAccepted = req.type === 'v22-rfp-solicitation-accepted'
                     // Phase 11.6 (#164): amendment-proposal accept/reject get
                     // their own colors — green for accepted, red for rejected
                     // — to match the actionable consequence (vs. the
                     // generic indigo "informational amendment" badges).
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked || isV22RfpSolicitationRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale || isV22RfpSolicitationReceived ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked || isV22RfpSolicitationRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted || isV22RfpSolicitationAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale || isV22RfpSolicitationReceived ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
@@ -4523,7 +4629,7 @@ export default function V2App() {
                     // consequences (accept/reject), distinct from the
                     // informational AMENDMENT category used for DA
                     // amendments and the rolled-back unilateral EA model.
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : isV22RfpSolicitationReceived ? 'SOLICITATION' : isV22RfpSolicitationRejected ? 'REJECTED' : 'REQUEST'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : isV22RfpSolicitationReceived ? 'SOLICITATION' : isV22RfpSolicitationRejected ? 'REJECTED' : isV22RfpSolicitationAccepted ? 'ACCEPTED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -4795,7 +4901,7 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
-                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected') {
+                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected' || req.type === 'v22-rfp-solicitation-accepted') {
                           // Phase 17.2: click navigates to Directory → RFP
                           // marker → RfpDetailPanel. Both notification types
                           // route to the same RFP — received lands on the
@@ -4804,9 +4910,17 @@ export default function V2App() {
                           // (incoming list vs. own solicitation card) via
                           // the panel's three-way visibility branch.
                           //
-                          // Click is auto-dismissed since the loop terminates
-                          // after the rejection — no further action needed
-                          // (the panel surfaces the latest state).
+                          // Phase 17.2.1: the accepted variant lands on the
+                          // solicitor's inbox alongside the standard EA+DA
+                          // request notification. Click routes here so the
+                          // solicitor can see their solicitation in
+                          // ACCEPTED state; the parent-canvas EA navigation
+                          // is reachable via the separate v22-request
+                          // notification (existing cold-path flow).
+                          //
+                          // Click is auto-dismissed for all three — the
+                          // loop terminates after the rejection or
+                          // acceptance.
                           updateRoleState(roleId, prev => ({
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
@@ -5054,7 +5168,9 @@ export default function V2App() {
                                                                           ? `${req.from.name} solicited your RFP${req.rfpName ? ` — Re: ${req.rfpName}` : ''}.`
                                                                           : isV22RfpSolicitationRejected
                                                                             ? `${req.from.name} rejected your solicitation${req.rfpName ? ` — Re: ${req.rfpName}` : ''}.${req.rejectionMessage ? ` "${req.rejectionMessage}"` : ''}`
-                                                                            : req.asset?.name || ''
+                                                                            : isV22RfpSolicitationAccepted
+                                                                              ? `${req.from.name} accepted your solicitation${req.rfpName ? ` — Re: ${req.rfpName}` : ''}. See your new EA on the parent canvas.`
+                                                                              : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -6209,6 +6325,10 @@ export default function V2App() {
                 claimsById={claimsByIdMap}
                 onOpenSolicitModal={({ rfp: targetRfp }) => setV22SolicitOpenForRfp({ rfp: targetRfp })}
                 onRejectSolicitation={(solicitation) => setV22SolicitationToReject(solicitation)}
+                // Phase 17.2.1: owner-side Accept flow entry. Click on the
+                // SolicitationCard's "Request Agreement" button mounts
+                // AssetPickerModal (gated below on v22AcceptingSolicitation).
+                onRequestAgreement={handleRequestAgreement}
               />
             </div>
           )
@@ -6252,6 +6372,34 @@ export default function V2App() {
               solicitorClaimName={claim?.name || v22SolicitationToReject.claimId}
               onSubmit={handleRejectSolicitation}
               onCancel={() => setV22SolicitationToReject(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 17.2.1: AssetPickerModal — first step of the Accept flow.
+            Mounts when the RFP owner clicks "Request Agreement" on a
+            SolicitationCard. Bob picks one of his own Assets to anchor
+            the requested mapping; Continue closes the AssetPickerModal
+            and opens the existing CombinedRequestModal pre-filled with
+            the picked Asset + the solicitor's Claim PIN + the RFP's
+            requirements-set ids. Cancel clears the in-flight Accept
+            context with no side effects. */}
+        {v22AcceptingSolicitation && !v22RequestOpen && (() => {
+          const shared = buildV22SharedArtifacts()
+          const solicitation = v22Solicitations.get(v22AcceptingSolicitation.solicitationId)
+          if (!solicitation) return null
+          const solicitorClaim = (shared.claims || []).find((c) => c.id === v22AcceptingSolicitation.solicitorClaimId)
+          const rfp = (shared.rfps || []).find((r) => r.id === v22AcceptingSolicitation.rfpId)
+          const ownedAssets = (shared.assets || []).filter((a) => a.owner === activeRole.party)
+          return (
+            <AssetPickerModal
+              solicitation={solicitation}
+              solicitorClaim={solicitorClaim}
+              rfp={rfp}
+              activeAssets={ownedAssets}
+              activeParty={activeRole.party}
+              onSubmit={handleAssetPicked}
+              onCancel={() => setV22AcceptingSolicitation(null)}
             />
           )
         })()}
@@ -6328,7 +6476,15 @@ export default function V2App() {
               handleV22RequestSubmit(payload)
               setV22AIShopperResult(null)
             }}
-            onClose={() => { setV22RequestOpen(false); setV22AIShopperResult(null) }}
+            onClose={() => {
+              setV22RequestOpen(false)
+              setV22AIShopperResult(null)
+              // Phase 17.2.1: cancelling/closing the CombinedRequestModal
+              // while the Accept flow was in progress clears the in-flight
+              // context so a future Request Agreement click starts fresh.
+              setV22AcceptingSolicitation(null)
+              setV22RequestAnchor(null)
+            }}
             // Phase 7: AI Shopper pre-populates PIN + suggested Req Set.
             initialPin={v22AIShopperResult?.claimPin || ''}
             initialRequirementsSetIds={
@@ -8128,7 +8284,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.0.4 &middot; Changelog
+          v0.17.2.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8175,6 +8331,16 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.2.1', date: '2026-05-19', label: 'Phase 17.2.1', items: [
+                  'Phase 17.2.1 — RFP Accept flow / Request Agreement. The Accept side of the solicitation loop (placeholder-disabled across 17.2 and 17.2.0.x) is now wired end-to-end. Bob clicks Request Agreement on Alice\'s solicitation card → AssetPickerModal opens → Bob picks one of his Assets → CombinedRequestModal opens pre-filled → submit creates a provisional EA+DA → Alice gets both a solicitation-accepted notification and the standard EA+DA request notification. The full RFP arc (post → solicit → reject/accept → formalize) is now demoable end-to-end.',
+                  'New `AssetPickerModal` component (src/components/modals/AssetPickerModal.jsx) — single-select scrollable list of the active actor\'s Assets + context block (solicitor + RFP + Claim name) + Continue button gated on selection. Honours the architectural rule that disclosure + evaluation requests must originate from one of the requester\'s Assets so the parent canvas can lay out the request-node + edge.',
+                  'V2App handlers: `handleRequestAgreement` captures the in-flight Accept-flow context (`v22AcceptingSolicitation = { solicitationId, solicitorClaimId, rfpId }`); `handleAssetPicked` pre-fills the existing CombinedRequestModal via `v22RequestAnchor` (picked Asset) + `v22AIShopperResult` (claim PIN + first RFP RS id) — the existing pre-fill mechanism is reused, no CombinedRequestModal refactor needed. Submit-side effect hook lives inside the existing `handleV22RequestSubmit` (conditional on `v22AcceptingSolicitation` being non-null) so the cold path is fully preserved.',
+                  'New `acceptSolicitation(solicitation, eaId)` pure transform in v2_2Data.js + `acceptedEaId` field on `makeRfpSolicitation` — solicitation links back to the resulting EA artifact when accepted. Used by handleV22RequestSubmit to transition the solicitation in-place + reference the new EA id.',
+                  'New `v22-rfp-solicitation-accepted` notification type. Delivered to the solicitor (Alice) on submit. Affirmative green badge + ACCEPTED label + "{requester} accepted your solicitation — see your new EA on the parent canvas" copy. Click routing mirrors the rejection notification (Directory → RFP marker → RfpDetailPanel); the panel\'s solicitor-view accepted-state surfaces the EA pointer. Auto-dismissed on click (loop terminates after acceptance).',
+                  'SolicitationCard accepted-state treatment (both viewer modes): green status badge, "Agreement requested on {date}" line, no action buttons. Owner sees "see the provisional EA on the parent canvas"; solicitor sees "Accepted — see your new Evaluation Agreement on the parent canvas". RfpDetailPanel\'s `onRequestAgreement` prop wired through to SolicitationCard.',
+                  'CombinedRequestModal cold-path preserved verbatim — the existing entry point (Claim PIN click on parent canvas, AI Shopper result) still works identically because the conditional submit-side branch is gated on `v22AcceptingSolicitation` (null for cold path). onClose extended to also clear `v22AcceptingSolicitation` so cancelling the modal mid-Accept-flow returns to a clean state.',
+                  'Architecture spec §8.9 extended with the Accept-path architecture (AssetPickerModal step + CombinedRequestModal reuse + dual notification model). Footer rolls forward to v0.17.2.1.',
+                ]},
                 { version: '0.17.2.0.4', date: '2026-05-18', label: 'Phase 17.2.0.4', items: [
                   'LOD thresholds reverted from 17.2.0.3\'s overly-aggressive 2.5–5.5 band to 3.4–5.0 (mini-cards 340%–500%, full-cards 500%–650%). At the 17.2.0.3 lower bound (250 %), mini-cards visibly overlapped in dense clusters like Pinnacle Systems; reverting to 3.4 puts screen spacing back close to the original density-invariant value. `MAX_ZOOM` stays at 6.5. selectRfp\'s `Math.max(zoomRef.current, LOD_THRESHOLD)` resolves to the new 5.0 — notification clicks still land at full-card LOD.',
                   'Zoom controls in the Directory layer raised above the card overlay (zIndex 50 → 1700). Mini-card and full-card overlays render at z=1500/1600 and were covering the +/-/FIT buttons when cards landed in the upper-right region. New value sits between the card overlay (1600) and the header pillbox (2000) so contextual chrome elements still render above the controls.',

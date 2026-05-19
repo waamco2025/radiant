@@ -1385,6 +1385,11 @@ export function makeRfpSolicitation({
   createdDate,
   respondedDate = null,
   rejectionMessage = null,
+  // Phase 17.2.1: when status === 'accepted', acceptedEaId references the
+  // provisional Evaluation Agreement created by the Request Agreement flow.
+  // Null in pending / rejected states. Lets the solicitor-side accepted
+  // view link back to the EA artifact on the parent canvas.
+  acceptedEaId = null,
 }) {
   if (!id) throw new Error('makeRfpSolicitation: id required')
   if (!rfpId) throw new Error('makeRfpSolicitation: rfpId required')
@@ -1406,6 +1411,24 @@ export function makeRfpSolicitation({
     createdDate: createdDate || new Date().toISOString(),
     respondedDate,
     rejectionMessage,
+    acceptedEaId,
+  }
+}
+
+// Phase 17.2.1: pure transform from a pending solicitation to its accepted
+// state. Pairs with the existing rejection path (handleRejectSolicitation in
+// V2App) but keeps the data transform decoupled from V2App's side-effect
+// fan-out (notification + state update). Throws on missing inputs so an
+// upstream miss surfaces immediately instead of writing a malformed
+// solicitation.
+export function acceptSolicitation(solicitation, eaId) {
+  if (!solicitation) throw new Error('acceptSolicitation: solicitation required')
+  if (!eaId) throw new Error('acceptSolicitation: eaId required')
+  return {
+    ...solicitation,
+    status: 'accepted',
+    respondedDate: new Date().toISOString(),
+    acceptedEaId: eaId,
   }
 }
 
