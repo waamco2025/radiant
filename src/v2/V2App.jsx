@@ -57,6 +57,10 @@ import {
   getBadgesForPoE,
   getBadgesForClaim,
   getBadgesForRecipient,
+  // Phase 17.3: shared predicate for resolving an active EA between the
+  // active actor (grantee) and a Claim owner (grantor) on a specific Claim.
+  // Drives the Directory-layer Claim panel + card EA-status CTAs.
+  getActiveEaForClaimAndRequester,
 } from './v2_2Data.js'
 import EdgeHoverMenu from './EdgeHoverMenu.jsx'
 import DisclosureAgreementDetailPanel from '../components/DetailPanel/DisclosureAgreementDetailPanel.jsx'
@@ -66,11 +70,14 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
 // Phase 17.2: solicitation create / reject modals.
 import SolicitationCreateModal from '../components/modals/SolicitationCreateModal.jsx'
-// Phase 17.2.1.1: AssetPickerModal import removed — the Accept flow now
-// uses the RFP's `assetId` directly. The component file remains in the
-// codebase for the future Phase 17.6+ create-RFP flow which will pick
-// the Asset at RFP-creation time.
-// import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
+// Phase 17.2.1.1: AssetPickerModal removed from the RFP Accept flow (the
+// Accept flow now uses the RFP's `assetId` directly).
+// Phase 17.3: AssetPickerModal re-mounted for the Directory-layer Claim
+// CTA flow — non-owner viewing a Claim with no existing EA clicks
+// "Request Evaluation Agreement", which opens AssetPickerModal so they
+// pick which of their Assets the request will anchor to before the
+// existing CombinedRequestModal cold path runs.
+import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
@@ -259,6 +266,11 @@ export default function V2App() {
   // state machine (which materialized a Claim card on top of a cluster
   // hit-area). Setting null dismisses both the tooltip pin and the panel.
   const [v22DirectorySelectedClaim, setV22DirectorySelectedClaim] = useState(null)
+  // Phase 17.3 — in-flight context for the Directory-layer Claim Request EA
+  // CTA. Set when the user clicks Request EA on a Directory Claim card or
+  // panel footer; gates AssetPickerModal mount. Cleared on AssetPickerModal
+  // cancel or after a successful asset pick (which opens CombinedRequestModal).
+  const [v22RequestingEaForClaim, setV22RequestingEaForClaim] = useState(null) // Claim | null
   // Phase 17.0: clicking an RFP marker on the Directory opens the read-only
   // `RfpDetailPanel` (mounted below). Mutual exclusion with
   // `v22DirectorySelectedClaim` is enforced at the click-handler level —
@@ -2719,6 +2731,47 @@ export default function V2App() {
     setV22RequestOpen(true)
   }, [])
 
+  // Phase 17.3 — Directory-layer Claim "Request Evaluation Agreement" CTA.
+  // Triggered from V22NodeDetailPanel's footer button OR from the Claim
+  // card's V22ActionBar (both surfaces share this handler). Opens
+  // AssetPickerModal so the requester picks which of their Assets the EA+DA
+  // request will anchor to. AssetPickerModal's Continue routes through
+  // handleAssetPickedForClaim, which opens CombinedRequestModal pre-filled.
+  const handleRequestEaForClaim = useCallback((claim) => {
+    if (!claim) return
+    setV22RequestingEaForClaim(claim)
+  }, [])
+
+  // Phase 17.3 — AssetPickerModal Continue handler for the Directory-layer
+  // Claim CTA flow. Resolves the picked Asset and the target Claim, opens
+  // CombinedRequestModal pre-filled (requesterAsset = picked Asset,
+  // initialPin = target Claim PIN, no initialRequirementsSetIds — Directory
+  // entry has no RFP context so no RS pre-selection). Reuses the existing
+  // AI Shopper pre-fill mechanism the cold path already trusts.
+  const handleAssetPickedForClaim = useCallback(({ assetId, claimId }) => {
+    if (!assetId || !claimId) return
+    const shared = buildV22SharedArtifacts()
+    const claim = (shared.claims || []).find((c) => c.id === claimId)
+    const requesterAsset = (shared.assets || []).find((a) => a.id === assetId)
+    if (!claim || !requesterAsset) return
+    setV22RequestingEaForClaim(null)
+    setV22RequestAnchor({
+      id: requesterAsset.id,
+      name: requesterAsset.name,
+      pin: requesterAsset.pin,
+    })
+    setV22AIShopperResult({
+      claimPin: claim.pin,
+      suggestedRequirementsSetIds: [],
+    })
+    setV22RequestOpen(true)
+  }, [])
+
+  // Phase 17.3 — handleViewEa is declared further down (after nodeMap +
+  // canvasRef are in scope) and assigned to a ref so the Directory mount
+  // blocks at lines ~6100 / ~6189 / inline handlers can reference it
+  // without TDZ-on-nodeMap. See `handleViewEaRef` below.
+
   const handleV22AmendDisclosureSubmit = useCallback(({ scope, terms, note }) => {
     if (!v22AmendingDaId) return
     // Phase 7 carry-over #2: compute notification targets BEFORE the
@@ -4000,6 +4053,36 @@ export default function V2App() {
   const handleCloseModal = useCallback(() => {
     setModalNode(null)
   }, [])
+
+  // Phase 17.3 — View Evaluation Agreement navigation. Triggered from
+  // V22NodeDetailPanel's footer button OR from the Claim card action bar
+  // on Directory when an EA already exists between the active actor
+  // (grantee) and the Claim's owner (grantor). Closes the Directory,
+  // clears any selected Claim / RFP panel, and routes to the EA artifact
+  // on the parent canvas via the existing `setOpenAgreement` mechanism
+  // (mirrors Phase 11C / 17.2.1.1's EA-amendment routing — pan to the
+  // Claim node + select the agreement edge + open the agreement panel).
+  // Declared here (rather than alongside the other Phase 17.3 handlers
+  // at line ~2740) because it closes over `nodeMap` and `canvasRef`,
+  // both of which are declared later in the V2App body — co-locating
+  // them avoids a TDZ on the useCallback deps array.
+  const handleViewEa = useCallback((ea) => {
+    if (!ea) return
+    setV22DirectoryOpen(false)
+    setV22DirectorySelectedClaim(null)
+    setV22DirectorySelectedRfp(null)
+    setV22RequestingEaForClaim(null)
+    const claimNode = ea.claimId ? nodeMap[ea.claimId] : null
+    if (claimNode) {
+      canvasRef.current?.animatedPanToWithZoom?.(claimNode.x, claimNode.y, 1.0, 500)
+    }
+    const matchingEdge = (v22Data?.edges || []).find((e) => e.pairedEvaluationAgreementId === ea.id)
+    setSelectedEdgeId(matchingEdge?.id || null)
+    setOpenAgreement({
+      kind: 'evaluation',
+      evaluationAgreementId: ea.id,
+    })
+  }, [nodeMap, v22Data])
 
   const handleSwitchRole = useCallback((newRoleId) => {
     if (newRoleId === roleId) return
@@ -6060,6 +6143,26 @@ export default function V2App() {
               setV22DirectorySelectedRfp(rfp)
               setV22DirectorySelectedClaim(null)
             }}
+            // Phase 17.3 — thread the active actor's EA collection so the
+            // per-claim card render path can resolve the existing EA via
+            // `getActiveEaForClaimAndRequester` and stamp the
+            // `_directoryExistingEa` / `_directoryRequestEaCandidate`
+            // markers on the synthetic node V22ActionBar consults.
+            evaluationAgreements={(() => {
+              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              return merged.evaluationAgreements || []
+            })()}
+            // Phase 17.3 — card action dispatcher. Mirrors V22NodeDetailPanel
+            // footer routing for the two Directory-only CTAs. `claim` is the
+            // raw artifact; `existingEa` is the resolved EA (null when the
+            // action is requestEvaluationAgreement).
+            onClaimCardAction={(action, _node, claim, existingEa) => {
+              if (action === 'requestEvaluationAgreement') {
+                handleRequestEaForClaim(claim)
+              } else if (action === 'viewEvaluationAgreement') {
+                handleViewEa(existingEa)
+              }
+            }}
           />
         )}
 
@@ -6211,6 +6314,11 @@ export default function V2App() {
                 // is paired yet. This is the canonical warm-path entry point
                 // — the user clicks ChipCo's cluster, sees the Claim, then
                 // requests an EA.
+                // Phase 17.3 — also resolve the cold-path EA state for the
+                // Directory mount. When no DA exists (no warm-path entry),
+                // the panel surfaces either Request EA (cold path via
+                // AssetPickerModal) or View EA depending on whether an EA
+                // already exists between the viewer and the Claim's owner.
                 {...(() => {
                   const activeDa = (sharedForPanel.disclosureAgreements || []).find(d =>
                     d.subject?.kind === 'claim' && d.subject.id === claim.id &&
@@ -6221,8 +6329,26 @@ export default function V2App() {
                     e.claimId === claim.id && e.grantee?.party === activeRole.party && e.status === 'active' && !e._provisional,
                   )
                   const showWarm = !!activeDa && !hasEa && claim.owner !== activeRole.party
-                  if (!showWarm) return {}
+                  const isOwnerViewingDir = claim.owner === activeRole.party
+                  // Phase 17.3 — resolve EA between the active actor and the
+                  // Claim owner via the shared predicate. Result drives both
+                  // the EA-status section and the footer button choice.
+                  const existingEaForActor = (!isOwnerViewingDir && !showWarm)
+                    ? getActiveEaForClaimAndRequester(claim, activeRole.party, sharedForPanel.evaluationAgreements || [])
+                    : null
+                  // Always wire the cold-path Request EA + View EA handlers
+                  // on the Directory mount (the panel gates rendering by
+                  // !hasActiveDaWithoutEa + EA presence).
+                  const coldPathProps = (!isOwnerViewingDir && !showWarm)
+                    ? {
+                        existingEaForActor,
+                        onRequestEa: handleRequestEaForClaim,
+                        onViewEa: handleViewEa,
+                      }
+                    : {}
+                  if (!showWarm) return coldPathProps
                   return {
+                    ...coldPathProps,
                     hasActiveDaWithoutEa: true,
                     onRequestEvaluationAgreement: () => {
                       setV22EaRequestContext({
@@ -6531,6 +6657,29 @@ export default function V2App() {
             }
           />
         )}
+
+        {/* Phase 17.3 — AssetPickerModal for the Directory-layer Claim
+            Request EA cold-path CTA. Opens when the user clicks Request EA
+            from either V22NodeDetailPanel's footer or the Claim card's
+            action bar on Directory; once an Asset is picked the modal
+            closes and CombinedRequestModal opens pre-filled with the
+            picked Asset + the target Claim's PIN (no RFP context, so no
+            `initialRequirementsSetIds` pre-selection). The modal is also
+            available for the future create-RFP flow (Phase 17.5+). */}
+        {v22RequestingEaForClaim && (() => {
+          const sharedForPicker = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const activeAssets = (sharedForPicker.assets || []).filter((a) => a.owner === activeRole.party)
+          return (
+            <AssetPickerModal
+              targetClaim={v22RequestingEaForClaim}
+              context={{ type: 'directory-claim' }}
+              activeAssets={activeAssets}
+              activeParty={activeRole.party}
+              onSubmit={handleAssetPickedForClaim}
+              onCancel={() => setV22RequestingEaForClaim(null)}
+            />
+          )
+        })()}
 
         {/* V2.2 Combined Response Modal — opens via the DA panel when a provisional request is selected. */}
         {v22RespondingTo && (() => {
@@ -8321,7 +8470,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.2.1.2 &middot; Changelog
+          v0.17.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8368,6 +8517,16 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.3', date: '2026-05-19', label: 'Phase 17.3', items: [
+                  'Phase 17.3 — Claim Detail Panel EA content on Directory + card action bar + #202 ACTOR/ASSET label cleanup. Opens the action surface for Directory-layer Claim discovery. Without this content, clicking a Claim on Directory opened a panel that didn\'t tell the viewer what they could do with it.',
+                  'V22NodeDetailPanel Claim view: new EA-status section near the top of the body — "An Evaluation Agreement is required to evaluate this Claim." (no-EA state, amber callout) or "An Evaluation Agreement is in place with {owner}." (EA-exists state, indigo callout). Footer extensions match: "Request Evaluation Agreement" (cold-path, opens AssetPickerModal) or "View Evaluation Agreement" (navigates parent canvas to the EA artifact + opens the EA Detail Panel). Owner viewing own Claim gets no EA-status section and no footer EA actions. The pre-existing Phase 11C warm-path (DA exists, no EA) is preserved unchanged.',
+                  'AssetNode V22ActionBar Claim branch: parallel CTAs on the Directory full-size Claim card. When the synthetic node carries `_directoryRequestEaCandidate`, the action bar surfaces a Request EA button (▷). When it carries `_directoryExistingEa`, the bar surfaces View EA (◉). Both fire the same V2App handlers as the panel footer. Parent-canvas Claim cards unchanged (those stamp markers come from DirectoryLayer\'s card-overlay render path only).',
+                  'AssetPickerModal re-mounted in V2App for the Directory Claim cold-path. Generalized prop contract: accepts a generic `targetClaim` + optional `context` ({ type: \'directory-claim\' } | { type: \'rfp\', rfp }) — context drives the modal\'s subtitle / context block. Legacy solicitation/solicitorClaim/rfp props preserved as fallback. Continue resolves the picked Asset + target Claim and opens CombinedRequestModal pre-filled (requesterAsset + initialPin, no initialRequirementsSetIds — no RFP in this flow). The existing cold-path provisional EA+DA pipeline takes over from there.',
+                  'New shared predicate `getActiveEaForClaimAndRequester(claim, requesterParty, evaluationAgreements)` exported from v2_2Data.js. Returns the resolved EA artifact (or null) for a given Claim/requester pair, filtering out declined/revoked EAs. Drives both the panel footer logic and the DirectoryLayer per-claim synthetic-node stamping (which V22ActionBar reads).',
+                  'V2App handlers: `handleRequestEaForClaim(claim)` opens AssetPickerModal; `handleAssetPickedForClaim({ assetId, claimId })` closes the picker and opens CombinedRequestModal; `handleViewEa(ea)` closes Directory + pans parent canvas to the Claim node + selects the EA edge + opens the EA Detail Panel (mirrors Phase 11C / 17.2.1.1\'s EA-amendment notification pattern). DirectoryLayer mount block gets new `evaluationAgreements` + `onClaimCardAction` props to thread the action surface end-to-end.',
+                  '#202 closed: ACTOR + ASSET typeLabel pills removed from V22ActorPanel + V22AssetPanel headers. The PanelHeader\'s `typeLabel` prop is now optional; when omitted (Actor + Asset cases), the header renders the name + PIN without a categorical pill. CLAIM / EVAL RESULT / PARSE RESULT / PROOF OF EVALUATION / BADGE TEMPLATE panels keep their type label since those are abstract artifact types. RfpDetailPanel\'s relational "Posted by" + "For Asset" rows unchanged (those convey relationship, not category).',
+                  'Out of scope (deferred): parent-layer EA-required-message-when-not-needed bug — still 17.4+ pending umbrella DA work. RFP creation flow (17.5+). Solicitation withdraw/amend (17.6+). Footer rolls forward to v0.17.3.',
+                ]},
                 { version: '0.17.2.1.2', date: '2026-05-19', label: 'Phase 17.2.1.2', items: [
                   'CombinedRequestModal RS pre-selection: all RFP-referenced Requirements Sets now pre-checked when CombinedRequestModal opens via the Accept flow. Previously only the first id from `rfp.requirementsSetIds` was pre-checked because `handleRequestAgreement` stored only the singular `suggestedRequirementsSetId`. Fix threads the full array as `suggestedRequirementsSetIds` (plural); cold-path AI Shopper entry (singular id) still works. CombinedRequestModal\'s state initializer was already correct — the bug was entirely upstream at the V2App handler + mount.',
                   'Footer rolls to v0.17.2.1.2.',

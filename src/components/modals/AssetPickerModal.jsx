@@ -1,17 +1,21 @@
-// Phase 17.2.1 — AssetPickerModal.
+// AssetPickerModal — Phase 17.2.1 origin, refactored in Phase 17.3.
 //
-// First step of the RFP-solicitation Accept flow. Bob (the RFP owner)
-// has clicked "Request Agreement" on a pending solicitation from Alice;
-// per the architectural rule that disclosure + evaluation requests must
-// originate from one of the requester's Assets (so the parent canvas
-// can lay out a request-node + edge), this modal asks Bob to pick which
-// of his own Assets will anchor the mapping.
+// Asks the active actor to pick which of their owned Assets will anchor a
+// disclosure + evaluation request against another party's Claim, per the
+// architectural rule that EA+DA requests must originate from one of the
+// requester's Assets so the parent canvas can lay out the request-node + edge.
 //
-// On Continue: fires onSubmit({ assetId, solicitationId }). V2App's
-// handler stashes the picked Asset into v22RequestAnchor and opens the
-// existing CombinedRequestModal with the solicitor's Claim PIN +
-// RFP-derived Requirements Sets pre-filled. The existing cold-path
-// provisional EA+DA pipeline takes over from there.
+// On Continue: fires onSubmit({ assetId, claimId }). V2App's handler resolves
+// both ids against shared artifacts and opens the existing CombinedRequestModal
+// pre-filled (requesterAsset = picked Asset, initialPin = target Claim PIN,
+// initialRequirementsSetIds = optional, supplied by caller via context).
+//
+// Phase 17.3 — generalized prop contract. The modal now accepts a generic
+// `targetClaim` (the Claim being targeted) + optional `context` object that
+// drives the subtitle / context block copy. Previous solicitation-specific
+// props (solicitation, solicitorClaim, rfp) are still accepted for the legacy
+// RFP Accept flow (now defunct post-17.2.1.1 but the props remain for future
+// re-use should the AssetPickerModal step return to the create-RFP flow).
 
 import { useState } from 'react'
 import {
@@ -20,17 +24,24 @@ import {
 } from './ModalShared'
 
 export default function AssetPickerModal({
-  solicitation,         // RfpSolicitation
-  solicitorClaim,       // resolved Claim object (the target of the EA+DA request)
-  rfp,                  // resolved Rfp object (for the context block)
+  // Phase 17.3: canonical prop set.
+  targetClaim,          // resolved Claim object (the EA+DA request target)
+  context,              // optional: { type: 'directory-claim' } | { type: 'rfp', rfp } | null
+  // Legacy props from Phase 17.2.1 (preserved for compatibility — see header).
+  solicitation,
+  solicitorClaim,
+  rfp,
   activeAssets = [],    // active actor's owned Assets
   // eslint-disable-next-line no-unused-vars
-  activeParty,          // active actor's party label (passed for symmetry; not rendered)
-  onSubmit,             // ({ assetId, solicitationId }) => void
+  activeParty,
+  onSubmit,             // ({ assetId, claimId, solicitationId }) => void
   onCancel,
 }) {
   const [selectedAssetId, setSelectedAssetId] = useState(null)
 
+  // Resolve the target Claim from either the new `targetClaim` prop or the
+  // legacy `solicitorClaim` fallback. `targetClaim` wins when both are set.
+  const claim = targetClaim || solicitorClaim || null
   const hasAssets = activeAssets.length > 0
   const canContinue = hasAssets && !!selectedAssetId
 
@@ -38,13 +49,24 @@ export default function AssetPickerModal({
     if (!canContinue) return
     onSubmit?.({
       assetId: selectedAssetId,
-      solicitationId: solicitation?.id,
+      claimId: claim?.id || null,
+      // Legacy field — preserved so the previous RFP Accept handler shape
+      // still resolves the solicitation id when invoked. Null when no
+      // solicitation context (Phase 17.3 Directory-Claim entry).
+      solicitationId: solicitation?.id || null,
     })
   }
 
-  const solicitorParty = solicitation?.solicitor || solicitorClaim?.owner || ''
-  const claimName = solicitorClaim?.name || solicitation?.claimId || ''
-  const rfpName = rfp?.name || ''
+  // Phase 17.3: context block + subtitle vary based on the entry path. The
+  // Directory-Claim entry has no solicitor / RFP, so the block emphasizes
+  // the Claim's owner instead.
+  const ctxType = context?.type
+    || (solicitation || rfp ? 'rfp' : null)
+    || (claim ? 'directory-claim' : null)
+  const claimName = claim?.name || solicitation?.claimId || ''
+  const claimOwner = claim?.owner || ''
+  const solicitorParty = solicitation?.solicitor || ''
+  const rfpName = (context?.type === 'rfp' && context?.rfp?.name) || rfp?.name || ''
 
   return (
     <Backdrop onClose={onCancel}>
@@ -60,8 +82,10 @@ export default function AssetPickerModal({
         />
         <ModalBody>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            {/* Solicitation context block — anchors who/what the user is
-                responding to so the picker decision is unambiguous. */}
+            {/* Context block. Variant per entry path:
+                - 'rfp' (legacy RFP Accept flow): From: {solicitor} via RFP: {rfp.name}
+                - 'directory-claim' (Phase 17.3 — Directory Claim CTA): Their
+                  Claim + Owner. */}
             <div style={{
               padding: '12px 14px',
               border: '1px solid color-mix(in srgb, var(--accent-indigo) 30%, var(--border))',
@@ -71,20 +95,35 @@ export default function AssetPickerModal({
               lineHeight: 1.6,
               color: 'var(--text-secondary)',
             }}>
-              <div style={{ marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-tertiary)' }}>From: </span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{solicitorParty}</span>
-                {rfpName && (
-                  <>
-                    <span style={{ color: 'var(--text-tertiary)' }}> via RFP: </span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{rfpName}</span>
-                  </>
-                )}
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-tertiary)' }}>Their Claim: </span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{claimName}</span>
-              </div>
+              {ctxType === 'rfp' ? (
+                <>
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: 'var(--text-tertiary)' }}>From: </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{solicitorParty}</span>
+                    {rfpName && (
+                      <>
+                        <span style={{ color: 'var(--text-tertiary)' }}> via RFP: </span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{rfpName}</span>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-tertiary)' }}>Their Claim: </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{claimName}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: 'var(--text-tertiary)' }}>Their Claim: </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{claimName || '—'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-tertiary)' }}>Owned by: </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{claimOwner || '—'}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Asset picker */}

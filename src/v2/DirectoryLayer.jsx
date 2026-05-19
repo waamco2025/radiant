@@ -32,7 +32,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect, forwardRef, useImperativeHandle } from 'react'
 import * as THREE from 'three'
 import { Delaunay } from 'd3-delaunay'
-import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals } from './v2_2Data.js'
+import { buildV22DirectoryDataForRole, buildV22SharedArtifacts, mergeProvisionals, getActiveEaForClaimAndRequester } from './v2_2Data.js'
 import { playDirectoryLoadAnimation } from './directoryLoadAnimation.js'
 // Phase 16.2.7: reuse parent-canvas card components verbatim for the LOD
 // swap. AssetNode = full-size card (210×96 px). AssetNodeMini = compact
@@ -1155,6 +1155,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // `rfp` artifact. V2App routes to a read-only RfpDetailPanel; mutual
   // exclusion with `onClaimDotClick` is enforced on V2App's side.
   onRfpClick,
+  // Phase 17.3 — Directory-layer Claim card action-bar wiring. V2App passes
+  // the active actor's EA collection (merged shared.evaluationAgreements)
+  // so the per-card render path can resolve each Claim's existing EA via
+  // `getActiveEaForClaimAndRequester`, plus a generic dispatch handler
+  // that mirrors V22NodeDetailPanel's footer (requestEvaluationAgreement
+  // and viewEvaluationAgreement actions).
+  evaluationAgreements,
+  onClaimCardAction,
   wipeOrigin,
 }, ref) {
   // ─── Entry/exit state machine ────────────────────────────────────────
@@ -3095,6 +3103,23 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
             )
           }
           const isSelected = pinned?.claim === d.claim
+          // Phase 17.3 — stamp Directory-mode EA state on the synthetic
+          // Claim node so V22ActionBar can surface the cold-path Request
+          // EA / View EA CTA on the card. Both `evaluationAgreements`
+          // and `onClaimCardAction` must be wired by V2App for the action
+          // bar to render anything; without them the synthetic node falls
+          // through to the existing (empty) Directory CLAIM action-set.
+          const baseNode = d.node || d.claim
+          let directoryClaimNode = baseNode
+          const isClaimOwner = d.claim && d.claim.owner === layout.activeParty
+          if (!isClaimOwner && Array.isArray(evaluationAgreements) && onClaimCardAction) {
+            const existingEa = getActiveEaForClaimAndRequester(d.claim, layout.activeParty, evaluationAgreements)
+            directoryClaimNode = {
+              ...baseNode,
+              _directoryExistingEa: existingEa || null,
+              _directoryRequestEaCandidate: !existingEa,
+            }
+          }
           return (
             <div
               key={`claim-card-${i}`}
@@ -3111,11 +3136,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               }}
             >
               <Card
-                node={d.node || d.claim}
+                node={directoryClaimNode}
                 isSelected={isSelected}
                 onSelect={() => onCardClick(d, i)}
                 activeParty={layout.activeParty}
                 disclosureType={d.disclosureType}
+                onV22CardAction={onClaimCardAction
+                  ? (action, n) => onClaimCardAction(action, n, d.claim, directoryClaimNode._directoryExistingEa || null)
+                  : undefined}
               />
             </div>
           )

@@ -2673,6 +2673,41 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.3 completion notes (2026-05-19) — Claim Detail Panel EA content on Directory + card action bar + #202 ACTOR/ASSET label cleanup
+
+Opens the action surface for Directory-layer Claim discovery. Without this content, clicking a Claim on Directory opened a panel that didn't tell the viewer what they could do with it. This phase wires the action loop end-to-end and unifies it with the parent-canvas card/panel pattern. Also closes backlog #202.
+
+**Diff (high-level).**
+
+- `src/v2/v2_2Data.js` — new exported helper `getActiveEaForClaimAndRequester(claim, requesterParty, evaluationAgreements)`. Returns the resolved EA artifact (or null) for a given Claim/requester pair, filtering out declined/revoked EAs. Tie-break: prefer `active` over `pending-acceptance`, then most recent by `terms.createdDate`.
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — V22ClaimPanel gets four new props (`existingEaForActor`, `onRequestEa`, `onViewEa` + the existing `hasActiveDaWithoutEa`/`onRequestEvaluationAgreement` warm-path props). New EA-status section in the body: "An Evaluation Agreement is required to evaluate this Claim." (cold-path, amber callout) or "An Evaluation Agreement is in place with {owner}." (EA-exists, indigo callout). Owner-viewing-own renders neither. Footer extensions: Request Evaluation Agreement (cold-path) or View Evaluation Agreement (existing-EA) buttons. PanelHeader's `typeLabel` is now optional. V22ActorPanel + V22AssetPanel mounts drop the `typeLabel="ACTOR"` / `typeLabel="ASSET"` props (#202).
+- `src/v2/AssetNode.jsx` — V22ActionBar Claim branch gains two new actions: `viewEvaluationAgreement` (when `node._directoryExistingEa` is stamped) and `requestEvaluationAgreement` (when `node._directoryRequestEaCandidate` is stamped, cold-path). Parent canvas Claim cards unaffected — the synthetic-node stamps come from DirectoryLayer's card-overlay render path only.
+- `src/v2/DirectoryLayer.jsx` — imports `getActiveEaForClaimAndRequester`. New props `evaluationAgreements` + `onClaimCardAction`. Card-overlay render path stamps the synthetic Claim node with `_directoryRequestEaCandidate: !existingEa` and `_directoryExistingEa: existingEa || null` (gated on non-owner + both new props wired); passes a wrapped `onV22CardAction` that dispatches to `onClaimCardAction(action, node, claim, existingEa)`.
+- `src/components/modals/AssetPickerModal.jsx` — prop contract generalized. New canonical props: `targetClaim` + optional `context` ({ type: 'directory-claim' } | { type: 'rfp', rfp }). Legacy props (`solicitation`, `solicitorClaim`, `rfp`) preserved as fallback for future re-use. Context block + subtitle vary based on entry path: directory-claim shows "Their Claim:" + "Owned by:"; rfp shows "From: {solicitor} via RFP: {rfpName}" + "Their Claim: ...". Submit shape now `{ assetId, claimId, solicitationId }` (claimId added, solicitationId null when no solicitation context).
+- `src/v2/V2App.jsx` — re-import AssetPickerModal (removed in 17.2.1.1). New session state `v22RequestingEaForClaim: Claim | null`. Three new handlers: `handleRequestEaForClaim`, `handleAssetPickedForClaim`, `handleViewEa`. `handleViewEa` declared after `nodeMap` + `canvasRef` are in scope (line ~4060) to avoid TDZ on the useCallback deps array — comment explains. DirectoryLayer mount wires `evaluationAgreements` + `onClaimCardAction`. Directory Detail Panel mount wires `existingEaForActor` + `onRequestEa` + `onViewEa` (cold path resolves the EA via `getActiveEaForClaimAndRequester` on each render). New AssetPickerModal mount gated on `v22RequestingEaForClaim`. Footer constant + Changelog modal entry rolled to v0.17.3.
+- `architecture-spec.md` — new §8.10 "Directory-layer Claim CTAs" + §8 Changelog bullet.
+- `polish-backlog.md` — #202 marked Complete + Phase 17.3 Update Log entry.
+- `CLAUDE.md` — Current state + active phase queue updated.
+
+**Deviations.**
+
+- **Parent-canvas Claim card action-bar pattern assessment.** The brief said to STOP and surface if the parent-canvas Claim card action bar pattern doesn't match the new Directory pattern. Audit result: the parent-canvas V22ActionBar Claim branch DOES have state-dependent CTAs but they're DIFFERENT from the Directory pattern. Parent canvas: Amend Claim + Self-Evaluate (owner), Run Evaluation (non-owner with EA via `evaluationAgreementForActor`), Request EA (non-owner with DA but no EA via `_hasActiveDaWithoutEa`). The brief implicitly assumed a "View EA" pattern on parent-canvas Claim cards; there isn't one — when the EA exists on parent canvas, the affordance is Run Evaluation (because the EA-exists state on parent canvas means the user can act). I added the Directory-specific View EA + cold-path Request EA via two NEW node stamps (`_directoryExistingEa` / `_directoryRequestEaCandidate`) so parent-canvas cards (which never receive those stamps) are untouched. The Directory pattern is therefore an extension, not a regression — Directory has different next-action semantics (can't Run Evaluation while on Directory — must surface the parent canvas first).
+- **`handleViewEa` placement.** Originally declared with the other Phase 17.3 handlers at line ~2740 (next to `handleRequestEaForClaim` + `handleAssetPickedForClaim`). Hit TDZ on the useCallback deps array (`[nodeMap, v22Data]`) because `nodeMap` is destructured at line ~3315 (later in the V2App body). Moved to line ~4060 (after both `nodeMap` and `canvasRef` are in scope), with a comment in the original location pointing to the relocation. Functionally equivalent; explanation preserved for future readers.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Data-layer probe of `getActiveEaForClaimAndRequester` on the seed: Bob viewing his own GovCo Claim → null (correct, predicate filters out grantor === grantee since seed has no such EAs); Bob viewing Alice's "Power Regulation Module Assembly" Claim → resolves EA `ea-igcqc4yw`; null/empty inputs return null. Total active EAs from MicroCo→GovCo in seed: 2 (Alice's PRM + VReg Claims). All other ~22k Alice Claims land in the cold-path Request EA state on Bob's Directory view.
+- Dev server module load: Vite transforms V2App.jsx cleanly (1.7 MB transformed); no SSR errors; HTTP 200 on root + transformed module. Full canvas walkthroughs (Bob clicks Alice's Claim → panel opens → footer Request EA → AssetPickerModal → CombinedRequestModal → submit) require mouse interaction per the documented V2Canvas raycaster limitation in CLAUDE.md.
+
+**Known scope boundaries.**
+
+- Parent-layer EA-required-message-when-not-needed bug deferred to Phase 17.4+ alongside umbrella DA edge work.
+- Remaining Claim Detail Panel content items (#58 Export, #104 Click-to-jump, #116 Agreements section on EvalResult/PoE, #161 Diff highlighting, #180) can fold into 17.3.x patches or a later dedicated detail-panel polish phase.
+- AssetPickerModal stays in the codebase as a generalized component (Directory-Claim flow active; legacy RFP-flow + future create-RFP entry preserved).
+
+**Status:** [x] Complete.
+
 ### Phase 17.2.1.2 completion notes (2026-05-19) — Hotfix: CombinedRequestModal RS pre-selection + Detail Panel label backlog entry
 
 Single bug fix closing the last QA item against the 17.2 arc, plus one backlog filing.

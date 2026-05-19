@@ -199,14 +199,21 @@ function PanelHeader({ typeLabel, name, pin, onClose, badge, actions }) {
   // close button. Used by Claim / Eval Result / PoE / Parse Result panels to
   // surface an Expand button alongside the type badge — the same affordance
   // location used on the EA Detail Panel since 11C.2.
+  // Phase 17.3 (#202): `typeLabel` is now optional. ACTOR + ASSET panels
+  // omit it because the Actor's PIN + name (or the Asset's PIN + name + file
+  // chip below) are self-identifying. Claim / Eval Result / Parse Result /
+  // PoE / Badge Template panels keep their type pill since those are
+  // abstract artifact types that benefit from an explicit label.
   return (
     <div style={{ padding: '18px 18px 14px', flexShrink: 0, borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{
-          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-          letterSpacing: '0.12em', color: 'var(--text-tertiary)', textTransform: 'uppercase',
-          padding: '2px 6px', background: TYPE_BADGE_BG, borderRadius: 3,
-        }}>{typeLabel}</span>
+        {typeLabel && (
+          <span style={{
+            fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            letterSpacing: '0.12em', color: 'var(--text-tertiary)', textTransform: 'uppercase',
+            padding: '2px 6px', background: TYPE_BADGE_BG, borderRadius: 3,
+          }}>{typeLabel}</span>
+        )}
         {badge}
         <div style={{ flex: 1 }} />
         {actions}
@@ -276,7 +283,7 @@ function V22ActorPanel({
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
     <PanelLayout
-      header={<PanelHeader typeLabel="ACTOR" name={node.name} pin={node.pin} onClose={onClose} />}
+      header={<PanelHeader name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
           {/* Phase 9A.6.1.1 Fix 1: stripped DOT, Role, Vertical, User rows.
@@ -360,7 +367,7 @@ function V22AssetPanel({
   const isPendingTransfer = !!node._pendingTransfer
   return (
     <PanelLayout
-      header={<PanelHeader typeLabel="ASSET" name={node.name} pin={node.pin} onClose={onClose} />}
+      header={<PanelHeader name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
           {asset?.description && (
@@ -678,6 +685,23 @@ function V22ClaimPanel({
   // with the Claim + grantor + existing DA's id.
   onRequestEvaluationAgreement,
   hasActiveDaWithoutEa = false,
+  // Phase 17.3 — Directory-layer Claim CTAs. When the panel is mounted from
+  // the Directory layer (no DA exists between the viewer and the Claim
+  // owner, the Claim isn't on the viewer's parent canvas), the panel's EA
+  // status section + footer surface two new states:
+  //   • no existing EA → "An Evaluation Agreement is required to evaluate
+  //     this Claim." + Request Evaluation Agreement footer button. The
+  //     button calls `onRequestEa(claim)`, which V2App routes through
+  //     AssetPickerModal → CombinedRequestModal pre-filled (cold path).
+  //   • existing EA → "An Evaluation Agreement is in place with {owner}." +
+  //     View Evaluation Agreement footer button. The button calls
+  //     `onViewEa(existingEa)`, which V2App closes the Directory and
+  //     navigates the parent canvas to the EA artifact.
+  // `existingEaForActor` is the resolved EA (or null) — V2App resolves it
+  // via `getActiveEaForClaimAndRequester` from v2_2Data.js.
+  existingEaForActor = null,
+  onRequestEa,
+  onViewEa,
   referencedAssetNames = [],
   // Phase 11D.3: when the viewer's active disclosure on this Claim is
   // proof-only (and only proof-only), the Referenced Assets section renders
@@ -991,6 +1015,36 @@ function V22ClaimPanel({
               borderRadius: 6,
             }}>
               An Evaluation Agreement is required to evaluate this Claim.
+            </div>
+          )}
+          {/* Phase 17.3 — Directory-layer cold-path EA status section. Two
+              variants: "EA required" (non-owner, no EA, no DA either) and
+              "EA in place" (non-owner, EA exists). The warm-path strip above
+              fires when a DA exists; this block fires in the other two cases.
+              The `onRequestEa` / `onViewEa` props gate visibility — V2App only
+              wires them on the Directory-layer mount, so the parent-canvas
+              mount falls through cleanly. */}
+          {!isOwner && !hasActiveDaWithoutEa && !!onRequestEa && !existingEaForActor && (
+            <div style={{
+              fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+              padding: '10px 12px', marginBottom: 14,
+              background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
+              borderRadius: 6,
+            }}>
+              An Evaluation Agreement is required to evaluate this Claim.
+            </div>
+          )}
+          {!isOwner && !!existingEaForActor && !!onViewEa && (
+            <div style={{
+              fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+              padding: '10px 12px', marginBottom: 14,
+              background: 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent-indigo) 25%, transparent)',
+              borderRadius: 6,
+            }}>
+              An Evaluation Agreement is in place with{' '}
+              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{node.owner}</span>.
             </div>
           )}
           <Section title="Owner">
@@ -1310,10 +1364,15 @@ function V22ClaimPanel({
         const hasOwnerActions = isOwner
         const hasEvalAction = !isOwner && !!evaluationAgreementForActor
         const hasWarmPathAction = !isOwner && !hasEvalAction && hasActiveDaWithoutEa && !!onRequestEvaluationAgreement
+        // Phase 17.3 — Directory-layer cold-path CTAs. Two new states gated on
+        // V2App wiring `onRequestEa` / `onViewEa` (the parent-canvas mount
+        // doesn't wire them, so these branches stay off there).
+        const hasViewEaAction = !isOwner && !!existingEaForActor && !!onViewEa
+        const hasColdRequestAction = !isOwner && !hasEvalAction && !hasWarmPathAction && !hasViewEaAction && !existingEaForActor && !!onRequestEa
         // Phase 14.2 (#169a): Issue Badge footer button on Claim panel.
         // Visible to any non-owner with an Issue Badge handler wired.
         const hasIssueBadgeAction = !isOwner && !!onIssueBadge
-        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction && !hasIssueBadgeAction) return null
+        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction && !hasColdRequestAction && !hasViewEaAction && !hasIssueBadgeAction) return null
         return (
           <>
             {noticeForPanel && (
@@ -1339,6 +1398,10 @@ function V22ClaimPanel({
               )
             ) : hasWarmPathAction ? (
               <FooterButton label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
+            ) : hasViewEaAction ? (
+              <FooterButton label="View Evaluation Agreement" onClick={() => onViewEa(existingEaForActor)} title={`Navigate to the existing Evaluation Agreement on your parent canvas (EA ${existingEaForActor?.id || ''}).`} />
+            ) : hasColdRequestAction ? (
+              <FooterButton label="Request Evaluation Agreement" accent onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
             ) : null}
             {hasIssueBadgeAction && (
               <FooterButton

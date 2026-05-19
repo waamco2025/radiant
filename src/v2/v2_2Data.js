@@ -877,6 +877,53 @@ export function makeEvaluationAgreement({
 }
 
 /**
+ * Phase 17.3 — shared predicate for resolving an active or pending EA between
+ * a requester (grantee) and a Claim's owner (grantor) for a specific Claim.
+ *
+ * Returns the resolved EA artifact when one exists, null otherwise. Used by:
+ *   - V22NodeDetailPanel Claim view to gate the Directory-layer "EA in place
+ *     with {owner}" vs "EA required" content + footer button (Phase 17.3).
+ *   - AssetNode's V22ActionBar to drive the Directory-layer Claim card's
+ *     "View Evaluation Agreement" vs "Request Evaluation Agreement" CTA.
+ *   - V2App handlers when navigating from the View EA button on Directory.
+ *
+ * Filtering rules:
+ *   - `ea.grantor.party === claim.owner` AND `ea.grantee.party === requesterParty`
+ *     AND `ea.claimId === claim.id`
+ *   - Skip EAs flagged with `_declineMeta` or `_revokedMeta` (the existing
+ *     declined / revoked session-state markers).
+ *   - Include `status: 'active'` (and any other in-flight status like
+ *     'pending-acceptance' Phase 11.6, which behaves like active for the
+ *     purposes of "EA exists between these two parties"). Excluded: declined
+ *     (already filtered via _declineMeta), revoked (already filtered via
+ *     _revokedMeta).
+ *
+ * Tie-breaking: if multiple EAs match (rare — would mean multiple EAs between
+ * the same grantor/grantee on the same Claim, which can happen if an old EA
+ * was superseded but not formally closed), prefer active over pending-
+ * acceptance, then most recent by `createdDate` (terms.createdDate on the EA).
+ */
+export function getActiveEaForClaimAndRequester(claim, requesterParty, evaluationAgreements) {
+  if (!claim || !requesterParty || !Array.isArray(evaluationAgreements)) return null
+  const candidates = evaluationAgreements.filter((ea) => {
+    if (!ea) return false
+    if (ea._declineMeta || ea._revokedMeta) return false
+    if (ea.grantor?.party !== claim.owner) return false
+    if (ea.grantee?.party !== requesterParty) return false
+    if (ea.claimId !== claim.id) return false
+    return true
+  })
+  if (candidates.length === 0) return null
+  if (candidates.length === 1) return candidates[0]
+  const dateOf = (ea) => ea.terms?.createdDate || ea.createdDate || ''
+  const active = candidates.filter((ea) => ea.status === 'active')
+  if (active.length > 0) {
+    return active.sort((a, b) => String(dateOf(b)).localeCompare(String(dateOf(a))))[0]
+  }
+  return candidates.sort((a, b) => String(dateOf(b)).localeCompare(String(dateOf(a))))[0]
+}
+
+/**
  * Evaluation Result artifact — spec §10.6. Owned by the evaluator; visible to the
  * Claim owner via a Proof-of-Evaluation Disclosure Agreement (see spec §3.5).
  *

@@ -1229,6 +1229,19 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           // v22DataWithReveal memo so the action bar can decide without
           // re-deriving the DA/EA state.
           buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
+        } else if (node._directoryExistingEa) {
+          // Phase 17.3 — Directory-layer Claim card CTA. When the synthetic
+          // Claim node is stamped with an existing EA (resolved by V2App
+          // via getActiveEaForClaimAndRequester), the card surfaces a View
+          // EA action that mirrors the panel footer's button.
+          buttons.push({ icon: '◉', tooltip: 'View Evaluation Agreement', onClick: fire('viewEvaluationAgreement') })
+        } else if (node._directoryRequestEaCandidate) {
+          // Phase 17.3 — Directory cold-path Request EA CTA. Stamped on the
+          // synthetic Claim node by V2App's Directory Claim-card render
+          // path: non-owner viewing a Claim with no existing EA. Click
+          // fires the same handler as the panel footer (V2App routes to
+          // AssetPickerModal → CombinedRequestModal).
+          buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
         }
         // Phase 14.2 (#169a): Issue Badge entry point on Claim cards.
         // Gate: any non-owner can issue (badges target Claims now). Visible
