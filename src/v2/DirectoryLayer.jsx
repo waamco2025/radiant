@@ -1361,6 +1361,11 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // umbrella-bearing cluster's outline ramps 0 → 1 alongside its label.
   const [umbrellaOpacities, setUmbrellaOpacities] = useState({})
   const animationHandleRef = useRef(null)
+  // Phase 17.3.2: cinematic zoom-out RAF id. Set by the animation effect
+  // when it kicks off the lerp from CINEMATIC_START_ZOOM down to
+  // INITIAL_ZOOM; cancelled in the effect's cleanup so role-switch /
+  // close-during-zoom doesn't leak the RAF.
+  const cinematicZoomRafRef = useRef(0)
   const lastAnimatedRoleRef = useRef(null)
   const lastAnimatedPhaseRef = useRef('closed')
 
@@ -1880,6 +1885,18 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       // attaching a fresh BufferGeometry).
       closedRfpMesh.geometry.dispose()
       closedRfpMaterial.dispose()
+      // Phase 17.3.2 — Safari WebGL context exhaustion fix.
+      // `renderer.dispose()` releases internal Three.js bookkeeping but
+      // does NOT force the underlying WebGL context to be released
+      // immediately. Safari's GPU driver is slow to reclaim disposed
+      // contexts; rapid Directory open/close cycles can accumulate
+      // contexts up to Safari's ~16-context limit and crash the tab.
+      // `forceContextLoss()` dispatches a `webglcontextlost` event,
+      // which prompts the driver to release the context synchronously.
+      // Chrome handles this gracefully too — no negative side effects on
+      // platforms that already dispose cleanly.
+      const ctxLossExt = renderer.getContext().getExtension('WEBGL_lose_context')
+      if (ctxLossExt) ctxLossExt.loseContext()
       renderer.dispose()
       rendererRef.current = null
       sceneRef.current = null
@@ -2597,12 +2614,47 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     // Cancel any in-flight animation cleanly.
     animationHandleRef.current?.skip()
     animationHandleRef.current = null
+    // Phase 17.3.2: cancel any in-flight cinematic zoom-out (role switch
+    // mid-zoom or close-during-zoom). Re-armed below.
+    if (cinematicZoomRafRef.current) {
+      cancelAnimationFrame(cinematicZoomRafRef.current)
+      cinematicZoomRafRef.current = 0
+    }
 
-    // Reset camera + zoom to initial galactic-view state on every entry.
-    zoomRef.current = INITIAL_ZOOM
+    // Phase 17.3.2 — cinematic zoom-out. Start the camera 30% tighter than
+    // the final galactic-view zoom; lerp back to INITIAL_ZOOM over the
+    // fan-out's duration via the same easeOut curve the dots use. Visual
+    // result: the camera pulls back into space as the network spreads out
+    // — a cinematic accompaniment to the dot wave. 1.3× = "30% tighter"
+    // (smaller numbers = tighter view since zoom < 1 here). 1500ms matches
+    // the new ~1.2–1.5s fan-out so the two timelines complete together.
+    const CINEMATIC_START_ZOOM = INITIAL_ZOOM * 1.3
+    const CINEMATIC_ZOOM_DURATION_MS = 1500
+    zoomRef.current = CINEMATIC_START_ZOOM
     camPosRef.current = clampPan(OWN_CLUSTER_ANCHOR_X, CANVAS_HEIGHT / 2)
-    setZoom(INITIAL_ZOOM)
+    setZoom(CINEMATIC_START_ZOOM)
     updateCamera()
+
+    const cinematicStart = performance.now()
+    const cinematicTick = () => {
+      const elapsed = performance.now() - cinematicStart
+      if (elapsed >= CINEMATIC_ZOOM_DURATION_MS) {
+        zoomRef.current = INITIAL_ZOOM
+        setZoom(INITIAL_ZOOM)
+        updateCamera()
+        cinematicZoomRafRef.current = 0
+        return
+      }
+      const t = elapsed / CINEMATIC_ZOOM_DURATION_MS
+      // Matches `easeOut` in directoryLoadAnimation.js: 1 - (1-t)^3.
+      const eased = 1 - Math.pow(1 - t, 3)
+      const z = CINEMATIC_START_ZOOM + (INITIAL_ZOOM - CINEMATIC_START_ZOOM) * eased
+      zoomRef.current = z
+      setZoom(z)
+      updateCamera()
+      cinematicZoomRafRef.current = requestAnimationFrame(cinematicTick)
+    }
+    cinematicZoomRafRef.current = requestAnimationFrame(cinematicTick)
 
     // Compute dot + label inputs for the wave animation. Read layout via
     // ref so this effect's deps stay tight to (phase, roleId, threeReady)
@@ -2703,6 +2755,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       // baseline.
       handle.skip()
       if (animationHandleRef.current === handle) animationHandleRef.current = null
+      // Phase 17.3.2: cancel the cinematic zoom-out RAF if it's still
+      // in flight. The animation effect cancels it at the top on the
+      // next entry, but the cleanup function fires earlier on close /
+      // role-switch and prevents the RAF from outliving the effect.
+      if (cinematicZoomRafRef.current) {
+        cancelAnimationFrame(cinematicZoomRafRef.current)
+        cinematicZoomRafRef.current = 0
+      }
     }
   }, [phase, roleId, threeReady, clampPan, updateCamera])
 
@@ -3043,7 +3103,13 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
         zIndex: 150,
         clipPath,
         WebkitClipPath: clipPath,
-        transition: 'clip-path 550ms cubic-bezier(0.65, 0, 0.35, 1), -webkit-clip-path 550ms cubic-bezier(0.65, 0, 0.35, 1)',
+        // Phase 17.3.2: bumped wipe duration 550 → 900ms so the
+        // CSS clip-path transition completion times up with the new
+        // ~1.2–1.5s fan-out duration. The wipe still leads (completes
+        // at 900ms, fan-out completes shortly after) but the two now
+        // overlap enough to read as one continuous transition rather
+        // than wipe-then-dots-appear. Easing curve unchanged.
+        transition: 'clip-path 900ms cubic-bezier(0.65, 0, 0.35, 1), -webkit-clip-path 900ms cubic-bezier(0.65, 0, 0.35, 1)',
         background: 'var(--bg-deep)',
         overflow: 'hidden',
         userSelect: 'none',
@@ -3258,6 +3324,22 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               && d.rfp?.status === 'open'
               && !hasOwnSolicitation
             )
+            // Phase 17.3.2 — owner Close / Reopen card CTAs. Stamp
+            // `_directoryCloseCandidate` (owner + open) or
+            // `_directoryReopenCandidate` (owner + closed). Mutually
+            // exclusive — the same actor on the same RFP can be in at
+            // most one of (solicit, close, reopen) at a time.
+            const isOwnerOfRfp = !!layout.activeParty && d.rfp?.owner === layout.activeParty
+            const closeCandidate = (
+              !!onRfpCardAction
+              && isOwnerOfRfp
+              && d.rfp?.status === 'open'
+            )
+            const reopenCandidate = (
+              !!onRfpCardAction
+              && isOwnerOfRfp
+              && d.rfp?.status === 'closed'
+            )
             const rfpSyntheticNode = {
               id: d.rfp.id,
               category: 'rfp',
@@ -3267,6 +3349,8 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               owner: d.rfp.owner,
               isClosed: isClosedOwned,
               _directorySolicitCandidate: solicitCandidate,
+              _directoryCloseCandidate: closeCandidate,
+              _directoryReopenCandidate: reopenCandidate,
             }
             return (
               <div

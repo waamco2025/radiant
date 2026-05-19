@@ -6181,6 +6181,24 @@ export default function V2App() {
             onRfpCardAction={(action, rfp) => {
               if (action === 'solicitWithClaim') {
                 setV22SolicitOpenForRfp({ rfp })
+              } else if (action === 'closeRfp') {
+                // Phase 17.3.2 — close from card mirrors the panel footer's
+                // Close handler (RfpDetailPanel mount at line ~6458).
+                // Closed timestamp captured at click time so re-renders
+                // see a stable value.
+                setV22ClosedRfpIds((prev) => {
+                  const next = new Map(prev)
+                  next.set(rfp.id, new Date().toISOString())
+                  return next
+                })
+              } else if (action === 'reopenRfp') {
+                // Phase 17.3.2 — reopen from card mirrors the panel footer.
+                setV22ClosedRfpIds((prev) => {
+                  if (!prev.has(rfp.id)) return prev
+                  const next = new Map(prev)
+                  next.delete(rfp.id)
+                  return next
+                })
               }
             }}
           />
@@ -8507,7 +8525,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.3.1 &middot; Changelog
+          v0.17.3.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8554,6 +8572,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.3.2', date: '2026-05-19', label: 'Phase 17.3.2', items: [
+                  'Phase 17.3.2 — Fan-out improvements + leak investigation + RFP owner card action bar. Five items batched before Phase 17.4 (umbrella DA edges) opens.',
+                  'Fan-out jitter bumped 250 → 600 ms; wave speed bumped 7000 → 9500 wu/sec. The wavefront travels faster and the jitter is now ~50% of the new base radial duration, so per-instance randomness dominates the perception of "which dot appears next" for a clearly jagged organic edge while the radial bias still gives the wave its outward direction.',
+                  'CSS wipe duration bumped 550 → 900 ms (`clip-path` transition in DirectoryLayer\'s scene container). The wipe still leads (completes at 900 ms while fan-out completes around 1.2–1.5 s) but the two now overlap enough to read as one continuous transition rather than wipe-then-dots-appear. Easing curve unchanged.',
+                  'Cinematic zoom-out during fan-out. The camera starts at `INITIAL_ZOOM × 1.3` (30% tighter view) and eases out to `INITIAL_ZOOM` over 1500 ms via the same `easeOut(t) = 1 - (1-t)^3` curve the dots use. Gives a pulls-back-into-space feel — the network spreads outward while the camera retreats. New `cinematicZoomRafRef` cancels the lerp on role-switch / close-during-zoom so the RAF doesn\'t outlive the effect.',
+                  'Safari crash on rapid Directory open/close cycles — investigation outcome: WebGL context exhaustion. Each open/close cycle disposes + recreates the entire Three.js renderer; Safari\'s ~16-context limit + slow driver-side context release lets cycles 10+ accumulate. **Surgical fix applied**: scene cleanup now calls `gl.getExtension(\'WEBGL_lose_context\').loseContext()` before `renderer.dispose()` to dispatch the `webglcontextlost` event synchronously and prompt the driver to release the context immediately. No negative side effects on Chrome / Firefox (those already dispose cleanly). React state-thrashing suspect (setLabelOpacities × N per RAF tick) reviewed but ruled out — React 18\'s automatic batching collapses same-tick setState calls into one render.',
+                  'RFP owner Close/Reopen action bar on the full-size card (parity with the panel footer\'s Close/Reopen buttons). DirectoryLayer stamps `_directoryCloseCandidate` (owner + open) and `_directoryReopenCandidate` (owner + closed) on the synthetic RFP node — mutually exclusive with each other and with `_directorySolicitCandidate` (non-owner). AssetNode\'s RFP early-return surfaces a padlock-icon button on hover/select; click dispatches `closeRfp` / `reopenRfp` through the existing `onV22CardAction` channel; V2App routes to the same session-state updates `RfpDetailPanel`\'s footer fires.',
+                  'Footer rolls forward to v0.17.3.2.',
+                ]},
                 { version: '0.17.3.1', date: '2026-05-19', label: 'Phase 17.3.1', items: [
                   'Phase 17.3.1 — Polish wrap before Phase 17.4 (umbrella DA edges). Four items batched: RFP card action bar with Solicit CTA; RfpDetailPanel categorical-pill cleanup + Requirements section overhaul; new RequirementsSetDetailModal; fan-out loading animation tweaks.',
                   'AssetNode RFP full-size card gains an action bar parallel to the Claim card pattern shipped in 17.3. When the synthetic node carries `_directorySolicitCandidate` (DirectoryLayer resolves: non-owner of an open RFP with no existing solicitation from active actor), the bar surfaces a "Solicit with my Claim" button with a new paper-airplane SVG icon. Click dispatches the `solicitWithClaim` action through `onV22CardAction`; V2App routes to the same SolicitationCreateModal mount the panel footer opens — both surfaces fire the same handler. Owner / existing-solicitation / closed-RFP cases suppress the button.',

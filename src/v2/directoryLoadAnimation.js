@@ -34,7 +34,12 @@
 // ~8284 wu — base duration drops from ~1.84s (4500wu/s) to ~1.18s. Add
 // the dot fade tail (90ms) + worst-case jitter (200ms) and the perceived
 // animation duration sits comfortably in the brief's 1.5–2s target band.
-const DEFAULT_WAVE_SPEED = 7000     // world units per second
+// Phase 17.3.2: bumped further 7000 → 9500 wu/sec. Base radial duration
+// drops to ~0.87s; with the new 600ms jitter the wavefront is travelling
+// faster *and* the jitter is a larger fraction of the timeline, which
+// is what makes the jaggedness more pronounced. Total fan-out duration
+// (radial + worst-case jitter + fade) sits around 1.2–1.4s.
+const DEFAULT_WAVE_SPEED = 9500     // world units per second
 // Phase 17.3.1: 200 → 90ms. The per-dot ramp is the actual scale-in
 // duration; snappier values trade smoothness for the "popping into
 // place" feel that fits the dense ~22k-dot field better than a long
@@ -44,9 +49,13 @@ const DEFAULT_LABEL_DELAY_MS = 100
 const LABEL_FADE_MS = 200
 // Phase 17.3.1: per-instance random jitter added to each dot's start
 // time. Range [0, JITTER_MS]; effective on top of the deterministic
-// distance-based start. ~250ms is ~20% of the new base duration —
-// produces a clearly jagged wavefront without losing the radial sense.
-const DEFAULT_JITTER_MS = 250
+// distance-based start.
+// Phase 17.3.2: bumped 250 → 600ms. The 250ms value was too subtle —
+// the wavefront still read as fairly uniform. 600ms is ~50% of the new
+// base radial duration, so the random jitter dominates the perception
+// of "which dot appears next" for a clearly jagged organic edge while
+// the radial bias still gives the wave its outward direction.
+const DEFAULT_JITTER_MS = 600
 
 // Phase 17.3.1: tiny seeded PRNG (xmur3 hash → mulberry32) so per-session
 // jitter is deterministic given a stable seed. Same primitive used in
@@ -101,11 +110,12 @@ function mulberry32(seed) {
  *   Callback invoked when a label's opacity changes.
  * @param {(party:string, opacity:number) => void} [opts.setUmbrellaOpacity]
  *   Callback invoked when an umbrella outline's opacity changes.
- * @param {number} [opts.waveSpeed=7000]   World units per second.
+ * @param {number} [opts.waveSpeed=9500]   World units per second
+ *                                          (Phase 17.3.2: 7000 → 9500).
  * @param {number} [opts.dotFadeMs=90]     Per-dot scale-in duration.
  * @param {number} [opts.labelDelayMs=100] Cluster-first-dot → label delay.
- * @param {number} [opts.jitterMs=250]     Max per-instance random start
- *                                          offset (Phase 17.3.1).
+ * @param {number} [opts.jitterMs=600]     Max per-instance random start
+ *                                          offset (Phase 17.3.2: 250 → 600).
  * @param {string} [opts.jitterSeed='']    Seed for jitter PRNG. Pass a
  *                                          stable identifier (e.g. role id +
  *                                          phase counter) so re-renders

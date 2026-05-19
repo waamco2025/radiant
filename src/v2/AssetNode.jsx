@@ -479,8 +479,18 @@ export default function AssetNode({
     // from active actor). Click fires the action-dispatcher (parallel to
     // 17.3's Claim card pattern). Visible only when the card is hovered
     // or selected so the bar doesn't visually crowd un-attended cards.
+    // Phase 17.3.2 — owner Close / Reopen CTAs on the RFP full-size card,
+    // parity with the panel footer's Close/Reopen buttons. DirectoryLayer
+    // stamps `_directoryCloseCandidate` (owner + open) or
+    // `_directoryReopenCandidate` (owner + closed) — the two are mutually
+    // exclusive so at most one button shows. Non-owner views see the
+    // Solicit button instead via the existing marker. All three are
+    // mutually exclusive per-actor-per-RFP.
     const rfpSolicitCandidate = !!node._directorySolicitCandidate
-    const rfpShowActionBar = (isSelected || hovered) && rfpSolicitCandidate && !!onV22CardAction
+    const rfpCloseCandidate = !!node._directoryCloseCandidate
+    const rfpReopenCandidate = !!node._directoryReopenCandidate
+    const rfpHasAnyAction = rfpSolicitCandidate || rfpCloseCandidate || rfpReopenCandidate
+    const rfpShowActionBar = (isSelected || hovered) && rfpHasAnyAction && !!onV22CardAction
     return (
       <div
         onMouseEnter={() => setHovered(true)}
@@ -566,13 +576,13 @@ export default function AssetNode({
             <span style={{ color: 'var(--text-secondary)' }}>{rfpOwner}</span>
           </div>
         </div>
-        {/* Phase 17.3.1 — Solicit-with-my-Claim action bar. Parallel to the
-            Claim card V22ActionBar in pattern: rendered only on hover /
-            select; gated on the `_directorySolicitCandidate` synthetic-node
-            stamp (set by DirectoryLayer when the active actor is a non-
-            owner of an open RFP with no existing solicitation). Click
-            dispatches the `solicitWithClaim` action through `onV22CardAction`
-            so V2App can route to the same handler the panel footer fires. */}
+        {/* Phase 17.3.1 — Solicit-with-my-Claim action bar.
+            Phase 17.3.2 — owner Close / Reopen buttons added in parallel.
+            Mutual exclusion: a given (actor, RFP) pair can have at most
+            one of (`_directorySolicitCandidate`, `_directoryCloseCandidate`,
+            `_directoryReopenCandidate`) true. Rendered only on hover /
+            select; click dispatches via `onV22CardAction` so V2App routes
+            to the same handlers the panel footer fires. */}
         {rfpShowActionBar && (
           <div style={{
             position: 'absolute',
@@ -584,20 +594,54 @@ export default function AssetNode({
             gap: 2,
             animation: 'v2-action-slide 150ms ease',
           }}>
-            <ActionButton
-              icon={(
-                <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path
-                    d="M14.5 1.5 L1.5 6.5 L6.5 8.5 L8.5 14.5 Z"
-                    stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" fill="none"
-                  />
-                  <line x1="6.5" y1="8.5" x2="14.5" y2="1.5" stroke="currentColor" strokeWidth="1.2" />
-                </svg>
-              )}
-              tooltip="Solicit with my Claim"
-              onClick={() => onV22CardAction?.('solicitWithClaim', node)}
-              categoryColor={'var(--border-hover)'}
-            />
+            {rfpSolicitCandidate && (
+              <ActionButton
+                icon={(
+                  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M14.5 1.5 L1.5 6.5 L6.5 8.5 L8.5 14.5 Z"
+                      stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" fill="none"
+                    />
+                    <line x1="6.5" y1="8.5" x2="14.5" y2="1.5" stroke="currentColor" strokeWidth="1.2" />
+                  </svg>
+                )}
+                tooltip="Solicit with my Claim"
+                onClick={() => onV22CardAction?.('solicitWithClaim', node)}
+                categoryColor={'var(--border-hover)'}
+              />
+            )}
+            {rfpCloseCandidate && (
+              <ActionButton
+                icon={(
+                  // Phase 17.3.2 — padlock (closed) icon for "Close this RFP".
+                  // Matches the existing icon set's stroke weight (1.2) +
+                  // 13×13 viewport rendered in a 16×16 viewBox.
+                  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <rect x="3" y="7" width="10" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                    <path d="M5 7 L5 5 a3 3 0 0 1 6 0 L11 7" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+                  </svg>
+                )}
+                tooltip="Close this RFP"
+                onClick={() => onV22CardAction?.('closeRfp', node)}
+                categoryColor={'var(--border-hover)'}
+              />
+            )}
+            {rfpReopenCandidate && (
+              <ActionButton
+                icon={(
+                  // Phase 17.3.2 — padlock-open icon for "Reopen this RFP".
+                  // Same body as the closed lock; the shackle is rotated /
+                  // open at the top to read as "unlocked".
+                  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <rect x="3" y="7" width="10" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                    <path d="M5 7 L5 5 a3 3 0 0 1 5.4 -1.8" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+                  </svg>
+                )}
+                tooltip="Reopen this RFP"
+                onClick={() => onV22CardAction?.('reopenRfp', node)}
+                categoryColor={'var(--border-hover)'}
+              />
+            )}
           </div>
         )}
       </div>

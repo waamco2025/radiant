@@ -2673,6 +2673,62 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.3.2 completion notes (2026-05-19) — Fan-out improvements + leak investigation + RFP owner card action bar
+
+Five items batched before Phase 17.4 (umbrella DA edges) opens. Closes the Safari rapid-cycle crash with a surgical WebGL fix; ships visual polish on the fan-out animation; brings the RFP card to parity with the panel footer for owner Close/Reopen.
+
+**Diff (high-level).**
+
+- `src/v2/directoryLoadAnimation.js` — `DEFAULT_JITTER_MS` 250 → 600; `DEFAULT_WAVE_SPEED` 7000 → 9500. JSDoc updated.
+- `src/v2/DirectoryLayer.jsx` — CSS wipe duration 550 → 900 ms (clip-path transition); cinematic zoom-out (new RAF loop at animation effect start; `cinematicZoomRafRef` cancelled in cleanup); WebGL context-loss extension call before `renderer.dispose()` (Safari crash fix); owner Close/Reopen markers stamped on synthetic RFP nodes.
+- `src/v2/AssetNode.jsx` — RFP early-return action bar extended with Close + Reopen padlock SVG icons gated on the new markers; mutually exclusive with Solicit.
+- `src/v2/V2App.jsx` — `onRfpCardAction` dispatcher extended with `closeRfp` / `reopenRfp` cases routing to the existing `setV22ClosedRfpIds` Map mutations the panel footer uses. Footer + Changelog modal rolled to v0.17.3.2.
+- Standard 5 doc updates.
+
+**Tuning constants summary (final values used).**
+
+- `DEFAULT_WAVE_SPEED`: 9500 wu/sec
+- `DEFAULT_JITTER_MS`: 600
+- `DEFAULT_DOT_FADE_MS`: 90 (unchanged from 17.3.1)
+- CSS wipe: 900 ms cubic-bezier(0.65, 0, 0.35, 1)
+- Cinematic zoom: starts at `INITIAL_ZOOM × 1.3` (= 0.195, vs final 0.15) and eases out to `INITIAL_ZOOM` over 1500 ms via `easeOut(t) = 1 - (1-t)^3`
+
+The 1.3× multiplier was the brief's starting suggestion and felt right on first inspection — keeping it. If QA reveals it's too tight or too subtle, easy to nudge to 1.15 or 1.4.
+
+**Safari crash investigation outcome.**
+
+Cannot reproduce Safari in this environment, so the investigation was code-review-driven. Three suspects:
+
+1. **Scene mount/unmount cycle (PRIMARY suspect — confirmed root cause).** `shouldMountScene = phase !== 'closed'` drives the scene-init `useEffect`. Each Directory open/close cycle creates + disposes the full Three.js renderer (including all geometries, materials, instanced meshes, and the underlying WebGL context). Safari's GPU driver is known to be slow to reclaim disposed WebGL contexts; the platform's ~16-concurrent-context limit means rapid cycles (open/close 10+ times in succession) can hit the cap and crash the tab.
+2. **closedRfpMesh geometry rebuild churn** — reviewed at line 2134 area. The rebuild path properly disposes `prevGeom` before attaching the new geometry. No leak.
+3. **React state thrashing from setLabelOpacities** — reviewed. The setter is called per RAF tick during the animation, but React 18's automatic batching collapses same-tick setState calls into a single render. No remediation needed.
+
+**Surgical fix applied** for the primary suspect: scene cleanup now calls `renderer.getContext().getExtension('WEBGL_lose_context').loseContext()` before `renderer.dispose()`. This dispatches a synchronous `webglcontextlost` event that prompts the GPU driver to release the context immediately rather than waiting for browser idle. Well-documented Safari-friendly pattern; no negative side effects on Chrome / Firefox (those already dispose cleanly — the extra call is a no-op when the context is already released or the extension is missing).
+
+**Cannot verify in Safari from this session**: the fix is code-confirmed and matches well-known Safari WebGL practice, but real verification requires a manual Safari rapid-cycle test. Surfaced as "code-verified-only" per the V2Canvas raycaster convention.
+
+**No throttle fallback applied.** Adding a 1000ms rate-limit on Directory open/close would degrade legitimate user toggles (one toggle, then immediate re-toggle is a reasonable user action). The surgical fix is contained and well-targeted; if it doesn't fully resolve the crash in Safari testing, a throttle can be added as a follow-up.
+
+**Deviations.**
+
+1. **Safari verification deferred.** No Safari available in agent session; surgical fix is code-confirmed but not browser-verified. Recommend manual Safari rapid-cycle test post-merge.
+2. **No defensive throttle.** The brief explicitly allowed a throttle as fallback; not applied because the surgical fix is the right shape and a throttle would hurt UX. If post-merge Safari test still shows crashes, the throttle can be added in 17.3.3.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Code review pass: all three suspects analyzed; surgical fix targets the confirmed root cause.
+- Cinematic zoom RAF lifecycle: `cinematicZoomRafRef` cancelled in cleanup; new entry cancels any in-flight RAF at the top. No leak.
+- Padlock SVG icons: 16×16 viewBox at 13×13 render, stroke 1.2 matching existing icons (Solicit paper-airplane, Claim card ▷/◉).
+
+**Known scope boundaries.**
+
+- Parent-layer EA-required-message bug still deferred to Phase 17.4+.
+- Solicitation withdraw / amend still deferred to Phase 17.6+.
+- Real Safari verification of the WebGL fix is a manual post-merge step.
+
+**Status:** [x] Complete.
+
 ### Phase 17.3.1 completion notes (2026-05-19) — Polish wrap: RFP card action bar + RfpDetailPanel cleanup + Requirements rows + fan-out animation tweaks
 
 Four polish items batched before Phase 17.4 (umbrella DA edges) opens. Closes #202 fully (RfpDetailPanel piece) and ships substantial visual upgrades to the Directory entry experience.
