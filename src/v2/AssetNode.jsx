@@ -473,6 +473,14 @@ export default function AssetNode({
     // consistency.
     const rfpIsClosed = !!node.isClosed
     const rfpBorderStyle = rfpIsClosed ? 'dashed' : 'solid'
+    // Phase 17.3.1 — Solicit CTA on RFP full-size cards. Active when the
+    // synthetic node carries `_directorySolicitCandidate` (DirectoryLayer
+    // resolves: non-owner + status === 'open' + no existing solicitation
+    // from active actor). Click fires the action-dispatcher (parallel to
+    // 17.3's Claim card pattern). Visible only when the card is hovered
+    // or selected so the bar doesn't visually crowd un-attended cards.
+    const rfpSolicitCandidate = !!node._directorySolicitCandidate
+    const rfpShowActionBar = (isSelected || hovered) && rfpSolicitCandidate && !!onV22CardAction
     return (
       <div
         onMouseEnter={() => setHovered(true)}
@@ -558,6 +566,40 @@ export default function AssetNode({
             <span style={{ color: 'var(--text-secondary)' }}>{rfpOwner}</span>
           </div>
         </div>
+        {/* Phase 17.3.1 — Solicit-with-my-Claim action bar. Parallel to the
+            Claim card V22ActionBar in pattern: rendered only on hover /
+            select; gated on the `_directorySolicitCandidate` synthetic-node
+            stamp (set by DirectoryLayer when the active actor is a non-
+            owner of an open RFP with no existing solicitation). Click
+            dispatches the `solicitWithClaim` action through `onV22CardAction`
+            so V2App can route to the same handler the panel footer fires. */}
+        {rfpShowActionBar && (
+          <div style={{
+            position: 'absolute',
+            left: CARD_W + 6,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            animation: 'v2-action-slide 150ms ease',
+          }}>
+            <ActionButton
+              icon={(
+                <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path
+                    d="M14.5 1.5 L1.5 6.5 L6.5 8.5 L8.5 14.5 Z"
+                    stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" fill="none"
+                  />
+                  <line x1="6.5" y1="8.5" x2="14.5" y2="1.5" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              )}
+              tooltip="Solicit with my Claim"
+              onClick={() => onV22CardAction?.('solicitWithClaim', node)}
+              categoryColor={'var(--border-hover)'}
+            />
+          </div>
+        )}
       </div>
     )
   }

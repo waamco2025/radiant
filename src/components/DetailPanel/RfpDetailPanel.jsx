@@ -22,6 +22,7 @@
 // (must be able to act on them); the Solicit button is hidden because
 // closed RFPs aren't visible to non-owners (Phase 17.1 directory filter).
 
+import { useState } from 'react'
 import SolicitationCard from './SolicitationCard.jsx'
 
 const TYPE_BADGE_BG = 'var(--bg-raised)'
@@ -107,6 +108,71 @@ function SectionHeading({ children }) {
       textTransform: 'uppercase',
       marginBottom: 8,
     }}>{children}</div>
+  )
+}
+
+// Phase 17.3.1 — full-width clickable row for the Requirements section.
+// Replaces the horizontal-chip layout: each RS gets its own row with the
+// name at full width and the version rendered as a small badge pill on
+// the right edge. Click opens RequirementsSetDetailModal (V2App mounts).
+// `onClick === undefined` renders the row non-clickable + no hover state.
+function RequirementRow({ name, version, onClick }) {
+  const [hovered, setHovered] = useState(false)
+  const clickable = !!onClick
+  const bg = (clickable && hovered)
+    ? 'color-mix(in srgb, var(--accent-indigo) 10%, var(--bg-raised))'
+    : 'var(--bg-raised)'
+  const border = (clickable && hovered)
+    ? 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
+    : 'var(--border-faint)'
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => clickable && setHovered(true)}
+      onMouseLeave={() => clickable && setHovered(false)}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() }
+      } : undefined}
+      title={clickable ? `Open ${name}` : undefined}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 12px',
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 6,
+        cursor: clickable ? 'pointer' : 'default',
+        transition: 'background 120ms, border-color 120ms',
+      }}
+    >
+      <span style={{
+        flex: 1,
+        minWidth: 0,
+        fontSize: 12,
+        color: 'var(--text-primary)',
+        fontWeight: 600,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>{name}</span>
+      {version != null && (
+        <span style={{
+          flexShrink: 0,
+          fontSize: 9,
+          fontFamily: 'var(--font-mono)',
+          fontWeight: 700,
+          letterSpacing: '0.06em',
+          color: 'var(--text-tertiary)',
+          padding: '2px 6px',
+          borderRadius: 3,
+          background: 'var(--bg-deep)',
+          border: '1px solid var(--border-faint)',
+        }}>v{version}</span>
+      )}
+    </div>
   )
 }
 
@@ -196,6 +262,10 @@ export default function RfpDetailPanel({
   // bound Asset for the "For Asset" row. Optional; if absent or the
   // assetId doesn't resolve, the row renders "(Asset not found)".
   assetsById = null,
+  // Phase 17.3.1: click handler for the Requirements rows. Opens
+  // V2App's RequirementsSetDetailModal for the clicked RS. Optional —
+  // when omitted, rows render non-clickable.
+  onRequirementClick,
 }) {
   if (!rfp) return null
 
@@ -290,20 +360,12 @@ export default function RfpDetailPanel({
       {/* Body */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
         {/* Posted by row */}
+        {/* Phase 17.3.1 (#202 follow-up): categorical "ACTOR" pill removed.
+            The "POSTED BY" section header conveys the relationship; the
+            party name + optional "YOU" relational indicator are sufficient. */}
         <div style={{ marginBottom: 18 }}>
           <SectionHeading>Posted by</SectionHeading>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              fontSize: 9,
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: 'var(--text-tertiary)',
-              padding: '2px 6px',
-              borderRadius: 4,
-              background: 'var(--bg-deep)',
-              textTransform: 'uppercase',
-            }}>ACTOR</span>
             <span style={{
               fontSize: 13,
               color: 'var(--text-primary)',
@@ -343,18 +405,10 @@ export default function RfpDetailPanel({
               )
             }
             return (
+              // Phase 17.3.1 (#202 follow-up): categorical "ASSET" pill
+              // removed. "FOR ASSET" section header conveys the
+              // relationship; the Asset name is self-identifying.
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  fontSize: 9,
-                  fontFamily: 'var(--font-mono)',
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  color: 'var(--text-tertiary)',
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  background: 'var(--bg-deep)',
-                  textTransform: 'uppercase',
-                }}>ASSET</span>
                 <span style={{
                   fontSize: 13,
                   color: 'var(--text-primary)',
@@ -384,9 +438,16 @@ export default function RfpDetailPanel({
           )}
         </div>
 
-        {/* Required Standards (RS chips) */}
+        {/* Phase 17.3.1 — Requirements section (was "Required Standards").
+            Renamed per Andrew's preference for the broader term. Layout
+            converted from horizontal chips to vertical full-width rows;
+            each clickable row opens RequirementsSetDetailModal (V2App
+            mounts it; this panel just fires `onRequirementClick(rsId)`).
+            Version number renders as a small badge pill at the row's
+            right edge. Missing-RS rows render muted "Standard not found"
+            and are non-clickable. */}
         <div style={{ marginBottom: 18 }}>
-          <SectionHeading>Required Standards</SectionHeading>
+          <SectionHeading>Requirements</SectionHeading>
           {reqIds.length === 0 ? (
             <div style={{
               fontSize: 12,
@@ -394,11 +455,34 @@ export default function RfpDetailPanel({
               fontStyle: 'italic',
             }}>No standards listed.</div>
           ) : (
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {reqIds.map((rsId) => {
                 const rs = rsById.get(rsId)
-                if (rs) return <RsChip key={rsId} name={rs.name || rsId} version={rs.version} />
-                return <RsChip key={rsId} raw={rsId} />
+                if (!rs) {
+                  return (
+                    <div
+                      key={rsId}
+                      style={{
+                        padding: '10px 12px',
+                        background: 'var(--bg-raised)',
+                        border: '1px dashed var(--border)',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: 'var(--text-dim)',
+                        fontStyle: 'italic',
+                      }}
+                    >Standard not found ({rsId})</div>
+                  )
+                }
+                const clickable = !!onRequirementClick
+                return (
+                  <RequirementRow
+                    key={rsId}
+                    name={rs.name || rsId}
+                    version={rs.version}
+                    onClick={clickable ? () => onRequirementClick(rsId) : undefined}
+                  />
+                )
               })}
             </div>
           )}

@@ -2673,6 +2673,51 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.3.1 completion notes (2026-05-19) — Polish wrap: RFP card action bar + RfpDetailPanel cleanup + Requirements rows + fan-out animation tweaks
+
+Four polish items batched before Phase 17.4 (umbrella DA edges) opens. Closes #202 fully (RfpDetailPanel piece) and ships substantial visual upgrades to the Directory entry experience.
+
+**Diff (high-level).**
+
+- `src/v2/AssetNode.jsx` — RFP early-return branch gains an inline action bar on hover/select when the synthetic node carries `_directorySolicitCandidate`. New paper-airplane SVG icon. Click dispatches `solicitWithClaim` via the existing `onV22CardAction` prop.
+- `src/v2/DirectoryLayer.jsx` — new props `solicitations` + `onRfpCardAction` for RFP card wiring. RFP synthetic-node construction stamps `_directorySolicitCandidate` (non-owner + open + no existing user solicitation). RFP `Card` receives `onV22CardAction` wrapper that dispatches to `onRfpCardAction(action, d.rfp)`. **Animation rewrite**: `dotOpacitiesRef` reinterpreted from color multiplier to matrix scale factor; new `flushDotMatrices` + `flushRfpMatrices` callbacks + `dotMatricesDirtyRef` / `rfpMatricesDirtyRef` flags integrated into the existing animate-loop pattern. Matrix populate + rescale-on-zoom paths multiply by appearScale[i]. `flushDotColors` simplified (no opacity branch). Animation effect pre-zeroes the new `rfpAppearScalesRef` and triggers immediate matrix flushes so the very first frame is blank. Animation start passes RFP positions + `setRfpAppear` callback + jitter seed.
+- `src/v2/directoryLoadAnimation.js` — speed (4500 → 7000 wu/sec), dotFadeMs (200 → 90 ms), new jitterMs (250 ms) with seeded xmur3 + mulberry32 PRNG, eased via easeOut(t) = 1-(1-t)^3, new `rfps` + `setRfpAppear` API. Helper-level comment block documents the semantics shift (appearance scale vs. opacity).
+- `src/components/DetailPanel/RfpDetailPanel.jsx` — "ACTOR" pill removed from "POSTED BY" row; "ASSET" pill removed from "FOR ASSET" row. Required Standards section renamed "Requirements"; chips replaced by vertical full-width clickable `RequirementRow` components (new in-file helper). Missing-RS rows render dashed-border non-clickable. New `onRequirementClick` prop (V2App wires to `setV22OpenRsId`). Added `useState` import.
+- `src/components/modals/RequirementsSetDetailModal.jsx` — new component (140 LOC). Read-only RS view via Backdrop / Modal / ModalHeader / ModalBody / ModalFooter primitives. Local GlobeIcon (canonical, matches LibraryModal + BadgesPanel + CombinedRequestModal). Header: name + version badge in title slot; "Published by {owner}" + globe in subtitle slot. Body: requirements list mirroring SolicitationCreateModal's accordion expanded-state treatment (inline-rendered, not extracted as a shared component). Footer: Close button only.
+- `src/v2/V2App.jsx` — new state `v22OpenRsId`; new RequirementsSetDetailModal import + mount gated on `v22OpenRsId`. DirectoryLayer mount wires `solicitations={Array.from(v22Solicitations.values())}` + `onRfpCardAction={(action, rfp) => action === 'solicitWithClaim' && setV22SolicitOpenForRfp({ rfp })}`. RfpDetailPanel mount wires `onRequirementClick={(rsId) => setV22OpenRsId(rsId)}`. Footer constant + Changelog modal entry rolled to v0.17.3.1.
+- `architecture-spec.md` — §8 Changelog bullet covering all four items + the matrix-scale animation rewrite.
+- `polish-backlog.md` — #202 marked Complete (extended note covers the 17.3 + 17.3.1 scope split); Update Log entry for Phase 17.3.1.
+- `CLAUDE.md` — Current state + active phase queue updated to reflect the polish wrap and 17.4 as next.
+
+**Implementation notes — animation rewrite.**
+
+The 16.2.3 implementation animated dot appearance by multiplying each dot's instance color by its opacity (0 → 1). At opacity 0 the dot rendered as black (color × 0 = (0,0,0)), which blended into the dark `--bg-deep` background — but was still a visible black dot, especially against the umbrella outlines and the grid background. The Phase 17.3.1 rewrite reinterprets the same per-instance value as a MATRIX SCALE factor: at 0 the per-instance matrix has scale 0 (dot is a point at its position, invisible); at 1 the matrix has the normal zoom-driven world-space size. Dots render at their final disclosure-type color from the moment of appearance; the wave grows each dot from a point to its full size.
+
+The two existing matrix-write paths (populate-during-layout-build, rescale-on-zoom) were extended to multiply by `appearScale[i]`. A new flush callback runs during the wave to keep the matrices in sync as appearScales change. The hit-test mesh (rfpHitMesh) keeps full scale throughout — keeps the marker clickable mid-wave, since intercepting an early click against a tiny-scale marker would feel glitchy. The existing color-multiplier code path in `flushDotColors` was simplified (no more opacity branch).
+
+RFP markers participate via parallel state (`rfpAppearScalesRef`) + a new helper API extension (`rfps` array + `setRfpAppear` callback). Closed-and-owned RFPs render via the separate `closedRfpMesh` (dashed `LineSegments`) — they were already excluded from `rfpMesh` / `rfpFillMesh` via the closed-owned partition, and the dashed mesh is geometry-built (not instance-matrix-driven), so it's not part of the appearance animation. Closed-owned RFPs render at full opacity from scene start. Surfacing this as a minor deviation from the brief: 99% of RFPs (open ones) participate; the ~few closed-owned ones don't. Acceptable in scope.
+
+**Deviations.**
+
+1. **`flushDotColors` simplification.** The pre-17.3.1 path multiplied each dot's color by its opacity. With matrix-scale-driven appearance, this is redundant — dots render at full color always (the multiplier branch never fired in steady state anyway). Removed entirely so the animation isn't confused between two parallel mechanisms.
+2. **RFP hit-test mesh stays at full scale during the wave.** The brief said "scale from 0 to 1 is simpler since the materials are already opaque" for RFP meshes — that's true for the visible outline + fill. The hit-test mesh would be invisible regardless of scale (material is transparent), but rendering it at scale 0 would make early-appeared markers un-clickable mid-wave. Surfaced this trade-off as a documented intent in code comments.
+3. **Closed-and-owned RFPs don't participate in the animation.** Those render via the separate dashed `closedRfpMesh` (geometry-built, not InstancedMesh — the dashing requires per-vertex line-distance computation that the matrix-scale approach doesn't accommodate cleanly). Phase 17.1 already handled them with a separate code path; extending the appearance animation to that path would be substantial scope, and only ~few RFPs are closed-and-owned in seed. Accepted as deviation.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Animation helper smoke-tested by inspection. Math: at canvas 11520×7447, max radial distance ~8284 wu / 7000 wu/sec = 1.18 s base + 0.09 s fade tail + 0.25 s jitter worst case = ~1.5 s total — within the brief's 1.5–2 s target.
+- Code review for matrix consistency: populate path, rescale-on-zoom path, and per-animation flush path all use the same `scale = baseScale × appearScale[i]` formula. Pre-zero + immediate flush at animation start ensures the first frame is blank (no popping).
+- The full canvas walkthrough (Bob views Alice's RFP card → hover → Solicit button appears → click → SolicitationCreateModal opens) requires mouse interaction per the documented V2Canvas raycaster limitation in CLAUDE.md.
+
+**Known scope boundaries.**
+
+- Parent-layer EA-required-message bug still deferred to Phase 17.4+.
+- Solicitation withdraw / amend still deferred to Phase 17.6+.
+- The pre-existing umbrella outline + label fade-in animation paths are NOT migrated to the scale-driven appearance — those use SVG opacity + label CSS opacity, which work fine without the black-to-color issue (they were never visible-but-wrong-color; just absent then fading in).
+
+**Status:** [x] Complete.
+
 ### Phase 17.3 completion notes (2026-05-19) — Claim Detail Panel EA content on Directory + card action bar + #202 ACTOR/ASSET label cleanup
 
 Opens the action surface for Directory-layer Claim discovery. Without this content, clicking a Claim on Directory opened a panel that didn't tell the viewer what they could do with it. This phase wires the action loop end-to-end and unifies it with the parent-canvas card/panel pattern. Also closes backlog #202.

@@ -70,6 +70,7 @@ import V22NodeDetailPanel from '../components/DetailPanel/V22NodeDetailPanel.jsx
 import RfpDetailPanel from '../components/DetailPanel/RfpDetailPanel.jsx'
 // Phase 17.2: solicitation create / reject modals.
 import SolicitationCreateModal from '../components/modals/SolicitationCreateModal.jsx'
+import RequirementsSetDetailModal from '../components/modals/RequirementsSetDetailModal.jsx'
 // Phase 17.2.1.1: AssetPickerModal removed from the RFP Accept flow (the
 // Accept flow now uses the RFP's `assetId` directly).
 // Phase 17.3: AssetPickerModal re-mounted for the Directory-layer Claim
@@ -277,6 +278,10 @@ export default function V2App() {
   // each setter clears the other so only one Detail Panel is visible at a
   // time. `v22DirectoryOpen` toggling clears both.
   const [v22DirectorySelectedRfp, setV22DirectorySelectedRfp] = useState(null)
+  // Phase 17.3.1: when non-null, RequirementsSetDetailModal mounts and
+  // resolves this id against `publishedRequirementSets`. Click on a
+  // Requirements row in RfpDetailPanel sets it; the modal's Close clears it.
+  const [v22OpenRsId, setV22OpenRsId] = useState(null)
   // Phase 17.1: session-state Map<rfpId, ISO closedDate> for owner-side
   // Close / Reopen transitions on RFPs. Mirror of the `v22Provisionals`
   // pattern — overlaid on the shared artifact set via `mergeClosedRfps`
@@ -6163,6 +6168,21 @@ export default function V2App() {
                 handleViewEa(existingEa)
               }
             }}
+            // Phase 17.3.1 — session-state solicitations threaded so the
+            // RFP card render path can detect "this active actor already
+            // solicited this RFP" and suppress the Solicit CTA. The Map's
+            // values list is what the brief's predicate consumes.
+            solicitations={Array.from(v22Solicitations.values())}
+            // Phase 17.3.1 — card action dispatcher for RFP cards. Mirrors
+            // the panel footer's "Solicit with my Claim" handler — opens
+            // SolicitationCreateModal with the RFP pre-loaded. Same
+            // session-state setter the panel footer uses, so behaviour is
+            // identical across the two surfaces.
+            onRfpCardAction={(action, rfp) => {
+              if (action === 'solicitWithClaim') {
+                setV22SolicitOpenForRfp({ rfp })
+              }
+            }}
           />
         )}
 
@@ -6469,6 +6489,9 @@ export default function V2App() {
                 // button opens CombinedRequestModal directly (no Asset
                 // picker step — the RFP's assetId is the anchor).
                 onRequestAgreement={handleRequestAgreement}
+                // Phase 17.3.1: clicking a Requirements row opens
+                // RequirementsSetDetailModal at the V2App level.
+                onRequirementClick={(rsId) => setV22OpenRsId(rsId)}
               />
             </div>
           )
@@ -6677,6 +6700,20 @@ export default function V2App() {
               activeParty={activeRole.party}
               onSubmit={handleAssetPickedForClaim}
               onCancel={() => setV22RequestingEaForClaim(null)}
+            />
+          )
+        })()}
+
+        {/* Phase 17.3.1 — RequirementsSetDetailModal. Opens from the
+            new Requirements row click in RfpDetailPanel. Resolves the
+            clicked rsId against the canonical publishedRequirementSets
+            catalog. */}
+        {v22OpenRsId && (() => {
+          const rs = (publishedRequirementSets || []).find((r) => r.id === v22OpenRsId) || null
+          return (
+            <RequirementsSetDetailModal
+              requirementsSet={rs}
+              onClose={() => setV22OpenRsId(null)}
             />
           )
         })()}
@@ -8470,7 +8507,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.3 &middot; Changelog
+          v0.17.3.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8517,6 +8554,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.3.1', date: '2026-05-19', label: 'Phase 17.3.1', items: [
+                  'Phase 17.3.1 — Polish wrap before Phase 17.4 (umbrella DA edges). Four items batched: RFP card action bar with Solicit CTA; RfpDetailPanel categorical-pill cleanup + Requirements section overhaul; new RequirementsSetDetailModal; fan-out loading animation tweaks.',
+                  'AssetNode RFP full-size card gains an action bar parallel to the Claim card pattern shipped in 17.3. When the synthetic node carries `_directorySolicitCandidate` (DirectoryLayer resolves: non-owner of an open RFP with no existing solicitation from active actor), the bar surfaces a "Solicit with my Claim" button with a new paper-airplane SVG icon. Click dispatches the `solicitWithClaim` action through `onV22CardAction`; V2App routes to the same SolicitationCreateModal mount the panel footer opens — both surfaces fire the same handler. Owner / existing-solicitation / closed-RFP cases suppress the button.',
+                  'RfpDetailPanel categorical pill cleanup (extends #202 from 17.3, which scoped V22NodeDetailPanel only). "POSTED BY" row no longer renders the "ACTOR" pill next to the party name; "FOR ASSET" row no longer renders the "ASSET" pill next to the Asset name. Relational headers ("POSTED BY", "FOR ASSET") and the "YOU" indicator are preserved — those convey relationship, not category. #202 is now fully closed across both V22NodeDetailPanel and RfpDetailPanel.',
+                  'Requirements section overhaul. Section title renamed "Required Standards" → "Requirements" per Andrew\'s broader-term preference. Layout converted from horizontal chips to vertical full-width clickable rows: each row renders the RS name at full width, version number as a small badge pill on the right, hover-state subtle indigo tint, click opens RequirementsSetDetailModal. Missing-RS rows render muted "Standard not found ({rsId})" + dashed-border treatment and are non-clickable.',
+                  'New RequirementsSetDetailModal component (`src/components/modals/RequirementsSetDetailModal.jsx`). Read-only single-RS view: header with RS name (large) + version badge pill, sub-header "Published by {owner}" + canonical GlobeIcon, scrollable body listing each requirement (id mono pill + label + description + optional muted italic Criterion). Mirrors the requirement-row treatment SolicitationCreateModal\'s RsAccordionEntry uses (inline-rendered rather than refactor-extracted to avoid extracting a shared component coupled to the accordion\'s open/close state). Close button only — purely informational; ESC + backdrop click close via the shared Backdrop primitive.',
+                  'Fan-out loading animation tweaks. `directoryLoadAnimation.js` bumps `waveSpeed` 4500 → 7000 wu/sec (base radial spread time drops ~37%) and `dotFadeMs` 200 → 90 ms (snappier per-dot ramp). New `jitterMs` (default 250 ms) seeded random per-instance start offset produces a jagged organic wavefront — adds an `xmur3 + mulberry32` PRNG seeded by a stable per-entry seed (passed as `jitterSeed: \'{roleId}:{i|r}\'`) so mid-flight re-renders see consistent jitter while each entry rolls fresh. Eased via `easeOut(t) = 1 - (1-t)^3` instead of linear ramp. RFP markers participate via new `rfps` + `setRfpAppear` API on the helper.',
+                  'DirectoryLayer per-instance scale-driven appearance (replaces 16.2.3 color-multiplier-from-black). `dotOpacitiesRef` is reinterpreted: value is now a per-instance MATRIX SCALE factor (0 = invisible, 1 = final size), not a color multiplier. Dots render at their final disclosure-type color from the moment they appear; the wave grows each dot from a point to its full size, eliminating the prior visible black-to-color transition. New `flushDotMatrices` + `flushRfpMatrices` callbacks integrated into the existing animate-loop dirty-flag pattern. `flushDotColors` simplified — no longer touches opacity (color stays at full saturation always; only hover/select white-brighten remains). RFP hit-test mesh keeps full scale throughout (clickable mid-wave). Footer rolls forward to v0.17.3.1.',
+                ]},
                 { version: '0.17.3', date: '2026-05-19', label: 'Phase 17.3', items: [
                   'Phase 17.3 — Claim Detail Panel EA content on Directory + card action bar + #202 ACTOR/ASSET label cleanup. Opens the action surface for Directory-layer Claim discovery. Without this content, clicking a Claim on Directory opened a panel that didn\'t tell the viewer what they could do with it.',
                   'V22NodeDetailPanel Claim view: new EA-status section near the top of the body — "An Evaluation Agreement is required to evaluate this Claim." (no-EA state, amber callout) or "An Evaluation Agreement is in place with {owner}." (EA-exists state, indigo callout). Footer extensions match: "Request Evaluation Agreement" (cold-path, opens AssetPickerModal) or "View Evaluation Agreement" (navigates parent canvas to the EA artifact + opens the EA Detail Panel). Owner viewing own Claim gets no EA-status section and no footer EA actions. The pre-existing Phase 11C warm-path (DA exists, no EA) is preserved unchanged.',

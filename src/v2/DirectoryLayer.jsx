@@ -1163,6 +1163,15 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // and viewEvaluationAgreement actions).
   evaluationAgreements,
   onClaimCardAction,
+  // Phase 17.3.1 — Directory-layer RFP card action-bar wiring. V2App passes
+  // the session-state solicitations collection so the per-card render path
+  // can detect "non-owner of an open RFP with no existing solicitation"
+  // (the `_directorySolicitCandidate` stamp), plus a card-action dispatcher
+  // mirroring `onClaimCardAction`. The dispatcher's `solicitWithClaim`
+  // action routes to the same SolicitationCreateModal the panel footer
+  // opens.
+  solicitations,
+  onRfpCardAction,
   wipeOrigin,
 }, ref) {
   // ─── Entry/exit state machine ────────────────────────────────────────
@@ -1327,10 +1336,16 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   const [threeReady, setThreeReady] = useState(false)
   const [zoom, setZoom] = useState(INITIAL_ZOOM)
 
-  // Phase 16.2.3: loading animation state.
-  //   • dotOpacitiesRef — per-dot opacity (0..1) used to scale each dot's
-  //     base color so opacity 0 renders black (blends into the opaque dark
-  //     `--bg-deep` background) and opacity 1 renders the dot's full color.
+  // Phase 16.2.3 / 17.3.1: loading animation state.
+  //   • dotOpacitiesRef — per-dot appearance scale (0..1). Phase 17.3.1
+  //     re-interprets this from "color multiplier" (which rendered dots
+  //     as black at op=0) to "per-instance matrix scale" (renders dots
+  //     invisible at scale=0, full size at scale=1). Per-dot color is
+  //     ALWAYS at full saturation now; the animation grows each dot from
+  //     a point to its final size in its final color. Eliminates the
+  //     visually-distracting black-to-color transition.
+  //   • rfpAppearScalesRef — Phase 17.3.1. Same mechanics for RFP marker
+  //     instances. Outline + fill + hit-test meshes share the array.
   //   • labelOpacities — per-party opacity for the cluster PillboxLabel.
   //   • animationHandleRef — { skip, promise } returned by
   //     playDirectoryLoadAnimation; consumed by the empty-canvas click
@@ -1339,6 +1354,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   //     wave replays only on Directory entry (initial mount + role switch)
   //     and not on every layout recompute (provisional updates, resize).
   const dotOpacitiesRef = useRef(new Float32Array(MAX_DOTS).fill(1))
+  const rfpAppearScalesRef = useRef(new Float32Array(200).fill(1))
   const [labelOpacities, setLabelOpacities] = useState({})
   // Phase 16.2.4: per-cluster umbrella outline opacity. Same fade-in timeline
   // as the label; default 1 (loaded). During the wave animation each
@@ -1380,6 +1396,19 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   const baseDotColorsRef = useRef([])
   const dotsDirtyRef = useRef(false)
   const flushDotColorsRef = useRef(() => {})
+  // Phase 17.3.1: dot-matrix dirty + flush refs. The load-animation
+  // callback updates dotOpacitiesRef and flips dotMatricesDirtyRef true;
+  // the animate loop calls flushDotMatricesRef on the next tick to write
+  // updated per-instance matrices (scale = currentZoomScale × opacity[i]).
+  // Once the animation completes opacities are all 1 and the flush is a
+  // no-op going forward.
+  const dotMatricesDirtyRef = useRef(false)
+  const flushDotMatricesRef = useRef(() => {})
+  // Phase 17.3.1: same mechanics for RFP markers. RFP outline + fill share
+  // matrix writes through the same per-instance index, so one flush
+  // updates both.
+  const rfpMatricesDirtyRef = useRef(false)
+  const flushRfpMatricesRef = useRef(() => {})
 
   // Phase 17.2: RFP marker hover state — separate from `hover` (which is
   // Claim-only) so the existing tooltip-fade behaviour doesn't fire on RFP
@@ -1781,6 +1810,21 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
         flushRfpColorsRef.current?.()
         rfpDirtyRef.current = false
       }
+      // Phase 17.3.1: matrix-scale flushes for the load-animation grow-in.
+      // Set per-tick by the playDirectoryLoadAnimation callbacks; flushed
+      // here before render. Once the animation completes the flag stays
+      // false and the writes stop. Note: order matters — flushDotMatrices
+      // depends on dotScaleRef being current; the rescale-on-zoom effect
+      // updates dotScaleRef synchronously when zoom changes, so by the
+      // time this animate-tick runs the ref is up to date.
+      if (dotMatricesDirtyRef.current) {
+        flushDotMatricesRef.current?.()
+        dotMatricesDirtyRef.current = false
+      }
+      if (rfpMatricesDirtyRef.current) {
+        flushRfpMatricesRef.current?.()
+        rfpMatricesDirtyRef.current = false
+      }
       if (dirtyRef.current) {
         renderer.render(scene, camera)
         updateOverlayRef.current()
@@ -1899,30 +1943,30 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     dotScaleRef.current = initialDotScale
 
     // Claim dots
-    // Phase 16.2.3: opacities are pre-zeroed by the load-animation effect
-    // when a new wave starts; otherwise default 1 (set via .fill(1) on the
-    // initial array and on animation completion). Each dot's instance color
-    // is its base color multiplied by its current opacity; since the
-    // Directory background is opaque dark `--bg-deep`, scaling color → 0
-    // makes the dot disappear into the background.
+    // Phase 17.3.1: opacities array is now a per-instance scale factor
+    // (0 = invisible, 1 = final size). The load-animation effect pre-zeroes
+    // the array when a new wave starts; otherwise default 1. Dots render
+    // at their final color from the moment they appear; the animation grows
+    // each dot from a point to its final size. Eliminates the prior
+    // color-from-black flash. See Phase 17.3.1 comment block at
+    // `dotOpacitiesRef` declaration.
     const dotOpacities = dotOpacitiesRef.current
-    const scaled = new THREE.Color()
     for (let i = 0; i < MAX_DOTS; i++) {
       if (i < claimDots.length) {
         const d = claimDots[i]
-        m.makeScale(initialDotScale, initialDotScale, 1)
-        m.setPosition(d.x, -d.y, 0)
-        dotsMesh.setMatrixAt(i, m)
+        const op = Math.max(0, dotOpacities[i])
+        const s = initialDotScale * op
+        if (s > 0) {
+          m.makeScale(s, s, 1)
+          m.setPosition(d.x, -d.y, 0)
+          dotsMesh.setMatrixAt(i, m)
+        } else {
+          dotsMesh.setMatrixAt(i, hidden)
+        }
         let c = colorIndigo
         if (d.colorVar === '--accent-amber') c = colorAmber
         else if (d.colorVar === '--accent-green') c = colorGreen
-        const op = dotOpacities[i]
-        if (op >= 1) {
-          dotsMesh.setColorAt(i, c)
-        } else {
-          scaled.copy(c).multiplyScalar(Math.max(0, op))
-          dotsMesh.setColorAt(i, scaled)
-        }
+        dotsMesh.setColorAt(i, c)
       } else {
         dotsMesh.setMatrixAt(i, hidden)
       }
@@ -1956,21 +2000,35 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     // hit-test mesh (rfpHitMesh) carries ALL instances so the owner can
     // still click to reopen.
     const activePartyForClosed = layout?.activeParty
+    // Phase 17.3.1: RFP per-instance appearance scale (0..1) parallels the
+    // dot animation. rfpAppearScalesRef[i] = 1 in steady state; the load-
+    // animation effect pre-zeroes the array when a new wave starts, then
+    // the wave ramps each entry 0 → 1 via the setRfpAppear callback. Once
+    // the animation completes the values stay at 1 and the multiplier is
+    // a no-op.
+    const rfpAppearScales = rfpAppearScalesRef.current
     for (let i = 0; i < MAX_RFPS; i++) {
       if (i < rfpDots.length) {
         const d = rfpDots[i]
         const isClosedOwned = d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed
-        m.makeScale(initialRfpScale, initialRfpScale, 1)
-        m.setPosition(d.x, -d.y, 0)
-        if (isClosedOwned) {
-          rfpMesh.setMatrixAt(i, hidden)
-          rfpFillMesh.setMatrixAt(i, hidden)
-        } else {
+        const appear = Math.max(0, rfpAppearScales[i])
+        const s = initialRfpScale * appear
+        if (s > 0 && !isClosedOwned) {
+          m.makeScale(s, s, 1)
+          m.setPosition(d.x, -d.y, 0)
           rfpMesh.setMatrixAt(i, m)
           rfpFillMesh.setMatrixAt(i, m)
+        } else {
+          rfpMesh.setMatrixAt(i, hidden)
+          rfpFillMesh.setMatrixAt(i, hidden)
         }
-        // Phase 17.0: hit-test mesh tracks the same per-instance matrix
-        // regardless of status (closed-owned still clickable for reopen).
+        // Phase 17.0: hit-test mesh tracks the visible markers at their
+        // FULL scale regardless of animation state — keeps the marker
+        // clickable mid-wave (clicking an early-appeared marker shouldn't
+        // depend on its instantaneous scale). Closed-owned still clickable
+        // for reopen via the hit-test mesh.
+        m.makeScale(initialRfpScale, initialRfpScale, 1)
+        m.setPosition(d.x, -d.y, 0)
         if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
       } else {
         rfpMesh.setMatrixAt(i, hidden)
@@ -2106,11 +2164,25 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     if (Math.abs(desiredScale - dotScaleRef.current) < 1e-4) return
     const claimDots = layout.allDots.filter((d) => d.kind !== 'rfp')
     const m = new THREE.Matrix4()
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
+    const opacities = dotOpacitiesRef.current
     for (let i = 0; i < claimDots.length; i++) {
       const d = claimDots[i]
-      m.makeScale(desiredScale, desiredScale, 1)
-      m.setPosition(d.x, -d.y, 0)
-      dotsMesh.setMatrixAt(i, m)
+      // Phase 17.3.1: per-instance scale composes the zoom-driven world
+      // size with the load-animation appearance factor (0..1). Once the
+      // animation completes opacities[i] = 1 and this reduces to the
+      // pre-17.3.1 behaviour. During the animation a zoom change while
+      // some dots are mid-appear preserves their current appearance
+      // factor so the matrix doesn't pop.
+      const op = Math.max(0, opacities[i])
+      const s = desiredScale * op
+      if (s > 0) {
+        m.makeScale(s, s, 1)
+        m.setPosition(d.x, -d.y, 0)
+        dotsMesh.setMatrixAt(i, m)
+      } else {
+        dotsMesh.setMatrixAt(i, hidden)
+      }
     }
     dotsMesh.instanceMatrix.needsUpdate = true
     dotScaleRef.current = desiredScale
@@ -2144,19 +2216,29 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     // stays normal at every zoom.
     const rfpHitMesh = rfpHitMeshRef.current
     const activePartyForClosed = layout?.activeParty
+    // Phase 17.3.1: include the load-animation appearance scale so a zoom
+    // change mid-wave doesn't pop markers to full size. Once the animation
+    // completes appearScales[i] = 1 and the multiplier is a no-op. The
+    // hit-test mesh keeps full scale (clickable throughout the wave).
+    const appearScales = rfpAppearScalesRef.current
     for (let i = 0; i < rfpDots.length; i++) {
       const d = rfpDots[i]
       const isClosedOwned = d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed
+      const appear = Math.max(0, appearScales[i])
+      const s = desiredScale * appear
       m.makeScale(desiredScale, desiredScale, 1)
       m.setPosition(d.x, -d.y, 0)
-      if (isClosedOwned) {
-        rfpMesh.setMatrixAt(i, hiddenMatrix)
-        rfpFillMesh.setMatrixAt(i, hiddenMatrix)
-      } else {
+      // Hit-test mesh at full size always (Phase 17.3.1 — see populate path).
+      if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
+      if (s > 0 && !isClosedOwned) {
+        m.makeScale(s, s, 1)
+        m.setPosition(d.x, -d.y, 0)
         rfpMesh.setMatrixAt(i, m)
         rfpFillMesh.setMatrixAt(i, m)
+      } else {
+        rfpMesh.setMatrixAt(i, hiddenMatrix)
+        rfpFillMesh.setMatrixAt(i, hiddenMatrix)
       }
-      if (rfpHitMesh) rfpHitMesh.setMatrixAt(i, m)
     }
     rfpMesh.instanceMatrix.needsUpdate = true
     rfpFillMesh.instanceMatrix.needsUpdate = true
@@ -2309,26 +2391,89 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     const target = pinnedRef.current || hoverRef.current
     const targetIdx = target?.dotIndex ?? -1
     const targetClusterIdx = targetIdx >= 0 ? claimDots[targetIdx]?.clusterIdx : null
-    const opacities = dotOpacitiesRef.current
-    const scaled = new THREE.Color()
+    // Phase 17.3.1: appearance-during-load is now matrix-scale-driven
+    // (see dotOpacitiesRef comment + flushDotMatrices). Dot color is always
+    // at full saturation; the only color variation here is the hover/select
+    // white-brighten. The pre-17.3.1 multiplier-by-opacity path is gone.
     for (let i = 0; i < baseColors.length; i++) {
       let c = baseColors[i]
       if (i === targetIdx) c = colorWhite
       else if (targetClusterIdx !== null && targetClusterIdx !== undefined && claimDots[i]?.clusterIdx === targetClusterIdx) {
         c = lerpToWhite(c)
       }
-      const op = opacities[i]
-      if (op < 1) {
-        scaled.copy(c).multiplyScalar(Math.max(0, op))
-        mesh.setColorAt(i, scaled)
-      } else {
-        mesh.setColorAt(i, c)
-      }
+      mesh.setColorAt(i, c)
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     dirtyRef.current = true
   }, [])
   useEffect(() => { flushDotColorsRef.current = flushDotColors }, [flushDotColors])
+
+  // Phase 17.3.1: per-instance matrix flush. Called from the render loop
+  // when dotMatricesDirtyRef is set by the load-animation callback. Reads
+  // the current zoom-driven base scale (dotScaleRef.current) and multiplies
+  // by per-instance opacity[i] for the scale-from-zero appearance.
+  const flushDotMatrices = useCallback(() => {
+    const mesh = dotsMeshRef.current
+    const layoutCur = layoutRef.current
+    if (!mesh || !layoutCur) return
+    const claimDots = layoutCur.allDots.filter((d) => d.kind !== 'rfp')
+    const opacities = dotOpacitiesRef.current
+    const baseScale = dotScaleRef.current
+    const m = new THREE.Matrix4()
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
+    for (let i = 0; i < claimDots.length; i++) {
+      const d = claimDots[i]
+      const op = Math.max(0, opacities[i])
+      const s = baseScale * op
+      if (s > 0) {
+        m.makeScale(s, s, 1)
+        m.setPosition(d.x, -d.y, 0)
+        mesh.setMatrixAt(i, m)
+      } else {
+        mesh.setMatrixAt(i, hidden)
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true
+    dirtyRef.current = true
+  }, [])
+  useEffect(() => { flushDotMatricesRef.current = flushDotMatrices }, [flushDotMatrices])
+
+  // Phase 17.3.1: RFP matrix flush. Mirrors flushDotMatrices for RFP outline
+  // + fill meshes (hit-test mesh stays at full scale — kept clickable
+  // throughout the animation, since the wave is fast enough that
+  // intercepting an early click against a tiny-scale marker would feel
+  // glitchy; full hit-test surface is fine).
+  const flushRfpMatrices = useCallback(() => {
+    const rfpMesh = rfpMeshRef.current
+    const rfpFillMesh = rfpFillMeshRef.current
+    const layoutCur = layoutRef.current
+    if (!rfpMesh || !rfpFillMesh || !layoutCur) return
+    const rfpDots = layoutCur.allDots.filter((d) => d.kind === 'rfp')
+    const scales = rfpAppearScalesRef.current
+    const baseScale = rfpScaleRef.current
+    const activeParty = layoutCur.activeParty
+    const m = new THREE.Matrix4()
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
+    for (let i = 0; i < rfpDots.length; i++) {
+      const d = rfpDots[i]
+      const isClosedOwned = d.rfp?.status === 'closed' && d.rfp?.owner === activeParty
+      const op = Math.max(0, scales[i])
+      const s = baseScale * op
+      if (s > 0 && !isClosedOwned) {
+        m.makeScale(s, s, 1)
+        m.setPosition(d.x, -d.y, 0)
+        rfpMesh.setMatrixAt(i, m)
+        rfpFillMesh.setMatrixAt(i, m)
+      } else {
+        rfpMesh.setMatrixAt(i, hidden)
+        rfpFillMesh.setMatrixAt(i, hidden)
+      }
+    }
+    rfpMesh.instanceMatrix.needsUpdate = true
+    rfpFillMesh.instanceMatrix.needsUpdate = true
+    dirtyRef.current = true
+  }, [])
+  useEffect(() => { flushRfpMatricesRef.current = flushRfpMatrices }, [flushRfpMatrices])
   // Flush after every layout change too (so the freshly-populated mesh
   // picks up the current hover/opacity state).
   useEffect(() => {
@@ -2491,27 +2636,49 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
         distFromAnchor: Math.hypot(c.center.x - anchor.x, c.center.y - anchor.y),
       }))
 
-    // Pre-zero opacities + label state so the very first frame is blank.
+    // Pre-zero opacities + RFP appear scales + label state so the very
+    // first frame is blank. Phase 17.3.1: opacities array now drives
+    // per-instance matrix scale (not color); rfpAppearScalesRef drives the
+    // parallel RFP marker animation.
     const opacities = dotOpacitiesRef.current
     for (let i = 0; i < opacities.length; i++) opacities[i] = 0
+    const rfpScales = rfpAppearScalesRef.current
+    for (let i = 0; i < rfpScales.length; i++) rfpScales[i] = 0
     const initialLabelOpacities = {}
     for (const l of labels) initialLabelOpacities[l.party] = 0
     setLabelOpacities(initialLabelOpacities)
     const initialUmbrellaOpacities = {}
     for (const u of umbrellaOutlines) initialUmbrellaOpacities[u.party] = 0
     setUmbrellaOpacities(initialUmbrellaOpacities)
+    // Phase 17.3.1: trigger an immediate matrix flush so the pre-zeroed
+    // opacities zap dots / RFPs to invisible BEFORE the first wave frame.
+    // Without this, the first ~16ms after Directory entry would show all
+    // dots at full size in their final color (because the populate-effect
+    // wrote matrices using opacities[i] = 1 before this effect ran).
+    dotMatricesDirtyRef.current = true
+    rfpMatricesDirtyRef.current = true
     dotsDirtyRef.current = true
     dirtyRef.current = true
 
     // Start the wave.
+    const rfpItems = layoutCur.allDots.filter((d) => d.kind === 'rfp')
     const handle = playDirectoryLoadAnimation({
       dots: claimDots.map((d) => ({ x: d.x, y: d.y })),
+      rfps: rfpItems.map((d) => ({ x: d.x, y: d.y })),
       labels,
       umbrellaOutlines,
       anchor,
+      // Phase 17.3.1: jitter seed combines roleId + phase counter so each
+      // Directory entry within a session rolls fresh jitter. Stable for
+      // the duration of one wave (mid-flight re-renders don't re-roll).
+      jitterSeed: `${roleId}:${lastAnimatedRoleRef.current ? 'r' : 'i'}`,
       setDotOpacity: (idx, op) => {
         opacities[idx] = op
-        dotsDirtyRef.current = true
+        dotMatricesDirtyRef.current = true
+      },
+      setRfpAppear: (idx, op) => {
+        rfpScales[idx] = op
+        rfpMatricesDirtyRef.current = true
       },
       setLabelOpacity: (party, op) => {
         setLabelOpacities((prev) => {
@@ -3072,6 +3239,25 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
             // builder filters them out); defensive guard preserved on the
             // owner match just in case.
             const isClosedOwned = d.rfp?.status === 'closed' && d.rfp?.owner === layout.activeParty
+            // Phase 17.3.1 — Solicit CTA stamping. Active actor must be a
+            // non-owner of an OPEN RFP with no existing solicitation from
+            // them against this RFP. Closed RFPs surface only to their
+            // owner via the asymmetric visibility filter (Phase 17.1), so
+            // a non-owner seeing this card implies status === 'open'.
+            const hasOwnSolicitation = Array.isArray(solicitations)
+              ? solicitations.some((s) => (
+                  s
+                  && s.rfpId === d.rfp.id
+                  && s.solicitor === layout.activeParty
+                ))
+              : false
+            const solicitCandidate = (
+              !!onRfpCardAction
+              && !!layout.activeParty
+              && d.rfp?.owner !== layout.activeParty
+              && d.rfp?.status === 'open'
+              && !hasOwnSolicitation
+            )
             const rfpSyntheticNode = {
               id: d.rfp.id,
               category: 'rfp',
@@ -3080,6 +3266,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               ownerParty: d.rfp.owner,
               owner: d.rfp.owner,
               isClosed: isClosedOwned,
+              _directorySolicitCandidate: solicitCandidate,
             }
             return (
               <div
@@ -3098,6 +3285,9 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
                   isSelected={isSelected}
                   onSelect={() => onCardClick(d, i)}
                   activeParty={layout.activeParty}
+                  onV22CardAction={onRfpCardAction
+                    ? (action) => onRfpCardAction(action, d.rfp)
+                    : undefined}
                 />
               </div>
             )
