@@ -2673,6 +2673,22 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.0.3 completion notes (2026-05-20) — Universal neutral footer buttons
+
+Completes the "all footer buttons neutral" policy from Phase 17.5.0.1 across every panel. 17.5.0.2 retained `accent` on judged "primary CTAs"; that judgment was wrong against Andrew's stated preference — universal neutral default is the single rule.
+
+**Diff (high-level).**
+
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — dropped the `accent` prop from 11 `FooterButton` call sites (12 `accent` keywords; Create PoE has active + 17.5.0.2-disabled branches): Actor Register Asset; Claim revoked-branch Dismiss; Claim owner Self-Evaluate; Claim non-owner Run Evaluation (active + pending-acceptance disabled); Claim warm + cold Request Evaluation Agreement; Eval Result orphaned Dismiss; Eval Result Create PoE (both branches); PoE Issue Badge; Badge Template Create new version. Every other prop on each call site unchanged. `FooterButton` itself unchanged.
+- `src/v2/V2App.jsx` — footer constant → v0.17.5.0.3; Changelog modal entry prepended.
+- Four docs (this entry + architecture-spec §8 + polish-backlog Update Log + CLAUDE.md current-state + Changelog modal).
+
+**Deviations.** None. `danger` (Cancel Transfer, Cancel Request) and `amber` (Respond to Request) variants intentionally left untouched — they carry semantic urgency (destructive / needs-attention), not "primary CTA" highlighting.
+
+**Runtime verification (dev preview).** Claim panel (Bob, non-owner + active EA on "Voltage Regulator IC"): Run Evaluation + Issue Badge both render with transparent background + the 40%-indigo neutral border (`color(srgb 0.273 0.304 0.509)`), confirmed NOT equal to the indigo fill `rgb(129, 140, 248)` — i.e. no longer accent-filled. Eval Result panel ("Evaluation of Voltage Regulator IC"): Create PoE renders neutral (transparent bg, indigo border) and enabled. `danger`/`amber` props confirmed preserved via source grep (Cancel Transfer / Cancel Request danger, Respond to Request amber). Build clean (`npm run build`, 0 errors); console shows only the pre-existing benign `NaN`-CSS-`left` worldToScreen transients. Items not directly exercised (Actor Register Asset, Self-Evaluate, Request EA warm/cold, Dismiss variants, Badge Template, the PoE-terminated Create PoE disabled branch) use the identical `accent`-dropped FooterButton neutral path verified above.
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.0.2 completion notes (2026-05-20) — Cross-panel footer icon propagation + visible-but-disabled audit
 
 Propagates the icon-with-hover-expand-label footer pattern (Asset footer, 17.5 / 17.5.0.1) to every other Detail Panel footer, and surfaces Create PoE as visible-but-disabled on PoE-terminated chains.

@@ -403,7 +403,7 @@ function V22ActorPanel({
       }
       footer={
         isOwner && onRegisterAsset ? (
-          <FooterButton icon="＋" label="Register Asset" accent onClick={onRegisterAsset} title="Register a new Asset from a file in your Qualified Storage." />
+          <FooterButton icon="＋" label="Register Asset" onClick={onRegisterAsset} title="Register a new Asset from a file in your Qualified Storage." />
         ) : null
       }
     />
@@ -1031,7 +1031,7 @@ function V22ClaimPanel({
             )}
           </>
         }
-        footer={<FooterButton icon="⊠" label="Dismiss" accent onClick={onDismissRevoked} title="Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit." />}
+        footer={<FooterButton icon="⊠" label="Dismiss" onClick={onDismissRevoked} title="Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit." />}
       />
     )
   }
@@ -1467,7 +1467,7 @@ function V22ClaimPanel({
               <>
                 <FooterButton icon="✎" label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
                 {onSelfEvaluate && (
-                  <FooterButton icon="◆" label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+                  <FooterButton icon="◆" label="Self-Evaluate" onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
                 )}
               </>
             ) : hasEvalAction ? (
@@ -1475,19 +1475,18 @@ function V22ClaimPanel({
                 <FooterButton
                   icon="◆"
                   label="Run Evaluation"
-                  accent
                   disabled
                   title={`Cannot run evaluation: amendment proposal awaiting your response. Respond in your inbox to continue.`}
                 />
               ) : (
-                <FooterButton icon="◆" label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+                <FooterButton icon="◆" label="Run Evaluation" onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
               )
             ) : hasWarmPathAction ? (
-              <FooterButton icon="▷" label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
+              <FooterButton icon="▷" label="Request Evaluation Agreement" onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
             ) : hasViewEaAction ? (
               <FooterButton icon="◉" label="View Evaluation Agreement" onClick={() => onViewEa(existingEaForActor)} title={`Navigate to the existing Evaluation Agreement on your parent canvas (EA ${existingEaForActor?.id || ''}).`} />
             ) : hasColdRequestAction ? (
-              <FooterButton icon="▷" label="Request Evaluation Agreement" accent onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
+              <FooterButton icon="▷" label="Request Evaluation Agreement" onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
             ) : null}
             {hasIssueBadgeAction && (
               <FooterButton
@@ -1903,7 +1902,6 @@ function V22EvalResultPanel({
             <FooterButton
               icon="⊠"
               label="Dismiss"
-              accent
               onClick={() => onDismissOrphanedEvalResult && onDismissOrphanedEvalResult(er)}
               title="Remove this orphaned Evaluation Result from your canvas. The artifact stays in your QS."
             />
@@ -1941,7 +1939,6 @@ function V22EvalResultPanel({
                   <FooterButton
                     icon="◈"
                     label="Create Proof of Evaluation"
-                    accent
                     disabled
                     title="An evaluation has already been finalized as a Proof of Evaluation. The evaluation chain is closed."
                   />
@@ -1949,7 +1946,6 @@ function V22EvalResultPanel({
                   <FooterButton
                     icon="◈"
                     label="Create Proof of Evaluation"
-                    accent
                     onClick={() => onCreatePoE(er)}
                     title="Finalize this evaluation as an immutable Proof of Evaluation. Terminates the evaluation chain for this Asset+Requirements Set combination."
                   />
@@ -2212,7 +2208,6 @@ function V22PoEPanel({
           <FooterButton
             icon={<BadgeShieldIcon size={13} color="currentColor" />}
             label="Issue Badge"
-            accent
             onClick={() => onIssueBadge(poe)}
             title="Issue a Badge against this Claim."
           />
@@ -2537,7 +2532,7 @@ function V22BadgeTemplatePanel({
         </>
       }
       footer={isOwn && isLatest ? (
-        <FooterButton icon="＋" label="Create new version" accent onClick={onNewVersion} title="Create a new version of this Badge Template. Prior versions remain in the Library." />
+        <FooterButton icon="＋" label="Create new version" onClick={onNewVersion} title="Create a new version of this Badge Template. Prior versions remain in the Library." />
       ) : null}
     />
   )

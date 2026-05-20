@@ -8664,7 +8664,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.0.2 &middot; Changelog
+          v0.17.5.0.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8711,6 +8711,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.0.3', date: '2026-05-20', label: 'Phase 17.5.0.3', items: [
+                  'All Detail Panel footer buttons across all node types now use the same neutral styling — no button is highlighted by default. Hover continues to reveal the label and explanatory tooltip.',
+                  'Destructive (red) and attention-needed (amber) buttons keep their semantic colors.',
+                ]},
                 { version: '0.17.5.0.2', date: '2026-05-20', label: 'Phase 17.5.0.2', items: [
                   'All Detail Panel footers across all node types now use the icon-only-with-hover-expand-label pattern shipped on Asset footers in v0.17.5.',
                   'Hover any footer button to see its full label inline and the explanatory tooltip.',
