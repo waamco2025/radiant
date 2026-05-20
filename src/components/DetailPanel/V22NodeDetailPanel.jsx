@@ -403,7 +403,7 @@ function V22ActorPanel({
       }
       footer={
         isOwner && onRegisterAsset ? (
-          <FooterButton label="Register Asset" accent onClick={onRegisterAsset} title="Register a new Asset from a file in your Qualified Storage." />
+          <FooterButton icon="＋" label="Register Asset" accent onClick={onRegisterAsset} title="Register a new Asset from a file in your Qualified Storage." />
         ) : null
       }
     />
@@ -920,9 +920,9 @@ function V22ClaimPanel({
         }
         footer={
           isOwner ? (
-            <FooterButton label="Respond to Request" amber onClick={onRespondToRequest} />
+            <FooterButton icon="↪" label="Respond to Request" amber onClick={onRespondToRequest} />
           ) : (
-            <FooterButton label="Cancel Request" danger onClick={onCancelRequest} title="Withdraw the pending request — both provisional artifacts will be removed." />
+            <FooterButton icon="✕" label="Cancel Request" danger onClick={onCancelRequest} title="Withdraw the pending request — both provisional artifacts will be removed." />
           )
         }
       />
@@ -965,7 +965,7 @@ function V22ClaimPanel({
             </Section>
           </>
         }
-        footer={<FooterButton label="Dismiss" onClick={onDismissDeclined} title="Remove the declined Claim from your canvas." />}
+        footer={<FooterButton icon="⊠" label="Dismiss" onClick={onDismissDeclined} title="Remove the declined Claim from your canvas." />}
       />
     )
   }
@@ -1031,7 +1031,7 @@ function V22ClaimPanel({
             )}
           </>
         }
-        footer={<FooterButton label="Dismiss" accent onClick={onDismissRevoked} title="Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit." />}
+        footer={<FooterButton icon="⊠" label="Dismiss" accent onClick={onDismissRevoked} title="Remove the revoked Claim and its paired Evaluation Agreement from your canvas. Your Evaluation Results remain in your Qualified Storage and stay on your canvas — dismiss them individually from each Evaluation Result's Detail Panel if you wish. Historical records are preserved for audit." />}
       />
     )
   }
@@ -1461,35 +1461,37 @@ function V22ClaimPanel({
         return (
           <>
             {noticeForPanel && (
-              <FooterButton label="Dismiss" onClick={onDismissRevocationNotice} title="Dismiss this revocation notice. Your Claim and any remaining agreements are unaffected." />
+              <FooterButton icon="⊠" label="Dismiss" onClick={onDismissRevocationNotice} title="Dismiss this revocation notice. Your Claim and any remaining agreements are unaffected." />
             )}
             {hasOwnerActions ? (
               <>
-                <FooterButton label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
+                <FooterButton icon="✎" label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
                 {onSelfEvaluate && (
-                  <FooterButton label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+                  <FooterButton icon="◆" label="Self-Evaluate" accent onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
                 )}
               </>
             ) : hasEvalAction ? (
               evaluationAgreementForActor.status === 'pending-acceptance' ? (
                 <FooterButton
+                  icon="◆"
                   label="Run Evaluation"
                   accent
                   disabled
                   title={`Cannot run evaluation: amendment proposal awaiting your response. Respond in your inbox to continue.`}
                 />
               ) : (
-                <FooterButton label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
+                <FooterButton icon="◆" label="Run Evaluation" accent onClick={onRunEvaluation} title={`Run an evaluation under EA ${evaluationAgreementForActor.id}`} />
               )
             ) : hasWarmPathAction ? (
-              <FooterButton label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
+              <FooterButton icon="▷" label="Request Evaluation Agreement" accent onClick={onRequestEvaluationAgreement} title="Request evaluation rights on this Claim. Your Disclosure Agreement remains unchanged." />
             ) : hasViewEaAction ? (
-              <FooterButton label="View Evaluation Agreement" onClick={() => onViewEa(existingEaForActor)} title={`Navigate to the existing Evaluation Agreement on your parent canvas (EA ${existingEaForActor?.id || ''}).`} />
+              <FooterButton icon="◉" label="View Evaluation Agreement" onClick={() => onViewEa(existingEaForActor)} title={`Navigate to the existing Evaluation Agreement on your parent canvas (EA ${existingEaForActor?.id || ''}).`} />
             ) : hasColdRequestAction ? (
-              <FooterButton label="Request Evaluation Agreement" accent onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
+              <FooterButton icon="▷" label="Request Evaluation Agreement" accent onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
             ) : null}
             {hasIssueBadgeAction && (
               <FooterButton
+                icon={<BadgeShieldIcon size={13} color="currentColor" />}
                 label="Issue Badge"
                 onClick={() => onIssueBadge(claim)}
                 title="Issue a Badge against this Claim."
@@ -1899,6 +1901,7 @@ function V22EvalResultPanel({
           // ER up; parent state-routes the Confirm/Cancel choice.
           return (
             <FooterButton
+              icon="⊠"
               label="Dismiss"
               accent
               onClick={() => onDismissOrphanedEvalResult && onDismissOrphanedEvalResult(er)}
@@ -1912,6 +1915,10 @@ function V22EvalResultPanel({
           // Assets have been disclosed since the prior `evidenceUsed`.
           // Tooltip varies by reason. Both gates compose with the
           // existing visible-but-disabled pattern.
+          // Phase 17.5.0.2: Create PoE now ALSO follows the visible-but-
+          // disabled pattern when the chain is PoE-terminated
+          // (`node._alreadyWrapped`) — it used to disappear; now it greys out
+          // with an explanatory tooltip, mirroring Re-Run for symmetry.
           const reRunDisabled = isPoeTerminated || !canRerun
           const reRunTooltip = isPoeTerminated
             ? "An evaluation has already been finalized as a Proof of Evaluation. Modify the Claim's evidence or select a different Requirements Set to continue."
@@ -1922,14 +1929,31 @@ function V22EvalResultPanel({
             <>
               {onReRunEvaluation && (
                 <FooterButton
+                  icon="↻"
                   label="Re-run Evaluation"
                   onClick={reRunDisabled ? undefined : onReRunEvaluation}
                   disabled={reRunDisabled}
                   title={reRunTooltip}
                 />
               )}
-              {onCreatePoE && !node._alreadyWrapped && (
-                <FooterButton label="Create Proof of Evaluation" accent onClick={() => onCreatePoE(er)} title="Finalize this evaluation as an immutable Proof of Evaluation. Terminates the evaluation chain for this Asset+Requirements Set combination." />
+              {onCreatePoE && (
+                node._alreadyWrapped ? (
+                  <FooterButton
+                    icon="◈"
+                    label="Create Proof of Evaluation"
+                    accent
+                    disabled
+                    title="An evaluation has already been finalized as a Proof of Evaluation. The evaluation chain is closed."
+                  />
+                ) : (
+                  <FooterButton
+                    icon="◈"
+                    label="Create Proof of Evaluation"
+                    accent
+                    onClick={() => onCreatePoE(er)}
+                    title="Finalize this evaluation as an immutable Proof of Evaluation. Terminates the evaluation chain for this Asset+Requirements Set combination."
+                  />
+                )
               )}
             </>
           )
@@ -2186,6 +2210,7 @@ function V22PoEPanel({
         if (blocked) return null
         return (
           <FooterButton
+            icon={<BadgeShieldIcon size={13} color="currentColor" />}
             label="Issue Badge"
             accent
             onClick={() => onIssueBadge(poe)}
@@ -2512,7 +2537,7 @@ function V22BadgeTemplatePanel({
         </>
       }
       footer={isOwn && isLatest ? (
-        <FooterButton label="Create new version" accent onClick={onNewVersion} title="Create a new version of this Badge Template. Prior versions remain in the Library." />
+        <FooterButton icon="＋" label="Create new version" accent onClick={onNewVersion} title="Create a new version of this Badge Template. Prior versions remain in the Library." />
       ) : null}
     />
   )

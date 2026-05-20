@@ -8349,9 +8349,14 @@ export default function V2App() {
                   })
                 }}
                 // Phase 13 (#168): Create-PoE entry from the Eval Result
-                // panel footer. Hidden when the Eval Result is already
-                // wrapped (`node._alreadyWrapped` flag stamped above).
-                onCreatePoE={node.v22Type === 'EVAL RESULT' && node.owner === activeRole.party && !node._alreadyWrapped
+                // panel footer. Phase 17.5.0.2: the `!node._alreadyWrapped`
+                // gate was removed here so the handler is passed even on a
+                // PoE-terminated chain — the panel now renders Create PoE as
+                // visible-but-disabled in that case (mirroring Re-Run) and
+                // owns the enabled/disabled decision via `node._alreadyWrapped`.
+                // The disabled button carries no onClick, so a wrapped chain
+                // still can't be re-finalized.
+                onCreatePoE={node.v22Type === 'EVAL RESULT' && node.owner === activeRole.party
                   ? (er) => setV22CreatingPoEContext({ evalResultId: er?.id || node.id })
                   : undefined}
                 // Phase 13 (#168): PoE panel resolution callbacks. Resolve
@@ -8659,7 +8664,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.0.1 &middot; Changelog
+          v0.17.5.0.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8706,6 +8711,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.0.2', date: '2026-05-20', label: 'Phase 17.5.0.2', items: [
+                  'All Detail Panel footers across all node types now use the icon-only-with-hover-expand-label pattern shipped on Asset footers in v0.17.5.',
+                  'Hover any footer button to see its full label inline and the explanatory tooltip.',
+                  '"Create Proof of Evaluation" now renders as visible-but-disabled when the evaluation chain has already been closed by a Proof of Evaluation, matching the existing treatment of Re-Run Evaluation.',
+                ]},
                 { version: '0.17.5.0.1', date: '2026-05-20', label: 'Phase 17.5.0.1', items: [
                   'Asset Detail Panel footer buttons now share a uniform neutral treatment — no single button is highlighted by default.',
                   'Subtle indigo tint on button borders and a soft background fill on hover for better affordance.',

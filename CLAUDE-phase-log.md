@@ -2673,6 +2673,26 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.0.2 completion notes (2026-05-20) — Cross-panel footer icon propagation + visible-but-disabled audit
+
+Propagates the icon-with-hover-expand-label footer pattern (Asset footer, 17.5 / 17.5.0.1) to every other Detail Panel footer, and surfaces Create PoE as visible-but-disabled on PoE-terminated chains.
+
+**Diff (high-level).**
+
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — `FooterButton` component itself unchanged; 27 call sites now all carry an `icon` prop. Migrated: Actor (Register Asset `＋`); Claim provisional (Respond `↪`, Cancel `✕`), declined/revoked/notice (Dismiss `⊠`), standard (Amend Claim `✎`, Self-Evaluate / Run Evaluation `◆`, Request EA warm+cold `▷`, View EA `◉`, Issue Badge = `BadgeShieldIcon`); Eval Result (orphaned Dismiss `⊠`, Re-run `↻`, Create PoE `◈`); PoE (Issue Badge shield); Badge Template (Create new version `＋`). **Create PoE visible-but-disabled:** the `{onCreatePoE && !node._alreadyWrapped && …}` render became `{onCreatePoE && (node._alreadyWrapped ? <disabled w/ closed-chain tooltip> : <active>)}`.
+- `src/v2/V2App.jsx` — **dropped the `!node._alreadyWrapped` gate on the `onCreatePoE` prop** (≈ line 8354) so the handler reaches the panel even on a wrapped chain; footer constant → v0.17.5.0.2; Changelog modal entry prepended.
+- Four docs (this entry + architecture-spec §8 + polish-backlog Update Log + CLAUDE.md current-state + Changelog modal).
+
+**Deviations / things surfaced.**
+
+- **V2App `onCreatePoE` wiring change (beyond the brief's stated V2App scope).** The brief listed V2App edits as Changelog + version only and put the visible-but-disabled change entirely in `V22NodeDetailPanel.jsx` (`{onCreatePoE && (_alreadyWrapped ? disabled : active)}`). But V2App gated `onCreatePoE` to `undefined` when `_alreadyWrapped`, so the panel never received the handler and the disabled branch couldn't render — Create PoE stayed *absent*, not disabled (verified live). Dropping that gate is necessary for QA #8 to pass; the disabled button carries no onClick, so a wrapped chain still can't be re-finalized.
+- **RFP / DA / EA panels left untouched (stop-and-flag).** `FooterButton` exists only in `V22NodeDetailPanel.jsx`. `RfpDetailPanel.jsx` uses a local `ActionButton`; the DA / EA agreement panels use their own button components. Per the brief's "stop and flag rather than picking icons unilaterally" rule, their footer-icon migration is deferred to a follow-up rather than guessing glyphs for Close / Reopen / Solicit / agreement actions.
+- **Parse Result panel has no footer** (owner-only artifact, no actions) — nothing to migrate there.
+
+**Runtime verification (dev preview).** Panels opened via the clickable HTML node cards. Claim panel (Bob, non-owner + active EA on "Voltage Regulator IC") footer: Run Evaluation `◆` (40px collapsed) + Issue Badge (icon span contains the `BadgeShieldIcon` SVG). Eval Result panel ("Voltage Regulator IC", non-terminated): Re-run `↻` (disabled — no new evidence) + Create PoE `◈` (enabled, `cursor: pointer`) — active state intact. Eval Result panel ("Power Regulation Module Assembly", PoE-terminated): Create PoE `◈` AND Re-run `↻` both `disabled` with `cursor: not-allowed` — the new visible-but-disabled state confirmed (screenshot). Build clean (`npm run build`, 0 errors); console shows only the pre-existing benign `NaN`-CSS-`left` worldToScreen transients. Items not directly exercised (Actor Register Asset, Claim owner Amend+Self-Eval, provisional Respond+Cancel, Badge Template, disabled-handler hover-expand) use the identical migrated `FooterButton` icon-mode path verified above.
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.0.1 completion notes (2026-05-20) — Asset footer styling polish
 
 Tightens the visual treatment of the Asset Detail Panel footer that landed in 17.5.
