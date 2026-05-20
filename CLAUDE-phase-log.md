@@ -2673,6 +2673,26 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5 completion notes (2026-05-20) — RFP creation entry-point foundation
+
+First phase of the 17.5.x arc (user-facing RFP creation — the third leg of the Directory triad: browse + connect + create). Establishes stable entry-point surfaces so the 17.5.1 modal + 17.5.2 orchestration can plug in.
+
+**Diff (high-level).**
+
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — (1) import `useState`. (2) `FooterButton` refactored: new `icon` prop drives an icon-with-hover-expand-label mode (icon span always visible; label span animates `max-width` 0→220px + `opacity` 0→1 + `margin-left` 0→8px on hover via local `hovered` state; `aria-label` carries the full label; `Tooltip` from `title` preserved; `flex: 0 0 auto`). The mode is **gated on `icon` presence** — without it, the legacy label-only button (`flex: 1`) renders unchanged. (3) Asset panel footer: five buttons migrated to icon mode + new 6th "Create RFP" (`⬚`), wrapped in a scoped inner flex row (`justify-content: flex-start; flex-wrap: nowrap; overflow: hidden; flex: 1`); pending-transfer Cancel button gets `✕`. (4) `V22AssetPanel` gains an `onCreateRfp` pass-through prop.
+- `src/v2/AssetNode.jsx` — `V22ActionBar` ASSET non-pending-transfer branch gains a 6th button `{ icon: '⬚', tooltip: 'Create RFP', onClick: fire('createRfp') }` between Create Claim and Transfer. Not added to the `_pendingTransfer` branch.
+- `src/v2/V2App.jsx` — new `handleCreateRfp` useCallback (placeholder logger); new `case 'createRfp'` in the `onV22CardAction` dispatcher (owner-only, not while pending); `onCreateRfp` prop on the V22AssetPanel mount; footer constant → v0.17.5; Changelog modal entry prepended.
+- Five docs (this entry + architecture-spec §8 + polish-backlog Update Log + CLAUDE.md current-state + Changelog modal).
+
+**Deviations.**
+
+- **`icon` prop made optional/gated, not strictly "required" as the brief stated.** `FooterButton` is reused at ~18 other call sites (Claim footer, Eval Result, declined/revoked Dismiss, etc.) that pass no icon. A strictly-required icon with icon-only-by-default rendering would have collapsed all of them to blank-until-hover buttons. Gating the new behavior on `icon != null` keeps every non-Asset footer pixel-identical while the Asset footer (which passes icons) gets the new treatment. This is the safe interpretation of the brief's intent.
+- **Footer layout scoped via an inner wrapper rather than mutating `PanelLayout`.** The brief said "switch the footer container to flex-start / flex:0 0 auto", but `PanelLayout`'s footer `<div>` is shared by every panel. Wrapping the six Asset buttons in a dedicated inner flex row achieves the same left-aligned, no-squeeze layout with `overflow: hidden` guard, without touching other panels.
+
+**Runtime verification (dev preview).** The parent-canvas Asset cards turned out to be clickable HTML (AssetNode components positioned via worldToScreen), so the Asset Detail Panel opened via a scripted DOM click despite the documented 3D-raycaster limitation (that limitation governs canvas-background/edge picking, not the HTML node cards). Verified: (1) footer renders 6 collapsed icon buttons ~40px each, no Transfer cut-off; (2) invoking the React `onMouseEnter` handler on a button expands it 40→123px with the label span going `max-width` 0→220px / opacity 0→1; (3) both explanatory tooltips render on hover (screenshot); (4) Create Claim footer button still opens its modal (no regression); (5) the footer Create RFP button logs `[Phase 17.5] createRfp dispatched for Asset: asset-… Avionics Module`; (6) the V22ActionBar shows 6 icons in order (＋ ⤴ ⊞ ◇ ⬚ →); (7) the action-bar `⬚` logs the same dispatch. Build clean (`npm run build`, 131 modules, 0 errors). Only pre-existing benign console output observed (the documented `NaN`-CSS-`left` worldToScreen transients + DirectoryLayer `packClusterDense` overflow warnings) plus the expected createRfp logs. Edge/regression cases hard to reach via script (pending-transfer lone Cancel button, non-owner no-footer, disabled-button hover-expand) are code-verified: the pending-transfer branch renders only the `✕` Cancel Transfer button with no Create RFP; the footer is gated on `isOwner`; disabled doesn't gate the hover handler (icon mode + expansion apply regardless, only bg/cursor change).
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.6 completion notes (2026-05-20) — Backlog hygiene: file #204 + #205
 
 Backlog-only wrap of Round 18. No code changes, no version bump, no Changelog modal entry, no architecture-spec change — just `polish-backlog.md` + `CLAUDE.md` + this log.

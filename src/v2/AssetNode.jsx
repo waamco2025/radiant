@@ -1288,6 +1288,11 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
           buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
           buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
+          // Phase 17.5: Create RFP (between Create Claim and Transfer). Not
+          // shown in the _pendingTransfer branch — posting an RFP while
+          // ownership is in flight is inappropriate. Icon ⬚ matches
+          // CATEGORY_CONFIG.rfp.icon, parallel to Create Claim's ◇.
+          buttons.push({ icon: '⬚', tooltip: 'Create RFP', onClick: fire('createRfp') })
           buttons.push({ icon: '→', tooltip: 'Transfer', onClick: fire('transferAsset') })
         }
       }

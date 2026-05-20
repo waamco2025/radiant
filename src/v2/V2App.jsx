@@ -2695,6 +2695,17 @@ export default function V2App() {
     setV22SolicitationToReject(null)
   }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
 
+  // Phase 17.5: Create RFP entry point. Both surfaces (the Asset card action
+  // bar via onV22CardAction and the Asset Detail Panel footer via onCreateRfp)
+  // dispatch here. This is the placeholder logger for 17.5 — it confirms both
+  // entry points fire correctly. The RfpCreationModal that consumes this lands
+  // in 17.5.1; the future signature is roughly:
+  //   setV22RfpCreationContext({ asset: assetNode }); setV22RfpCreationOpen(true)
+  const handleCreateRfp = useCallback((assetNode) => {
+    // eslint-disable-next-line no-console
+    console.log('[Phase 17.5] createRfp dispatched for Asset:', assetNode?.id, assetNode?.name)
+  }, [])
+
   // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
   // on a SolicitationCard. Phase 17.2.1.1 collapses the prior two-modal
   // chain (AssetPickerModal → CombinedRequestModal) into a single direct
@@ -5783,6 +5794,14 @@ export default function V2App() {
                   setV22CreatingClaim({ initialAssetIds: [node.id] })
                 }
                 return
+              case 'createRfp':
+                // Phase 17.5: owner-only, not while a transfer is pending.
+                // Entry-point only — handleCreateRfp logs in 17.5; the
+                // RfpCreationModal lands in 17.5.1.
+                if (node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer) {
+                  handleCreateRfp(node)
+                }
+                return
               case 'transferAsset':
                 // Phase 9A.4 Gate B: owner-only; Asset card action fires this.
                 // `_pendingTransfer` guards a second initiation mid-flight.
@@ -8113,6 +8132,11 @@ export default function V2App() {
                 onCreateClaim={node.v22Type === 'ASSET' && node.owner === activeRole.party
                   ? () => setV22CreatingClaim({ initialAssetIds: [node.id] })
                   : undefined}
+                // Phase 17.5: Create RFP entry point (owner-only, not while a
+                // transfer is pending). Placeholder logger in 17.5.
+                onCreateRfp={node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer
+                  ? () => handleCreateRfp(node)
+                  : undefined}
                 onParseEvidence={node.owner === activeRole.party && node.v22Type === 'ASSET'
                   ? () => setV22ParsingAsset(node)
                   : undefined}
@@ -8635,7 +8659,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4.5 &middot; Changelog
+          v0.17.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8682,6 +8706,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5', date: '2026-05-20', label: 'Phase 17.5', items: [
+                  'Asset Detail Panel footer collapsed to icon buttons; hover any button to see its full label inline.',
+                  'New "Create RFP" action available on Asset cards (right-side action bar) and in the Asset Detail Panel footer. The full creation modal arrives in the next phase.',
+                  'Fixes the long-standing Transfer button cut-off in the Asset Detail Panel footer.',
+                ]},
                 { version: '0.17.4.5', date: '2026-05-20', label: 'Phase 17.4.5', items: [
                   'Internal "ownership" DAs no longer leak into the Directory Claim Detail Panel for non-owner viewers — Alice viewing a ChipCo Claim now sees only her umbrella DA + cross-party EAs, not ChipCo\'s internal Full Disclosure marker.',
                   'Root cause was a seed-data bug: Alice\'s ownership-DA loop iterated the full multi-party Claim array and minted spurious MicroCo-owned internal DAs over ChipCo\'s Claims (with colliding ids). Owner-side behavior is unchanged — Dave still sees the Internal ownership DA on his own Claims.',

@@ -10,7 +10,7 @@
 //   • Disclosure Declined (spec §11.4 + Phase 5 add #5) — when node.isDeclined,
 //     show owner's decline reason + "Dismiss" CTA.
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import CopyBadge from './shared/CopyBadge'
 import ExpandButton from './shared/ExpandButton'
 import Tooltip from '../Tooltip'
@@ -152,7 +152,8 @@ function AssetHierarchyRow({ asset, onSelect }) {
   )
 }
 
-function FooterButton({ label, onClick, accent, danger, amber, disabled, title }) {
+function FooterButton({ icon, label, onClick, accent, danger, amber, disabled, title }) {
+  const [hovered, setHovered] = useState(false)
   const bg = disabled
     ? 'var(--bg-raised)'
     : amber
@@ -166,6 +167,64 @@ function FooterButton({ label, onClick, accent, danger, amber, disabled, title }
   // Phase 9A.2: tooltips are instant-on-hover via the Tooltip primitive.
   // Only render one when `title` is explicitly passed — plain label buttons
   // don't need a tooltip repeating their own label.
+
+  // Phase 17.5: icon-with-hover-expand mode. When `icon` is provided the
+  // button collapses to an icon-only square and animates its width on hover
+  // to reveal the label inline (the explanatory Tooltip from `title` still
+  // pops on hover too — label = verb, tooltip = explanation). When `icon` is
+  // omitted, the legacy label-only button (flex: 1, always-visible label)
+  // renders unchanged — this preserves every other FooterButton call site
+  // (Claim / Eval Result / dismiss / etc.) that doesn't pass an icon.
+  if (icon != null) {
+    const iconButton = (
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={label}
+        onClick={disabled ? undefined : onClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        style={{
+          flex: '0 0 auto',
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '10px 12px',
+          background: bg,
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          color,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          transition: 'background 120ms',
+        }}
+      >
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          minWidth: 14, fontSize: 14, lineHeight: 1,
+        }}>{icon}</span>
+        <span style={{
+          maxWidth: hovered ? 220 : 0,
+          opacity: hovered ? 1 : 0,
+          marginLeft: hovered ? 8 : 0,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          transition: 'max-width 150ms ease, opacity 150ms ease, margin-left 150ms ease',
+        }}>{label}</span>
+      </button>
+    )
+    return title
+      ? <Tooltip content={title} width={280} wrapperStyle={{ flex: '0 0 auto' }}>{iconButton}</Tooltip>
+      : iconButton
+  }
+
   const button = (
     <button
       type="button"
@@ -341,6 +400,10 @@ function V22AssetPanel({
   onRequestAgreement, onCreateClaim, onParseEvidence,
   onTransferAsset, onCancelTransfer,
   onRegisterChildAsset,
+  // Phase 17.5: Create RFP entry point (pass-through to the new footer
+  // button). Handler is a placeholder logger in 17.5; the RfpCreationModal
+  // lands in 17.5.1.
+  onCreateRfp,
   parseResultsForAsset = [],
   childAssets = [],
   parentAsset = null,
@@ -495,18 +558,24 @@ function V22AssetPanel({
       footer={
         isOwner ? (
           isPendingTransfer ? (
-            <FooterButton label="Cancel Transfer" danger onClick={onCancelTransfer} title="Withdraw the pending transfer — no ledger record, recipient notification dismisses." />
+            <FooterButton icon="✕" label="Cancel Transfer" danger onClick={onCancelTransfer} title="Withdraw the pending transfer — no ledger record, recipient notification dismisses." />
           ) : (
-            <>
-              {/* Phase 10.2: Register child Asset under this Asset. Five-button
-                  footer is intentionally crowded for now — auto-collapsing
-                  affordance is a future polish phase. */}
-              <FooterButton label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
-              <FooterButton label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
-              <FooterButton label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a Parsing Template" />
-              <FooterButton label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
-              <FooterButton label="Transfer" onClick={onTransferAsset} disabled={!onTransferAsset} title="Transfer ownership of this Asset to another actor" />
-            </>
+            // Phase 17.5: icon-with-hover-expand footer (replaces the Phase
+            // 10.2 crowded label-only five-button row, closing that polish
+            // flag and fixing the Transfer cut-off). Six actions, each
+            // collapsed to an icon and expanding its label inline on hover.
+            // flex:0 0 auto buttons + flex-start so hover expansion doesn't
+            // squeeze siblings; overflow:hidden + nowrap as a layout guard.
+            // Order: Register Asset → Request Agreement → Parse Evidence →
+            // Create Claim → Create RFP → Transfer.
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', flexWrap: 'nowrap', overflow: 'hidden', flex: 1 }}>
+              <FooterButton icon="＋" label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
+              <FooterButton icon="⤴" label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
+              <FooterButton icon="⊞" label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a Parsing Template" />
+              <FooterButton icon="◇" label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
+              <FooterButton icon="⬚" label="Create RFP" onClick={onCreateRfp} disabled={!onCreateRfp} title="Post a public RFP anchored to this Asset — other actors will be able to solicit their Claims for review" />
+              <FooterButton icon="→" label="Transfer" onClick={onTransferAsset} disabled={!onTransferAsset} title="Transfer ownership of this Asset to another actor" />
+            </div>
           )
         ) : null
       }
