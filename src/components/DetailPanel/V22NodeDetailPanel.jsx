@@ -176,6 +176,19 @@ function FooterButton({ icon, label, onClick, accent, danger, amber, disabled, t
   // renders unchanged — this preserves every other FooterButton call site
   // (Claim / Eval Result / dismiss / etc.) that doesn't pass an icon.
   if (icon != null) {
+    // Phase 17.5.0.1: neutral-default styling polish. For the neutral state
+    // (no accent/danger/amber/disabled) the border picks up a 40% indigo
+    // blend (matching AssetNode.jsx's WARM_BORDER), the background tints to
+    // var(--bg-raised) on hover, and the border deepens to a 60% indigo
+    // blend on hover. Variant buttons (accent/danger/amber) and disabled keep
+    // their existing treatment. Scoped to icon-mode (the Asset footer) — the
+    // legacy label-only branch (other panels' neutral buttons) is untouched;
+    // cross-panel propagation is a later phase.
+    const isNeutral = !accent && !danger && !amber && !disabled
+    const neutralBorder = hovered
+      ? 'color-mix(in srgb, var(--accent-indigo) 60%, var(--border))'
+      : 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
+    const neutralBg = hovered ? 'var(--bg-raised)' : 'transparent'
     const iconButton = (
       <button
         type="button"
@@ -191,8 +204,11 @@ function FooterButton({ icon, label, onClick, accent, danger, amber, disabled, t
           display: 'inline-flex',
           alignItems: 'center',
           padding: '10px 12px',
-          background: bg,
-          border: '1px solid var(--border)',
+          // Phase 17.5.0.1: backgroundColor longhand (the properly animatable
+          // property) tints to var(--bg-raised) on hover; border-color
+          // deepens its indigo blend. Both fade over 120ms.
+          backgroundColor: isNeutral ? neutralBg : bg,
+          border: `1px solid ${isNeutral ? neutralBorder : 'var(--border)'}`,
           borderRadius: 4,
           color,
           fontFamily: 'var(--font-mono)',
@@ -203,7 +219,7 @@ function FooterButton({ icon, label, onClick, accent, danger, amber, disabled, t
           cursor: disabled ? 'not-allowed' : 'pointer',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
-          transition: 'background 120ms',
+          transition: 'background-color 120ms ease, border-color 120ms ease',
         }}
       >
         <span style={{
@@ -570,7 +586,7 @@ function V22AssetPanel({
             // Create Claim → Create RFP → Transfer.
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', flexWrap: 'nowrap', overflow: 'hidden', flex: 1 }}>
               <FooterButton icon="＋" label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
-              <FooterButton icon="⤴" label="Request Agreement" accent onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
+              <FooterButton icon="⤴" label="Request Agreement" onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
               <FooterButton icon="⊞" label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a Parsing Template" />
               <FooterButton icon="◇" label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
               <FooterButton icon="⬚" label="Create RFP" onClick={onCreateRfp} disabled={!onCreateRfp} title="Post a public RFP anchored to this Asset — other actors will be able to solicit their Claims for review" />

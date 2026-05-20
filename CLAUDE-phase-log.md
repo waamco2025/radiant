@@ -2673,6 +2673,25 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.0.1 completion notes (2026-05-20) — Asset footer styling polish
+
+Tightens the visual treatment of the Asset Detail Panel footer that landed in 17.5.
+
+**Diff (high-level).**
+
+- `src/components/DetailPanel/V22NodeDetailPanel.jsx` — (1) `FooterButton` icon-mode branch gains an `isNeutral` check (`!accent && !danger && !amber && !disabled`) plus `neutralBorder` (40% indigo blend default, 60% on hover, via `color-mix(in srgb, var(--accent-indigo) N%, var(--border))`) and `neutralBg` (`transparent` default, `var(--bg-raised)` on hover). The button style applies these only when `isNeutral` — `backgroundColor: isNeutral ? neutralBg : bg` (longhand, the properly animatable property), `border: 1px solid ${isNeutral ? neutralBorder : 'var(--border)'}`, transition `background-color 120ms ease, border-color 120ms ease`. (2) Asset footer Request Agreement button drops its `accent` prop so all six buttons are neutral.
+- `src/v2/V2App.jsx` — footer constant → v0.17.5.0.1; Changelog modal entry prepended.
+- Four docs (this entry + architecture-spec §8 single-line bullet + polish-backlog Update Log + CLAUDE.md current-state + Changelog modal).
+
+**Deviations.**
+
+- **Scoped to the icon-mode branch, not the shared style computation.** The brief's pseudocode gated on `isNeutral` generically, but `FooterButton` also has a legacy label-only branch used by other panels' neutral buttons (e.g. "Dismiss"). QA item 9 explicitly wants cross-panel propagation deferred to a later phase. Placing the new neutral styling inside the `if (icon != null)` branch confines it to the Asset footer (the only icon-mode caller; the pending Cancel Transfer is `danger`, so not neutral), leaving legacy-mode neutral buttons on other panels untouched.
+- **`backgroundColor` longhand instead of the `background` shorthand** for the neutral tint (the label-expand `max-width`/`opacity`/`margin-left` transitions stay on the child label span, not the button). The longhand is the properly animatable property; the shorthand-with-`var()` is the riskier form for a transitioned property.
+
+**Runtime verification (dev preview).** Asset Detail Panel opened via the clickable HTML node card (parent-canvas Asset cards are HTML, so the panel opens via DOM despite the 3D-raycaster limitation). All six footer buttons render neutral by default (no indigo-filled accent button); `getComputedStyle` confirmed the neutral border resolves to the 40%-indigo `color-mix` and the non-hovered background is `transparent`. Invoking the React `onMouseEnter` handler then **screenshotting** (the authoritative signal) showed the hovered "Create RFP" button expand its label inline AND pick up the `var(--bg-raised)` tint, with the others collapsed/neutral — confirming both the 17.5 label-expand and the new hover tint paint. **Tooling note:** `getComputedStyle` proved unreliable for *transitioned* properties under programmatic (React-prop-invoked) hover in this headless Chromium — it transiently reported a transitioning `max-width`/`background-color` as stuck at the start value even though the paint (per screenshot) was correct. The screenshot is the ground truth; non-transitioned reads (the static 40% border, the transparent default bg) were consistent. Variant buttons confirmed unchanged: Claim panel "Respond to Request" (amber) / "Cancel Request" (danger) render via the untouched legacy label-only branch; the Actor panel "Register Asset" stays `accent` (cross-panel propagation deferred). Console shows only the pre-existing benign `NaN`-CSS-`left` worldToScreen transients. Build clean (`npm run build`, 0 errors).
+
+**Status:** [x] Complete.
+
 ### Phase 17.5 completion notes (2026-05-20) — RFP creation entry-point foundation
 
 First phase of the 17.5.x arc (user-facing RFP creation — the third leg of the Directory triad: browse + connect + create). Establishes stable entry-point surfaces so the 17.5.1 modal + 17.5.2 orchestration can plug in.

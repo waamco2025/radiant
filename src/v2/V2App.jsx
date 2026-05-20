@@ -8659,7 +8659,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5 &middot; Changelog
+          v0.17.5.0.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8706,6 +8706,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.0.1', date: '2026-05-20', label: 'Phase 17.5.0.1', items: [
+                  'Asset Detail Panel footer buttons now share a uniform neutral treatment — no single button is highlighted by default.',
+                  'Subtle indigo tint on button borders and a soft background fill on hover for better affordance.',
+                ]},
                 { version: '0.17.5', date: '2026-05-20', label: 'Phase 17.5', items: [
                   'Asset Detail Panel footer collapsed to icon buttons; hover any button to see its full label inline.',
                   'New "Create RFP" action available on Asset cards (right-side action bar) and in the Asset Detail Panel footer. The full creation modal arrives in the next phase.',
