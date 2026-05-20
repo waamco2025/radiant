@@ -1426,6 +1426,11 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // `buildV22DirectoryDataForRole`. See §8.8 in the architecture spec
   // for the asymmetric-visibility rationale.
   v22ClosedRfpIds,
+  // Phase 17.5.1: session-state Map<rfpId, rfp> of user-created RFPs threaded
+  // from V2App. Overlaid onto the shared artifact set inside
+  // `buildV22DirectoryDataForRole` so the creating actor sees their new RFP
+  // in their own Directory cluster.
+  v22CreatedRfps,
   // eslint-disable-next-line no-unused-vars
   onOpenAIShopper,
   onClose,
@@ -1501,7 +1506,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // ─── Per-role data + viewport + layout ──────────────────────────────
   const directoryData = useMemo(() => {
     if (!roleId) return null
-    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds)
+    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps)
     // Phase 16.1.3 Item 8: enrich the directory data with per-Claim
     // disclosure-type lookup tables for both public DAs and umbrella DAs.
     // The view-builder currently doesn't expose these directly; we look
@@ -1538,7 +1543,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     } catch (_e) {
       return base
     }
-  }, [roleId, v22Provisionals, v22ClosedRfpIds])
+  }, [roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps])
 
   const [viewport, setViewport] = useState({
     w: typeof window !== 'undefined' ? window.innerWidth : 1280,

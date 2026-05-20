@@ -1421,6 +1421,24 @@ export function mergeClosedRfps(shared, closedRfpIds) {
   return { ...shared, rfps: next }
 }
 
+// Phase 17.5.1: overlays session-state user-created RFPs on the shared
+// artifact collection. Mirror of mergeClosedRfps' shape — pure function.
+// Storage shape is a Map<rfpId, rfp> with the full RFP object as the
+// value (vs. mergeClosedRfps storing just a closedDate). Apply BEFORE
+// mergeClosedRfps in the merge chain so a user can Close a freshly-
+// created RFP within the same session.
+export function mergeCreatedRfps(shared, createdRfps) {
+  if (!createdRfps || (createdRfps.size ?? 0) === 0) return shared
+  const existingIds = new Set(shared.rfps.map((r) => r.id))
+  const additions = []
+  for (const [, rfp] of createdRfps) {
+    if (existingIds.has(rfp.id)) continue  // defensive — shouldn't happen
+    additions.push(rfp)
+  }
+  if (additions.length === 0) return shared
+  return { ...shared, rfps: [...shared.rfps, ...additions] }
+}
+
 // Phase 17.2: RFP Solicitation — a seller invites a buyer to consider one of
 // the seller's existing public Claims against the buyer's open RFP. One
 // solicitation per (solicitor, rfpId) pair (enforced at the call site in V2App;
@@ -5402,15 +5420,22 @@ export function getV22DataForRole(roleId, provisionals) {
  *     otherRfps: RFP[],                   // non-active-Actor RFPs (status === 'open')
  *   }
  */
-export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds) {
+export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds, createdRfps) {
   // Phase 17.1: closedRfpIds (Map<id, ISO closedDate> | null) overlays
   // session-state Close transitions on the seed RFPs. Threaded the same
   // way provisionals are — merged in-place here so call sites don't
   // need to pre-construct a wrapper. Order against mergeProvisionals
   // doesn't matter (provisionals never touch RFPs) but we apply
   // provisionals first for symmetry with other view-building paths.
+  // Phase 17.5.1: createdRfps (Map<id, rfp> | null) overlays session-state
+  // user-created RFPs. Order created → closed so a user can create and then
+  // Close the same RFP within one session (mergeClosedRfps' .map runs over
+  // the merged rfps and finds the user-created RFP if its id is closed).
   const shared = mergeClosedRfps(
-    mergeProvisionals(buildV22SharedArtifacts(), provisionals),
+    mergeCreatedRfps(
+      mergeProvisionals(buildV22SharedArtifacts(), provisionals),
+      createdRfps,
+    ),
     closedRfpIds,
   )
   const actor = (shared.actors || []).find((a) => a.id === roleId)

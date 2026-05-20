@@ -2673,6 +2673,24 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.1 completion notes (2026-05-20) — Create RFP flow (RfpCreationModal scaffolding)
+
+Builds out the RFP creation modal + state plumbing + view-builder integration. Closes the "creation flow (17.5+)" line of #192 Item J. Post-creation orchestration (layer switch + pan/zoom + NEW badge) is Phase 17.5.2.
+
+**Diff (high-level).**
+
+- `src/components/modals/RfpCreationModal.jsx` — **new file.** Two-step modal (Form → Review/Confirm) using the shared `Modal`/`ModalHeader`/`ModalBody`/`ModalFooter`/`Btn`/`StepDots`/`FieldLabel` from `ModalShared`, plus a local `GlobeIcon` (copied from CombinedRequestModal). Step 1: name input + description textarea + RS scrollbox (`max-height: 280`) with **Published Requirements Sets** (globe + "Published by") and **Your Requirements Sets** sections; `canContinue = name.trim() && description.trim() && selectedRsIds.size > 0`. Step 2: labeled-list review card (For Asset / RFP Name / Description / RS chips). Footer: StepDots + Cancel/Continue (step 1) or Back/Publish (step 2). Back preserves state (component-level `useState`).
+- `src/v2/v2_2Data.js` — new `mergeCreatedRfps(shared, createdRfps)` export (pure, mirrors `mergeClosedRfps`; Map<id, rfp>, returns identity when empty); `buildV22DirectoryDataForRole` signature → `(roleId, provisionals, closedRfpIds, createdRfps)` with merge chain `mergeClosedRfps(mergeCreatedRfps(mergeProvisionals(...), createdRfps), closedRfpIds)` (created → closed).
+- `src/v2/DirectoryLayer.jsx` — new `v22CreatedRfps` prop; passed as the 4th arg to `buildV22DirectoryDataForRole` + added to the `directoryData` useMemo deps.
+- `src/v2/V2App.jsx` — import `RfpCreationModal` + `makeRfp`; new state `v22CreatedRfps` / `v22RfpCreationOpen` / `v22RfpCreationContext`; `handleCreateRfp` upgraded from logger to modal-opener; new `handleRfpCreationSubmit` (builds via `makeRfp`, id seeded `makeArtifactId('rfp','{party}-{slug}-{Date.now()}')`); extracted the CombinedRequestModal RS-row IIFE into a shared `v22AvailableRequirementsSetRows` useMemo (both modals consume it); `v22CreatedRfps` threaded to the DirectoryLayer mount; RfpCreationModal mounted after CombinedRequestModal; footer constant → v0.17.5.1; Changelog modal entry.
+- Four docs (this entry + architecture-spec §8 bullet + new §8.11 + polish-backlog Update Log + #192 progress note + CLAUDE.md current-state + Changelog modal).
+
+**Deviations.** None of substance. `StepDots` is passed `current={step}` (1-based) + `total={totalSteps}` exactly as CombinedRequestModal does (the "Step X of 2" header pill is the authoritative indicator). `mergeCreatedRfps` is imported into `v2_2Data` internals only — not into V2App (the brief listed it as a possible import, but V2App never calls it directly; DirectoryLayer calls the builder which calls it). Submit button labeled "Publish RFP" (clearer verb than a bare "Submit").
+
+**Runtime verification (dev preview).** Full walkthrough on Bob's view from the Avionics Module Asset Detail Panel: Create RFP footer button opens the modal pre-anchored ("Create RFP for Avionics Module", "Step 1 of 2"); Continue is disabled (Btn gates via `onClick=undefined` + opacity 0.4 — not the DOM `disabled` attr) until name + description + ≥1 RS are set; both `PUBLISHED REQUIREMENTS SETS` + `YOUR REQUIREMENTS SETS` section headers render (text-transform: uppercase) with the seed RS rows; selecting an RS flips Continue's `onClick` to a function; Step 2 shows Asset / name / full description / RS chip; Back returns to Step 1 with name + description + RS selection preserved; Publish closes the modal with no console errors. Data-layer probe: `mergeCreatedRfps` appends (118 → 119 rfps) and returns identity on an empty Map; `buildV22DirectoryDataForRole(bob.id, …, createdMap)` puts the created RFP in `ownRfps` (Sentinel-4 + the new RFP); the Directory rebuilds clean after creation. Build clean (`npm run build`). Note: per the documented Three.js raycaster limitation, clicking the new RFP marker in the Directory to open its Detail Panel is a manual step; the data-layer probe + clean Directory rebuild are the structural backstop for "appears in own cluster."
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.0.4 completion notes (2026-05-20) — Disclosure boundary cleanup (umbrella DA pull-in + catalog Asset backfill + Library polish)
 
 Three bundled demo-prep fixes.

@@ -24,6 +24,8 @@ import {
   buildV22SharedArtifacts, mergeProvisionals,
   // Phase 17.1: closed-RFP lifecycle merge layer.
   mergeClosedRfps,
+  // Phase 17.5.1: RFP factory for the Create RFP flow (id via makeArtifactId).
+  makeRfp,
   // Phase 17.2: RFP solicitation factory + merge layer.
   makeRfpSolicitation, mergeSolicitations,
   // Phase 17.2.1: acceptSolicitation transitions a pending solicitation to
@@ -81,6 +83,7 @@ import RequirementsSetDetailModal from '../components/modals/RequirementsSetDeta
 import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
+import RfpCreationModal from '../components/modals/RfpCreationModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
@@ -291,6 +294,14 @@ export default function V2App() {
   // a dashed-outline visual treatment at every Directory LOD; non-owners
   // see them filtered out by `buildV22DirectoryDataForRole`.
   const [v22ClosedRfpIds, setV22ClosedRfpIds] = useState(() => new Map())
+  // Phase 17.5.1: session-state Map<rfpId, rfp> of user-created RFPs +
+  // transient modal-open + context state for the Create RFP flow. The Map
+  // is overlaid on the shared artifact set via `mergeCreatedRfps` (before
+  // mergeClosedRfps) so a created RFP appears in the owner's Directory
+  // cluster and can be Closed within the same session.
+  const [v22CreatedRfps, setV22CreatedRfps] = useState(() => new Map())
+  const [v22RfpCreationOpen, setV22RfpCreationOpen] = useState(false)
+  const [v22RfpCreationContext, setV22RfpCreationContext] = useState(null)
   // Phase 17.2: session-state Map<solicitationId, RfpSolicitation> for
   // seller-initiated solicitations against an RFP. Mirror of
   // `v22ClosedRfpIds` shape — Map so updates (rejection, response date)
@@ -2695,16 +2706,45 @@ export default function V2App() {
     setV22SolicitationToReject(null)
   }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
 
-  // Phase 17.5: Create RFP entry point. Both surfaces (the Asset card action
-  // bar via onV22CardAction and the Asset Detail Panel footer via onCreateRfp)
-  // dispatch here. This is the placeholder logger for 17.5 — it confirms both
-  // entry points fire correctly. The RfpCreationModal that consumes this lands
-  // in 17.5.1; the future signature is roughly:
-  //   setV22RfpCreationContext({ asset: assetNode }); setV22RfpCreationOpen(true)
+  // Phase 17.5 → 17.5.1: Create RFP entry point. Both surfaces (the Asset
+  // card action bar via onV22CardAction and the Asset Detail Panel footer
+  // via onCreateRfp) dispatch here. Opens the two-step RfpCreationModal
+  // pre-anchored to the clicked Asset.
   const handleCreateRfp = useCallback((assetNode) => {
-    // eslint-disable-next-line no-console
-    console.log('[Phase 17.5] createRfp dispatched for Asset:', assetNode?.id, assetNode?.name)
+    if (!assetNode) return
+    setV22RfpCreationContext({ asset: assetNode })
+    setV22RfpCreationOpen(true)
   }, [])
+
+  // Phase 17.5.1: RfpCreationModal Submit. Builds the RFP via makeRfp
+  // (asset.id → assetId, activeRole → owner/ownerDot; id seeded with a name
+  // slug + timestamp for uniqueness) and adds it to the v22CreatedRfps Map.
+  // The Directory view-builder picks it up via mergeCreatedRfps so it
+  // appears in the creating actor's own cluster. Post-creation pan/zoom +
+  // NEW badge are Phase 17.5.2.
+  const handleRfpCreationSubmit = useCallback((payload) => {
+    if (!v22RfpCreationContext?.asset || !activeRole) return
+    const slug = (payload.name || 'rfp').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
+    const newRfp = makeRfp({
+      id: makeArtifactId('rfp', `${activeRole.party.toLowerCase()}-${slug}-${Date.now()}`),
+      owner: activeRole.party,
+      ownerDot: activeRole.partyDot,
+      name: payload.name.trim(),
+      description: payload.description.trim(),
+      assetId: v22RfpCreationContext.asset.id,
+      requirementsSetIds: payload.requirementsSetIds,
+      status: 'open',
+      createdDate: new Date().toISOString(),
+    })
+    setV22CreatedRfps((prev) => {
+      const next = new Map(prev)
+      next.set(newRfp.id, newRfp)
+      return next
+    })
+    setV22RfpCreationOpen(false)
+    setV22RfpCreationContext(null)
+  }, [v22RfpCreationContext, activeRole])
 
   // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
   // on a SolicitationCard. Phase 17.2.1.1 collapses the prior two-modal
@@ -3944,6 +3984,35 @@ export default function V2App() {
   const visiblePublishedSets = useMemo(() => {
     return publishedRequirementSets.filter(s => s._publishedByRoleId !== roleId)
   }, [publishedRequirementSets, roleId])
+
+  // Phase 17.5.1: shared Requirements-Set rows for the multi-select scrollbox
+  // in both CombinedRequestModal and RfpCreationModal. Published RSes
+  // (network-wide) first — each carries isPublished + ownerParty so the row
+  // renders a globe icon + "Published by {owner}" line — then the active
+  // actor's own (non-published) RSes, deduped by id (own wins so own-private
+  // RSes can never disappear if also published). Extracted from the
+  // CombinedRequestModal mount's inline IIFE so both modals share one source.
+  const v22AvailableRequirementsSetRows = useMemo(() => {
+    const rows = []
+    const seen = new Set()
+    for (const rs of (publishedRequirementSets || [])) {
+      if (seen.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push({
+        id: rs.id, name: rs.name, version: rs.version ?? 1,
+        isPublished: true, ownerParty: rs._publishedBy || null,
+      })
+    }
+    for (const rs of (requirementSets || [])) {
+      if (seen.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push({
+        id: rs.id, name: rs.name, version: rs.version ?? 1,
+        isPublished: false, ownerParty: null,
+      })
+    }
+    return rows
+  }, [publishedRequirementSets, requirementSets])
 
   // PEP templates — per-role, defaults from demo data
   const pepTemplates = useMemo(() => {
@@ -6195,6 +6264,11 @@ export default function V2App() {
             // their owner (dashed treatment); non-owners see them
             // filtered out of `otherRfps` / `cluster.rfps`.
             v22ClosedRfpIds={v22ClosedRfpIds}
+            // Phase 17.5.1: session-state user-created RFPs threaded into the
+            // per-role view builder. They appear in the creating actor's own
+            // Directory cluster (mergeCreatedRfps overlays them on the shared
+            // artifact set before the per-role filter runs).
+            v22CreatedRfps={v22CreatedRfps}
             // Phase 11.8 #44: route the circular wipe through the screen-space
             // origin captured when the Radiant Network actor node was
             // double-clicked. Null falls back to the chrome globe-button corner.
@@ -6761,39 +6835,11 @@ export default function V2App() {
               || v22Data?.nodes.find(n => n.v22Type === 'ASSET' && n.owner === activeRole.party)
               || null
             }
-            availableRequirementsSets={(() => {
-              // Phase 17.2.1.1: scrollbox lists ALL published Requirements
-              // Sets (network-wide) so RFP pre-selection works — `rfp.requirementsSetIds`
-              // can reference any actor's published RS. The active actor's
-              // own (non-published) RSes are appended below so they remain
-              // selectable from this entry point. Dedupe by id (own wins so
-              // own-private RSes can never disappear if they're also published).
-              const rows = []
-              const seen = new Set()
-              for (const rs of (publishedRequirementSets || [])) {
-                if (seen.has(rs.id)) continue
-                seen.add(rs.id)
-                rows.push({
-                  id: rs.id,
-                  name: rs.name,
-                  version: rs.version ?? 1,
-                  isPublished: true,
-                  ownerParty: rs._publishedBy || null,
-                })
-              }
-              for (const rs of (requirementSets || [])) {
-                if (seen.has(rs.id)) continue
-                seen.add(rs.id)
-                rows.push({
-                  id: rs.id,
-                  name: rs.name,
-                  version: rs.version ?? 1,
-                  isPublished: false,
-                  ownerParty: null,
-                })
-              }
-              return rows
-            })()}
+            // Phase 17.5.1: shared RS rows (extracted to the
+            // v22AvailableRequirementsSetRows useMemo; previously an inline
+            // IIFE here). Same output — published RSes network-wide first
+            // with globe + "Published by", own RSes below, deduped by id.
+            availableRequirementsSets={v22AvailableRequirementsSetRows}
             resolveClaimByPin={(pin) => resolveClaimByPinInShared(pin, v22Provisionals)}
             // Phase 11D #134: pass the set of Claim ids already on the active
             // actor's canvas. The modal flags PINs that resolve to one of
@@ -6825,6 +6871,24 @@ export default function V2App() {
                   ? [v22AIShopperResult.suggestedRequirementsSetId]
                   : []
             }
+          />
+        )}
+
+        {/* Phase 17.5.1 — Create RFP flow. Opens from the Asset card action
+            bar / Detail Panel footer "Create RFP" button (entry points
+            shipped in 17.5). Two steps (Form → Review); Submit builds the
+            RFP via makeRfp and adds it to v22CreatedRfps, surfacing it in
+            the active actor's own Directory cluster. */}
+        {v22RfpCreationOpen && v22RfpCreationContext?.asset && (
+          <RfpCreationModal
+            asset={v22RfpCreationContext.asset}
+            activeRole={activeRole}
+            availableRequirementsSets={v22AvailableRequirementsSetRows}
+            onSubmit={handleRfpCreationSubmit}
+            onClose={() => {
+              setV22RfpCreationOpen(false)
+              setV22RfpCreationContext(null)
+            }}
           />
         )}
 
@@ -8664,7 +8728,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.0.4 &middot; Changelog
+          v0.17.5.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8711,6 +8775,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.1', date: '2026-05-20', label: 'Phase 17.5.1', items: [
+                  'Click "Create RFP" on any of your Asset cards (right-side action bar or Detail Panel footer) to publish a new Request for Proposals to the Radiant Network.',
+                  'Two-step modal: fill in the name + description + requirements, then review and submit.',
+                  'Newly created RFPs appear in your own Directory cluster alongside your existing RFPs.',
+                  'Post-creation pan/zoom + "NEW" badge arrive in the next phase.',
+                ]},
                 { version: '0.17.5.0.4', date: '2026-05-20', label: 'Phase 17.5.0.4', items: [
                   'Other parties\' Claims and Assets now only appear on your network graph when you have an Evaluation Agreement backing the relationship (or through the established "share evaluation proof forward" pattern). Umbrella disclosures from the Directory layer no longer leak artifacts onto the parent canvas.',
                   'Catalog Claims (ChipCo + MicroCo) now have proper Asset anchors — no more floating Claim nodes without origin Assets.',
