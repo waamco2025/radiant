@@ -2673,6 +2673,23 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.0.4 completion notes (2026-05-20) — Disclosure boundary cleanup (umbrella DA pull-in + catalog Asset backfill + Library polish)
+
+Three bundled demo-prep fixes.
+
+**Diff (high-level).**
+
+- `src/v2/v2_2Data.js` — **Part 1:** new `isFullyAnchoredDa(da)` predicate in `buildViewForActor()` (declared right after `pairedDaIds`): true iff `pairedDaIds.has(da.id)` (EA-paired) OR `da.subject.kind` is `'poe'`/`'evalResult'` OR (`subject.kind === 'claim'` && `type === 'proofonly'` && `scope.poeIds.length > 0`). Inserted `if (!isFullyAnchoredDa(da)) continue` as the first post-`_revokedMeta` check in the proof-only Claim pull-in loop, and after the `_revokedMeta` check in the grantor-side `granteeAssetId` Asset pull-in loop. **Part 2:** 17 new `makeAsset` stub Assets (12 owned by Dave, 5 by Alice), populated `referencedAssetIds: [<assetId>]` on the matching 12 ChipCo catalog + 5 MicroCo umbrella-seed Claims, added the new Assets to `daveOwnAssets`/`aliceOwnAssets` and the top-level `assets` array. (No new DA-construction code — the existing `claimRefEdges` loop emits the `da-ref-` DAs.)
+- `src/components/modals/LibraryModal.jsx` — **Part 3:** Published Requirements empty state wrapped in a column div with a 40px wire-globe SVG (circle + ellipse + equator line, stroke `var(--text-dim)`, opacity 0.3, marginBottom 16) above the explanatory copy, matching the Parsing Templates / Requirements Sets / Badges empty states.
+- `src/v2/V2App.jsx` — footer constant → v0.17.5.0.4; Changelog modal entry prepended.
+- Four docs (this entry + architecture-spec §6.1/§8 + polish-backlog Update Log + CLAUDE.md current-state + Changelog modal).
+
+**Deviations.** None of substance. The brief named the view function `buildV22View()`; the actual export is `buildViewForActor()` (cosmetic name difference, predicate placed as specified). For Alice's 5 new Assets the brief said "same defaults" as Dave's; used `sha256:microco-{slug}` hashes (parallel to the `sha256:chipco-{slug}` pattern) for consistency with the existing descriptive-hash convention.
+
+**Runtime verification.** Build clean (`npm run build`, 0 errors). Data-layer probe across all four role views: **leaks fixed** — Bob's `claims` no longer include `claim-chipco-flashmem`/`claim-chipco-adcdac`/`claim-microco-thermal-pad`; Alice's no longer include `claim-chipco-adcdac`; Dave's `pulledInAssetIds` is empty (no `bAvionics`=`asset-u6ikou6a` / `cAuditWorkspace`=`asset-w4wqaceg`). **Regressions clear** — Bob's `pulledInClaimIds` = `[claim-prm-assembly, claim-vreg-ic]`; Carol pulls `cPrm`+`cEmi`; Alice's `pulledInAssetIds` = `[asset-u6ikou6a (bAvionics), asset-w4wqaceg (cAuditWorkspace), asset-chipco-prm-ic-datasheet]`. **Phase 11D.3 carveout preserved** — Dave's `pulledInClaimIds` = `[claim-prm-assembly]`, `proofsOfEvaluation` = `[poe-iwcikmag]`, `evaluationResults` = `[eval-6mkamg42]`. **Backfill** — all 17 catalog Claims carry exactly 1 `referencedAssetId`, each resolving to an Asset present on the owner's view; **no new duplicate DA ids** (the 4 pre-existing benign ChipCo `da-ref`/`da-parse` dupes are unchanged and don't touch the new assets). **Library globe** — dev preview: Published Requirements tab right-panel empty state renders the 40px globe SVG (opacity 0.3) above the copy (screenshot). Console clean — only the documented pre-existing DirectoryLayer `packClusterDense` overflow warnings; no duplicate-DA-id / React-key warnings. Note: `bAvionics`'s real id is `asset-u6ikou6a` (hashed via `makeArtifactId`), not `asset-govco-avionics` — a probe written against the literal id gives a false "absent" reading; verified against the resolved ids and via `pulledInAssetIds`.
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.0.3 completion notes (2026-05-20) — Universal neutral footer buttons
 
 Completes the "all footer buttons neutral" policy from Phase 17.5.0.1 across every panel. 17.5.0.2 retained `accent` on judged "primary CTAs"; that judgment was wrong against Andrew's stated preference — universal neutral default is the single rule.

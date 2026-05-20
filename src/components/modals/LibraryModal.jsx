@@ -230,10 +230,20 @@ function PublishedRequirementsPanel({ publishedRequirementSets = [], initialSele
             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: 40, textAlign: 'center',
           }}>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-              {publishedRequirementSets.length === 0
-                ? <>No published requirements visible to your network yet.</>
-                : <>Select a published requirement set to view its details.</>}
+            <div>
+              {/* Phase 17.5.0.4: wire-globe icon for empty-state parity with the
+                  other Library tabs (Parsing Templates, Requirements Sets, Badges).
+                  Same 40px glyph above the explanatory copy. */}
+              <svg width={40} height={40} viewBox="0 0 16 16" fill="none" style={{ opacity: 0.3, marginBottom: 16 }}>
+                <circle cx="8" cy="8" r="6" stroke="var(--text-dim)" strokeWidth="1.2" fill="none" />
+                <ellipse cx="8" cy="8" rx="3" ry="6" stroke="var(--text-dim)" strokeWidth="1" fill="none" />
+                <line x1="2" y1="8" x2="14" y2="8" stroke="var(--text-dim)" strokeWidth="1" />
+              </svg>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                {publishedRequirementSets.length === 0
+                  ? <>No published requirements visible to your network yet.</>
+                  : <>Select a published requirement set to view its details.</>}
+              </div>
             </div>
           </div>
         )}

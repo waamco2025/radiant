@@ -2669,6 +2669,95 @@ function buildV22SharedArtifactsUncached() {
     registrationDate: '2026-02-08T13:41:00Z',
     parseResultIds: ['parse-emi-datasheet'],
   })
+  // Phase 17.5.0.4: stub Asset anchors for the five Phase 17.4 MicroCo
+  // umbrella-seed Claims (closing the Phase 16.0 / 17.4 "no referenced
+  // Assets" deferral). One Asset per Claim; the existing `claimRefEdges`
+  // loop generates the internal `da-ref-` DAs automatically.
+  const aPcbStackQualReport = makeAsset({
+    id: 'asset-microco-pcbstack-qual',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'PCB Stackup MPC-12 Qualification Report',
+    description: 'Qualification report for the twelve-layer controlled-impedance MPC-12 PCB stackup.',
+    file: {
+      uri: 'provenance://evidence/microco-pcbstack-qual',
+      filename: 'microco-pcbstack-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:microco-pcbstack-qual',
+      localPath: '/microco-pcbstack-qual.pdf',
+    },
+    registrationDate: '2026-03-01T09:00:00Z',
+    parseResultIds: [],
+  })
+  const aConnSpec = makeAsset({
+    id: 'asset-microco-connspec',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Connector Interface CIF-44 Spec',
+    description: 'Mechanical and signal-integrity spec for the CIF-44 board-to-board connector interface.',
+    file: {
+      uri: 'provenance://evidence/microco-connspec',
+      filename: 'microco-connspec.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:microco-connspec',
+      localPath: '/microco-connspec.pdf',
+    },
+    registrationDate: '2026-03-02T09:00:00Z',
+    parseResultIds: [],
+  })
+  const aThermalPad = makeAsset({
+    id: 'asset-microco-thermalpad',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Thermal Pad TPM-08 Datasheet',
+    description: 'Datasheet for the high-conductivity TPM-08 thermal interface pad.',
+    file: {
+      uri: 'provenance://evidence/microco-thermalpad',
+      filename: 'microco-thermalpad.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:microco-thermalpad',
+      localPath: '/microco-thermalpad.pdf',
+    },
+    registrationDate: '2026-03-03T09:00:00Z',
+    parseResultIds: [],
+  })
+  const aFwBootloaderSource = makeAsset({
+    id: 'asset-microco-fwbootloader',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Bootloader Firmware FBL-2 Source',
+    description: 'Source package for the FBL-2 secure-boot bootloader firmware.',
+    file: {
+      uri: 'provenance://evidence/microco-fwbootloader',
+      filename: 'microco-fwbootloader.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:microco-fwbootloader',
+      localPath: '/microco-fwbootloader.pdf',
+    },
+    registrationDate: '2026-03-04T09:00:00Z',
+    parseResultIds: [],
+  })
+  const aRfFilterSpec = makeAsset({
+    id: 'asset-microco-rffilter',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'RF Filter RFF-900 Spec',
+    description: 'Insertion-loss and rejection spec for the RFF-900 cavity RF bandpass filter.',
+    file: {
+      uri: 'provenance://evidence/microco-rffilter',
+      filename: 'microco-rffilter.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:microco-rffilter',
+      localPath: '/microco-rffilter.pdf',
+    },
+    registrationDate: '2026-03-05T09:00:00Z',
+    parseResultIds: [],
+  })
 
   // ── Bob's Assets ─────────────────────────────────────────────────────
   // Avionics Module (the Sentinel-4 anchor) is the original Phase 1 Asset and
@@ -2819,6 +2908,214 @@ function buildV22SharedArtifactsUncached() {
     registrationDate: '2026-02-12T09:18:00Z',
     parseResultIds: [],
   })
+  // Phase 17.5.0.4: stub Asset anchors for the twelve Phase 16.0 ChipCo
+  // catalog-expansion Claims (closing the Phase 16.0 "future phases can give
+  // them real Assets if needed" deferral). One Asset per Claim; the existing
+  // `claimRefEdges` loop generates the internal `da-ref-` DAs automatically.
+  const dOpAmpDatasheet = makeAsset({
+    id: 'asset-chipco-opamp-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Op-Amp ICA-340 Datasheet',
+    description: 'Datasheet for the ICA-340 precision op-amp.',
+    file: {
+      uri: 'provenance://evidence/chipco-opamp-datasheet',
+      filename: 'chipco-opamp-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-opamp-datasheet',
+      localPath: '/chipco-opamp-datasheet.pdf',
+    },
+    registrationDate: '2026-02-19T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dBuckRegQualReport = makeAsset({
+    id: 'asset-chipco-buckreg-qual',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Buck Regulator BCR-110 Qualification Report',
+    description: 'Qualification report for the BCR-110 buck-converter regulator.',
+    file: {
+      uri: 'provenance://evidence/chipco-buckreg-qual',
+      filename: 'chipco-buckreg-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-buckreg-qual',
+      localPath: '/chipco-buckreg-qual.pdf',
+    },
+    registrationDate: '2026-02-20T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dTimingIcDatasheet = makeAsset({
+    id: 'asset-chipco-timingic-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Timing IC TMG-225 Datasheet',
+    description: 'Datasheet for the TMG-225 real-time clock + watchdog timing IC.',
+    file: {
+      uri: 'provenance://evidence/chipco-timingic-datasheet',
+      filename: 'chipco-timingic-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-timingic-datasheet',
+      localPath: '/chipco-timingic-datasheet.pdf',
+    },
+    registrationDate: '2026-02-21T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dLdoRegDatasheet = makeAsset({
+    id: 'asset-chipco-ldoreg-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'LDO Regulator LDO-440 Datasheet',
+    description: 'Datasheet for the radiation-tolerant LDO-440 low-dropout regulator.',
+    file: {
+      uri: 'provenance://evidence/chipco-ldoreg-datasheet',
+      filename: 'chipco-ldoreg-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-ldoreg-datasheet',
+      localPath: '/chipco-ldoreg-datasheet.pdf',
+    },
+    registrationDate: '2026-02-22T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dMixedSigQualReport = makeAsset({
+    id: 'asset-chipco-mixedsig-qual',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Mixed-Signal IC MSI-180 Qualification Report',
+    description: 'Qualification report for the MSI-180 mixed-signal conditioning IC.',
+    file: {
+      uri: 'provenance://evidence/chipco-mixedsig-qual',
+      filename: 'chipco-mixedsig-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-mixedsig-qual',
+      localPath: '/chipco-mixedsig-qual.pdf',
+    },
+    registrationDate: '2026-02-23T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dBandgapDatasheet = makeAsset({
+    id: 'asset-chipco-bandgap-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Bandgap Reference BGR-095 Datasheet',
+    description: 'Datasheet for the BGR-095 precision bandgap voltage reference.',
+    file: {
+      uri: 'provenance://evidence/chipco-bandgap-datasheet',
+      filename: 'chipco-bandgap-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-bandgap-datasheet',
+      localPath: '/chipco-bandgap-datasheet.pdf',
+    },
+    registrationDate: '2026-02-24T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dFlashMemQualReport = makeAsset({
+    id: 'asset-chipco-flashmem-qual',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Flash Memory FMM-512 Qualification Report',
+    description: 'Qualification report for the radiation-hardened FMM-512 flash memory.',
+    file: {
+      uri: 'provenance://evidence/chipco-flashmem-qual',
+      filename: 'chipco-flashmem-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-flashmem-qual',
+      localPath: '/chipco-flashmem-qual.pdf',
+    },
+    registrationDate: '2026-02-25T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dSramCtlQualReport = makeAsset({
+    id: 'asset-chipco-sramctl-qual',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'SRAM Controller SCM-1024 Qualification Report',
+    description: 'Qualification report for the SCM-1024 high-density SRAM controller with EDAC.',
+    file: {
+      uri: 'provenance://evidence/chipco-sramctl-qual',
+      filename: 'chipco-sramctl-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-sramctl-qual',
+      localPath: '/chipco-sramctl-qual.pdf',
+    },
+    registrationDate: '2026-02-26T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dAdcDacDatasheet = makeAsset({
+    id: 'asset-chipco-adcdac-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'ADC/DAC Combo ADC-820 Datasheet',
+    description: 'Datasheet for the ADC-820 12-bit ADC/DAC combo with integrated reference.',
+    file: {
+      uri: 'provenance://evidence/chipco-adcdac-datasheet',
+      filename: 'chipco-adcdac-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-adcdac-datasheet',
+      localPath: '/chipco-adcdac-datasheet.pdf',
+    },
+    registrationDate: '2026-02-27T09:00:00Z',
+    parseResultIds: [],
+  })
+  const dMpuQualReport = makeAsset({
+    id: 'asset-chipco-mpu-qual',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'Microcontroller MCU-440 Qualification Report',
+    description: 'Qualification report for the MCU-440 microcontroller.',
+    file: {
+      uri: 'provenance://evidence/chipco-mpu-qual',
+      filename: 'chipco-mpu-qual.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-mpu-qual',
+      localPath: '/chipco-mpu-qual.pdf',
+    },
+    registrationDate: '2026-02-25T11:00:00Z',
+    parseResultIds: [],
+  })
+  const dSerdesDatasheet = makeAsset({
+    id: 'asset-chipco-serdes-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'SerDes Interface SDX-650 Datasheet',
+    description: 'Datasheet for the SDX-650 high-speed SerDes interface.',
+    file: {
+      uri: 'provenance://evidence/chipco-serdes-datasheet',
+      filename: 'chipco-serdes-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-serdes-datasheet',
+      localPath: '/chipco-serdes-datasheet.pdf',
+    },
+    registrationDate: '2026-02-26T11:00:00Z',
+    parseResultIds: [],
+  })
+  const dPmicDatasheet = makeAsset({
+    id: 'asset-chipco-pmic-datasheet',
+    owner: dave.party,
+    ownerDot: dave.partyDot,
+    name: 'PMIC-330 Datasheet',
+    description: 'Datasheet for the PMIC-330 multi-rail system power management IC.',
+    file: {
+      uri: 'provenance://evidence/chipco-pmic-datasheet',
+      filename: 'chipco-pmic-datasheet.pdf',
+      size: 1572864,
+      mimeType: 'application/pdf',
+      hash: 'sha256:chipco-pmic-datasheet',
+      localPath: '/chipco-pmic-datasheet.pdf',
+    },
+    registrationDate: '2026-02-27T11:00:00Z',
+    parseResultIds: [],
+  })
 
   const assets = [
     aPrmDatasheet,
@@ -2835,6 +3132,25 @@ function buildV22SharedArtifactsUncached() {
     dPrmIcDatasheet,
     dPrmIcTestReport,
     dVrefDatasheet,
+    // Phase 17.5.0.4: stub Asset anchors for the 12 ChipCo catalog Claims
+    // (Phase 16.0) + 5 MicroCo umbrella-seed Claims (Phase 17.4).
+    dOpAmpDatasheet,
+    dBuckRegQualReport,
+    dTimingIcDatasheet,
+    dLdoRegDatasheet,
+    dMixedSigQualReport,
+    dBandgapDatasheet,
+    dFlashMemQualReport,
+    dSramCtlQualReport,
+    dAdcDacDatasheet,
+    dMpuQualReport,
+    dSerdesDatasheet,
+    dPmicDatasheet,
+    aPcbStackQualReport,
+    aConnSpec,
+    aThermalPad,
+    aFwBootloaderSource,
+    aRfFilterSpec,
     // Phase 16.2: 1 stub Asset per mock-supplier Claim (157 total).
     ...mockAssets,
     // Phase 16.2.6: 3,328 additional stub Assets from the 35 new mock actors.
@@ -3028,7 +3344,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Op-Amp ICA-340 Linearity Spec',
     description: 'Precision op-amp ICA-340 linearity and offset spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dOpAmpDatasheet.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-20T09:00:00Z' },
     ],
@@ -3041,7 +3357,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Buck Regulator BCR-110 Compliance',
     description: 'Buck-converter regulator BCR-110 qualified to MIL-PRF-55681 v2.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dBuckRegQualReport.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-21T09:00:00Z' },
     ],
@@ -3054,7 +3370,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Timing IC TMG-225 Datasheet',
     description: 'Real-time clock + watchdog timing IC TMG-225.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dTimingIcDatasheet.id],
     createdDate: '2026-02-22T09:00:00Z',
     amendments: [],
   })
@@ -3064,7 +3380,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'LDO Regulator LDO-440 Spec',
     description: 'Low-dropout regulator LDO-440 — radiation-tolerant variant.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dLdoRegDatasheet.id],
     createdDate: '2026-02-23T09:00:00Z',
     amendments: [],
   })
@@ -3074,7 +3390,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Mixed-Signal IC MSI-180 Compliance',
     description: 'Mixed-signal MSI-180 conditioning IC qualified to MIL-PRF-55681 v1.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dMixedSigQualReport.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-mil-prf-55681-v1', addedDate: '2026-02-24T09:00:00Z' },
     ],
@@ -3087,7 +3403,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Bandgap Reference BGR-095 Spec',
     description: 'Precision bandgap voltage reference BGR-095.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dBandgapDatasheet.id],
     createdDate: '2026-02-25T09:00:00Z',
     amendments: [],
   })
@@ -3097,7 +3413,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Flash Memory FMM-512 Qualification',
     description: 'Radiation-hardened flash memory FMM-512 qualification spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dFlashMemQualReport.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-26T09:00:00Z' },
     ],
@@ -3110,7 +3426,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'SRAM Controller SCM-1024 Qualification',
     description: 'High-density SRAM controller SCM-1024 with EDAC.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dSramCtlQualReport.id],
     createdDate: '2026-02-27T09:00:00Z',
     amendments: [],
   })
@@ -3120,7 +3436,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'ADC/DAC Combo ADC-820 Spec',
     description: '12-bit ADC/DAC combo ADC-820 with integrated reference.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dAdcDacDatasheet.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-28T09:00:00Z' },
     ],
@@ -3133,7 +3449,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Microcontroller MCU-440 Compliance',
     description: 'Microcontroller MCU-440 qualified to MIL-PRF-55681 v2.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dMpuQualReport.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-02-26T11:00:00Z' },
     ],
@@ -3146,7 +3462,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'SerDes Interface SDX-650 Spec',
     description: 'High-speed SerDes interface SDX-650 datasheet + jitter spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dSerdesDatasheet.id],
     createdDate: '2026-02-27T11:00:00Z',
     amendments: [],
   })
@@ -3156,7 +3472,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: dave.partyDot,
     name: 'Power Management IC PMIC-330 Spec',
     description: 'Multi-rail PMIC-330 system-level power management spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [dPmicDatasheet.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-02-28T11:00:00Z' },
     ],
@@ -3178,7 +3494,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: alice.partyDot,
     name: 'PCB Stackup MPC-12 Qualification',
     description: 'Twelve-layer controlled-impedance PCB stackup MPC-12 qualification report.',
-    referencedAssetIds: [],
+    referencedAssetIds: [aPcbStackQualReport.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-03-02T09:00:00Z' },
     ],
@@ -3191,7 +3507,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: alice.partyDot,
     name: 'Connector Interface CIF-44 Spec',
     description: 'Board-to-board connector interface CIF-44 mechanical + signal-integrity spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [aConnSpec.id],
     createdDate: '2026-03-03T09:00:00Z',
     amendments: [],
   })
@@ -3201,7 +3517,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: alice.partyDot,
     name: 'Thermal Pad TPM-08 Datasheet',
     description: 'High-conductivity thermal interface pad TPM-08 datasheet.',
-    referencedAssetIds: [],
+    referencedAssetIds: [aThermalPad.id],
     createdDate: '2026-03-04T09:00:00Z',
     amendments: [],
   })
@@ -3211,7 +3527,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: alice.partyDot,
     name: 'Bootloader Firmware FBL-2 Compliance',
     description: 'Secure-boot bootloader firmware FBL-2 compliance attestation.',
-    referencedAssetIds: [],
+    referencedAssetIds: [aFwBootloaderSource.id],
     referencedRequirementsSets: [
       { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-03-05T09:00:00Z' },
     ],
@@ -3224,7 +3540,7 @@ function buildV22SharedArtifactsUncached() {
     ownerDot: alice.partyDot,
     name: 'RF Filter RFF-900 Spec',
     description: 'Cavity RF bandpass filter RFF-900 insertion-loss + rejection spec.',
-    referencedAssetIds: [],
+    referencedAssetIds: [aRfFilterSpec.id],
     createdDate: '2026-03-06T09:00:00Z',
     amendments: [],
   })
@@ -3256,6 +3572,12 @@ function buildV22SharedArtifactsUncached() {
     aVregDatasheet,
     aVregTestReport,    // Phase 16.2.1: ownership DA restored; demo prereq attaches Asset to VReg Claim via amendment later.
     aEmiDatasheet,
+    // Phase 17.5.0.4: stub Asset anchors for the 5 MicroCo umbrella-seed Claims.
+    aPcbStackQualReport,
+    aConnSpec,
+    aThermalPad,
+    aFwBootloaderSource,
+    aRfFilterSpec,
   ].map((a) =>
     makeInternalDisclosureAgreement({
       id: `da-own-${a.id}`,
@@ -3284,7 +3606,13 @@ function buildV22SharedArtifactsUncached() {
     }),
   )
   // Phase 11A: ChipCo's ownership DAs (Assets + Claims + Parse Result).
-  const daveOwnAssets = [dPrmIcDatasheet, dPrmIcTestReport, dVrefDatasheet].map((a) =>
+  // Phase 17.5.0.4: + the 12 ChipCo catalog-Claim stub Asset anchors.
+  const daveOwnAssets = [
+    dPrmIcDatasheet, dPrmIcTestReport, dVrefDatasheet,
+    dOpAmpDatasheet, dBuckRegQualReport, dTimingIcDatasheet, dLdoRegDatasheet,
+    dMixedSigQualReport, dBandgapDatasheet, dFlashMemQualReport, dSramCtlQualReport,
+    dAdcDacDatasheet, dMpuQualReport, dSerdesDatasheet, dPmicDatasheet,
+  ].map((a) =>
     makeInternalDisclosureAgreement({
       id: `da-own-${a.id}`,
       owner: dave.party,
@@ -4564,6 +4892,26 @@ function buildViewForActor(actor, shared) {
   const pairedDaIds = new Set(
     evaluationAgreements.map((ea) => ea.disclosureAgreementId).filter(Boolean),
   )
+  // Phase 17.5.0.4: a DA is "fully anchored" when its relationship has crossed
+  // the threshold from directory-visibility into active disclosure. Umbrella
+  // DAs (Phase 16.0 / 17.4 catalog visibility) fail this predicate — they grant
+  // Directory-layer visibility only and must not pull artifacts onto the
+  // parent canvas.
+  //
+  // Anchoring criteria (any one is sufficient):
+  //   1. Paired with an EA via disclosureAgreementId.
+  //   2. Subject is a PoE or Eval Result (proof disclosures anchored to a
+  //      specific artifact, never umbrella-only by construction).
+  //   3. Phase 11D.3 carveout: proof-only Claim DA with populated
+  //      scope.poeIds — the "share PoE forward" pattern (e.g.,
+  //      daAliceToDavePrmProof).
+  const isFullyAnchoredDa = (da) =>
+    pairedDaIds.has(da.id)
+    || da.subject?.kind === 'poe'
+    || da.subject?.kind === 'evalResult'
+    || (da.subject?.kind === 'claim'
+        && da.type === 'proofonly'
+        && (da.scope?.poeIds?.length || 0) > 0)
   const pulledInClaimIds = new Set()
   for (const ea of evaluationAgreements) {
     if (ea.grantee.party !== party) continue // only pull in as grantee
@@ -4574,6 +4922,7 @@ function buildViewForActor(actor, shared) {
   // type whose payload is the chosen Eval Results, anchored to the Claim.
   for (const da of disclosureAgreements) {
     if (da._revokedMeta) continue
+    if (!isFullyAnchoredDa(da)) continue
     if (da.subject?.kind !== 'claim') continue
     if (da.type !== 'proofonly') continue
     if (da.grantee.party !== party) continue
@@ -4679,6 +5028,11 @@ function buildViewForActor(actor, shared) {
   // during the provisional state — no counterparty Asset is pulled in. After
   // acceptance, the DA's type flips to full/selective/proofonly and the
   // grantee-side anchor pulls in normally with a reveal animation.
+  // Phase 17.5.0.4 narrowing: this rule fires only for fully-anchored DAs
+  // (EA-paired, PoE/Eval Result subject, or Phase 11D.3 proof-only Claim DA
+  // with poeIds). Umbrella DAs (Phase 16.0 / 17.4 catalog visibility) carry a
+  // `granteeAssetId` for the warm-path EA-request pre-fill but do not trigger
+  // anchor pull-in until the relationship crosses into active disclosure.
   const pulledInAssetIds = new Set()
   for (const da of disclosureAgreements) {
     if (da.grantor.party !== party) continue
@@ -4689,6 +5043,7 @@ function buildViewForActor(actor, shared) {
     // Phase 9D: revoked DAs no longer pull the counterparty anchor onto the
     // grantor's canvas — the disclosure relationship is terminated.
     if (da._revokedMeta) continue
+    if (!isFullyAnchoredDa(da)) continue
     pulledInAssetIds.add(da.granteeAssetId)
   }
   const pulledInAssets = shared.assets.filter(
