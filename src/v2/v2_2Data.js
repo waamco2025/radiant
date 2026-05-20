@@ -3331,16 +3331,29 @@ function buildV22SharedArtifactsUncached() {
   })
 
   // Actor → each of their Claims (Full, implicit). Edge: Actor ↔ Claim.
-  const aliceOwnClaims = claims.map((c) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${c.id}`,
-      owner: alice.party,
-      ownerDot: alice.partyDot,
-      subject: { kind: 'claim', id: c.id },
-      scope: {},
-      terms: { createdDate: c.createdDate },
-    }),
-  )
+  // Phase 17.4.5: filter to Alice's OWN claims. The primary `claims` array
+  // holds claims from multiple parties — Alice's (cPrm/cVreg/cEmi + the five
+  // Phase 17.4 MicroCo claims) AND Dave/ChipCo's 14 claims. Mapping the whole
+  // array with a hardcoded `owner: alice.party` minted spurious MicroCo-owned
+  // internal ownership DAs over ChipCo's claims, colliding with
+  // `daveOwnClaims`' identical `da-own-${c.id}` ids. The MicroCo/MicroCo
+  // duplicate then leaked an "Internal" Full Disclosure row into the Directory
+  // Claim Detail Panel whenever Alice viewed a ChipCo umbrella Claim (the
+  // V2App party-presence filter admits it because Alice IS both parties of the
+  // internal DA). Restricting to claims Alice actually owns keeps each
+  // ownership DA's party aligned with the claim's owner.
+  const aliceOwnClaims = claims
+    .filter((c) => c.owner === alice.party)
+    .map((c) =>
+      makeInternalDisclosureAgreement({
+        id: `da-own-${c.id}`,
+        owner: alice.party,
+        ownerDot: alice.partyDot,
+        subject: { kind: 'claim', id: c.id },
+        scope: {},
+        terms: { createdDate: c.createdDate },
+      }),
+    )
 
   // Claim → each referenced Asset (Full, implicit) — one DA per (claim, asset) pair.
   // subject is the Claim; scope.assetIds names the referenced Asset. Edge: Claim ↔ Asset.

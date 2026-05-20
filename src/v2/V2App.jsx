@@ -8635,7 +8635,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4.4 &middot; Changelog
+          v0.17.4.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8682,6 +8682,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4.5', date: '2026-05-20', label: 'Phase 17.4.5', items: [
+                  'Internal "ownership" DAs no longer leak into the Directory Claim Detail Panel for non-owner viewers — Alice viewing a ChipCo Claim now sees only her umbrella DA + cross-party EAs, not ChipCo\'s internal Full Disclosure marker.',
+                  'Root cause was a seed-data bug: Alice\'s ownership-DA loop iterated the full multi-party Claim array and minted spurious MicroCo-owned internal DAs over ChipCo\'s Claims (with colliding ids). Owner-side behavior is unchanged — Dave still sees the Internal ownership DA on his own Claims.',
+                  'Footer rolls forward to v0.17.4.5.',
+                ]},
                 { version: '0.17.4.4', date: '2026-05-20', label: 'Phase 17.4.4', items: [
                   'Grantee-side Revoke now works from the Directory umbrella-Claim Detail Panel (confirmation modal + cascade + automatic perimeter reshape on revoke).',
                   'Umbrella-only Claims disappear from the Directory cluster after revoke (no public DA means no remaining visibility path).',

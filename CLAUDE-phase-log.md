@@ -2673,6 +2673,29 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.5 completion notes (2026-05-20) — Internal "ownership" DA leak on Directory Claim panel
+
+Alice (MicroCo) viewing a ChipCo Claim's Detail Panel on the Directory layer saw ChipCo's *internal* ownership DA ("Full Disclosure — Internal — Never expires") next to her legitimate umbrella DA. Internal ownership DAs should be visible only to the Claim's owner.
+
+**Diagnosis — none of the brief's hypothesized scenarios (A/B/C/D); it was a seed-data bug.** The investigation ruled out the panel and the V2App filter in turn:
+
+- The V22ClaimPanel's `AgreementsSection` (V22NodeDetailPanel.jsx ~line 1332 + the component at ~2961) renders the DA list **strictly from the `disclosureAgreements` prop** — no synthetic-node fallback (Scenario A), no separate ownership prop (Scenario B), no joined list (Scenario C). So the leak had to be in what the prop contained.
+- The V2App Directory mount filter (V2App.jsx ~line 6424) is **correct**: it requires `d.subject.kind === 'claim' && d.subject.id === claim.id && … && (d.grantee.party === active || d.grantor.party === active)`. Not Scenario D in the sense of a broken filter.
+- A data probe on the *prop output* revealed the truth: for `claim-chipco-flashmem` there were **two** DAs with the same id `da-own-claim-chipco-flashmem` — the legit `ChipCo→ChipCo` ownership DA **plus a spurious `MicroCo→MicroCo` internal DA**. The latter passes the party-presence filter because Alice (MicroCo) is *both* parties of the internal DA. (Critically, the brief's proposed rule — "internal DA where the active actor is *neither* party" — would NOT catch this leak, since Alice is a party.)
+
+**Root cause.** In `v2_2Data.js`, `const aliceOwnClaims = claims.map((c) => makeInternalDisclosureAgreement({ id: \`da-own-${c.id}\`, owner: alice.party, … }))` mapped over the **full primary-Claim array** — which holds Alice's three Claims (cPrm/cVreg/cEmi), the five Phase 17.4 MicroCo Claims, **and Dave/ChipCo's 14 Claims** — while hardcoding `owner: alice.party`. That minted a MicroCo-owned internal ownership DA for every ChipCo Claim, with ids colliding with `daveOwnClaims`'. The latent bug dated to when ChipCo's Claims joined the primary `claims` array (Phase 16.0); it only became *visible* once Phase 17.4 gave the Directory Claim panel its Agreements section. The parallel `claimRefEdges = claims.flatMap(...)` loop was checked and is fine — it uses `owner: claim.owner`, so its (benign) ChipCo `da-ref`/`da-parse` duplicates carry the correct owner and never leak.
+
+**Fix.** Restrict the loop to Alice's own Claims: `claims.filter((c) => c.owner === alice.party).map(...)`. One-line semantic change; the internal-DA model is otherwise untouched. **Rule codified** (architecture-spec §8.2 / §6.4): an internal ownership DA (grantor.party === grantee.party) must only exist for — and be visible to — the Claim's owner; counterparty internals are private.
+
+**Verification.** `npm run build` clean (131 modules). Data-layer probes on the merged shared artifacts: Alice → `claim-chipco-flashmem` prop resolves to only `ChipCo→MicroCo` (umbrella); Bob → only `ChipCo→GovCo`; Dave → still `ChipCo→ChipCo` internal + the two umbrellas (owner-side preserved); Alice's own-claim internal DAs drop 22 → 8 (her 3 + 5 MicroCo, **zero** over non-MicroCo Claims); Dave's 14 ChipCo ownership DAs intact. All four parent-canvas views (`buildAliceView`/`buildBobView`/`buildCarolView`/`buildDaveView` → `buildV22Canvas`) build with no errors. Dev server reload: no console errors. Per the documented Directory raycaster limitation, the dot-click → panel walkthrough across the four roles is the canonical manual verification path; the probe on the exact prop the panel consumes is the structural backstop.
+
+**Known scope boundaries.**
+
+- Four pre-existing benign `da-ref`/`da-parse` ChipCo-internal duplicate ids remain (both copies carry the correct ChipCo owner; never leak). Out of scope for this leak fix; noted for a future seed-tidiness pass.
+- Phase 17.5 (RFP creation flow) is next — fresh chat with a Round 20 handoff doc.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.4 completion notes (2026-05-20) — Revoke wiring on Directory Claim panel + #203 backlog entry
 
 Two small follow-ups closing out the umbrella-disclosure arc: wire the previously-dead Revoke button on the Directory umbrella-Claim Detail Panel, and file a backlog item for a rare edge-tooltip residual.
