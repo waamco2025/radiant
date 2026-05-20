@@ -2673,6 +2673,41 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.2 completion notes (2026-05-20) — Polish wrap fix: collinear perimeter + legend positioning + distance-based active-cluster buffer
+
+Three 17.4.1 items that visual QA showed didn't deliver the intended result. All changes in DirectoryLayer.jsx (+ standard doc updates).
+
+**Diff (high-level).**
+
+- `src/v2/DirectoryLayer.jsx` — (1) new `isCollinear(poly, eps)` + `collinearStadium(points, r)` helpers; `umbrellaOutlinePath`'s 3+ branch routes collinear hulls to the stadium fallback. (2) `DirectoryLegendBar` `bottom: 12 → 40`. (3) removed the area-based `ACTIVE_CLUSTER_BUFFER_DOTS` term; added a post-Lloyd's distance-based seed correction (`ACTIVE_CLUSTER_BUFFER_GRIDS = 8`) before the final Voronoi recompute, with canvas clamping + clamp-short warning.
+- `src/v2/V2App.jsx` — footer + Changelog modal rolled to v0.17.4.2.
+- Standard 5 doc updates.
+
+**Implementation notes.**
+
+- **Collinear hull detection.** `isCollinear` picks poly[0] and the point farthest from it as the baseline line, then checks every point's perpendicular distance is within `eps = DOT_RADIUS / 2`. If the convex hull of the umbrella subset is collinear (all points effectively on one line), `collinearStadium(points, DOT_RADIUS + DOT_GRID / 2)` surrounds each ORIGINAL point with a 24-sample circle and convex-hulls the union → a proper rounded capsule that never degenerates to a line. The non-collinear path is untouched (`offsetPolygonOutward(hull, DOT_GRID / 2)`), so existing 2D perimeters render identically — I did NOT adopt the brief's "optional: always use Minkowski" suggestion, to avoid reshaping non-degenerate perimeters (the brief flagged surfacing if Minkowski changed 2D shapes; keeping both paths sidesteps that entirely).
+- **Legend bottom = 40.** Clears the ~32px global footer with ~8px breathing room.
+- **Distance-based buffer.** `ACTIVE_CLUSTER_BUFFER_GRIDS = 8` → `ACTIVE_CLUSTER_BUFFER_DIST = 8 × DOT_GRID`. After Lloyd's converges, each non-active seed is pushed radially out from the active seed so `D ≥ activeRadius + neighborRadius + ACTIVE_CLUSTER_BUFFER_DIST` (radii = `sqrt(targetArea / π)`). Final Voronoi recomputed AFTER the push. Clamp to the usable-canvas insets; if a push gets clamped short, a `console.warn` names the neighbour party and the partial buffer is accepted. The area-based 17.4.1 term was removed entirely (keeping both would double-count and skew cell sizes).
+
+**Deviations.**
+
+1. **Kept the non-collinear `offsetPolygonOutward` path** rather than switching all cases to Minkowski-with-disk (the brief's optional item). Rationale: avoids reshaping existing non-degenerate perimeters; the collinear fallback only fires for the degenerate case that was actually broken.
+2. **Distance-based buffer pushes from the bottom-center active anchor.** The active seed is pinned at `OWN_CLUSTER_ANCHOR` (~20% up from the bottom). Most clusters fan out upward from there, so they're pushed further up (fine); a cluster directly below the anchor would clamp against the bottom inset (warning logged). This is inherent to the anchor placement, not a new issue.
+3. **Buffer math is an approximation** (circular-radius proxy for irregular Voronoi cells). The visible gap won't be exactly 8 dots in every direction, but it guarantees a substantial separation that the area-based approach couldn't. Tunable via `ACTIVE_CLUSTER_BUFFER_GRIDS`.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Dev server: DirectoryLayer transforms with HTTP 200.
+- Perimeter shape, legend position, and cluster spacing are inherently visual + require canvas interaction — code-verified here; manual mouse walkthrough recommended per the documented Directory raycaster limitation. Possible console warnings: the existing `packClusterDense` overflow warnings (pre-existing) + the new clamp-short buffer warning if any neighbour seed hits the canvas edge (acceptable per the brief).
+
+**Known scope boundaries.**
+
+- Phase 17.5 (RFP creation flow) is next.
+- Parent-layer EA-required-message bug still deferred.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.1 completion notes (2026-05-20) — Polish wrap: perimeter shape fix + Directory legend + active-cluster buffer + active label z
 
 Four QA-driven polish items on the umbrella DA arc, all in DirectoryLayer.jsx (+ standard doc updates).

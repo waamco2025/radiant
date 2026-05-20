@@ -8601,7 +8601,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4.1 &middot; Changelog
+          v0.17.4.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8648,6 +8648,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4.2', date: '2026-05-20', label: 'Phase 17.4.2', items: [
+                  'Phase 17.4.2 — Polish wrap fix: collinear perimeter + legend positioning + distance-based active-cluster buffer. Three 17.4.1 items that visual QA showed didn\'t deliver the intended result.',
+                  'Umbrella perimeter handles collinear subsets. The 17.4.1 inflation halving was correct in principle, but when the umbrella subset\'s relocated cells land in a straight grid row, `convexHull` returns a degenerate near-zero-area polygon and `offsetPolygonOutward` of a line produced a thin rectangle that read as just a line. New collinearity test (perpendicular-distance epsilon = DOT_RADIUS / 2) routes the degenerate case to a Minkowski-sum-with-disk capsule (circle around each point + convex hull — generalizes the 2-dot stadium to N points). Genuinely-2D subsets keep the existing `offsetPolygonOutward` output unchanged.',
+                  'Directory legend bumped above the global app footer (`bottom: 12 → 40`). At 12 the "Connected to AWS S3 · v… · Changelog" footer bar (~32px) covered the bottom-left legend.',
+                  'Active-cluster buffer switched from area-based to distance-based. The 17.4.1 `bufferArea = 4 × DOT_GRID²` only expanded the Voronoi cell radius ~1 dot (and Lloyd\'s redistributes area non-isotropically), so it never delivered visible separation. Replaced by a post-Lloyd\'s seed correction: each neighbour seed is pushed radially outward from the active seed until the active + neighbour cluster edges (radius ≈ sqrt(targetArea / π)) are ≥ 8 DOT_GRID apart, then the final Voronoi is recomputed with the adjusted seeds. Seeds clamp to the usable canvas; clamped-short cases log a warning + accept the partial buffer.',
+                  'Footer rolls forward to v0.17.4.2.',
+                ]},
                 { version: '0.17.4.1', date: '2026-05-20', label: 'Phase 17.4.1', items: [
                   'Phase 17.4.1 — Polish wrap on the umbrella DA arc: perimeter shape fix + Directory legend + active-cluster buffer + active label z-order.',
                   'Umbrella perimeter inflation halved (DOT_GRID → DOT_GRID / 2) across all three branches of umbrellaOutlinePath (1-dot bounding circle, 2-dot stadium, 3+ convex-hull offset). Dots sit one DOT_GRID apart in the matrix, so a half-cell offset lands the perimeter corners at the MIDPOINT between an umbrella dot and an adjacent non-umbrella dot — the prior full-cell (and ~2-cell for the 1-dot case) offset over-extended past adjacent dots and cut through dot positions. Geometry function otherwise unchanged.',

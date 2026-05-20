@@ -745,6 +745,47 @@ function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty, umb
   return sliced.map((c) => ({ x: c.x, y: c.y }))
 }
 
+// Phase 17.4.2 — collinearity test for a convex hull (or any point list).
+// Returns true when every point lies within `eps` perpendicular distance of
+// the line through poly[0] and the point farthest from poly[0]. 0/1/2-point
+// inputs are trivially collinear. Used to detect the degenerate-line case
+// where the umbrella subset's relocated cells land in a straight grid row.
+function isCollinear(poly, eps) {
+  if (!poly || poly.length < 3) return true
+  const a = poly[0]
+  let b = poly[0]
+  let maxD = -Infinity
+  for (const p of poly) {
+    const d = (p[0] - a[0]) * (p[0] - a[0]) + (p[1] - a[1]) * (p[1] - a[1])
+    if (d > maxD) { maxD = d; b = p }
+  }
+  const dx = b[0] - a[0], dy = b[1] - a[1]
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-9) return true  // all points coincident
+  for (const p of poly) {
+    const dist = Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / len
+    if (dist > eps) return false
+  }
+  return true
+}
+
+// Phase 17.4.2 — Minkowski-sum-with-disk capsule for N points. Surrounds
+// each point with a radius-`r` circle, then takes the convex hull over all
+// circle samples — generalizes the 2-dot stadium to any number of (typically
+// collinear) points and always yields a proper 2D rounded shape, never a
+// degenerate line. Used as the collinear fallback in `umbrellaOutlinePath`.
+function collinearStadium(points, r) {
+  const segs = 24
+  const ring = []
+  for (const [px, py] of points) {
+    for (let i = 0; i < segs; i++) {
+      const a = (i / segs) * Math.PI * 2
+      ring.push([px + r * Math.cos(a), py + r * Math.sin(a)])
+    }
+  }
+  return convexHull(ring)
+}
+
 // Build the per-cluster umbrella outline path. Concave-hull would be the
 // preferred shape but the canonical `concaveman` algorithm requires another
 // dep — for the current cluster sizes the convex hull is visually clean.
@@ -785,6 +826,17 @@ function umbrellaOutlinePath(umbrellaDots) {
     return convexHull(ring)
   }
   const hull = convexHull(points)
+  // Phase 17.4.2 — collinear-hull guard. When the umbrella subset's relocated
+  // cells land in a straight grid row (common given grid-anchored cell
+  // positions), `convexHull` returns a degenerate near-zero-area polygon and
+  // `offsetPolygonOutward(lineSegment, …)` produces a thin rectangle that
+  // reads as just a line. Detect collinearity (epsilon = DOT_RADIUS / 2) and
+  // fall back to the Minkowski-sum-with-disk capsule (generalizes the 2-dot
+  // stadium to N collinear points). The genuinely-2D path keeps the existing
+  // `offsetPolygonOutward` output so non-degenerate perimeters are unchanged.
+  if (isCollinear(hull, DOT_RADIUS / 2)) {
+    return collinearStadium(points, DOT_RADIUS + DOT_GRID / 2)
+  }
   return offsetPolygonOutward(hull, DOT_GRID / 2)
 }
 
@@ -832,7 +884,10 @@ function DirectoryLegendBar() {
   return (
     <div style={{
       position: 'absolute',
-      bottom: 12,
+      // Phase 17.4.2: bumped 12 → 40 so the legend clears the global app
+      // footer bar ("Connected to AWS S3 · v… · Changelog", ~32px tall) —
+      // at bottom: 12 the footer covered it.
+      bottom: 40,
       left: 12,
       display: 'flex',
       gap: 12,
@@ -1059,24 +1114,20 @@ function computeLayout(directoryData, viewport) {
   // contribute alongside the LABEL_HOLE_AREA, scaled by the inefficiency
   // factor that absorbs perimeter rounding losses + Lloyd's wobble.
   const RFP_AREA_FACTOR = 1.44
-  // Phase 17.4.1: explicit breathing-room buffer around the active actor's
-  // own cluster (clusterSpecs[0], isOwnCluster). Adds the area of N extra
-  // dots to its target so the Lloyd's tessellation reserves more space for
-  // it — neighbouring mock clusters (e.g. ArrowGuard Defense in the bottom-
-  // center region near the active anchor) were crowding the active cluster.
-  // The freed-vs-claimed area redistributes among the non-active clusters
-  // automatically via the centroidal relaxation. 4 dots is the starting
-  // value; bump if visual inspection shows the active cluster still crowds.
-  const ACTIVE_CLUSTER_BUFFER_DOTS = 4
+  // Phase 17.4.2: the Phase 17.4.1 area-based active-cluster buffer is
+  // removed — `bufferArea = N × DOT_GRID²` only expands the Voronoi cell
+  // radius by ~sqrt(N / π) DOT_GRID (≈ 1 cell for N=4), and Lloyd's
+  // centroidal relaxation redistributes area non-isotropically, so it
+  // never delivered the visible separation Andrew wanted. Replaced by a
+  // distance-based post-Lloyd's seed correction (see below the loop) that
+  // pushes neighbour seeds out to a guaranteed minimum gap. Keeping both
+  // would double-count, so the area term is gone.
   const targetAreas = clusterSpecs.map((spec) => {
     const dotCount = spec.umbrellaItems.length + spec.publicItems.length
     const rfpCount = spec.rfpItems.length
     const dotArea = dotCount * DOT_GRID * DOT_GRID
     const rfpArea = rfpCount * DOT_GRID * DOT_GRID * RFP_AREA_FACTOR
-    const bufferArea = spec.isOwnCluster
-      ? ACTIVE_CLUSTER_BUFFER_DOTS * DOT_GRID * DOT_GRID
-      : 0
-    return (dotArea + rfpArea + LABEL_HOLE_AREA + bufferArea) * BUFFER_OVERHEAD_FACTOR
+    return (dotArea + rfpArea + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
   })
   const targetSum = targetAreas.reduce((s, a) => s + a, 0)
   if (targetSum > usableArea && typeof console !== 'undefined') {
@@ -1122,7 +1173,52 @@ function computeLayout(directoryData, viewport) {
     // eslint-disable-next-line no-console
     console.warn(`[DirectoryLayer] Lloyd's iteration capped at ${LLOYD_MAX_ITER}; max displacement ${lloydMaxDisplacement.toFixed(1)} wu still > ${LLOYD_CONVERGENCE_DELTA}`)
   }
-  // Final Voronoi cells after iteration.
+
+  // ─── Phase 17.4.2: distance-based active-cluster buffer ──────────────
+  // After Lloyd's converges, push every neighbour seed radially outward from
+  // the active seed until the active cluster's edge and the neighbour's edge
+  // are separated by at least ACTIVE_CLUSTER_BUFFER_DIST in world units.
+  // Cluster radius is approximated as sqrt(targetArea / π). Replaces the
+  // (removed) area-based buffer, which couldn't deliver a guaranteed visible
+  // gap because Lloyd's relaxation redistributes area non-isotropically.
+  // Seeds are clamped to the usable canvas; if clamping prevents reaching the
+  // target separation for a neighbour, a console warning is logged and the
+  // partial buffer is accepted (better than spilling off-canvas).
+  const ACTIVE_CLUSTER_BUFFER_GRIDS = 8
+  const ACTIVE_CLUSTER_BUFFER_DIST = ACTIVE_CLUSTER_BUFFER_GRIDS * DOT_GRID
+  const clampX = (x) => Math.max(DOMAIN_INSET_LEFT, Math.min(CANVAS_WIDTH - DOMAIN_INSET_RIGHT, x))
+  const clampY = (y) => Math.max(DOMAIN_INSET_TOP, Math.min(CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM, y))
+  const activeSeedIdx = clusterSpecs.findIndex((s) => s.isOwnCluster)
+  if (activeSeedIdx >= 0) {
+    const activeSeed = seeds[activeSeedIdx]
+    const activeRadius = Math.sqrt(targetAreas[activeSeedIdx] / Math.PI)
+    for (let i = 0; i < seeds.length; i++) {
+      if (i === activeSeedIdx) continue
+      const seed = seeds[i]
+      const dx = seed[0] - activeSeed[0]
+      const dy = seed[1] - activeSeed[1]
+      const D = Math.hypot(dx, dy)
+      if (D < 1e-6) continue  // degenerate (coincident with active); skip
+      const neighborRadius = Math.sqrt(targetAreas[i] / Math.PI)
+      const minD = activeRadius + neighborRadius + ACTIVE_CLUSTER_BUFFER_DIST
+      if (D < minD) {
+        const scale = minD / D
+        const pushedX = activeSeed[0] + dx * scale
+        const pushedY = activeSeed[1] + dy * scale
+        const clampedX = clampX(pushedX)
+        const clampedY = clampY(pushedY)
+        seeds[i] = [clampedX, clampedY]
+        // If clamping kept the seed short of the target separation, warn.
+        if ((Math.abs(clampedX - pushedX) > 1 || Math.abs(clampedY - pushedY) > 1)
+            && typeof console !== 'undefined') {
+          // eslint-disable-next-line no-console
+          console.warn(`[DirectoryLayer] active-cluster buffer constraint not fully satisfied for ${clusterSpecs[i].ownerParty}: clamped at canvas edge`)
+        }
+      }
+    }
+  }
+
+  // Final Voronoi cells after iteration + buffer correction.
   const finalDelaunay = Delaunay.from(seeds)
   const finalVoronoi = finalDelaunay.voronoi([DOMAIN_INSET_LEFT, DOMAIN_INSET_TOP, CANVAS_WIDTH - DOMAIN_INSET_RIGHT, CANVAS_HEIGHT - DOMAIN_INSET_BOTTOM])
 
