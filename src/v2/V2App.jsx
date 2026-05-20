@@ -8601,7 +8601,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4 &middot; Changelog
+          v0.17.4.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8648,6 +8648,14 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4.1', date: '2026-05-20', label: 'Phase 17.4.1', items: [
+                  'Phase 17.4.1 — Polish wrap on the umbrella DA arc: perimeter shape fix + Directory legend + active-cluster buffer + active label z-order.',
+                  'Umbrella perimeter inflation halved (DOT_GRID → DOT_GRID / 2) across all three branches of umbrellaOutlinePath (1-dot bounding circle, 2-dot stadium, 3+ convex-hull offset). Dots sit one DOT_GRID apart in the matrix, so a half-cell offset lands the perimeter corners at the MIDPOINT between an umbrella dot and an adjacent non-umbrella dot — the prior full-cell (and ~2-cell for the 1-dot case) offset over-extended past adjacent dots and cut through dot positions. Geometry function otherwise unchanged.',
+                  'New DirectoryLegendBar (bottom-left, mirrors V2Canvas\'s parent-canvas LegendBar). Four rows: Full Disclosure (indigo dot), Selective Disclosure (amber dot), Proof-Only Disclosure (green dot), Request for Proposals (indigo hollow square — matches the RFP marker). Hover tooltips explain each disclosure type + the RFP marker; rendered inline (no react-dom portal) since the legend sits in a corner.',
+                  '4-dot breathing-room buffer added to the active actor\'s own cluster in the Lloyd\'s target-area computation (`target_area_i` for the isOwnCluster spec gains 4 × DOT_GRID² before the overhead factor). The active cluster (e.g. Bob\'s GovCo) was getting crowded by neighbouring mock clusters (ArrowGuard Defense in the bottom-center region); the buffer reserves extra space and the freed area redistributes among non-active clusters via the centroidal relaxation.',
+                  'Active actor\'s label pillbox z-index bumped to a dedicated Z_ACTIVE_CLUSTER_LABEL = 300 (above the other cluster labels\' 100–~200 dot-count-inverse ranks, below RFP labels at 1100 / zoom controls at 1700 / card overlay / tooltips) so a neighbouring label can never cover it. Non-active labels keep their existing ranking.',
+                  'Footer rolls forward to v0.17.4.1.',
+                ]},
                 { version: '0.17.4', date: '2026-05-19', label: 'Phase 17.4', items: [
                   'Phase 17.4 — Umbrella DA arc: perimeter fix + seed expansion + Directory panel/card parity + perimeter hover. Andrew\'s chosen approach (Option #3 — grouping perimeter, no edges) ratified.',
                   'Umbrella perimeter rendering fixed. Root cause: `packClusterDense` placed the umbrella subset on the innermost cells (sorted by distance from cluster center), which RING the central label hole — so the convex-hull perimeter (offset outward 1 cell) enclosed the hole + actor pillbox ("perimeter wraps the pillbox with no dots inside"). Fix: the packer now relocates the umbrella subset into a coherent edge-blob (anchored at the inner cell furthest from center, growing inward by nearest-neighbor) so the hull is a tight off-center polygon wrapping just the umbrella dots. RFP cells stay outermost; public cells fill the rest. `umbrellaOutlinePath` itself unchanged.',

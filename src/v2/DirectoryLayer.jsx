@@ -252,6 +252,11 @@ function computeLabelFontSize(zoom) {
 // "smaller than the smallest cluster" — they belong to single markers).
 const Z_BASE_CLUSTER_LABEL = 100
 const Z_RFP_LABEL = Z_BASE_CLUSTER_LABEL + 1000   // 1100 — clear of any plausible cluster z-rank
+// Phase 17.4.1: the active actor's own cluster label sits above every
+// other cluster label (which rank 100–~200 by dot-count-inverse) so it's
+// never covered by a neighbouring label. Stays well below the RFP labels
+// (1100), zoom controls (1700), card overlay (1500/1600), and tooltips.
+const Z_ACTIVE_CLUSTER_LABEL = 300
 
 function cssVarToColor(varName, fallback = '#8888ff') {
   if (typeof window === 'undefined') return new THREE.Color(fallback)
@@ -747,9 +752,17 @@ function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty, umb
 function umbrellaOutlinePath(umbrellaDots) {
   if (!umbrellaDots || umbrellaDots.length === 0) return null
   const points = umbrellaDots.map((d) => [d.x, d.y])
+  // Phase 17.4.1 — inflation halved from DOT_GRID to DOT_GRID / 2 across
+  // all three branches. The dot matrix spaces dots one DOT_GRID apart, so
+  // a half-cell offset puts the perimeter corners at the MIDPOINT between
+  // an umbrella dot and an adjacent (non-umbrella) dot — the "halfway
+  // between dots" alignment Andrew wants. The prior full-cell (and ~2-cell
+  // for the 1-dot case) offset over-extended past adjacent non-umbrella
+  // dots, producing visually misaligned corners that cut through dot
+  // positions. `umbrellaOutlinePath` geometry is otherwise unchanged.
   if (points.length === 1) {
     const [cx, cy] = points[0]
-    const r = DOT_GRID + DOT_RADIUS + DOT_GRID  // +1 cell margin
+    const r = DOT_GRID / 2 + DOT_RADIUS  // tight: half-cell beyond the dot edge
     const segs = 24
     const ring = []
     for (let i = 0; i < segs; i++) {
@@ -761,7 +774,7 @@ function umbrellaOutlinePath(umbrellaDots) {
   if (points.length === 2) {
     // Stadium (capsule) approximation via convex-hull of two circles.
     const [a, b] = points
-    const r = DOT_RADIUS + DOT_GRID
+    const r = DOT_RADIUS + DOT_GRID / 2
     const segs = 24
     const ring = []
     for (let i = 0; i < segs; i++) {
@@ -772,7 +785,7 @@ function umbrellaOutlinePath(umbrellaDots) {
     return convexHull(ring)
   }
   const hull = convexHull(points)
-  return offsetPolygonOutward(hull, DOT_GRID)
+  return offsetPolygonOutward(hull, DOT_GRID / 2)
 }
 
 function isHoverNearPillbox(hoverScreen, pillX, pillY) {
@@ -783,6 +796,103 @@ function isHoverNearPillbox(hoverScreen, pillX, pillY) {
   const pL = pillX - PILLBOX_W / 2, pR = pillX + PILLBOX_W / 2
   const pT = pillY - PILLBOX_H / 2, pB = pillY + PILLBOX_H / 2
   return !(dotR_ < pL || dotL > pR || dotB < pT || dotT > pB)
+}
+
+// ─── Phase 17.4.1: Directory legend (bottom-left) ──────────────────────
+// Parallels V2Canvas's LegendBar (which explains edge-color semantics on
+// the parent canvas) — here it explains the Directory's dot-color +
+// RFP-marker semantics. Same visual conventions: absolute bottom-left,
+// color-mixed surface background, mono labels, hover tooltips. Tooltips
+// render inline (absolutely positioned above the hovered row within the
+// legend container) rather than via a react-dom portal — DirectoryLayer
+// doesn't already import createPortal and the legend sits in a corner
+// where an inline tooltip clears the surrounding UI cleanly.
+const DIRECTORY_LEGEND_ITEMS = [
+  {
+    key: 'full', shape: 'dot', color: 'var(--accent-indigo)', label: 'Full Disclosure',
+    tip: 'The asset owner discloses all parsed data fields. Evaluation Agreements can run over all of them.',
+  },
+  {
+    key: 'selective', shape: 'dot', color: 'var(--accent-amber)', label: 'Selective Disclosure',
+    tip: 'The asset owner discloses only a chosen subset of fields. Evaluation Agreements run only over those fields.',
+  },
+  {
+    key: 'proofonly', shape: 'dot', color: 'var(--accent-green)', label: 'Proof-Only Disclosure',
+    tip: 'The asset owner discloses only pass/fail results from existing evaluations. No raw data field access.',
+  },
+  {
+    key: 'rfp', shape: 'square', color: 'var(--accent-indigo)', label: 'Request for Proposals',
+    tip: 'An open posting from a buyer seeking suppliers. Solicit with one of your Claims to respond.',
+  },
+]
+
+function DirectoryLegendBar() {
+  const [tipKey, setTipKey] = useState(null)
+  const tipItem = tipKey ? DIRECTORY_LEGEND_ITEMS.find((it) => it.key === tipKey) : null
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 12,
+      left: 12,
+      display: 'flex',
+      gap: 12,
+      zIndex: 50,
+      pointerEvents: 'auto',
+      padding: '5px 10px',
+      background: 'color-mix(in srgb, var(--bg-surface) 85%, transparent)',
+      borderRadius: 6,
+      border: '1px solid var(--border)',
+    }}>
+      {DIRECTORY_LEGEND_ITEMS.map((it) => (
+        <div
+          key={it.key}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'default', position: 'relative' }}
+          onMouseEnter={() => setTipKey(it.key)}
+          onMouseLeave={() => setTipKey((k) => (k === it.key ? null : k))}
+        >
+          {it.shape === 'dot' ? (
+            <svg width="12" height="12" style={{ display: 'block' }} aria-hidden>
+              <circle cx="6" cy="6" r="5" fill={it.color} />
+            </svg>
+          ) : (
+            <svg width="12" height="12" style={{ display: 'block' }} aria-hidden>
+              <rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke={it.color} strokeWidth="1.5" />
+            </svg>
+          )}
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            color: 'var(--text-tertiary)',
+            letterSpacing: '0.02em',
+          }}>{it.label}</span>
+        </div>
+      ))}
+      {tipItem && (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          bottom: 'calc(100% + 8px)',
+          width: 260,
+          padding: '6px 10px',
+          background: 'var(--bg-surface)',
+          border: `1px solid ${tipItem.color}`,
+          borderRadius: 5,
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-secondary)',
+          lineHeight: 1.4,
+          pointerEvents: 'none',
+          zIndex: 2700,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+        }}>
+          <div style={{ fontWeight: 600, color: tipItem.color, marginBottom: 3, fontSize: 10, letterSpacing: '.04em' }}>
+            {tipItem.label.toUpperCase()}
+          </div>
+          {tipItem.tip}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── Layout: world-coord positions per cluster ─────────────────────────
@@ -949,12 +1059,24 @@ function computeLayout(directoryData, viewport) {
   // contribute alongside the LABEL_HOLE_AREA, scaled by the inefficiency
   // factor that absorbs perimeter rounding losses + Lloyd's wobble.
   const RFP_AREA_FACTOR = 1.44
+  // Phase 17.4.1: explicit breathing-room buffer around the active actor's
+  // own cluster (clusterSpecs[0], isOwnCluster). Adds the area of N extra
+  // dots to its target so the Lloyd's tessellation reserves more space for
+  // it — neighbouring mock clusters (e.g. ArrowGuard Defense in the bottom-
+  // center region near the active anchor) were crowding the active cluster.
+  // The freed-vs-claimed area redistributes among the non-active clusters
+  // automatically via the centroidal relaxation. 4 dots is the starting
+  // value; bump if visual inspection shows the active cluster still crowds.
+  const ACTIVE_CLUSTER_BUFFER_DOTS = 4
   const targetAreas = clusterSpecs.map((spec) => {
     const dotCount = spec.umbrellaItems.length + spec.publicItems.length
     const rfpCount = spec.rfpItems.length
     const dotArea = dotCount * DOT_GRID * DOT_GRID
     const rfpArea = rfpCount * DOT_GRID * DOT_GRID * RFP_AREA_FACTOR
-    return (dotArea + rfpArea + LABEL_HOLE_AREA) * BUFFER_OVERHEAD_FACTOR
+    const bufferArea = spec.isOwnCluster
+      ? ACTIVE_CLUSTER_BUFFER_DOTS * DOT_GRID * DOT_GRID
+      : 0
+    return (dotArea + rfpArea + LABEL_HOLE_AREA + bufferArea) * BUFFER_OVERHEAD_FACTOR
   })
   const targetSum = targetAreas.reduce((s, a) => s + a, 0)
   if (targetSum > usableArea && typeof console !== 'undefined') {
@@ -3383,7 +3505,11 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               faded={faded}
               opacity={labelOp}
               fontPx={labelFontPx}
-              zIndex={clusterZByParty.get(cluster.ownerParty) ?? Z_BASE_CLUSTER_LABEL}
+              // Phase 17.4.1: active actor's own label always renders above
+              // the other cluster labels (whose ranks land in 100–~200) so
+              // a neighbouring label can never cover it. Non-active labels
+              // keep their dot-count-inverse ranking.
+              zIndex={isOwn ? Z_ACTIVE_CLUSTER_LABEL : (clusterZByParty.get(cluster.ownerParty) ?? Z_BASE_CLUSTER_LABEL)}
               isOwn={isOwn}
             />
           )
@@ -3702,6 +3828,11 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       >
         <span>← Back to Network</span>
       </div>
+
+      {/* Phase 17.4.1 — Directory legend (bottom-left). Explains the
+          dot-color disclosure-type semantics + the RFP hollow-square
+          marker. Parallels V2Canvas's parent-canvas LegendBar. */}
+      <DirectoryLegendBar />
     </div>
   )
 })

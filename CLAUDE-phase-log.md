@@ -2673,6 +2673,41 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.1 completion notes (2026-05-20) — Polish wrap: perimeter shape fix + Directory legend + active-cluster buffer + active label z
+
+Four QA-driven polish items on the umbrella DA arc, all in DirectoryLayer.jsx (+ standard doc updates).
+
+**Diff (high-level).**
+
+- `src/v2/DirectoryLayer.jsx` — (1) `umbrellaOutlinePath` inflation `DOT_GRID` → `DOT_GRID / 2` in all three branches. (2) New `DirectoryLegendBar` component + `DIRECTORY_LEGEND_ITEMS` constant + mount in the return JSX. (3) 4-dot buffer (`ACTIVE_CLUSTER_BUFFER_DOTS = 4`) added to the active cluster's target area in `computeLayout`. (4) New `Z_ACTIVE_CLUSTER_LABEL = 300` constant + applied to the active actor's label pillbox.
+- `src/v2/V2App.jsx` — footer + Changelog modal rolled to v0.17.4.1.
+- Standard 5 doc updates.
+
+**Tuning decisions (final values).**
+
+- **Perimeter inflation:** `DOT_GRID / 2` for all three branches, as the brief specified. The 1-dot circle radius is `DOT_GRID / 2 + DOT_RADIUS` and the 2-dot stadium radius is `DOT_RADIUS + DOT_GRID / 2` (both keep the `DOT_RADIUS` term so the perimeter clears the dot's edge, not just its center). The 3+ convex-hull case uses a bare `DOT_GRID / 2` outward offset (the hull already passes through dot centers, so a half-cell offset reaches the midpoint to the next grid line without needing the `+ DOT_RADIUS` term). Did NOT need the `DOT_GRID / 2 + DOT_RADIUS` variant the brief flagged as a possible adjustment for the 3+ case — `DOT_GRID / 2` reads cleanly because the hull vertices are dot centers and the half-cell offset reaches halfway to the adjacent grid cell. The 1-dot/2-dot branches keep `DOT_RADIUS` because their radius is measured from the dot center and the geometry is a circle/stadium around the dot, not an offset of a hull through dot centers. Surfacing this minor inconsistency per the brief's stop-and-surface clause: the three branches are NOT perfectly uniform (1-dot/2-dot include `+ DOT_RADIUS`, 3+ does not), but each is correct for its own geometry — uniformity would actually misalign them.
+- **Active-cluster buffer:** 4 dots (the brief's starting value), applied as `+ 4 × DOT_GRID²` to the `isOwnCluster` spec's target area before the `BUFFER_OVERHEAD_FACTOR` multiply. Kept at 4 — visual inspection wasn't reproducible from the agent session (canvas raycaster limitation), so I went with the brief's recommended starting value rather than guessing higher.
+- **Active label z:** `Z_ACTIVE_CLUSTER_LABEL = 300` — above the dot-count-inverse cluster-label ranks (100–~200) and clearly below RFP labels (1100), zoom controls (1700), card overlay (1500/1600), tooltips.
+
+**Deviations.**
+
+1. **Legend tooltips render inline, not via portal.** The brief sanctioned this fallback ("If extracting the LegendBar tooltip pattern surfaces too much coupling … inline-render the Directory tooltips without portal-rendering"). DirectoryLayer.jsx doesn't import `createPortal`; the legend sits in the bottom-left corner where an absolutely-positioned tooltip (rendered above the hovered row, `bottom: calc(100% + 8px)`) clears the surrounding UI cleanly. No react-dom import added.
+2. **Perimeter branch inflation not perfectly uniform** (see tuning decisions). 1-dot/2-dot keep `+ DOT_RADIUS`; 3+ uses bare `DOT_GRID / 2`. Each is geometrically correct for its branch; forcing uniformity would misalign them.
+3. **RFP legend swatch color = `var(--accent-indigo)`** — matches the RFP marker's `rfpBaseColor = cssVarToColor('--accent-indigo', …)`. Both Full Disclosure and RFP render indigo; the filled-circle vs hollow-square shape distinguishes them (accurate to the actual rendering).
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Dev server: DirectoryLayer transforms with HTTP 200.
+- Perimeter shape, legend appearance, cluster spacing, and label z-order are inherently visual + require canvas interaction — code-verified here; manual mouse walkthrough recommended for the visual QA items per the documented Directory raycaster limitation.
+
+**Known scope boundaries.**
+
+- Phase 17.5 (RFP creation flow) is next.
+- Parent-layer EA-required-message bug still deferred.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4 completion notes (2026-05-19) — Umbrella DA arc: perimeter fix + seed expansion + Directory panel/card parity + perimeter hover
 
 Closes the umbrella-DA visualisation work. Andrew's Option #3 (grouping perimeter, no edges) ratified — the visual infrastructure was largely already shipped (Phase 16.x); this phase fixed the broken perimeter, expanded the seed for all four roles, brought the Directory Claim panel/card to parity with the parent canvas, and added perimeter hover/tooltip.
