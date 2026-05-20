@@ -2673,6 +2673,38 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.3 completion notes (2026-05-20) — Polish wrap fix: Minkowski perimeter + legend z + edge tooltip cleanup
+
+Two 17.4.2 items that visual QA showed still misbehaving, plus a long-standing ghost edge-tooltip bug Andrew surfaced.
+
+**Diff (high-level).**
+
+- `src/v2/DirectoryLayer.jsx` — (1) `umbrellaOutlinePath` 3+ branch replaced the convexHull + isCollinear/offsetPolygonOutward pattern with an unconditional `collinearStadium(points, DOT_RADIUS + DOT_GRID / 2)`. `offsetPolygonOutward` + `isCollinear` marked `void` (retained, no longer called). (2) `DirectoryLegendBar` `zIndex: 50 → 400`.
+- `src/v2/V2App.jsx` — new `clearEdgeUiState()` useCallback (clearHoverState + setEdgeHover(null) + setEdgeMenu(null)); called from the globe-toggle open branch, the node-double-click open path, the RFP-solicitation notification open path, and `handleSwitchRole`. Footer + Changelog modal rolled to v0.17.4.3.
+- Standard 5 doc updates.
+
+**Decisions.**
+
+- **Always-Minkowski (unconditional capsule).** Per the brief — eliminates the threshold-tuning problem entirely. The capsule gives rounded corners for every umbrella subset (collinear, near-collinear, 2D) and never degenerates to a line. The non-collinear `offsetPolygonOutward` path (mitered corners) is gone from `umbrellaOutlinePath`. Did NOT observe any cluster where the old mitered output was preferable — the seeded umbrella subsets are small (3–7 dots) where the rounded capsule reads cleanly. No stop-and-surface trigger fired.
+- **Retained `isCollinear` + `offsetPolygonOutward`** marked `void` (matching the file's existing `void clipPolygonToRect` convention) rather than deleting — the brief left this to discretion; keeping them costs nothing and they're plausibly useful for future perimeter work.
+- **Legend z = 400** — the brief's value. Above the active cluster label (300), comfortably below the next overlay tier (zoom controls 1700).
+- **`clearEdgeUiState` helper** extracted (the brief's optional consolidation) since four call sites now need the identical three-call sequence. Defined as a `useCallback` with empty deps (only touches refs + state setters, all stable).
+
+**Edge-tooltip root cause.** Two independent tooltip-state layers: V2Canvas's internal hover indicator (the small circle) was already cleared via the imperative `clearHoverState` on the chrome + node-double-click open paths. But V2App's `edgeHover` (hover tooltip) and `edgeMenu` (the pinned "SELECT EDGE TO VIEW" box, set by clicking an edge) live outside V2Canvas and were never cleared on Directory open or role change. The pinned `edgeMenu` therefore persisted; `EdgeHoverMenu` only un-renders when `resolveAgreementsForEdge(edgeId, v22View, edges)` returns null (which happens transiently after a role switch because the edgeId doesn't resolve in the new role's edge graph — hence the "disappears on switch, reappears on switch-back" symptom), but the state was never actually dropped. `clearEdgeUiState` now drops all three together at every layer/role transition.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Dev server: DirectoryLayer + V2App both transform with HTTP 200.
+- Perimeter shape, legend z-order, and edge-tooltip clearing are inherently visual + require canvas interaction — code-verified here; manual mouse walkthrough recommended per the documented Directory raycaster limitation.
+
+**Known scope boundaries.**
+
+- Phase 17.5 (RFP creation flow) is next.
+- Parent-layer EA-required-message bug still deferred.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.2 completion notes (2026-05-20) — Polish wrap fix: collinear perimeter + legend positioning + distance-based active-cluster buffer
 
 Three 17.4.1 items that visual QA showed didn't deliver the intended result. All changes in DirectoryLayer.jsx (+ standard doc updates).

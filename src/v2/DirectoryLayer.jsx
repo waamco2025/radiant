@@ -572,6 +572,11 @@ function offsetPolygonOutward(poly, dist) {
   }
   return out
 }
+// Phase 17.4.3: `umbrellaOutlinePath` now uses the Minkowski capsule
+// (collinearStadium) unconditionally for 3+ points, so offsetPolygonOutward
+// is no longer called. Retained (matching the file's `void clipPolygonToRect`
+// convention) in case future perimeter work wants mitered-corner offsets.
+void offsetPolygonOutward
 
 // Clip a polygon to the canvas rectangle (Sutherland–Hodgman). The Voronoi
 // cells from d3-delaunay are already clipped via the bounding box passed
@@ -768,6 +773,11 @@ function isCollinear(poly, eps) {
   }
   return true
 }
+// Phase 17.4.3: `umbrellaOutlinePath` no longer gates on isCollinear (the
+// 3+ branch now always uses the Minkowski capsule). Retained per the brief
+// — still useful if future work needs a collinearity test. Marked unused
+// to match the file's `void clipPolygonToRect` convention.
+void isCollinear
 
 // Phase 17.4.2 — Minkowski-sum-with-disk capsule for N points. Surrounds
 // each point with a radius-`r` circle, then takes the convex hull over all
@@ -825,19 +835,17 @@ function umbrellaOutlinePath(umbrellaDots) {
     }
     return convexHull(ring)
   }
-  const hull = convexHull(points)
-  // Phase 17.4.2 — collinear-hull guard. When the umbrella subset's relocated
-  // cells land in a straight grid row (common given grid-anchored cell
-  // positions), `convexHull` returns a degenerate near-zero-area polygon and
-  // `offsetPolygonOutward(lineSegment, …)` produces a thin rectangle that
-  // reads as just a line. Detect collinearity (epsilon = DOT_RADIUS / 2) and
-  // fall back to the Minkowski-sum-with-disk capsule (generalizes the 2-dot
-  // stadium to N collinear points). The genuinely-2D path keeps the existing
-  // `offsetPolygonOutward` output so non-degenerate perimeters are unchanged.
-  if (isCollinear(hull, DOT_RADIUS / 2)) {
-    return collinearStadium(points, DOT_RADIUS + DOT_GRID / 2)
-  }
-  return offsetPolygonOutward(hull, DOT_GRID / 2)
+  // Phase 17.4.3 — always use the Minkowski-with-disk capsule for 3+ points.
+  // The 17.4.2 collinear-vs-not gate (isCollinear at epsilon = DOT_RADIUS / 2)
+  // was unreliable: near-collinear subsets — e.g. packClusterDense laying 7
+  // umbrella dots in a vertical strip with ≤1 cell of horizontal spread —
+  // didn't trip the collinearity threshold and fell through to
+  // `offsetPolygonOutward` on a very thin hull, still reading as a line at
+  // typical zoom. The capsule treatment is consistent regardless of point
+  // distribution: rounded corners for any shape, never degenerates to a
+  // line. `isCollinear` is retained in the codebase (still useful for any
+  // future work) but no longer gates this path.
+  return collinearStadium(points, DOT_RADIUS + DOT_GRID / 2)
 }
 
 function isHoverNearPillbox(hoverScreen, pillX, pillY) {
@@ -891,7 +899,11 @@ function DirectoryLegendBar() {
       left: 12,
       display: 'flex',
       gap: 12,
-      zIndex: 50,
+      // Phase 17.4.3: bumped 50 → 400 so the legend sits above the active
+      // cluster label (Z_ACTIVE_CLUSTER_LABEL = 300), which was covering it.
+      // Stays below the zoom controls (1700), card overlay (1500/1600), and
+      // tooltips (9999).
+      zIndex: 400,
       pointerEvents: 'auto',
       padding: '5px 10px',
       background: 'color-mix(in srgb, var(--bg-surface) 85%, transparent)',

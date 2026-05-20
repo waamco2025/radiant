@@ -4121,6 +4121,20 @@ export default function V2App() {
     })
   }, [nodeMap, v22Data])
 
+  // Phase 17.4.3 — clear all edge-tooltip / pinned-edge-menu UI state.
+  // Two layers of state drive edge tooltips: V2Canvas's internal hover
+  // indicator (cleared via the imperative `clearHoverState`) and V2App's
+  // `edgeHover` (hover tooltip) + `edgeMenu` (pinned "SELECT EDGE TO VIEW"
+  // box). Both must be cleared together — previously the V2App states
+  // persisted across Directory open + role switch, leaving a ghost
+  // tooltip / pinned menu floating over the Directory or reappearing on
+  // role switch-back. Called from both Directory-open paths + role change.
+  const clearEdgeUiState = useCallback(() => {
+    canvasRef.current?.clearHoverState?.()
+    setEdgeHover(null)
+    setEdgeMenu(null)
+  }, [])
+
   const handleSwitchRole = useCallback((newRoleId) => {
     if (newRoleId === roleId) return
     setRoleId(newRoleId)
@@ -4130,10 +4144,13 @@ export default function V2App() {
     // Phase 9D.1: revocation notice is per-viewer; clear on role switch so
     // it doesn't leak context across canvases.
     setV22ActiveRevocationNotice(null)
+    // Phase 17.4.3: switching roles changes the edge graph, so any open
+    // edge tooltip / pinned edge menu would be stale — clear it.
+    clearEdgeUiState()
     const role = ROLES.find(r => r.id === newRoleId)
     if (role) setCredits(role.credits)
     setShowAcct(false)
-  }, [roleId])
+  }, [roleId, clearEdgeUiState])
 
   // Detail Panel footer actions
   const handlePanelViewChain = useCallback(() => {
@@ -4571,9 +4588,12 @@ export default function V2App() {
                     setV22DirectorySelectedRfp(null)
                   } else {
                     // Opening the Directory — clear any open Parent-layer
-                    // edge tooltip / hover state so it doesn't persist
-                    // behind the wipe.
-                    canvasRef.current?.clearHoverState?.()
+                    // edge tooltip / hover state + pinned edge menu so it
+                    // doesn't persist behind the wipe (Phase 17.4.3:
+                    // extended from clearHoverState-only to the full
+                    // edge-UI clear, which also drops V2App's edgeHover +
+                    // edgeMenu).
+                    clearEdgeUiState()
                   }
                   setV22DirectoryOpen((open) => !open)
                 }}
@@ -5056,6 +5076,12 @@ export default function V2App() {
                           if (targetRfp) {
                             // Ensure Directory is open. Mutual exclusion:
                             // clear any open Claim panel.
+                            // Phase 17.4.3: clear parent-layer edge tooltip /
+                            // pinned edge menu so it doesn't ghost over the
+                            // Directory (the notification path didn't clear
+                            // hover state before — only the chrome + node-
+                            // double-click paths did).
+                            clearEdgeUiState()
                             setV22DirectoryOpen(true)
                             setV22DirectorySelectedClaim(null)
                             setV22DirectorySelectedRfp(targetRfp)
@@ -5626,10 +5652,10 @@ export default function V2App() {
             setForceExpandSda(null)
             setSelectedEdgeId(null)
             setOpenAgreement(null)
-            // Phase 16.1.1 Item 5: clear parent-layer edge hover state
-            // before transitioning so any open tooltip doesn't persist
-            // behind the wipe.
-            canvasRef.current?.clearHoverState?.()
+            // Phase 16.1.1 Item 5 / Phase 17.4.3: clear parent-layer edge
+            // hover state + pinned edge menu before transitioning so no
+            // tooltip / "SELECT EDGE TO VIEW" box persists behind the wipe.
+            clearEdgeUiState()
             setV22DirectoryWipeOrigin({ x: screenX, y: screenY })
             setV22DirectoryOpen(true)
           }}
@@ -8601,7 +8627,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4.2 &middot; Changelog
+          v0.17.4.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8648,6 +8674,13 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4.3', date: '2026-05-20', label: 'Phase 17.4.3', items: [
+                  'Phase 17.4.3 — Polish wrap fix: Minkowski perimeter + legend z + edge tooltip cleanup. Two 17.4.2 items still misbehaving + a long-standing ghost-tooltip bug.',
+                  'Umbrella perimeter now uses the Minkowski-with-disk capsule (collinearStadium) unconditionally for 3+ points. The 17.4.2 collinear-vs-not gate (isCollinear at epsilon = DOT_RADIUS / 2) was too tight — near-collinear subsets (e.g. Bob\'s 7 ChipCo umbrella dots packed in a vertical strip) fell through to offsetPolygonOutward on a thin hull and still rendered as a line. The capsule gives consistently rounded perimeters regardless of point distribution and never degenerates. isCollinear + offsetPolygonOutward retained in the codebase (marked unused) for possible future use.',
+                  'Directory legend z-index bumped 50 → 400 so the active cluster label (z=300) no longer covers it. Stays below zoom controls (1700), card overlay (1500/1600), tooltips (9999).',
+                  'Parent-layer edge tooltips cleared on Directory open + role change. Two state layers drove the ghost: V2Canvas\'s internal hover indicator (cleared via clearHoverState) AND V2App\'s edgeHover (hover tooltip) + edgeMenu (pinned "SELECT EDGE TO VIEW" box). The V2App states were never cleared, so a pinned edge menu persisted over the Directory and reappeared on role switch-back. New clearEdgeUiState() helper (clearHoverState + setEdgeHover(null) + setEdgeMenu(null)) is now called from all three Directory-open paths (chrome/globe toggle, node-double-click, RFP-solicitation notification) + the role-switch handler.',
+                  'Footer rolls forward to v0.17.4.3.',
+                ]},
                 { version: '0.17.4.2', date: '2026-05-20', label: 'Phase 17.4.2', items: [
                   'Phase 17.4.2 — Polish wrap fix: collinear perimeter + legend positioning + distance-based active-cluster buffer. Three 17.4.1 items that visual QA showed didn\'t deliver the intended result.',
                   'Umbrella perimeter handles collinear subsets. The 17.4.1 inflation halving was correct in principle, but when the umbrella subset\'s relocated cells land in a straight grid row, `convexHull` returns a degenerate near-zero-area polygon and `offsetPolygonOutward` of a line produced a thin rectangle that read as just a line. New collinearity test (perpendicular-distance epsilon = DOT_RADIUS / 2) routes the degenerate case to a Minkowski-sum-with-disk capsule (circle around each point + convex hull — generalizes the 2-dot stadium to N points). Genuinely-2D subsets keep the existing `offsetPolygonOutward` output unchanged.',
