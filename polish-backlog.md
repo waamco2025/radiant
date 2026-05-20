@@ -215,6 +215,20 @@ Phase ordering: address after Cascading Disclosures (#26) ships, so the burial r
 - **Future enhancement:** attach an actual legal document (PDF / structured agreement) to the EA, alongside the structured terms.
 - **Depends on:** Pairs with #141, #108. Scope finalization waits on Andrew's ideation pass on the term list.
 
+### 204. Extract `makeOwnershipDAsForActor` helper for seed-time internal DAs
+- **Status:** Open
+- **Effort:** S
+- **Source:** Phase 17.4.5 post-mortem.
+- **Context:** Phase 17.4.5 root-caused an Internal-DA leak to seed construction — `aliceOwnClaims` minted MicroCo→MicroCo internal DAs over ChipCo's Claims by iterating the full multi-party `claims` array instead of filtering by `alice.party`. The fix tightened that block, but the per-actor internal-DA pattern is enforced manually at every actor seed block, so future seed additions could repeat the bug.
+- **Proposed fix:** Extract a helper like `makeOwnershipDAsForActor(actor, ownedItems)` that filters by ownership internally and emits the standard internal-DA shape (`da-own-${id}`, `owner`/`ownerDot`, `subject`, `terms`); use it consistently across all actor seed blocks (assets + claims). Cleanest structural fix.
+
+### 205. Tidy duplicate `da-ref` / `da-parse` ids in seed
+- **Status:** Open
+- **Effort:** S
+- **Source:** Phase 17.4.5 review — pre-existing seed redundancy.
+- **Context:** `claimRefEdges` iterates the full `claims` array (correctly using `claim.owner` per-iteration); `daveClaimRefEdges` also iterates Dave's PrmIc + Vref subset and creates ids of the same shape (`da-ref-${claim.id}-${assetId}`). Four DAs end up duplicated by id — content identical, benign at runtime due to `mergeById` dedup, but the seed file has redundant sources of truth. (`da-parse-${pr.id}` for ChipCo's PrmIc datasheet is the same situation.)
+- **Proposed fix:** Pick one canonical path (probably the generic `claimRefEdges` / `parseResultRefEdges` loops) and drop the actor-specific duplicate block.
+
 ---
 
 ## Process Flows
@@ -1078,6 +1092,8 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 ---
 
 ## Update Log
+
+- 2026-05-20: **Phase 17.4.6 — Backlog hygiene.** Backlog-only — filed #204 (extract a `makeOwnershipDAsForActor` helper so per-actor internal-DA seeding can't repeat the 17.4.5 over-iteration bug) and #205 (drop the duplicate actor-specific `da-ref` / `da-parse` seed blocks in favor of the generic loops). Both are seed-resilience carry-overs from the 17.4.5 post-mortem. No code or version changes. Round 18 wraps here; Round 19 picks up at Phase 17.5 (RFP creation flow).
 
 - 2026-05-20: **Phase 17.4.5 — Internal "ownership" DA leak fix on Directory Claim panel.** When Alice (MicroCo) viewed a ChipCo Claim's Detail Panel on the Directory layer, the Agreements section showed ChipCo's internal ownership DA ("Full Disclosure — Internal — Never expires") next to her legitimate umbrella DA. **Diagnosis (not the brief's hypothesized panel/filter scenarios):** a seed-data bug. The panel renders strictly from `disclosureAgreementsForNode` (no fallback), and the V2App Directory mount filter is correct. The real cause: `v2_2Data.js`'s `aliceOwnClaims = claims.map(...)` loop iterated the *full* primary-Claim array (Alice's + Dave/ChipCo's + the Phase 17.4 MicroCo Claims) while hardcoding `owner: alice.party`, minting spurious MicroCo→MicroCo internal ownership DAs over every ChipCo Claim — with `da-own-${c.id}` ids that collide with `daveOwnClaims`'. The MicroCo/MicroCo duplicate passes the party-presence filter because Alice IS both parties of the internal DA, so it surfaced. Note the brief's proposed rule ("internal DA where active actor is *neither* party") wouldn't catch this — Alice is a party to the bogus DA. **Fix:** restrict `aliceOwnClaims` to `claims.filter((c) => c.owner === alice.party)`. Owner-side preserved (Dave still sees his ChipCo internal DA on his own Claims). Probe-verified across all four roles + parent-canvas view builds. Footer rolls forward to v0.17.4.5.
 

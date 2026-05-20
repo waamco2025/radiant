@@ -2673,6 +2673,21 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.6 completion notes (2026-05-20) — Backlog hygiene: file #204 + #205
+
+Backlog-only wrap of Round 18. No code changes, no version bump, no Changelog modal entry, no architecture-spec change — just `polish-backlog.md` + `CLAUDE.md` + this log.
+
+**What was filed.** Two seed-resilience carry-overs from the Phase 17.4.5 post-mortem:
+
+- **#204 — Extract a `makeOwnershipDAsForActor(actor, ownedItems)` helper for seed-time internal DAs.** 17.4.5 root-caused the Internal-DA leak to seed construction; the fix tightened the one offending block (`aliceOwnClaims`) but the per-actor internal-DA pattern is still hand-rolled at every actor seed block, so a future addition could repeat the over-iteration bug. A helper that filters by ownership internally and emits the standard `da-own-${id}` shape would make the bug structurally impossible.
+- **#205 — Tidy duplicate `da-ref` / `da-parse` ids.** Pre-existing, benign: `claimRefEdges` iterates the full `claims` array (correctly using `claim.owner` per-iteration) while `daveClaimRefEdges` re-emits the same-shaped ids for Dave's PrmIc + Vref subset; four DAs end up duplicated by id (content identical, deduped at runtime via `mergeById`). Pick one canonical source.
+
+**The seed-vs-runtime distinction worth recording.** The universal visibility rule — "an internal ownership DA (grantor.party === grantee.party) is private to the Claim's owner" — actually *held* in the runtime layer: `buildV22DirectoryDataForRole`'s filters and the V2App Directory mount's party-presence filter are role-agnostic and correct. The 17.4.5 bug lived purely in the *seed* layer, which is per-actor bespoke rather than role-agnostic: every actor block enumerates its own owned items by hand, and `aliceOwnClaims` was the lone block written as "iterate the whole `claims` array" instead of "iterate this actor's items." So the leak wasn't a rule violation in logic — it was malformed seed data that the (correct) rule then faithfully surfaced because the active actor happened to be both parties of the bogus internal DA. #204 closes that gap by making the seed layer enforce ownership the same way the runtime layer assumes it.
+
+**Verification.** `git diff` shows only `.md` files (polish-backlog.md, CLAUDE.md, CLAUDE-phase-log.md). No build needed (no code touched); ran the build anyway to confirm nothing regressed. Also trimmed an erroneous trailing 17.4.4 paragraph that had been appended to the 17.4.5 "Last shipped phase" block in CLAUDE.md (the content is correctly preserved in the separate 17.4.4 prior-phase bullet) so the Round 19 handoff doc reads clean.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.5 completion notes (2026-05-20) — Internal "ownership" DA leak on Directory Claim panel
 
 Alice (MicroCo) viewing a ChipCo Claim's Detail Panel on the Directory layer saw ChipCo's *internal* ownership DA ("Full Disclosure — Internal — Never expires") next to her legitimate umbrella DA. Internal ownership DAs should be visible only to the Claim's owner.
