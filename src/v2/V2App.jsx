@@ -6448,6 +6448,14 @@ export default function V2App() {
                   const c = (sharedForPanel.claims || []).find((x) => x.id === claimId)
                   return c ? c.name : null
                 }}
+                // Phase 17.4.4 — grantee-side Revoke on umbrella DA / EA. The
+                // confirmation modal + revocation cascade (handleOpenRevocationConfirm
+                // → handleRevokeConfirm) already handle the grantee path correctly
+                // (it branches on `agreement.grantor.party === activeRole.party`).
+                // The Directory mount was missing the prop wiring; pass it through
+                // so the row's Revoke button fires the same flow the parent canvas does.
+                onRevokeDa={(da) => handleOpenRevocationConfirm(da, 'DA')}
+                onRevokeEa={(ea) => handleOpenRevocationConfirm(ea, 'EA')}
                 // Phase 11C: warm-path entry from the directory-materialized
                 // panel. Detect the umbrella DA from the materialized Claim's
                 // owner to the active actor, and surface the CTA when no EA
@@ -8627,7 +8635,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.4.3 &middot; Changelog
+          v0.17.4.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8674,6 +8682,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4.4', date: '2026-05-20', label: 'Phase 17.4.4', items: [
+                  'Grantee-side Revoke now works from the Directory umbrella-Claim Detail Panel (confirmation modal + cascade + automatic perimeter reshape on revoke).',
+                  'Umbrella-only Claims disappear from the Directory cluster after revoke (no public DA means no remaining visibility path).',
+                  'Footer rolls forward to v0.17.4.4.',
+                ]},
                 { version: '0.17.4.3', date: '2026-05-20', label: 'Phase 17.4.3', items: [
                   'Phase 17.4.3 — Polish wrap fix: Minkowski perimeter + legend z + edge tooltip cleanup. Two 17.4.2 items still misbehaving + a long-standing ghost-tooltip bug.',
                   'Umbrella perimeter now uses the Minkowski-with-disk capsule (collinearStadium) unconditionally for 3+ points. The 17.4.2 collinear-vs-not gate (isCollinear at epsilon = DOT_RADIUS / 2) was too tight — near-collinear subsets (e.g. Bob\'s 7 ChipCo umbrella dots packed in a vertical strip) fell through to offsetPolygonOutward on a thin hull and still rendered as a line. The capsule gives consistently rounded perimeters regardless of point distribution and never degenerates. isCollinear + offsetPolygonOutward retained in the codebase (marked unused) for possible future use.',

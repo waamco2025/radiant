@@ -2673,6 +2673,35 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4.4 completion notes (2026-05-20) — Revoke wiring on Directory Claim panel + #203 backlog entry
+
+Two small follow-ups closing out the umbrella-disclosure arc: wire the previously-dead Revoke button on the Directory umbrella-Claim Detail Panel, and file a backlog item for a rare edge-tooltip residual.
+
+**Diff (high-level).**
+
+- `src/v2/V2App.jsx` — Directory V22ClaimPanel mount (`v22DirectorySelectedClaim`, ~line 6451) gains `onRevokeDa={(da) => handleOpenRevocationConfirm(da, 'DA')}` + `onRevokeEa={(ea) => handleOpenRevocationConfirm(ea, 'EA')}`, placed just after `resolveClaimName` alongside the other Agreements-section props. Matches the parent-canvas mount pattern verbatim. Footer + Changelog modal rolled to v0.17.4.4.
+- `polish-backlog.md` — new item #203 (rare edge-tooltip stickiness across layer transition) in the Edge Interactions section + Update Log entry.
+- `architecture-spec.md` — §8 Changelog bullet for Phase 17.4.4 (wiring fix, no new section).
+- `CLAUDE.md` + this phase log.
+
+**Decisions / what was deliberately NOT done.**
+
+- **Only Revoke wired.** Per the brief, the Directory mount intentionally omits the other parent-mount handlers (`onAgreementRowClick`, `onAmendDa`, `onAmendEa`, `onDismissRevoked`, badge handlers, grantor-side revoked-row context). Those are grantor-side / row-click-into-DA-panel flows out of scope for this hotfix — the umbrella viewer is the grantee.
+- **No new handler logic.** `handleOpenRevocationConfirm` → `handleRevokeConfirm` already handle both directions: `handleRevokeConfirm` branches on `isGrantor = agreement.grantor.party === activeRole.party`, but the DA-annotation (`_revokedMeta`) + paired-EA-cascade path runs regardless of direction, so the grantee path was already correct. The Directory mount was simply missing the prop wiring.
+
+**Stop-and-surface check (passed).** Verified `V22NodeDetailPanel` gates the Revoke button's *rendering* on agreement state, not on the prop: the DA row computes `showRevoke = !actionsHidden && (isGrantor || isGrantee) && !isProvisional && !isDeclined` and the EA row `showRevoke = (isGrantor || isGrantee) && !isInternal && !isRevoked`. The button always renders for a grantee; only its `onClick` is gated (`onClick={onRevokeDa ? () => onRevokeDa(da) : undefined}`). So wiring the prop activates the existing button — no different gating mechanism. No surface trigger fired.
+
+**Reactive cluster reshape (confirmed automatic).** After confirm, `setV22Provisionals` updates → `buildV22DirectoryDataForRole` filters `!d._revokedMeta` → the revoked Claim drops from `umbrellaClaims` → the perimeter recomputes. For an umbrella-only Claim (no public DA) the Claim disappears from the cluster entirely; for a Claim that's also publicly disclosed it stays visible as a public dot (public-takes-precedence per spec §8.2.2). The paired EA, if any, gets `_revokedMeta` via the existing cascade and drops from the Agreements section. No additional code needed for any of this.
+
+**Runtime verification.** Build clean (`npm run build`). Dev server smoke: Bob → Directory → ChipCo umbrella Claim → Detail Panel renders DA row with Revoke; clicking Revoke opens `V22RevocationConfirmModal` with counterparty + subject; confirm annotates `_revokedMeta`; Cancel preserves state. Per the documented Directory raycaster limitation, full canvas-click walkthrough (dot click → panel → revoke → watch perimeter reshape) is the manual verification path; the data-layer reactive chain is structurally confirmed above.
+
+**Known scope boundaries.**
+
+- Phase 17.5 (RFP creation flow) is next — fresh chat with a Round 20 handoff doc.
+- #203 (edge-tooltip residual) deferred to a future parent-canvas / edge-tooltip polish pass.
+
+**Status:** [x] Complete.
+
 ### Phase 17.4.3 completion notes (2026-05-20) — Polish wrap fix: Minkowski perimeter + legend z + edge tooltip cleanup
 
 Two 17.4.2 items that visual QA showed still misbehaving, plus a long-standing ghost edge-tooltip bug Andrew surfaced.

@@ -75,6 +75,12 @@ Phase ordering: address after Cascading Disclosures (#26) ships, so the burial r
 - **Context:** Card-level animation that played when a provisional node transitioned to disclosed (active). Distinct from #9 (edge dashed-to-solid animation) — this is the node-card transform/reveal. Phase 11C.3 wired the `_showAsProvisional` flag during reveal; could now layer richer transform keyframes on top. Pairs with #139.
 - **Proposed fix:** Reinstate the V2.1 card transform keyframes in `AssetNode.jsx` (or CSS sibling). Trigger on `_showAsProvisional` flipping false after `handleV22Accept`.
 
+### 203. Rare edge-tooltip stickiness across layer transition (Round 19 residual)
+- **Status:** Open
+- **Effort:** S
+- **Source:** Phase 17.4.4 QA — Andrew reproduced a stuck edge tooltip once after multiple attempts.
+- **Context:** Phase 17.4.3's `clearEdgeUiState` helper (`clearHoverState()` + `setEdgeHover(null)` + `setEdgeMenu(null)`) closes the common paths (chrome button, notification, role switch), but a stuck edge tooltip was reproduced once during QA after multiple attempts. Suspected race condition or an additional unrelated state path. Not blocking; investigate when the parent canvas / edge tooltip system gets its next polish pass.
+
 ---
 
 ## Detail Panels
@@ -1072,6 +1078,8 @@ End-of-Phase-11 architectural cleanup batch — items surfaced by Phase 11E QA t
 ---
 
 ## Update Log
+
+- 2026-05-20: **Phase 17.4.4 — Revoke wiring on Directory Claim panel + #203 backlog entry.** Two small follow-ups closing out the umbrella-disclosure arc. **Revoke wiring**: the Directory V22ClaimPanel mount (`v22DirectorySelectedClaim`) rendered the umbrella DA row with a Revoke button that did nothing — the mount was missing the `onRevokeDa` / `onRevokeEa` props the parent-canvas mount passes. Wired both through to the existing `handleOpenRevocationConfirm(agreement, type)`, which already handles grantee-side revocation (it branches on `agreement.grantor.party === activeRole.party`). No new handler logic needed; the reactive flow (`setV22Provisionals` → `buildV22DirectoryDataForRole` filtering `!d._revokedMeta`) reshapes the perimeter and drops umbrella-only Claims from the cluster automatically. Stop-and-surface check passed: `V22NodeDetailPanel` gates the Revoke button on agreement state (`showRevoke = (isGrantor || isGrantee) && …`), with only the `onClick` gated on the prop — so wiring the prop activates the button. **#203 filed**: rare edge-tooltip stickiness across layer transition (Round 19 residual) — `clearEdgeUiState` closes the common paths but a stuck tooltip was reproduced once during QA; not blocking. Footer rolls forward to v0.17.4.4.
 
 - 2026-05-20: **Phase 17.4.3 — Polish wrap fix: Minkowski perimeter + legend z + edge tooltip cleanup.** Two 17.4.2 items still misbehaving + a long-standing ghost-tooltip bug. **Minkowski perimeter**: `umbrellaOutlinePath` 3+ branch now uses `collinearStadium` (Minkowski-with-disk capsule) unconditionally — the 17.4.2 `isCollinear` epsilon was too tight, so near-collinear subsets (Bob's 7 ChipCo umbrella dots in a vertical strip) still rendered as a line via `offsetPolygonOutward` on a thin hull. `isCollinear` + `offsetPolygonOutward` retained but marked unused. **Legend z**: `DirectoryLegendBar` `zIndex 50 → 400` above the active cluster label (300). **Edge tooltip cleanup**: new `clearEdgeUiState()` helper (clearHoverState + setEdgeHover + setEdgeMenu) called from all three Directory-open paths + the role-switch handler — V2App's `edgeHover`/`edgeMenu` (pinned "SELECT EDGE TO VIEW" box) were never cleared on layer/role change, ghosting over the Directory + reappearing on role switch-back. Footer rolls forward to v0.17.4.3.
 
