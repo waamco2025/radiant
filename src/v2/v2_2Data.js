@@ -3163,6 +3163,71 @@ function buildV22SharedArtifactsUncached() {
     createdDate: '2026-02-28T11:00:00Z',
     amendments: [],
   })
+  // ── Phase 17.4: five non-public MicroCo Claims for the umbrella-DA seed
+  // expansion. MicroCo's three existing Claims (cPrm / cVreg / cEmi) are
+  // all publicly disclosed, and public takes precedence over umbrella per
+  // §8.2.2 — so an umbrella DA on any of them would NOT render as an amber
+  // perimeter subset. The brief explicitly sanctions adding new Claims for
+  // the umbrella subset rather than reshaping the existing public Claims
+  // (which are load-bearing in the parent-canvas demos). These are minimal
+  // (no referenced Assets) — they exist purely to populate the umbrella
+  // perimeter on Bob's + Carol's views of the MicroCo cluster.
+  const cMicroPcbStack = makeClaim({
+    id: 'claim-microco-pcb-stack',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'PCB Stackup MPC-12 Qualification',
+    description: 'Twelve-layer controlled-impedance PCB stackup MPC-12 qualification report.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-mil-prf-55681-v2', addedDate: '2026-03-02T09:00:00Z' },
+    ],
+    createdDate: '2026-03-02T09:00:00Z',
+    amendments: [],
+  })
+  const cMicroConnSpec = makeClaim({
+    id: 'claim-microco-conn-spec',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Connector Interface CIF-44 Spec',
+    description: 'Board-to-board connector interface CIF-44 mechanical + signal-integrity spec.',
+    referencedAssetIds: [],
+    createdDate: '2026-03-03T09:00:00Z',
+    amendments: [],
+  })
+  const cMicroThermalPad = makeClaim({
+    id: 'claim-microco-thermal-pad',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Thermal Pad TPM-08 Datasheet',
+    description: 'High-conductivity thermal interface pad TPM-08 datasheet.',
+    referencedAssetIds: [],
+    createdDate: '2026-03-04T09:00:00Z',
+    amendments: [],
+  })
+  const cMicroFwBootloader = makeClaim({
+    id: 'claim-microco-fw-bootloader',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'Bootloader Firmware FBL-2 Compliance',
+    description: 'Secure-boot bootloader firmware FBL-2 compliance attestation.',
+    referencedAssetIds: [],
+    referencedRequirementsSets: [
+      { requirementsSetId: 'reqset-system-integration-v1', addedDate: '2026-03-05T09:00:00Z' },
+    ],
+    createdDate: '2026-03-05T09:00:00Z',
+    amendments: [],
+  })
+  const cMicroRfFilter = makeClaim({
+    id: 'claim-microco-rf-filter',
+    owner: alice.party,
+    ownerDot: alice.partyDot,
+    name: 'RF Filter RFF-900 Spec',
+    description: 'Cavity RF bandpass filter RFF-900 insertion-loss + rejection spec.',
+    referencedAssetIds: [],
+    createdDate: '2026-03-06T09:00:00Z',
+    amendments: [],
+  })
   // Phase 16.2: this list holds the primary-actor claims only. The
   // mock-supplier claims (`mockClaims`, 157 entries) carry their own
   // ownership / claim-ref DAs from `seedMockSupplierActor`, so they must
@@ -3176,6 +3241,9 @@ function buildV22SharedArtifactsUncached() {
     cChipcoOpAmp, cChipcoBuckReg, cChipcoTimingIc, cChipcoLdoReg,
     cChipcoMixedSig, cChipcoBandgap, cChipcoFlashMem, cChipcoSramCtl,
     cChipcoAdcDac, cChipcoMpu, cChipcoSerdes, cChipcoPowerMgmt,
+    // Phase 17.4: five non-public MicroCo Claims for the umbrella seed.
+    cMicroPcbStack, cMicroConnSpec, cMicroThermalPad,
+    cMicroFwBootloader, cMicroRfFilter,
   ]
 
   // ── Disclosure Agreements ─────────────────────────────────────────────
@@ -3586,6 +3654,169 @@ function buildV22SharedArtifactsUncached() {
     type: 'full',
     scope: { assetIds: [], includeDerivatives: true },
     terms: { createdDate: '2026-03-12T14:40:00Z', expires: '2027-03-12T14:40:00Z', autoRenew: false },
+  })
+
+  // ── Phase 17.4: umbrella DA seed expansion across actor pairings ──────
+  // Demonstrable umbrella disclosure for all four switchable roles (was:
+  // only Dave→Bob). Each is a regular DA with grantee=non-active-party +
+  // subject.kind='claim' — no new artifact type (per architecture, an
+  // "umbrella DA" is just a directory-visible DA whose grantee isn't the
+  // Radiant Network). Disclosure-type variety drives the dot color coding
+  // (full=indigo, selective=amber, proofonly=green). granteeAssetId points
+  // at the grantee's anchor Asset so the warm-path EA request flow can
+  // pre-fill it.
+
+  // Alice (MicroCo) → Bob (GovCo): 5 DAs, type variety (2 full, 2 selective,
+  // 1 proofonly) so Bob's view of the MicroCo cluster shows all three colors.
+  const daAliceToBobPcbStack = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-govco-pcb-stack'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cMicroPcbStack.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-14T10:00:00Z', expires: '2027-03-14T10:00:00Z', autoRenew: false },
+  })
+  const daAliceToBobConnSpec = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-govco-conn-spec'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cMicroConnSpec.id },
+    granteeAssetId: bAvionics.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-14T10:05:00Z', expires: '2027-03-14T10:05:00Z', autoRenew: false },
+  })
+  const daAliceToBobThermalPad = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-govco-thermal-pad'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cMicroThermalPad.id },
+    granteeAssetId: bAvionics.id,
+    type: 'proofonly',
+    scope: { includeDerivatives: false },
+    terms: { createdDate: '2026-03-14T10:10:00Z', expires: '2027-03-14T10:10:00Z', autoRenew: false },
+  })
+  const daAliceToBobFwBootloader = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-govco-fw-bootloader'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cMicroFwBootloader.id },
+    granteeAssetId: bAvionics.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-14T10:15:00Z', expires: '2027-03-14T10:15:00Z', autoRenew: false },
+  })
+  const daAliceToBobRfFilter = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-govco-rf-filter'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: bob.party, dot: bob.partyDot },
+    subject: { kind: 'claim', id: cMicroRfFilter.id },
+    granteeAssetId: bAvionics.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-14T10:20:00Z', expires: '2027-03-14T10:20:00Z', autoRenew: false },
+  })
+
+  // Alice (MicroCo) → Carol (AuditCo): 3 DAs, all full (auditors need
+  // complete data access). Reuses 3 of Alice's new non-public Claims.
+  const daAliceToCarolPcbStack = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-auditco-pcb-stack'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cMicroPcbStack.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-15T10:00:00Z', expires: '2027-03-15T10:00:00Z', autoRenew: false },
+  })
+  const daAliceToCarolConnSpec = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-auditco-conn-spec'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cMicroConnSpec.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-15T10:05:00Z', expires: '2027-03-15T10:05:00Z', autoRenew: false },
+  })
+  const daAliceToCarolThermalPad = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'microco-auditco-thermal-pad'),
+    grantor: { party: alice.party, dot: alice.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cMicroThermalPad.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-15T10:10:00Z', expires: '2027-03-15T10:10:00Z', autoRenew: false },
+  })
+
+  // Dave (ChipCo) → Alice (MicroCo): 3 DAs, sub-supplier component spec
+  // sharing (2 selective, 1 proofonly). Reuses Dave's existing non-public
+  // Claims — a Claim can carry umbrella DAs to multiple grantees.
+  const daDaveToAliceFlashMem = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-microco-flashmem'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: alice.party, dot: alice.partyDot },
+    subject: { kind: 'claim', id: cChipcoFlashMem.id },
+    granteeAssetId: aPrmDatasheet.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-16T10:00:00Z', expires: '2027-03-16T10:00:00Z', autoRenew: false },
+  })
+  const daDaveToAliceSramCtl = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-microco-sramctl'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: alice.party, dot: alice.partyDot },
+    subject: { kind: 'claim', id: cChipcoSramCtl.id },
+    granteeAssetId: aPrmDatasheet.id,
+    type: 'selective',
+    scope: { assetIds: [], includeDerivatives: false },
+    terms: { createdDate: '2026-03-16T10:05:00Z', expires: '2027-03-16T10:05:00Z', autoRenew: false },
+  })
+  const daDaveToAliceAdcDac = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-microco-adcdac'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: alice.party, dot: alice.partyDot },
+    subject: { kind: 'claim', id: cChipcoAdcDac.id },
+    granteeAssetId: aPrmDatasheet.id,
+    type: 'proofonly',
+    scope: { includeDerivatives: false },
+    terms: { createdDate: '2026-03-16T10:10:00Z', expires: '2027-03-16T10:10:00Z', autoRenew: false },
+  })
+
+  // Dave (ChipCo) → Carol (AuditCo): 3 DAs, all full (auditing). Reuses
+  // Dave's existing non-public Claims.
+  const daDaveToCarolMpu = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-auditco-mpu'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cChipcoMpu.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-17T10:00:00Z', expires: '2027-03-17T10:00:00Z', autoRenew: false },
+  })
+  const daDaveToCarolSerdes = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-auditco-serdes'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cChipcoSerdes.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-17T10:05:00Z', expires: '2027-03-17T10:05:00Z', autoRenew: false },
+  })
+  const daDaveToCarolPowerMgmt = makeDisclosureAgreement({
+    id: makeArtifactId('da', 'chipco-auditco-pmic'),
+    grantor: { party: dave.party, dot: dave.partyDot },
+    grantee: { party: carol.party, dot: carol.partyDot },
+    subject: { kind: 'claim', id: cChipcoPowerMgmt.id },
+    granteeAssetId: cAuditWorkspace.id,
+    type: 'full',
+    scope: { assetIds: [], includeDerivatives: true },
+    terms: { createdDate: '2026-03-17T10:10:00Z', expires: '2027-03-17T10:10:00Z', autoRenew: false },
   })
 
   // Phase 16.0: Bob's seeded RFP. Phase 16 renders the dot only; full
@@ -4075,6 +4306,21 @@ function buildV22SharedArtifactsUncached() {
     daChipcoToBobMpu,
     daChipcoToBobSerdes,
     daChipcoToBobPowerMgmt,
+    // Phase 17.4: umbrella DA seed expansion across actor pairings.
+    daAliceToBobPcbStack,
+    daAliceToBobConnSpec,
+    daAliceToBobThermalPad,
+    daAliceToBobFwBootloader,
+    daAliceToBobRfFilter,
+    daAliceToCarolPcbStack,
+    daAliceToCarolConnSpec,
+    daAliceToCarolThermalPad,
+    daDaveToAliceFlashMem,
+    daDaveToAliceSramCtl,
+    daDaveToAliceAdcDac,
+    daDaveToCarolMpu,
+    daDaveToCarolSerdes,
+    daDaveToCarolPowerMgmt,
     daAlicePublicPrm,
     daAlicePublicVreg,
     daAlicePublicEmi,

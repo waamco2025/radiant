@@ -655,7 +655,7 @@ function shrinkConvexPolygon(poly, distance) {
  * are available (Voronoi cell too small at current Lloyd's convergence) the
  * caller logs an overflow warning so we know which cluster overflowed.
  */
-function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty }) {
+function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty, umbrellaCount = 0, rfpCount = 0 }) {
   // Phase 16.2.6.1 pinned convention: if shrink collapses (cell too thin
   // for a 1-cell inward offset — happens when Lloyd's hasn't pushed jumbo
   // neighbours away enough to give the small cluster real area), fall back
@@ -695,7 +695,49 @@ function packClusterDense({ cellPoly, centerX, centerY, count, clusterParty }) {
     }
   }
   cells.sort((a, b) => a.dist - b.dist)
-  return cells.slice(0, count).map((c) => ({ x: c.x, y: c.y }))
+  const sliced = cells.slice(0, count)
+
+  // Phase 17.4 — umbrella-subset spatial grouping. The caller's item array
+  // is [...umbrellaItems, ...publicItems, ...rfpItems] mapped 1:1 to the
+  // returned positions by index. Pre-17.4 the umbrella items landed on the
+  // innermost cells (sorted by distance from center), which RING the
+  // central label hole. The convex-hull umbrella perimeter (offset outward
+  // by 1 cell) then enclosed the hole + actor pillbox — the "perimeter
+  // wraps the pillbox with no dots inside" bug.
+  //
+  // Fix: relocate the umbrella cells into a coherent blob hugging the
+  // cluster's edge (away from the central label hole) so their hull is a
+  // tight off-center polygon. RFP cells stay outermost (preserving the
+  // "Claims inner / RFPs outer" convention). Public cells fill the rest.
+  // Only re-orders when there's a meaningful umbrella subset to group.
+  if (umbrellaCount > 0 && umbrellaCount < sliced.length) {
+    // Reserve the outermost `rfpCount` cells for RFPs (sliced is
+    // innermost-first, so the tail is outermost).
+    const rfpCells = rfpCount > 0 ? sliced.slice(sliced.length - rfpCount) : []
+    const innerCells = rfpCount > 0 ? sliced.slice(0, sliced.length - rfpCount) : sliced
+    if (umbrellaCount < innerCells.length) {
+      // Blob anchor = the inner cell furthest from cluster center (on the
+      // cluster's edge, maximally away from the central label hole).
+      let anchor = innerCells[0]
+      let maxD = -Infinity
+      for (const c of innerCells) {
+        if (c.dist > maxD) { maxD = c.dist; anchor = c }
+      }
+      // Sort inner cells by distance to the anchor; nearest umbrellaCount
+      // form the umbrella blob, the rest are public.
+      const withAnchorDist = innerCells.map((c) => ({
+        x: c.x,
+        y: c.y,
+        aDist: (c.x - anchor.x) * (c.x - anchor.x) + (c.y - anchor.y) * (c.y - anchor.y),
+      }))
+      withAnchorDist.sort((a, b) => a.aDist - b.aDist)
+      const umbrellaCells = withAnchorDist.slice(0, umbrellaCount)
+      const publicCells = withAnchorDist.slice(umbrellaCount)
+      const ordered = [...umbrellaCells, ...publicCells, ...rfpCells]
+      return ordered.map((c) => ({ x: c.x, y: c.y }))
+    }
+  }
+  return sliced.map((c) => ({ x: c.x, y: c.y }))
 }
 
 // Build the per-cluster umbrella outline path. Concave-hull would be the
@@ -985,7 +1027,14 @@ function computeLayout(directoryData, viewport) {
     // animations, label maps) has a place to look.
     const placedDots = []
     if (N > 0) {
-      const positions = packClusterDense({ cellPoly, centerX, centerY, count: N, clusterParty: spec.ownerParty })
+      const positions = packClusterDense({
+        cellPoly, centerX, centerY, count: N, clusterParty: spec.ownerParty,
+        // Phase 17.4: pass the umbrella + RFP counts so the packer can
+        // group the umbrella subset into a coherent edge-blob (instead of
+        // ringing the central label hole) while keeping RFPs outermost.
+        umbrellaCount: spec.umbrellaItems.length,
+        rfpCount: spec.rfpItems.length,
+      })
       if (positions.length < N && typeof console !== 'undefined') {
         // eslint-disable-next-line no-console
         console.warn(`[DirectoryLayer] packClusterDense overflow for ${spec.ownerParty}: placed ${positions.length}/${N} (Voronoi cell too small at current Lloyd's convergence — bump Lloyd's cap or grow canvas).`)
@@ -1162,6 +1211,10 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // that mirrors V22NodeDetailPanel's footer (requestEvaluationAgreement
   // and viewEvaluationAgreement actions).
   evaluationAgreements,
+  // Phase 17.4 — disclosure agreements threaded so the per-claim card
+  // render path can detect the warm-path state (DA exists, no EA) and
+  // stamp `_directoryWarmPathRequestCandidate` for the action bar.
+  disclosureAgreements,
   onClaimCardAction,
   // Phase 17.3.1 — Directory-layer RFP card action-bar wiring. V2App passes
   // the session-state solicitations collection so the per-card render path
@@ -1371,6 +1424,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
 
   const [hover, setHover] = useState(null)
   const [pinned, setPinned] = useState(null)
+  // Phase 17.4 — umbrella perimeter hover. `hoveredPerimeter` drives both
+  // the SVG path brightening (border + fill opacity bump) and the HTML
+  // tooltip overlay. Set only when the hovered cluster changes (not on
+  // every mouse-move tick) to keep re-renders minimal. Shape:
+  // { party, x, y } | null — x/y are container-relative cursor coords for
+  // the tooltip position.
+  const [hoveredPerimeter, setHoveredPerimeter] = useState(null)
+  const hoveredPerimeterPartyRef = useRef(null)
   useEffect(() => {
     if (phase === 'closed') {
       setHover(null); setPinned(null)
@@ -1378,6 +1439,9 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       // entry starts at baseline.
       hoveredRfpIdxRef.current = -1
       rfpDirtyRef.current = true
+      // Phase 17.4: clear perimeter hover on close.
+      hoveredPerimeterPartyRef.current = null
+      setHoveredPerimeter(null)
     }
   }, [phase])
   useEffect(() => {
@@ -1385,6 +1449,9 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     // Phase 17.2: same reset on role switch.
     hoveredRfpIdxRef.current = -1
     rfpDirtyRef.current = true
+    // Phase 17.4: clear perimeter hover on role switch.
+    hoveredPerimeterPartyRef.current = null
+    setHoveredPerimeter(null)
   }, [roleId])
 
   // Phase 16.2.3: ref mirrors of hover/pinned/layout so the load-animation
@@ -2823,6 +2890,54 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       updateCamera()
       return
     }
+    // Phase 17.4 — umbrella perimeter hover hit-test. Runs independently
+    // of (and before) the dot/RFP raycast so it never blocks dot hits: a
+    // dot inside the perimeter still hovers + clicks normally. Projects
+    // each cluster's `umbrellaPathWorld` to screen via worldToScreen and
+    // point-in-polygon tests the container-relative cursor. State updates
+    // only when the hovered party CHANGES (the tooltip position still
+    // tracks the cursor every tick via the lightweight x/y update when the
+    // party is unchanged but the cursor moved — see below).
+    {
+      const renderer = rendererRef.current
+      let foundParty = null
+      if (renderer && layout && Array.isArray(layout.allClusters)) {
+        const rect = renderer.domElement.getBoundingClientRect()
+        const cx = e.clientX - rect.left
+        const cy = e.clientY - rect.top
+        for (const cluster of layout.allClusters) {
+          const pathWorld = cluster.umbrellaPathWorld
+          if (!pathWorld || pathWorld.length < 3) continue
+          const screenPoly = pathWorld.map((p) => {
+            const s = worldToScreen(p[0], p[1])
+            return [s.x, s.y]
+          })
+          if (screenPoly.some(([px, py]) => !Number.isFinite(px) || !Number.isFinite(py))) continue
+          if (pointInPolygon(cx, cy, screenPoly)) {
+            foundParty = cluster.ownerParty
+            break
+          }
+        }
+      }
+      if (foundParty !== hoveredPerimeterPartyRef.current) {
+        hoveredPerimeterPartyRef.current = foundParty
+        if (foundParty) {
+          const rect = renderer.domElement.getBoundingClientRect()
+          setHoveredPerimeter({ party: foundParty, x: e.clientX - rect.left, y: e.clientY - rect.top })
+        } else {
+          setHoveredPerimeter(null)
+        }
+        dirtyRef.current = true
+      } else if (foundParty && hoveredPerimeter) {
+        // Same party, cursor moved — keep the tooltip following the cursor.
+        const rect = renderer.domElement.getBoundingClientRect()
+        const nx = e.clientX - rect.left
+        const ny = e.clientY - rect.top
+        if (Math.abs(nx - hoveredPerimeter.x) > 2 || Math.abs(ny - hoveredPerimeter.y) > 2) {
+          setHoveredPerimeter({ party: foundParty, x: nx, y: ny })
+        }
+      }
+    }
     const hit = raycast(e.clientX, e.clientY)
     // Phase 17.2.0.1: cursor `pointer` when hovering any interactive
     // Directory primitive (Claim dot, RFP open marker, closed-and-owned
@@ -2880,7 +2995,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       ownerParty: d.claim.owner,
       dotIndex: hit.index,
     })
-  }, [hover, layout, clampPan, raycast, updateCamera, worldToScreen])
+  }, [hover, hoveredPerimeter, layout, clampPan, raycast, updateCamera, worldToScreen])
 
   const handleMouseUp = useCallback((e) => {
     if (!draggingRef.current) return
@@ -3096,6 +3211,12 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
           rfpDirtyRef.current = true
           dirtyRef.current = true
         }
+        // Phase 17.4: clear perimeter hover + tooltip on layer-exit.
+        if (hoveredPerimeterPartyRef.current) {
+          hoveredPerimeterPartyRef.current = null
+          setHoveredPerimeter(null)
+          dirtyRef.current = true
+        }
       }}
       style={{
         position: 'fixed',
@@ -3162,19 +3283,65 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
           const d = finitePts.map((pt, i) => (i === 0 ? `M ${pt.x} ${pt.y}` : `L ${pt.x} ${pt.y}`)).join(' ') + ' Z'
           const op = umbrellaOpacities[p.ownerParty]
           const opacity = op === undefined ? 1 : op
+          // Phase 17.4 — hover brightening. When this cluster's perimeter
+          // is hovered, bump the border to full amber + the fill tint from
+          // 8% to 16%. Instantaneous (no transition) — mouse-move smooths
+          // the perceived change.
+          const isHoveredPerimeter = hoveredPerimeter?.party === p.ownerParty
           return (
             <path
               key={`umbrella-${p.ownerParty}`}
               d={d}
               stroke="var(--accent-amber)"
-              strokeWidth={1.5}
-              fill="color-mix(in srgb, var(--accent-amber) 8%, transparent)"
+              strokeWidth={isHoveredPerimeter ? 2.5 : 1.5}
+              strokeOpacity={isHoveredPerimeter ? 1 : 0.55}
+              fill={isHoveredPerimeter
+                ? 'color-mix(in srgb, var(--accent-amber) 16%, transparent)'
+                : 'color-mix(in srgb, var(--accent-amber) 8%, transparent)'}
               strokeLinejoin="round"
               opacity={opacity}
             />
           )
         })}
       </svg>
+
+      {/* Phase 17.4 — umbrella perimeter hover tooltip. Rendered near the
+          cursor (container-relative coords from handleMouseMove), clamped
+          to the viewport edges. Explains the disclosure relationship. */}
+      {hoveredPerimeter && (() => {
+        const TT_W = 240
+        const containerW = containerRef.current?.clientWidth || 1400
+        const containerH = containerRef.current?.clientHeight || 900
+        // Offset slightly down-right of the cursor; clamp to stay on-screen.
+        let left = hoveredPerimeter.x + 14
+        let top = hoveredPerimeter.y + 14
+        if (left + TT_W > containerW - 8) left = hoveredPerimeter.x - TT_W - 14
+        if (left < 8) left = 8
+        if (top + 80 > containerH - 8) top = hoveredPerimeter.y - 80
+        if (top < 8) top = 8
+        return (
+          <div style={{
+            position: 'absolute',
+            left,
+            top,
+            width: TT_W,
+            zIndex: 2600,
+            pointerEvents: 'none',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              You have Disclosure Agreements with the Claims inside this perimeter.
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>
+              From {hoveredPerimeter.party}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Pillbox labels (HTML overlay; positioned via worldToScreen). */}
       {layout && overlay && (() => {
@@ -3388,10 +3555,25 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
           const isClaimOwner = d.claim && d.claim.owner === layout.activeParty
           if (!isClaimOwner && Array.isArray(evaluationAgreements) && onClaimCardAction) {
             const existingEa = getActiveEaForClaimAndRequester(d.claim, layout.activeParty, evaluationAgreements)
+            // Phase 17.4 — warm-path detection. A Claim with an active DA
+            // (grantee = active actor) but NO EA is the warm-path state:
+            // the card surfaces "Request Evaluation Agreement" that opens
+            // the EARequestModal (DA already exists, only the EA is
+            // requested). Mutually exclusive with the cold-path candidate
+            // (no DA, no EA) and the View-EA state (EA exists). Umbrella
+            // Claims are the canonical warm-path case.
+            const hasActiveDa = Array.isArray(disclosureAgreements) && disclosureAgreements.some((da) =>
+              da.subject?.kind === 'claim' && da.subject.id === d.claim.id &&
+              da.grantee?.party === layout.activeParty &&
+              da.type !== 'provisional' && !da._declineMeta && !da._revokedMeta,
+            )
+            const warmPathCandidate = !existingEa && hasActiveDa
             directoryClaimNode = {
               ...baseNode,
               _directoryExistingEa: existingEa || null,
-              _directoryRequestEaCandidate: !existingEa,
+              // Cold-path only when there's neither an EA nor a DA.
+              _directoryRequestEaCandidate: !existingEa && !hasActiveDa,
+              _directoryWarmPathRequestCandidate: warmPathCandidate,
             }
           }
           return (

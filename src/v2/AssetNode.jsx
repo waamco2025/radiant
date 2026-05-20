@@ -1321,12 +1321,22 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           // via getActiveEaForClaimAndRequester), the card surfaces a View
           // EA action that mirrors the panel footer's button.
           buttons.push({ icon: '◉', tooltip: 'View Evaluation Agreement', onClick: fire('viewEvaluationAgreement') })
+        } else if (node._directoryWarmPathRequestCandidate) {
+          // Phase 17.4 — Directory warm-path Request EA CTA. Stamped when
+          // an active DA exists (umbrella disclosure) but no EA. Mutually
+          // exclusive with the cold-path candidate (no DA) + the View-EA
+          // state (EA exists); checked BEFORE the cold-path so the more-
+          // precise state wins per the brief's data-integrity rule. Click
+          // dispatches a distinct action so V2App routes it to the
+          // EARequestModal (DA exists — only the EA is requested) rather
+          // than the cold-path AssetPickerModal → CombinedRequestModal.
+          buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreementWarmPath') })
         } else if (node._directoryRequestEaCandidate) {
           // Phase 17.3 — Directory cold-path Request EA CTA. Stamped on the
           // synthetic Claim node by V2App's Directory Claim-card render
-          // path: non-owner viewing a Claim with no existing EA. Click
-          // fires the same handler as the panel footer (V2App routes to
-          // AssetPickerModal → CombinedRequestModal).
+          // path: non-owner viewing a Claim with no existing EA AND no DA.
+          // Click fires the same handler as the panel footer (V2App routes
+          // to AssetPickerModal → CombinedRequestModal).
           buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
         }
         // Phase 14.2 (#169a): Issue Badge entry point on Claim cards.

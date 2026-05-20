@@ -2747,6 +2747,38 @@ export default function V2App() {
     setV22RequestingEaForClaim(claim)
   }, [])
 
+  // Phase 17.4 — Directory-layer Claim "Request Evaluation Agreement" CTA,
+  // WARM path. Triggered from the Claim card action bar (and mirrored by
+  // the panel footer's onRequestEvaluationAgreement) when an active DA
+  // already exists between the active actor (grantee) and the Claim owner
+  // but no EA is paired yet (the umbrella-disclosure case). Opens the
+  // EARequestModal directly (NOT the cold-path AssetPickerModal →
+  // CombinedRequestModal — the DA's granteeAssetId already anchors the
+  // request). Resolves the active DA + the grantee anchor Asset from the
+  // merged shared artifacts. No-op when no qualifying DA is found (the
+  // marker should never be stamped without one, but guard defensively).
+  const handleRequestEaWarmPathForClaim = useCallback((claim) => {
+    if (!claim) return
+    const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const activeDa = (shared.disclosureAgreements || []).find((d) =>
+      d.subject?.kind === 'claim' && d.subject.id === claim.id &&
+      d.grantee?.party === activeRole.party &&
+      d.type !== 'provisional' && !d._declineMeta && !d._revokedMeta,
+    )
+    if (!activeDa) return
+    const anchorAsset = activeDa.granteeAssetId
+      ? (shared.assets || []).find((a) => a.id === activeDa.granteeAssetId) || null
+      : null
+    setV22EaRequestContext({
+      claim,
+      ownerParty: claim.owner,
+      existingDisclosureAgreementId: activeDa.id,
+      requesterAsset: anchorAsset
+        ? { id: anchorAsset.id, name: anchorAsset.name }
+        : (activeDa.granteeAssetId ? { id: activeDa.granteeAssetId, name: activeDa.granteeAssetId } : null),
+    })
+  }, [activeRole.party, v22Provisionals])
+
   // Phase 17.3 — AssetPickerModal Continue handler for the Directory-layer
   // Claim CTA flow. Resolves the picked Asset and the target Claim, opens
   // CombinedRequestModal pre-filled (requesterAsset = picked Asset,
@@ -6157,13 +6189,22 @@ export default function V2App() {
               const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
               return merged.evaluationAgreements || []
             })()}
-            // Phase 17.3 — card action dispatcher. Mirrors V22NodeDetailPanel
-            // footer routing for the two Directory-only CTAs. `claim` is the
-            // raw artifact; `existingEa` is the resolved EA (null when the
-            // action is requestEvaluationAgreement).
+            // Phase 17.4 — disclosure agreements threaded so DirectoryLayer
+            // can compute the warm-path marker (`_directoryWarmPathRequestCandidate`
+            // = active DA exists, no EA) for the Claim card action bar.
+            disclosureAgreements={(() => {
+              const merged = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+              return merged.disclosureAgreements || []
+            })()}
+            // Phase 17.3 / 17.4 — card action dispatcher. Mirrors
+            // V22NodeDetailPanel footer routing for the Directory CTAs.
+            // `claim` is the raw artifact; `existingEa` is the resolved EA
+            // (null for the request actions).
             onClaimCardAction={(action, _node, claim, existingEa) => {
               if (action === 'requestEvaluationAgreement') {
                 handleRequestEaForClaim(claim)
+              } else if (action === 'requestEvaluationAgreementWarmPath') {
+                handleRequestEaWarmPathForClaim(claim)
               } else if (action === 'viewEvaluationAgreement') {
                 handleViewEa(existingEa)
               }
@@ -6344,8 +6385,43 @@ export default function V2App() {
                 onExpand={(artifact) => setV22ExpandedArtifact({ artifact, schema: 'claim' })}
                 evaluationResultsForClaim={[]}
                 evaluationAgreementForActor={null}
-                disclosureAgreementsForNode={[]}
-                evaluationAgreementsForNode={[]}
+                // Phase 17.4 — DA/EA Agreements section parity with the
+                // parent-canvas mount. The directory-materialized Claim
+                // isn't on the active actor's parent canvas, so the lists
+                // are sourced from sharedForPanel (merged shared artifacts)
+                // filtered to this Claim AND to agreements the active actor
+                // is a party to (grantee or grantor). For umbrella Claims
+                // the active actor is the grantee — the umbrella DA shows
+                // in the section. Revoked lists stay empty (revocation
+                // notices are a parent-canvas session flow, not surfaced
+                // from the Directory materialized panel).
+                disclosureAgreementsForNode={(sharedForPanel.disclosureAgreements || []).filter((d) =>
+                  d.subject?.kind === 'claim' && d.subject.id === claim.id &&
+                  d.type !== 'provisional' && !d._declineMeta && !d._revokedMeta &&
+                  (d.grantee?.party === activeRole.party || d.grantor?.party === activeRole.party),
+                )}
+                evaluationAgreementsForNode={(sharedForPanel.evaluationAgreements || []).filter((e) =>
+                  e.claimId === claim.id && !e._declineMeta && !e._revokedMeta &&
+                  (e.grantee?.party === activeRole.party || e.grantor?.party === activeRole.party),
+                )}
+                // Phase 17.4 — name resolvers for the Agreements section rows
+                // (subject + claim name lookups against sharedForPanel).
+                resolveSubjectName={(subject) => {
+                  if (!subject) return null
+                  const pools = {
+                    asset: sharedForPanel.assets,
+                    claim: sharedForPanel.claims,
+                    evalResult: sharedForPanel.evaluationResults,
+                    parseResult: sharedForPanel.parseResults,
+                  }
+                  const pool = pools[subject.kind]
+                  const artifact = pool?.find((a) => a.id === subject.id)
+                  return artifact ? (artifact.name || artifact.templateName || artifact.id) : null
+                }}
+                resolveClaimName={(claimId) => {
+                  const c = (sharedForPanel.claims || []).find((x) => x.id === claimId)
+                  return c ? c.name : null
+                }}
                 // Phase 11C: warm-path entry from the directory-materialized
                 // panel. Detect the umbrella DA from the materialized Claim's
                 // owner to the active actor, and surface the CTA when no EA
@@ -8525,7 +8601,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.3.2 &middot; Changelog
+          v0.17.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8572,6 +8648,15 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.4', date: '2026-05-19', label: 'Phase 17.4', items: [
+                  'Phase 17.4 — Umbrella DA arc: perimeter fix + seed expansion + Directory panel/card parity + perimeter hover. Andrew\'s chosen approach (Option #3 — grouping perimeter, no edges) ratified.',
+                  'Umbrella perimeter rendering fixed. Root cause: `packClusterDense` placed the umbrella subset on the innermost cells (sorted by distance from cluster center), which RING the central label hole — so the convex-hull perimeter (offset outward 1 cell) enclosed the hole + actor pillbox ("perimeter wraps the pillbox with no dots inside"). Fix: the packer now relocates the umbrella subset into a coherent edge-blob (anchored at the inner cell furthest from center, growing inward by nearest-neighbor) so the hull is a tight off-center polygon wrapping just the umbrella dots. RFP cells stay outermost; public cells fill the rest. `umbrellaOutlinePath` itself unchanged.',
+                  'Seed expansion: 14 new umbrella DAs across actor pairings (was: only Dave→Bob). Alice→Bob (5, type variety: 2 full / 2 selective / 1 proofonly), Alice→Carol (3, all full), Dave→Alice (3, 2 selective / 1 proofonly), Dave→Carol (3, all full). Five new non-public MicroCo Claims added for Alice\'s umbrella subset (MicroCo\'s 3 existing Claims are all public, and public takes precedence over umbrella — so umbrella DAs on them wouldn\'t render a perimeter). Dave\'s disclosures reuse his existing 7 non-public Claims. Demo result: Bob sees ChipCo (7) + MicroCo (5) perimeters; Alice sees ChipCo (3); Carol sees MicroCo (3) + ChipCo (3); Dave sees none (by design — suppliers don\'t receive umbrella disclosures).',
+                  'Directory Claim Detail Panel parity with the parent canvas. The Directory mount of V22ClaimPanel now threads the DA/EA Agreements section lists (sourced from merged shared artifacts, filtered to this Claim + agreements the active actor is a party to) + name resolvers — so clicking an umbrella Claim shows its existing DA in the Agreements section + the EA-required callout + the warm-path "Request Evaluation Agreement" footer button (opens EARequestModal, since the DA already exists). Cold-path (no DA) + View-EA (EA exists) states from 17.3 preserved. Mutation handlers (Amend/Revoke DA/EA) intentionally omitted from the Directory mount — those are grantor-side actions and the umbrella viewer is the grantee.',
+                  'Card action bar warm-path parity. New `_directoryWarmPathRequestCandidate` synthetic-node marker (active DA exists, no EA) — mutually exclusive with the cold-path (`_directoryRequestEaCandidate`, no DA) and View-EA (`_directoryExistingEa`) markers. AssetNode\'s Claim card action bar renders the warm-path Request EA button; click dispatches a distinct action that V2App routes to the EARequestModal (not the cold-path AssetPickerModal → CombinedRequestModal). DirectoryLayer now receives `disclosureAgreements` to compute the marker.',
+                  'Umbrella perimeter hover + tooltip. Point-in-polygon hit-testing in the Directory mouse-move handler (projects each cluster\'s `umbrellaPathWorld` to screen, tests the cursor) runs independently of the dot raycast so it never blocks Claim clicks. On hover: border opacity 0.55 → 1.0 + stroke 1.5 → 2.5px + fill tint 8% → 16%. HTML tooltip near the cursor: "You have Disclosure Agreements with the Claims inside this perimeter." + "From {grantor party}" sub-line, viewport-edge-clamped.',
+                  'Footer rolls forward to v0.17.4.',
+                ]},
                 { version: '0.17.3.2', date: '2026-05-19', label: 'Phase 17.3.2', items: [
                   'Phase 17.3.2 — Fan-out improvements + leak investigation + RFP owner card action bar. Five items batched before Phase 17.4 (umbrella DA edges) opens.',
                   'Fan-out jitter bumped 250 → 600 ms; wave speed bumped 7000 → 9500 wu/sec. The wavefront travels faster and the jitter is now ~50% of the new base radial duration, so per-instance randomness dominates the perception of "which dot appears next" for a clearly jagged organic edge while the radial bias still gives the wave its outward direction.',

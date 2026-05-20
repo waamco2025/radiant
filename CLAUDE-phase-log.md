@@ -2673,6 +2673,47 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.4 completion notes (2026-05-19) — Umbrella DA arc: perimeter fix + seed expansion + Directory panel/card parity + perimeter hover
+
+Closes the umbrella-DA visualisation work. Andrew's Option #3 (grouping perimeter, no edges) ratified — the visual infrastructure was largely already shipped (Phase 16.x); this phase fixed the broken perimeter, expanded the seed for all four roles, brought the Directory Claim panel/card to parity with the parent canvas, and added perimeter hover/tooltip.
+
+**Diff (high-level).**
+
+- `src/v2/DirectoryLayer.jsx` — `packClusterDense` gains `umbrellaCount` + `rfpCount` params and relocates the umbrella subset into a coherent edge-blob (perimeter fix). New props `disclosureAgreements`. Claim-card synthetic node stamps `_directoryWarmPathRequestCandidate` (+ adjusts `_directoryRequestEaCandidate` to require no-DA). Perimeter hover: `hoveredPerimeter` state + `hoveredPerimeterPartyRef`, point-in-polygon hit-test in `handleMouseMove`, hover brightening in the SVG path, HTML tooltip overlay. Cleared on phase-close / role-switch / mouse-leave.
+- `src/v2/v2_2Data.js` — 5 new non-public MicroCo Claims (cMicroPcbStack / cMicroConnSpec / cMicroThermalPad / cMicroFwBootloader / cMicroRfFilter) + 14 new umbrella DAs across Alice→Bob, Alice→Carol, Dave→Alice, Dave→Carol. Added to the `claims` + `disclosureAgreements` arrays.
+- `src/v2/AssetNode.jsx` — V22ActionBar Claim branch gains the warm-path Request EA button (`_directoryWarmPathRequestCandidate`), checked before the cold-path candidate (more-precise state wins).
+- `src/v2/V2App.jsx` — Directory V22ClaimPanel mount threads `disclosureAgreementsForNode` / `evaluationAgreementsForNode` (filtered from sharedForPanel) + `resolveSubjectName` / `resolveClaimName`. New `handleRequestEaWarmPathForClaim` opens the EARequestModal. DirectoryLayer mount wires `disclosureAgreements` + the warm-path card-action case. Footer + Changelog modal rolled to v0.17.4.
+- Standard 5 doc updates.
+
+**Perimeter bug root cause + fix.** Investigation confirmed the view-builder data was correct (Bob's ChipCo cluster carried 7 umbrellaClaims). The bug was downstream in `packClusterDense`: it sorts available grid cells by distance from the cluster center ascending and fills the first N. Since the item array is `[...umbrellaItems, ...publicItems, ...rfpItems]` mapped 1:1 to positions, the umbrella items landed on the innermost cells — which ring the central label hole (the hole is excluded from packing). The convex-hull perimeter (`umbrellaOutlinePath`, offset outward 1 cell) of a ring-of-dots-around-a-hole encloses the hole, so the perimeter wrapped the actor pillbox with the dots sitting on its edge. Fix (surgical, per the brief's "only debug what feeds the function, don't rewrite umbrellaOutlinePath"): `packClusterDense` now accepts `umbrellaCount` + `rfpCount`, reserves the outermost `rfpCount` cells for RFPs, then picks the umbrella cells as a tight nearest-neighbor blob anchored at the inner cell furthest from center (the cluster's edge, away from the label hole). The hull of an edge-blob is a tight off-center polygon that wraps just the umbrella dots.
+
+**Seed expansion + integrity.**
+
+- New DA count: +14 (92006 → 92020). New Claim count: +5 (22994 → 22999).
+- Per-role umbrella-subset counts (data-probe verified): Bob → ChipCo 7 + MicroCo 5; Alice → ChipCo 3; Carol → MicroCo 3 + ChipCo 3; Dave → none.
+- Public-precedence preserved: the probe confirms no Claim that's both public + umbrella-to-active lands in `umbrellaClaims` (Bob's MicroCo cluster shows 3 public + 5 umbrella with zero overlap — the 5 umbrella are the new non-public Claims).
+- Disclosure-type variety: Bob's MicroCo umbrella subset spans indigo (pcb-stack, rf-filter = full), amber (conn-spec, fw-bootloader = selective), green (thermal-pad = proofonly).
+
+**Deviations.**
+
+1. **Added 5 new MicroCo Claims rather than disclosing existing ones.** MicroCo's three existing Claims (cPrm / cVreg / cEmi) are all publicly disclosed, and public takes precedence over umbrella per §8.2.2 — so an umbrella DA on any of them would route the Claim to `publicClaims`, not `umbrellaClaims`, and no amber perimeter would render. The brief explicitly sanctions adding new Claims for the umbrella subset ("or add new Claims for the umbrella subset"). The 5 new Claims are minimal (no referenced Assets, like Dave's existing non-public Claims) and additive — the existing 3 public Claims (load-bearing in parent-canvas demos) are untouched.
+2. **DA/EA mutation handlers omitted from the Directory mount.** The brief flagged that AgreementsSection row handlers (onAmendDa, onRevokeDa, onAgreementRowClick) may have parent-canvas-specific side effects. Decision: OMIT them on the Directory mount. Rationale: the umbrella viewer is the DA's grantee, and Amend/Revoke are grantor-side actions (the AgreementsSection gates those buttons on `activeParty === grantor` anyway, so they wouldn't render for the grantee even if passed). Agreement-row-click navigation would need parent-canvas context that doesn't exist from the Directory materialized panel. Passing only the lists + name resolvers gives the read-only Agreements section the brief wants.
+3. **Revoked DA/EA lists passed empty on the Directory mount.** Revocation notices are a parent-canvas session flow (driven by `v22ActiveRevocationNotice`); the Directory materialized panel doesn't participate in that flow. Empty arrays are correct here.
+
+**Runtime verification.**
+
+- Build: `npm run build` clean (`✓ 129 modules transformed`, no errors).
+- Data-layer probes: umbrella-subset counts per role (above); new DA/Claim counts; public-precedence non-overlap.
+- Dev server: DirectoryLayer / v2_2Data / RequirementsSetDetailModal all transform with HTTP 200.
+- Perimeter rendering, hover/tooltip, panel content, and card actions are inherently visual + require canvas-click interaction — code-verified here per the documented V2Canvas/Directory raycaster limitation; manual mouse walkthrough recommended for the visual QA items (perimeter wraps correct dots, hover brightens, tooltip copy, warm-path panel/card).
+
+**Known scope boundaries.**
+
+- Parent-layer EA-required-message-when-not-needed bug still deferred (Andrew can't recall the symptom).
+- Phase 17.5 (RFP creation flow) is next.
+
+**Status:** [x] Complete.
+
 ### Phase 17.3.2 completion notes (2026-05-19) — Fan-out improvements + leak investigation + RFP owner card action bar
 
 Five items batched before Phase 17.4 (umbrella DA edges) opens. Closes the Safari rapid-cycle crash with a surgical WebGL fix; ships visual polish on the fan-out animation; brings the RFP card to parity with the panel footer for owner Close/Reopen.
