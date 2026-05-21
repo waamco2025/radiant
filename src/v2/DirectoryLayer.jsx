@@ -1512,6 +1512,10 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // `buildV22DirectoryDataForRole` so the creating actor sees their new RFP
   // in their own Directory cluster.
   v22CreatedRfps,
+  // Phase 17.5.1.4: session-state Set<rfpId> of removed RFPs. Applied last in
+  // the merge chain inside `buildV22DirectoryDataForRole` so a removed RFP
+  // (and its solicitations) disappears from every actor's Directory.
+  v22RemovedRfpIds,
   // eslint-disable-next-line no-unused-vars
   onOpenAIShopper,
   onClose,
@@ -1587,7 +1591,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // ─── Per-role data + viewport + layout ──────────────────────────────
   const directoryData = useMemo(() => {
     if (!roleId) return null
-    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps)
+    const base = buildV22DirectoryDataForRole(roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps, v22RemovedRfpIds)
     // Phase 16.1.3 Item 8: enrich the directory data with per-Claim
     // disclosure-type lookup tables for both public DAs and umbrella DAs.
     // The view-builder currently doesn't expose these directly; we look
@@ -1624,7 +1628,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     } catch (_e) {
       return base
     }
-  }, [roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps])
+  }, [roleId, v22Provisionals, v22ClosedRfpIds, v22CreatedRfps, v22RemovedRfpIds])
 
   const [viewport, setViewport] = useState({
     w: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -3782,6 +3786,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               && isOwnerOfRfp
               && d.rfp?.status === 'closed'
             )
+            // Phase 17.5.1.4 — owner Remove card CTA. Same gate as Reopen
+            // (owner + closed) so a closed-and-owned RFP shows both Reopen
+            // and Remove on its action bar, mirroring the panel footer.
+            const removeCandidate = (
+              !!onRfpCardAction
+              && isOwnerOfRfp
+              && d.rfp?.status === 'closed'
+            )
             const rfpSyntheticNode = {
               id: d.rfp.id,
               category: 'rfp',
@@ -3793,6 +3805,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               _directorySolicitCandidate: solicitCandidate,
               _directoryCloseCandidate: closeCandidate,
               _directoryReopenCandidate: reopenCandidate,
+              _directoryRemoveCandidate: removeCandidate,
             }
             return (
               <div

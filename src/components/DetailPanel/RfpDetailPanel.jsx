@@ -246,19 +246,32 @@ function RsChip({ name, version, raw }) {
 // also not affirming, so neutral grey-on-dim reads as "discrete state
 // change"). Reopen uses indigo, matching the affirming-action treatment
 // V22NodeDetailPanel's accent buttons use.
-function ActionButton({ label, onClick, variant }) {
+// Phase 17.5.1.4: `danger` variant (red) for the irreversible Remove RFP
+// action + optional `title` tooltip + optional `icon` glyph.
+function ActionButton({ label, onClick, variant, title, icon }) {
   const isAffirm = variant === 'affirm'
+  const isDanger = variant === 'danger'
+  const bg = isAffirm ? 'var(--accent-indigo)'
+    : isDanger ? 'color-mix(in srgb, var(--accent-red) 12%, var(--bg-raised))'
+    : 'var(--bg-raised)'
+  const border = isAffirm ? 'var(--accent-indigo)'
+    : isDanger ? 'color-mix(in srgb, var(--accent-red) 50%, var(--border))'
+    : 'var(--border)'
+  const color = isAffirm ? 'var(--bg-deep)'
+    : isDanger ? 'var(--accent-red)'
+    : 'var(--text-primary)'
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       style={{
         flex: 1,
         padding: '10px 14px',
-        background: isAffirm ? 'var(--accent-indigo)' : 'var(--bg-raised)',
-        border: '1px solid ' + (isAffirm ? 'var(--accent-indigo)' : 'var(--border)'),
+        background: bg,
+        border: '1px solid ' + border,
         borderRadius: 4,
-        color: isAffirm ? 'var(--bg-deep)' : 'var(--text-primary)',
+        color,
         fontFamily: 'var(--font-mono)',
         fontSize: 11,
         fontWeight: 700,
@@ -266,7 +279,7 @@ function ActionButton({ label, onClick, variant }) {
         textTransform: 'uppercase',
         cursor: 'pointer',
       }}
-    >{label}</button>
+    >{icon ? <span style={{ marginRight: 6 }}>{icon}</span> : null}{label}</button>
   )
 }
 
@@ -277,6 +290,9 @@ export default function RfpDetailPanel({
   onClose,
   onCloseRfp,
   onReopenRfp,
+  // Phase 17.5.1.4: owner-only Remove action, available only on closed RFPs.
+  // Silently destroys the RFP + any open solicitations against it.
+  onRemoveRfp,
   // Phase 17.2: solicitations + activeClaims + handlers.
   solicitations = [],
   activeClaims = [],
@@ -598,8 +614,13 @@ export default function RfpDetailPanel({
         )}
       </div>
 
-      {/* Phase 17.1: owner-only footer with single direct-action button —
-          Close (open) or Reopen (closed).
+      {/* Phase 17.1: owner-only footer — Close (open) or Reopen (closed).
+          Phase 17.5.1.4: closed RFPs gain a second "Remove RFP" button
+          (danger variant) — irreversible destruction of the RFP + any open
+          solicitations against it. Remove is NEVER shown on an open RFP
+          (Andrew's explicit constraint: Close must happen first — which
+          fires solicitor notifications — Remove is the silent cleanup
+          afterward).
           Phase 17.2: non-owner footer extension — "Solicit with my Claim"
           button on open RFPs without an existing solicitation, or a muted
           "Already solicited" line when the active actor has one. Other
@@ -615,11 +636,20 @@ export default function RfpDetailPanel({
           flexShrink: 0,
         }}>
           {isClosed ? (
-            <ActionButton
-              label="Reopen this RFP"
-              variant="affirm"
-              onClick={() => onReopenRfp?.(rfp)}
-            />
+            <>
+              <ActionButton
+                label="Reopen this RFP"
+                variant="affirm"
+                onClick={() => onReopenRfp?.(rfp)}
+              />
+              <ActionButton
+                label="Remove RFP"
+                variant="danger"
+                icon="⊟"
+                title="Permanently remove this RFP from the network. Any open solicitations against it will also be removed. This action cannot be undone."
+                onClick={() => onRemoveRfp?.(rfp)}
+              />
+            </>
           ) : (
             <ActionButton
               label="Close this RFP"

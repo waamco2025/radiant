@@ -1439,6 +1439,24 @@ export function mergeCreatedRfps(shared, createdRfps) {
   return { ...shared, rfps: [...shared.rfps, ...additions] }
 }
 
+// Phase 17.5.1.4: overlays session-state Remove transitions. Filters
+// removed RFPs out of `shared.rfps` AND cascades to drop any
+// `rfpSolicitations` referencing those RFPs (per the Remove spec: removal
+// silently destroys the RFP + any open solicitations against it). Pure
+// function — returns a new shared object. Storage shape is a Set<rfpId>.
+// Apply LAST in the merge chain (after created / closed) so the removal
+// acts on the final RFP set. When the Set is empty or missing, returns
+// shared unchanged.
+export function mergeRemovedRfps(shared, removedRfpIds) {
+  if (!removedRfpIds || (removedRfpIds.size ?? 0) === 0) return shared
+  const removed = (id) => removedRfpIds.has(id)
+  return {
+    ...shared,
+    rfps: (shared.rfps || []).filter((r) => !removed(r.id)),
+    rfpSolicitations: (shared.rfpSolicitations || []).filter((s) => !removed(s.rfpId)),
+  }
+}
+
 // Phase 17.2: RFP Solicitation — a seller invites a buyer to consider one of
 // the seller's existing public Claims against the buyer's open RFP. One
 // solicitation per (solicitor, rfpId) pair (enforced at the call site in V2App;
@@ -5420,7 +5438,7 @@ export function getV22DataForRole(roleId, provisionals) {
  *     otherRfps: RFP[],                   // non-active-Actor RFPs (status === 'open')
  *   }
  */
-export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds, createdRfps) {
+export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds, createdRfps, removedRfpIds) {
   // Phase 17.1: closedRfpIds (Map<id, ISO closedDate> | null) overlays
   // session-state Close transitions on the seed RFPs. Threaded the same
   // way provisionals are — merged in-place here so call sites don't
@@ -5431,12 +5449,19 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
   // user-created RFPs. Order created → closed so a user can create and then
   // Close the same RFP within one session (mergeClosedRfps' .map runs over
   // the merged rfps and finds the user-created RFP if its id is closed).
-  const shared = mergeClosedRfps(
-    mergeCreatedRfps(
-      mergeProvisionals(buildV22SharedArtifacts(), provisionals),
-      createdRfps,
+  // Phase 17.5.1.4: removedRfpIds (Set<id> | null) overlays Remove
+  // transitions. Applied LAST so removal acts on the final RFP set (a
+  // same-session create → close → remove sequence works) and cascades to
+  // drop associated rfpSolicitations.
+  const shared = mergeRemovedRfps(
+    mergeClosedRfps(
+      mergeCreatedRfps(
+        mergeProvisionals(buildV22SharedArtifacts(), provisionals),
+        createdRfps,
+      ),
+      closedRfpIds,
     ),
-    closedRfpIds,
+    removedRfpIds,
   )
   const actor = (shared.actors || []).find((a) => a.id === roleId)
   const activeParty = actor?.party || null

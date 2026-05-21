@@ -144,6 +144,10 @@ export default function RfpCreationModal({
   return (
     <Backdrop onClose={onClose}>
       <Modal width={640}>
+        {/* Phase 17.5.1.4 (Fix B): dim the name + description placeholders so
+            the empty fields don't read as pre-filled. Inline styles can't
+            target ::placeholder, so a scoped rule keys off the shared class. */}
+        <style>{`.rfp-create-field::placeholder { color: color-mix(in srgb, var(--text-muted) 70%, transparent); opacity: 1; }`}</style>
         <ModalHeader
           title={step === 1 ? `Create RFP for ${assetName}` : 'Review RFP details'}
           subtitle={
@@ -163,6 +167,7 @@ export default function RfpCreationModal({
               <FieldLabel label="RFP Name" required />
               <input
                 type="text"
+                className="rfp-create-field"
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -185,6 +190,7 @@ export default function RfpCreationModal({
               <FieldLabel label="Description" required />
               <textarea
                 rows={5}
+                className="rfp-create-field"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Describe what you're sourcing, the evaluation context, and any constraints suppliers should know about…"

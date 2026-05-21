@@ -489,7 +489,10 @@ export default function AssetNode({
     const rfpSolicitCandidate = !!node._directorySolicitCandidate
     const rfpCloseCandidate = !!node._directoryCloseCandidate
     const rfpReopenCandidate = !!node._directoryReopenCandidate
-    const rfpHasAnyAction = rfpSolicitCandidate || rfpCloseCandidate || rfpReopenCandidate
+    // Phase 17.5.1.4 — owner Remove action, stamped only on closed-and-owned
+    // RFPs (mutually exclusive with the Close candidate, parallel to Reopen).
+    const rfpRemoveCandidate = !!node._directoryRemoveCandidate
+    const rfpHasAnyAction = rfpSolicitCandidate || rfpCloseCandidate || rfpReopenCandidate || rfpRemoveCandidate
     const rfpShowActionBar = (isSelected || hovered) && rfpHasAnyAction && !!onV22CardAction
     return (
       <div
@@ -640,6 +643,25 @@ export default function AssetNode({
                 tooltip="Reopen this RFP"
                 onClick={() => onV22CardAction?.('reopenRfp', node)}
                 categoryColor={'var(--border-hover)'}
+              />
+            )}
+            {rfpRemoveCandidate && (
+              <ActionButton
+                icon={(
+                  // Phase 17.5.1.4 — trash-can icon for the irreversible
+                  // "Remove RFP" action (closed-and-owned only). Distinct
+                  // from the ✕ Cancel / ⊠ Dismiss glyphs.
+                  <svg width={13} height={13} viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path d="M3 4.5 H13" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    <path d="M6.5 4.5 V3 a1 1 0 0 1 1 -1 H8.5 a1 1 0 0 1 1 1 V4.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                    <path d="M4.5 4.5 L5 13 a1 1 0 0 0 1 1 H10 a1 1 0 0 0 1 -1 L11.5 4.5" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+                    <line x1="6.5" y1="6.5" x2="6.8" y2="12" stroke="currentColor" strokeWidth="1" />
+                    <line x1="9.5" y1="6.5" x2="9.2" y2="12" stroke="currentColor" strokeWidth="1" />
+                  </svg>
+                )}
+                tooltip="Remove this RFP"
+                onClick={() => onV22CardAction?.('removeRfp', node)}
+                categoryColor={'var(--accent-red)'}
               />
             )}
           </div>
