@@ -1516,6 +1516,10 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // the merge chain inside `buildV22DirectoryDataForRole` so a removed RFP
   // (and its solicitations) disappears from every actor's Directory.
   v22RemovedRfpIds,
+  // Phase 17.5.2: id of the just-created RFP. Stamped as `_isNew` on the
+  // matching synthetic RFP card so AssetNode renders the NEW badge until the
+  // user navigates away (cleared in V2App by a deselect effect).
+  recentlyCreatedRfpId,
   // eslint-disable-next-line no-unused-vars
   onOpenAIShopper,
   onClose,
@@ -1741,6 +1745,14 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   const cinematicZoomRafRef = useRef(0)
   const lastAnimatedRoleRef = useRef(null)
   const lastAnimatedPhaseRef = useRef('closed')
+  // Phase 17.5.2: ref mirror of `recentlyCreatedRfpId` so the entry-animation
+  // effect can read the latest value without adding it to the effect deps
+  // (which would replay the entry animation when the flag clears). When set,
+  // the Directory was opened to route directly to the just-created RFP, so the
+  // galactic-entry cinematic zoom-out is skipped — `selectRfp`'s pan/zoom to
+  // the marker (full-card LOD) owns the camera instead of being overridden.
+  const recentlyCreatedRfpIdRef = useRef(null)
+  recentlyCreatedRfpIdRef.current = recentlyCreatedRfpId
 
   const [hover, setHover] = useState(null)
   const [pinned, setPinned] = useState(null)
@@ -1894,6 +1906,15 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // Phase 16.1.3 Item 6: animated pan-to-center (mirrors V2Canvas pattern).
   const animatedPanToWithZoom = useCallback((worldX, worldY, targetZoom, duration = 500) => {
     if (panAnimRef.current) cancelAnimationFrame(panAnimRef.current)
+    // Phase 17.5.2: cancel any in-flight entry cinematic zoom-out (Phase
+    // 17.3.2) so it doesn't fight this pan/zoom frame-by-frame. Without this,
+    // a programmatic selectRfp fired mid-entry (e.g. post-creation routing)
+    // races the cinematic lerp back toward INITIAL_ZOOM and the camera settles
+    // at neither target (observed ~52% instead of full-card LOD).
+    if (cinematicZoomRafRef.current) {
+      cancelAnimationFrame(cinematicZoomRafRef.current)
+      cinematicZoomRafRef.current = 0
+    }
     const startX = camPosRef.current.x
     const startY = camPosRef.current.y
     const startZoom = zoomRef.current
@@ -2970,33 +2991,43 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     // — a cinematic accompaniment to the dot wave. 1.3× = "30% tighter"
     // (smaller numbers = tighter view since zoom < 1 here). 1500ms matches
     // the new ~1.2–1.5s fan-out so the two timelines complete together.
-    const CINEMATIC_START_ZOOM = INITIAL_ZOOM * 1.3
-    const CINEMATIC_ZOOM_DURATION_MS = 1500
-    zoomRef.current = CINEMATIC_START_ZOOM
-    camPosRef.current = clampPan(OWN_CLUSTER_ANCHOR_X, CANVAS_HEIGHT / 2)
-    setZoom(CINEMATIC_START_ZOOM)
-    updateCamera()
-
-    const cinematicStart = performance.now()
-    const cinematicTick = () => {
-      const elapsed = performance.now() - cinematicStart
-      if (elapsed >= CINEMATIC_ZOOM_DURATION_MS) {
-        zoomRef.current = INITIAL_ZOOM
-        setZoom(INITIAL_ZOOM)
-        updateCamera()
-        cinematicZoomRafRef.current = 0
-        return
-      }
-      const t = elapsed / CINEMATIC_ZOOM_DURATION_MS
-      // Matches `easeOut` in directoryLoadAnimation.js: 1 - (1-t)^3.
-      const eased = 1 - Math.pow(1 - t, 3)
-      const z = CINEMATIC_START_ZOOM + (INITIAL_ZOOM - CINEMATIC_START_ZOOM) * eased
-      zoomRef.current = z
-      setZoom(z)
+    // Phase 17.5.2: skip the galactic-entry cinematic zoom-out when the
+    // Directory was opened to route directly to a just-created RFP. The
+    // cinematic lerp drives zoom back to INITIAL_ZOOM (~15%) and would
+    // override `selectRfp`'s pan/zoom to the new marker at full-card LOD
+    // (selectRfp fires during 'opening', before this effect, so its
+    // animatedPanToWithZoom can't pre-cancel a cinematic that hasn't started
+    // yet). Skipping it here lets selectRfp own the camera. The fan-out below
+    // still plays. (Notification-routing keeps the cinematic — no target id.)
+    if (!recentlyCreatedRfpIdRef.current) {
+      const CINEMATIC_START_ZOOM = INITIAL_ZOOM * 1.3
+      const CINEMATIC_ZOOM_DURATION_MS = 1500
+      zoomRef.current = CINEMATIC_START_ZOOM
+      camPosRef.current = clampPan(OWN_CLUSTER_ANCHOR_X, CANVAS_HEIGHT / 2)
+      setZoom(CINEMATIC_START_ZOOM)
       updateCamera()
+
+      const cinematicStart = performance.now()
+      const cinematicTick = () => {
+        const elapsed = performance.now() - cinematicStart
+        if (elapsed >= CINEMATIC_ZOOM_DURATION_MS) {
+          zoomRef.current = INITIAL_ZOOM
+          setZoom(INITIAL_ZOOM)
+          updateCamera()
+          cinematicZoomRafRef.current = 0
+          return
+        }
+        const t = elapsed / CINEMATIC_ZOOM_DURATION_MS
+        // Matches `easeOut` in directoryLoadAnimation.js: 1 - (1-t)^3.
+        const eased = 1 - Math.pow(1 - t, 3)
+        const z = CINEMATIC_START_ZOOM + (INITIAL_ZOOM - CINEMATIC_START_ZOOM) * eased
+        zoomRef.current = z
+        setZoom(z)
+        updateCamera()
+        cinematicZoomRafRef.current = requestAnimationFrame(cinematicTick)
+      }
       cinematicZoomRafRef.current = requestAnimationFrame(cinematicTick)
     }
-    cinematicZoomRafRef.current = requestAnimationFrame(cinematicTick)
 
     // Compute dot + label inputs for the wave animation. Read layout via
     // ref so this effect's deps stay tight to (phase, roleId, threeReady)
@@ -3407,6 +3438,23 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     return () => container.removeEventListener('wheel', handleWheel)
   }, [handleWheel, phase])
 
+  // Phase 17.5.2 (Part C): double-click empty canvas space → return to Parent
+  // (same reverse circle wipe as the globe button / exit chip, via `onClose`).
+  // Filters: (1) only when the layer is settled (`phase === 'in'`) so an
+  // in-flight open/close transition no-ops; (2) only when the dblclick target
+  // is the Three.js canvas itself — HTML overlays (cards, cluster-label
+  // pillboxes, zoom controls, exit chip) are different elements, so dblclicks
+  // on them don't reach this branch; (3) for canvas hits, a raycast marker hit
+  // (dot-LOD claim/RFP) means the dblclick belongs to that marker, not empty
+  // space. No visible affordance — hidden shortcut per Andrew's request.
+  const handleCanvasDoubleClick = useCallback((e) => {
+    if (phase !== 'in') return
+    const canvasEl = rendererRef.current?.domElement
+    if (!canvasEl || e.target !== canvasEl) return
+    if (raycast(e.clientX, e.clientY)) return
+    onClose?.()
+  }, [phase, raycast, onClose])
+
   const zoomIn = useCallback(() => {
     zoomRef.current = Math.min(MAX_ZOOM, zoomRef.current * 1.15)
     setZoom(zoomRef.current)
@@ -3471,6 +3519,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onDoubleClick={handleCanvasDoubleClick}
       onMouseLeave={() => {
         draggingRef.current = false
         setHover(null)
@@ -3802,6 +3851,8 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               ownerParty: d.rfp.owner,
               owner: d.rfp.owner,
               isClosed: isClosedOwned,
+              // Phase 17.5.2: NEW badge on the just-created RFP card.
+              _isNew: !!recentlyCreatedRfpId && d.rfp.id === recentlyCreatedRfpId,
               _directorySolicitCandidate: solicitCandidate,
               _directoryCloseCandidate: closeCandidate,
               _directoryReopenCandidate: reopenCandidate,

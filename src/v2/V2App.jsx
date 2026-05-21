@@ -313,6 +313,15 @@ export default function V2App() {
   // removed RFP + its solicitations disappear from every actor's view.
   // Remove is only reachable on closed RFPs (enforced at the UI render sites).
   const [v22RemovedRfpIds, setV22RemovedRfpIds] = useState(() => new Set())
+  // Phase 17.5.2: id of the most-recently-created RFP. Drives the `_isNew`
+  // reveal flag on the synthetic Directory RFP card (NEW badge); cleared by a
+  // deselect effect once the user navigates away. Mirrors the parent-layer
+  // `v22RecentlyAcceptedClaimId` reveal pattern, but for Directory-only RFPs.
+  const [v22RecentlyCreatedRfpId, setV22RecentlyCreatedRfpId] = useState(null)
+  // Phase 17.5.2: ref to the latest `routeToRfp` (defined later, after
+  // clearEdgeUiState + directoryLayerRef). Lets `handleRfpCreationSubmit`
+  // (declared earlier) invoke it at event-time without a forward dep / TDZ.
+  const routeToRfpRef = useRef(null)
   // Phase 17.2: session-state Map<solicitationId, RfpSolicitation> for
   // seller-initiated solicitations against an RFP. Mirror of
   // `v22ClosedRfpIds` shape — Map so updates (rejection, response date)
@@ -2834,6 +2843,14 @@ export default function V2App() {
     })
     setV22RfpCreationOpen(false)
     setV22RfpCreationContext(null)
+    // Phase 17.5.2: orchestration. Stamp the new RFP for the `_isNew` reveal
+    // (NEW badge on its Directory card), then route to it — switches Parent →
+    // Directory (forward wipe), pans/zooms to the marker at full-card LOD, and
+    // auto-selects it (opens its Detail Panel). `setV22CreatedRfps` hasn't
+    // flushed yet, so we pass the freshly-built `newRfp` as the routing
+    // fallback object.
+    setV22RecentlyCreatedRfpId(newRfp.id)
+    routeToRfpRef.current?.(newRfp.id, { rfp: newRfp })
   }, [v22RfpCreationContext, activeRole])
 
   // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
@@ -4391,7 +4408,15 @@ export default function V2App() {
   // phase machine + layout are ready (rAF retry, capped). The RFP is resolved
   // from the full created→closed→removed merge chain so a created/closed RFP
   // routes correctly and a removed one no-ops.
-  const routeToRfp = useCallback((rfpId) => {
+  // Phase 17.5.2: `opts.rfp` is a fallback RFP object for the post-creation
+  // flow — at submit time `setV22CreatedRfps` hasn't flushed, so the merged
+  // lookup below can't yet resolve the brand-new RFP; the caller passes the
+  // freshly-built object so routing proceeds. `selectRfp` only needs the id to
+  // find the marker once the layout rebuilds (the rAF retry waits for it), and
+  // the panel re-resolves `currentRfp` from the merge chain each render, so the
+  // fallback object is sufficient. `selectRfp` already zooms to LOD_THRESHOLD
+  // (full-card LOD), so no explicit zoom-level plumbing is needed.
+  const routeToRfp = useCallback((rfpId, opts = {}) => {
     const sharedRfps = mergeRemovedRfps(
       mergeClosedRfps(
         mergeCreatedRfps(buildV22SharedArtifacts(), v22CreatedRfps),
@@ -4399,22 +4424,62 @@ export default function V2App() {
       ),
       v22RemovedRfpIds,
     ).rfps || []
-    const targetRfp = sharedRfps.find((r) => r.id === rfpId) || null
+    const targetRfp = sharedRfps.find((r) => r.id === rfpId) || opts.rfp || null
     if (!targetRfp) return
     setSel(null)
     clearEdgeUiState()
     setV22DirectoryOpen(true)
     setV22DirectorySelectedClaim(null)
     setV22DirectorySelectedRfp(targetRfp)
+    // Phase 17.5.2: cap raised 60 → 240 frames (~4s). For a freshly-created
+    // RFP, the Directory opens from Parent (forward wipe ~900ms) and the
+    // layout must rebuild to include the new RFP (after the v22CreatedRfps
+    // setState flushes) before `selectRfp` can find its marker — that can
+    // exceed the old ~1s window, leaving the marker unselected + un-zoomed.
     let attempts = 0
     const trySelect = () => {
       attempts += 1
       const ok = directoryLayerRef.current?.selectRfp?.(targetRfp)
-      if (ok || attempts > 60) return
+      if (ok || attempts > 240) return
       requestAnimationFrame(trySelect)
     }
     requestAnimationFrame(trySelect)
   }, [v22CreatedRfps, v22ClosedRfpIds, v22RemovedRfpIds, clearEdgeUiState])
+  // Keep the ref pointing at the latest routeToRfp so earlier-declared
+  // handlers (handleRfpCreationSubmit) can call it without a forward dep.
+  routeToRfpRef.current = routeToRfp
+
+  // Phase 17.5.2: clear the NEW-badge reveal once the user navigates away from
+  // the freshly-created RFP — when the selected Directory RFP is no longer the
+  // recently-created one (selected another marker, closed the panel, or
+  // returned to Parent → v22DirectorySelectedRfp becomes null). Mirrors the
+  // parent-layer `_isNew` clear-on-deselect pattern.
+  useEffect(() => {
+    if (!v22RecentlyCreatedRfpId) return
+    if (v22DirectorySelectedRfp?.id !== v22RecentlyCreatedRfpId) {
+      setV22RecentlyCreatedRfpId(null)
+    }
+  }, [v22DirectorySelectedRfp, v22RecentlyCreatedRfpId])
+
+  // Phase 17.5.2 (Part B): navigate from an RFP's Detail Panel "For Asset"
+  // row to that Asset on the parent canvas — the inverse of routeToRfp. Closes
+  // the RFP/Claim Detail Panels + the Directory layer (reverse circle wipe),
+  // then selects + pans/zooms to the Asset node on the parent canvas. Mirrors
+  // handleViewEa's close-Directory-then-pan pattern (pan runs during the wipe;
+  // no rAF needed — V2Canvas is mounted under the Directory overlay). If the
+  // Asset isn't on the active actor's parent canvas, it still returns to Parent
+  // (no selection).
+  const routeToAsset = useCallback((assetId) => {
+    if (!assetId) return
+    setV22DirectorySelectedRfp(null)
+    setV22DirectorySelectedClaim(null)
+    setV22DirectoryOpen(false)
+    clearEdgeUiState()
+    const assetNode = nodeMap[assetId]
+    if (!assetNode || assetNode.v22Type !== 'ASSET') { setSel(null); return }
+    setSel(assetNode.id)
+    canvasRef.current?.animatedPanToWithZoom?.(assetNode.x, assetNode.y, 1.0, 500)
+  }, [nodeMap, clearEdgeUiState])
 
   const handleSwitchRole = useCallback((newRoleId) => {
     if (newRoleId === roleId) return
@@ -6491,6 +6556,9 @@ export default function V2App() {
             // merge chain so removed RFPs + their solicitations disappear from
             // every actor's Directory view.
             v22RemovedRfpIds={v22RemovedRfpIds}
+            // Phase 17.5.2: id of the just-created RFP — DirectoryLayer stamps
+            // `_isNew` on its synthetic card so AssetNode renders the NEW badge.
+            recentlyCreatedRfpId={v22RecentlyCreatedRfpId}
             // Phase 11.8 #44: route the circular wipe through the screen-space
             // origin captured when the Radiant Network actor node was
             // double-clicked. Null falls back to the chrome globe-button corner.
@@ -6930,6 +6998,9 @@ export default function V2App() {
                 // Phase 17.3.1: clicking a Requirements row opens
                 // RequirementsSetDetailModal at the V2App level.
                 onRequirementClick={(rsId) => setV22OpenRsId(rsId)}
+                // Phase 17.5.2 (Part B): clicking the "For Asset" row routes
+                // back to the Asset's Detail Panel on the parent canvas.
+                onOpenAsset={routeToAsset}
               />
             </div>
           )
@@ -8976,7 +9047,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.1.5 &middot; Changelog
+          v0.17.5.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9023,6 +9094,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.2', date: '2026-05-21', label: 'Phase 17.5.2', items: [
+                  'Creating an RFP now smoothly transitions to the Directory layer, zooms to the new RFP, opens its Detail Panel, and marks the card with a NEW badge until you move on.',
+                  'Click the "For Asset" row in any RFP\'s Detail Panel to jump to that Asset\'s Detail Panel on the parent canvas — the inverse of the click-to-open-RFP shortcut shipped last phase.',
+                  'Double-click any empty space on the Directory layer to return to the parent canvas (same reverse-wipe animation as the globe button).',
+                ]},
                 { version: '0.17.5.1.5', date: '2026-05-21', label: 'Phase 17.5.1.5', items: [
                   'Asset Detail Panels now list every RFP anchored to that Asset under a new "Anchored RFPs" section.',
                   'Click any RFP row to jump to its Detail Panel on the Directory layer.',

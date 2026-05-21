@@ -579,6 +579,28 @@ export default function AssetNode({
             <span style={{ color: 'var(--text-secondary)' }}>{rfpOwner}</span>
           </div>
         </div>
+        {/* Phase 17.5.2 — NEW badge on a just-created RFP card (mirrors the
+            parent-layer reveal badge). Cleared in V2App on deselect. */}
+        {isNew && (
+          <div style={{
+            position: 'absolute',
+            top: -8,
+            right: -8 + ACTION_BAR_W,
+            zIndex: 5,
+            fontSize: 8,
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            color: '#fff',
+            background: 'var(--accent-green)',
+            padding: '2px 7px',
+            borderRadius: 4,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+            pointerEvents: 'none',
+          }}>
+            NEW
+          </div>
+        )}
         {/* Phase 17.3.1 — Solicit-with-my-Claim action bar.
             Phase 17.3.2 — owner Close / Reopen buttons added in parallel.
             Mutual exclusion: a given (actor, RFP) pair can have at most

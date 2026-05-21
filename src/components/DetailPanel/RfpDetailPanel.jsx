@@ -293,6 +293,10 @@ export default function RfpDetailPanel({
   // Phase 17.5.1.4: owner-only Remove action, available only on closed RFPs.
   // Silently destroys the RFP + any open solicitations against it.
   onRemoveRfp,
+  // Phase 17.5.2 (Part B): clicking the "For Asset" row routes to that Asset's
+  // Detail Panel on the parent canvas (closes the Directory). Available to all
+  // viewers; when omitted the row renders as static text.
+  onOpenAsset,
   // Phase 17.2: solicitations + activeClaims + handlers.
   solicitations = [],
   activeClaims = [],
@@ -451,16 +455,48 @@ export default function RfpDetailPanel({
                 }}>(Asset not found)</div>
               )
             }
+            // Phase 17.5.2 (Part B): the row click-navigates to the Asset's
+            // Detail Panel on the parent canvas (closes the Directory). Hover
+            // treatment matches the clickable RequirementRow / AssetPanelRfpRow
+            // pattern. Renders as static text when onOpenAsset is absent.
+            const clickable = !!onOpenAsset
             return (
-              // Phase 17.3.1 (#202 follow-up): categorical "ASSET" pill
-              // removed. "FOR ASSET" section header conveys the
-              // relationship; the Asset name is self-identifying.
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                onClick={clickable ? () => onOpenAsset(rfp.assetId) : undefined}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onKeyDown={clickable ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenAsset(rfp.assetId) }
+                } : undefined}
+                title={clickable ? `Open ${boundAsset.name || boundAsset.id} on the parent canvas` : undefined}
+                onMouseEnter={clickable ? (e) => {
+                  e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 10%, var(--bg-raised))'
+                  e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--accent-indigo) 40%, var(--border))'
+                } : undefined}
+                onMouseLeave={clickable ? (e) => {
+                  e.currentTarget.style.background = 'var(--bg-raised)'
+                  e.currentTarget.style.borderColor = 'var(--border-faint)'
+                } : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '10px 12px',
+                  background: 'var(--bg-raised)',
+                  border: '1px solid var(--border-faint)',
+                  borderRadius: 6,
+                  cursor: clickable ? 'pointer' : 'default',
+                  transition: 'background 120ms, border-color 120ms',
+                }}
+              >
                 <span style={{
+                  flex: 1,
+                  minWidth: 0,
                   fontSize: 13,
                   color: 'var(--text-primary)',
                   wordBreak: 'break-word',
                 }}>{boundAsset.name || boundAsset.id}</span>
+                {clickable && (
+                  <span style={{ flexShrink: 0, fontSize: 14, color: 'var(--text-tertiary)', lineHeight: 1 }}>›</span>
+                )}
               </div>
             )
           })()}
