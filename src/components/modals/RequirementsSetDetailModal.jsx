@@ -36,7 +36,16 @@ export default function RequirementsSetDetailModal({
 }) {
   if (!requirementsSet) return null
   const rs = requirementsSet
-  const owner = rs._publishedBy || null
+  // Phase 17.5.1.3 (Fix 2): branch the subheader on publication state.
+  // The RS arrives via `v22RfpRsLookupPool` (Phase 17.5.1.2), whose entries
+  // carry derived `owner` + `isPublished`. Published RSes show the globe +
+  // "Published by {owner}"; unpublished RFP-referenced RSes show a plainer
+  // "by {owner}" with no globe (they reach this modal via implicit-
+  // publication-by-reference, but they aren't actually on the public
+  // network, so the "Published by" framing + globe would misrepresent them).
+  // Fallbacks keep the modal correct if mounted with a raw RS object.
+  const owner = rs.owner || rs._publishedBy || null
+  const isPublished = rs.isPublished != null ? rs.isPublished : !!rs._publishedBy
   const requirements = Array.isArray(rs.requirements) ? rs.requirements : []
 
   return (
@@ -61,10 +70,14 @@ export default function RequirementsSetDetailModal({
               )}
             </span>
           )}
-          subtitle={(
+          subtitle={isPublished ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <GlobeIcon size={12} />
               <span>Published by <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{owner || 'an unknown actor'}</span></span>
+            </span>
+          ) : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span>by <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{owner || 'an unknown actor'}</span></span>
             </span>
           )}
           onClose={onClose}

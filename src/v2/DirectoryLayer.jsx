@@ -317,6 +317,81 @@ function makeHollowCircleGeometry(outerRadius, borderThickness, segments = 32) {
   return new THREE.ShapeGeometry(shape, segments)
 }
 
+// Phase 17.5.1.3 (Fix 3): build a THICK dashed square-ring geometry for the
+// closed-RFP markers. The prior closed-RFP rendering used a 1px THREE.Line-
+// Segments outline (WebGL ignores `linewidth`), so closed markers read as a
+// hairline next to the open RFPs' ~2px hollow-square ring — making them look
+// "weaker" rather than just "lifecycle = closed". This emits filled dash
+// quads (2 triangles each) along the four edges of a thick square ring, so
+// the closed marker matches the open ring's stroke thickness while the dash
+// pattern keeps signalling the closed lifecycle state.
+//
+// `centers` is an array of { x, y } world centers (note: y is screen-space
+// world y; callers pass `-d.y` already negated). `half` is half the outer
+// side length, `thickness` is the border width (both world units), and
+// `baseColor` is a THREE.Color used to seed the per-vertex color buffer.
+// Returns { positions, colors, vertsPerRfp } — vertsPerRfp is constant across
+// all markers (same geometry), so the hover/select recolor can address each
+// marker's contiguous vertex range.
+function buildClosedRfpRingDashes(centers, half, thickness, baseColor) {
+  // Dash layout (local coords, origin-centered) computed once — identical for
+  // every marker since they share `half` + `thickness`. Period scales with the
+  // marker so the dash count stays stable across zoom (~6 dashes per edge).
+  const period = (half * 2) / 6
+  const dashLen = period * 0.6
+  const rects = [] // [x0, y0, x1, y1] dash rectangles
+  // Horizontal strips (top, bottom) span the full width; dashes run along x.
+  for (const [yLo, yHi] of [[half - thickness, half], [-half, -half + thickness]]) {
+    let x = -half
+    while (x < half - 1e-3) {
+      rects.push([x, yLo, Math.min(x + dashLen, half), yHi])
+      x += period
+    }
+  }
+  // Vertical strips (left, right) are inset on y by `thickness` so they don't
+  // double-draw the corners already covered by the horizontal strips.
+  for (const [xLo, xHi] of [[-half, -half + thickness], [half - thickness, half]]) {
+    let y = -half + thickness
+    const yEnd = half - thickness
+    while (y < yEnd - 1e-3) {
+      rects.push([xLo, y, xHi, Math.min(y + dashLen, yEnd)])
+      y += period
+    }
+  }
+  const vertsPerRfp = rects.length * 6 // 2 triangles × 3 verts per dash quad
+  const positions = new Float32Array(centers.length * vertsPerRfp * 3)
+  const colors = new Float32Array(centers.length * vertsPerRfp * 3)
+  let p = 0
+  let c = 0
+  for (const ctr of centers) {
+    const cx = ctr.x
+    const cy = ctr.y
+    for (const [x0, y0, x1, y1] of rects) {
+      // tri 1: (x0,y0) (x1,y0) (x1,y1)   tri 2: (x0,y0) (x1,y1) (x0,y1)
+      positions[p++] = cx + x0; positions[p++] = cy + y0; positions[p++] = 0
+      positions[p++] = cx + x1; positions[p++] = cy + y0; positions[p++] = 0
+      positions[p++] = cx + x1; positions[p++] = cy + y1; positions[p++] = 0
+      positions[p++] = cx + x0; positions[p++] = cy + y0; positions[p++] = 0
+      positions[p++] = cx + x1; positions[p++] = cy + y1; positions[p++] = 0
+      positions[p++] = cx + x0; positions[p++] = cy + y1; positions[p++] = 0
+    }
+    for (let v = 0; v < vertsPerRfp; v++) {
+      colors[c++] = baseColor.r; colors[c++] = baseColor.g; colors[c++] = baseColor.b
+    }
+  }
+  return { positions, colors, vertsPerRfp }
+}
+
+// Phase 17.5.1.3 (Fix 3): muted-indigo closed-RFP stroke color. A 50/50 blend
+// of the indigo accent and the muted-text token — reads as "indigo-family,
+// lifecycle-marked" without dimming the marker's visual weight. Returns a
+// fresh THREE.Color each call (lerp mutates the receiver).
+function closedRfpStrokeColor() {
+  return cssVarToColor('--accent-indigo', '#6b8aff').lerp(
+    cssVarToColor('--text-muted', '#4b5563'), 0.5,
+  )
+}
+
 // ─── Tooltip card (3 rows: badge + name + owner) ───────────────────────
 function ClaimTooltipCard({ claim, x, y, viewportW }) {
   const wouldClipRight = x + DOT_RADIUS + TOOLTIP_OFFSET + TOOLTIP_W > (viewportW || 1280) - 16
@@ -1743,6 +1818,11 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // Closed-owned RFP positions in the rfpDots array (so we can map an
   // overall RFP index to its closed-RFP index). null when none are closed.
   const closedRfpIdxMapRef = useRef(new Map())
+  // Phase 17.5.1.3 (Fix 3): vertices-per-marker in the thick dashed-ring
+  // geometry (constant within a build, but varies with the dash layout).
+  // `flushRfpColors` uses it to address each closed RFP's contiguous vertex
+  // range when applying hover/select brightening.
+  const closedRfpVertsPerRfpRef = useRef(0)
 
   const [overlay, setOverlay] = useState(null)
 
@@ -2079,28 +2159,26 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     scene.add(rfpHitMesh)
     rfpHitMeshRef.current = rfpHitMesh
 
-    // Phase 17.1: dashed-outline LineSegments for closed-and-owned RFPs.
-    // BufferGeometry is empty at construction; the populate effect below
-    // fills its `position` attribute on every layout / zoom change. The
-    // material's dashSize / gapSize are in world units; values picked so
-    // the dashing reads as roughly 4-on-2 at default zoom against the
-    // ~45 wu RFP_BASE_OUTER outline. Defensive InstancedMesh-style
-    // settings apply to LineSegments too (the boundingSphere is computed
-    // from geometry vertices — empty geometry → tiny default sphere →
-    // frustum + raycast cull the whole mesh).
+    // Phase 17.1 / 17.5.1.3 (Fix 3): thick dashed-ring mesh for closed-and-
+    // owned RFPs. BufferGeometry is empty at construction; the populate +
+    // rescale effects fill its `position` + `color` attributes on every
+    // layout / zoom change via `buildClosedRfpRingDashes`. Was a 1px
+    // THREE.LineSegments (LineDashedMaterial) — WebGL ignores `linewidth`, so
+    // closed markers rendered as a hairline next to the open RFPs' ~2px ring.
+    // Now a filled triangle mesh of dash quads matching the open ring's
+    // stroke thickness; the dash pattern still signals the closed lifecycle.
+    // Defensive culling settings (frustum off + unbounded sphere) carry over —
+    // empty/origin-centered geometry would otherwise be culled.
     const closedRfpGeometry = new THREE.BufferGeometry()
-    // Phase 17.2: vertex colors on the closed-RFP dashed outline drive
-    // hover/select brightening (the LineSegments has 8 line segments per
-    // closed-owned RFP = 16 vertices). Material's base `color` stays
-    // indigo as a fallback; with `vertexColors = true`, the per-vertex
-    // color attribute multiplies the base color at fragment-shader time.
-    const closedRfpMaterial = new THREE.LineDashedMaterial({
+    // Phase 17.2: vertex colors drive hover/select brightening. Material base
+    // `color` is white so the per-vertex color renders 1:1; DoubleSide guards
+    // against any dash-quad winding inconsistency.
+    const closedRfpMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       vertexColors: true,
-      dashSize: 8,
-      gapSize: 4,
+      side: THREE.DoubleSide,
     })
-    const closedRfpMesh = new THREE.LineSegments(closedRfpGeometry, closedRfpMaterial)
+    const closedRfpMesh = new THREE.Mesh(closedRfpGeometry, closedRfpMaterial)
     closedRfpMesh.frustumCulled = false
     closedRfpMesh.boundingSphere = unboundedSphere()
     scene.add(closedRfpMesh)
@@ -2388,20 +2466,18 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     if (rfpMesh.instanceColor) rfpMesh.instanceColor.needsUpdate = true
     if (rfpFillMesh.instanceColor) rfpFillMesh.instanceColor.needsUpdate = true
 
-    // Phase 17.1: rebuild closed-RFP dashed outline geometry. Build a
-    // BufferGeometry with 4 line segments per closed-owned RFP (each
-    // segment = 2 vertices × 3 coords). With the bounded closed-owned
-    // set the buffer is small enough that disposing + reattaching on
-    // every layout / zoom change is trivial. `computeLineDistances()` is
-    // REQUIRED after attaching the position attribute — without it the
-    // LineDashedMaterial renders as a solid line.
+    // Phase 17.1 / 17.5.1.3 (Fix 3): rebuild the closed-RFP thick dashed-ring
+    // geometry. `buildClosedRfpRingDashes` emits filled dash quads along a
+    // thick square ring (border thickness matches the open RFP ring's on-
+    // screen ~RFP_BORDER_SCREEN_PX, world thickness = RFP_BORDER_SCREEN_PX /
+    // zoom). With the bounded closed-owned set the buffer is small enough that
+    // disposing + reattaching on every layout / zoom change is trivial.
     const closedRfpMesh = closedRfpMeshRef.current
     if (closedRfpMesh) {
       const closedOwnedRfps = []
       // Phase 17.2: build a map from rfpDots-index → closedOwned-index so
       // `flushRfpColors` can resolve a hover/select rfpIdx to the right
-      // vertex range in the closed-RFP color buffer. The vertex layout is
-      // 8 vertices per closed-owned RFP (4 line segments × 2 endpoints).
+      // contiguous vertex range in the closed-RFP color buffer.
       const closedIdxMap = new Map()
       for (let i = 0; i < rfpDots.length; i++) {
         const d = rfpDots[i]
@@ -2411,52 +2487,22 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
         }
       }
       closedRfpIdxMapRef.current = closedIdxMap
-      const halfBase = RFP_BASE_OUTER / 2
-      const half = halfBase * initialRfpScale
-      const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
-      // Phase 17.2: matching per-vertex color buffer. Default colour = the
-      // accent-indigo theme value (LineDashedMaterial.color is white, so the
-      // per-vertex value becomes the actual rendered color via the
-      // vertexColors multiplication path).
-      const closedIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
-      const colors = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
-      const closedBaseColors = new Array(closedOwnedRfps.length)
-      let vIdx = 0
-      let cIdx = 0
-      for (let k = 0; k < closedOwnedRfps.length; k++) {
-        const d = closedOwnedRfps[k]
-        closedBaseColors[k] = closedIndigo.clone()
-        const x = d.x
-        const y = -d.y
-        // top edge
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        // right edge
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        // bottom edge
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        // left edge
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        // Fill all 8 vertices with the base color.
-        for (let v = 0; v < 8; v++) {
-          colors[cIdx++] = closedIndigo.r
-          colors[cIdx++] = closedIndigo.g
-          colors[cIdx++] = closedIndigo.b
-        }
-      }
-      baseClosedRfpColorsRef.current = closedBaseColors
+      const half = (RFP_BASE_OUTER / 2) * initialRfpScale
+      const thickness = RFP_BORDER_SCREEN_PX / Math.max(zoomRef.current, 1e-3)
+      // Centers in screen-space world coords (y negated to match the scene).
+      const centers = closedOwnedRfps.map((d) => ({ x: d.x, y: -d.y }))
+      const muted = closedRfpStrokeColor()
+      const { positions, colors, vertsPerRfp } = buildClosedRfpRingDashes(centers, half, thickness, muted)
+      closedRfpVertsPerRfpRef.current = vertsPerRfp
+      baseClosedRfpColorsRef.current = closedOwnedRfps.map(() => muted.clone())
       // Dispose previous geometry before replacing — the mesh keeps a
       // reference to its current `geometry`, so unattached old geometries
       // would leak otherwise.
       const prevGeom = closedRfpMesh.geometry
       const nextGeom = new THREE.BufferGeometry()
-      nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      nextGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
       nextGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       closedRfpMesh.geometry = nextGeom
-      closedRfpMesh.computeLineDistances()
       if (prevGeom) prevGeom.dispose()
     }
 
@@ -2570,49 +2616,30 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     if (rfpHitMesh) rfpHitMesh.instanceMatrix.needsUpdate = true
     rfpScaleRef.current = desiredScale
 
-    // Phase 17.1: rebuild closed-RFP dashed outline at the new scale.
-    // The vertex buffer was baked at the previous scale; replacing it
-    // here keeps the on-screen dashing size proportional to the rest of
-    // the RFP markers as zoom changes. computeLineDistances() is
-    // required after each rebuild.
+    // Phase 17.1 / 17.5.1.3 (Fix 3): rebuild the closed-RFP thick dashed ring
+    // at the new scale. The vertex buffer was baked at the previous scale;
+    // replacing it keeps both the marker size and the border thickness
+    // (RFP_BORDER_SCREEN_PX / zoom in world units) tracking the open RFPs.
     const closedRfpMesh = closedRfpMeshRef.current
     if (closedRfpMesh) {
       const closedOwnedRfps = rfpDots.filter(
         (d) => d.rfp?.status === 'closed' && !!activePartyForClosed && d.rfp?.owner === activePartyForClosed,
       )
       const half = (RFP_BASE_OUTER / 2) * desiredScale
-      const vertices = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
-      // Phase 17.2: rebuild vertex colors at the new scale too —
+      const thickness = RFP_BORDER_SCREEN_PX / Math.max(zoom, 1e-3)
+      const centers = closedOwnedRfps.map((d) => ({ x: d.x, y: -d.y }))
       // `flushRfpColors` runs after this rebuild (via rfpDirtyRef) so the
-      // baseline color attribute is sufficient here; the flush re-writes
-      // the hovered/selected vertices.
-      const closedIndigo = cssVarToColor('--accent-indigo', '#6b8aff')
-      const colors = new Float32Array(closedOwnedRfps.length * 4 * 2 * 3)
-      let vIdx = 0
-      let cIdx = 0
-      for (const d of closedOwnedRfps) {
-        const x = d.x
-        const y = -d.y
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x + half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y - half; vertices[vIdx++] = 0
-        vertices[vIdx++] = x - half; vertices[vIdx++] = y + half; vertices[vIdx++] = 0
-        for (let v = 0; v < 8; v++) {
-          colors[cIdx++] = closedIndigo.r
-          colors[cIdx++] = closedIndigo.g
-          colors[cIdx++] = closedIndigo.b
-        }
-      }
+      // baseline color attribute is sufficient here; the flush re-writes the
+      // hovered/selected vertex ranges.
+      const muted = closedRfpStrokeColor()
+      const { positions, colors, vertsPerRfp } = buildClosedRfpRingDashes(centers, half, thickness, muted)
+      closedRfpVertsPerRfpRef.current = vertsPerRfp
+      baseClosedRfpColorsRef.current = closedOwnedRfps.map(() => muted.clone())
       const prevGeom = closedRfpMesh.geometry
       const nextGeom = new THREE.BufferGeometry()
-      nextGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
+      nextGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
       nextGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3))
       closedRfpMesh.geometry = nextGeom
-      closedRfpMesh.computeLineDistances()
       if (prevGeom) prevGeom.dispose()
     }
     dirtyRef.current = true
@@ -2846,14 +2873,17 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     }
     if (rfpMesh.instanceColor) rfpMesh.instanceColor.needsUpdate = true
     if (rfpFillMesh.instanceColor) rfpFillMesh.instanceColor.needsUpdate = true
-    // Closed-RFP dashed outline via per-vertex colors. Map an overall
-    // rfpDots-index to its 8-vertex range in the color buffer; lerp toward
-    // white at the hovered/selected vertices, restore base elsewhere.
+    // Closed-RFP thick dashed ring via per-vertex colors. Map an overall
+    // rfpDots-index to its contiguous vertex range in the color buffer (the
+    // ring is built from N dash quads → `vertsPerRfp` verts per marker, Phase
+    // 17.5.1.3); lerp toward white at the hovered/selected marker, restore
+    // base elsewhere.
     if (closedRfpMesh && closedRfpMesh.geometry) {
       const closedIdxMap = closedRfpIdxMapRef.current
       const closedBase = baseClosedRfpColorsRef.current
+      const vertsPerRfp = closedRfpVertsPerRfpRef.current
       const colorAttr = closedRfpMesh.geometry.getAttribute('color')
-      if (colorAttr && closedBase && closedBase.length > 0) {
+      if (colorAttr && closedBase && closedBase.length > 0 && vertsPerRfp > 0) {
         const arr = colorAttr.array
         const c = new THREE.Color()
         for (let k = 0; k < closedBase.length; k++) {
@@ -2871,8 +2901,8 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
           } else {
             c.copy(closedBase[k])
           }
-          const start = k * 8 * 3
-          for (let v = 0; v < 8; v++) {
+          const start = k * vertsPerRfp * 3
+          for (let v = 0; v < vertsPerRfp; v++) {
             arr[start + v * 3] = c.r
             arr[start + v * 3 + 1] = c.g
             arr[start + v * 3 + 2] = c.b

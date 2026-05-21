@@ -2626,10 +2626,17 @@ export default function V2App() {
   // respondedDate + rejectionMessage, and fires a v22-rfp-solicitation-
   // rejected notification on the solicitor's inbox.
   const handleCreateSolicitation = useCallback(({ rfpId, claimId, message }) => {
-    // Resolve the target RFP from the seed set + closed-RFP merge so the
-    // owner party is available for notification routing. The seed `rfps`
-    // never moves between owners, so a plain lookup is sufficient.
-    const sharedForLookup = mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds)
+    // Resolve the target RFP from the seed set + closed-RFP + created-RFP
+    // merges so the owner party is available for notification routing.
+    // Phase 17.5.1.3 (Fix 1B): the lookup previously omitted
+    // `mergeCreatedRfps`, so a user-created RFP wasn't findable here and the
+    // handler bailed at `if (!rfp) return` — solicitation Submit silently
+    // no-op'd for every user-created RFP. Threading the created-RFP overlay
+    // restores parity with seeded RFPs.
+    const sharedForLookup = mergeCreatedRfps(
+      mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds),
+      v22CreatedRfps,
+    )
     const rfp = (sharedForLookup.rfps || []).find((r) => r.id === rfpId)
     if (!rfp) return
     const id = `solicit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -2667,7 +2674,7 @@ export default function V2App() {
     }
     // Close the create modal.
     setV22SolicitOpenForRfp(null)
-  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
+  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, v22CreatedRfps, enqueueV22NotificationForRequester])
 
   const handleRejectSolicitation = useCallback(({ solicitationId, rejectionMessage }) => {
     let updated = null
@@ -8817,7 +8824,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.1.2 &middot; Changelog
+          v0.17.5.1.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8864,6 +8871,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.1.3', date: '2026-05-21', label: 'Phase 17.5.1.3', items: [
+                  'Fixed solicitation submission on RFPs you\'ve created yourself.',
+                  'Requirements Set Detail Modal now reads correctly for unpublished Requirements Sets — shows the owner without the "published by" prefix or the globe icon.',
+                  'Closed RFP markers on the Directory layer now render at the same thickness as open RFPs, with a muted indigo color that distinguishes their lifecycle state without dimming them visually.',
+                ]},
                 { version: '0.17.5.1.2', date: '2026-05-21', label: 'Phase 17.5.1.2', items: [
                   'Newly created RFPs now integrate into their owner\'s existing Directory cluster on every viewer\'s Directory — no more duplicate cluster label.',
                   'Requirements Set chips in the RFP Detail Panel open the RS detail modal regardless of publication status.',
