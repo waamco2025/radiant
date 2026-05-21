@@ -437,6 +437,14 @@ function V22AssetPanel({
   onAmendEa,
   onRevokeDa,
   onRevokeEa,
+  // Phase 17.5.1.5: Anchored RFPs section. `anchoredRfps` is the merged,
+  // newest-first list of RFPs whose assetId === this Asset; the handlers
+  // mirror the RfpDetailPanel + Directory action-bar lifecycle wiring.
+  anchoredRfps = [],
+  onOpenRfp,
+  onCloseRfp,
+  onReopenRfp,
+  onRemoveRfp,
 }) {
   const asset = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -568,6 +576,17 @@ function V22AssetPanel({
             onAmendEa={onAmendEa}
             onRevokeDa={onRevokeDa}
             onRevokeEa={onRevokeEa}
+          />
+          {/* Phase 17.5.1.5: Anchored RFPs — the parent-canvas surface for
+              RFPs anchored to this Asset (RFPs are Directory-layer-only).
+              Always rendered (even empty) so the feature is discoverable. */}
+          <AnchoredRfpsSection
+            anchoredRfps={anchoredRfps}
+            activeParty={activeParty}
+            onOpenRfp={onOpenRfp}
+            onCloseRfp={onCloseRfp}
+            onReopenRfp={onReopenRfp}
+            onRemoveRfp={onRemoveRfp}
           />
         </>
       }
@@ -2589,7 +2608,12 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
-function ActionLabel({ label, onClick, disabled, title }) {
+function ActionLabel({ label, onClick, disabled, title, danger }) {
+  // Phase 17.5.1.5: `danger` variant (red base + brightened-red hover) for the
+  // irreversible "Remove RFP" row action. Default (false) preserves the
+  // existing primary→indigo treatment used by every DA/EA row action.
+  const baseColor = disabled ? 'var(--text-dim)' : danger ? 'var(--accent-red)' : 'var(--text-primary)'
+  const hoverColor = danger ? 'color-mix(in srgb, var(--accent-red) 75%, var(--text-primary))' : 'var(--accent-indigo)'
   const span = (
     <span
       role={onClick && !disabled ? 'button' : undefined}
@@ -2601,16 +2625,16 @@ function ActionLabel({ label, onClick, disabled, title }) {
       }}
       onMouseEnter={(e) => {
         if (disabled) return
-        e.currentTarget.style.color = 'var(--accent-indigo)'
+        e.currentTarget.style.color = hoverColor
       }}
       onMouseLeave={(e) => {
         if (disabled) return
-        e.currentTarget.style.color = 'var(--text-primary)'
+        e.currentTarget.style.color = baseColor
       }}
       style={{
         fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
         letterSpacing: '0.06em', textTransform: 'uppercase',
-        color: disabled ? 'var(--text-dim)' : 'var(--text-primary)',
+        color: baseColor,
         cursor: disabled ? 'default' : (onClick ? 'pointer' : 'default'),
         transition: 'color 120ms',
         userSelect: 'none',
@@ -3174,6 +3198,99 @@ function AgreementsSection({
               />
             ))}
           </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+/* ─── Anchored RFPs (Phase 17.5.1.5) ─────────────────────────────────────
+   Parent-canvas surface for managing RFPs anchored to an Asset (RFPs live on
+   the Directory layer, so the Asset Detail Panel is the only parent-canvas
+   place to see + manage them). Mirrors the AgreementsSection row pattern:
+   a clickable identity area (navigates to the RFP's Detail Panel on the
+   Directory layer) + owner-only inline lifecycle ActionLabels on the right. */
+function RfpStatusPill({ closed }) {
+  const base = {
+    fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+    letterSpacing: '0.1em', padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+  }
+  if (closed) {
+    // Muted treatment matching the closed-RFP marker / RfpDetailPanel CLOSED badge.
+    return <span style={{ ...base, color: 'var(--text-tertiary)', border: '1px solid var(--border)', background: 'var(--bg-deep)' }}>CLOSED</span>
+  }
+  return <span style={{ ...base, color: 'var(--accent-green)', border: '1px solid color-mix(in srgb, var(--accent-green) 40%, var(--border))', background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-raised))' }}>OPEN</span>
+}
+
+function AssetPanelRfpRow({ rfp, isOwner, onOpenRfp, onCloseRfp, onReopenRfp, onRemoveRfp }) {
+  const isClosed = rfp.status === 'closed'
+  const reqCount = Array.isArray(rfp.requirementsSetIds) ? rfp.requirementsSetIds.length : 0
+  return (
+    <AgreementRow onClick={onOpenRfp ? () => onOpenRfp(rfp.id) : undefined}>
+      {/* Left: identity (clickable via the row) */}
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }} title={rfp.name}>{rfp.name || '(Unnamed RFP)'}</span>
+          <RfpStatusPill closed={isClosed} />
+        </div>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+          Posted {formatDateTime(rfp.createdDate)}{reqCount ? ` · ${reqCount} requirement${reqCount === 1 ? '' : 's'}` : ''}
+        </div>
+      </div>
+      {/* Right: owner-only lifecycle actions (Close, or Reopen + Remove). */}
+      {isOwner && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          {!isClosed && (
+            <ActionLabel
+              label="✕ Close"
+              onClick={onCloseRfp ? () => onCloseRfp(rfp) : undefined}
+              title="Close this RFP"
+            />
+          )}
+          {isClosed && (
+            <>
+              <ActionLabel
+                label="⟲ Reopen"
+                onClick={onReopenRfp ? () => onReopenRfp(rfp) : undefined}
+                title="Reopen this RFP"
+              />
+              <ActionLabel
+                label="⊟ Remove"
+                danger
+                onClick={onRemoveRfp ? () => onRemoveRfp(rfp) : undefined}
+                title="Permanently remove this RFP. Open solicitations will also be removed. This action cannot be undone."
+              />
+            </>
+          )}
+        </div>
+      )}
+    </AgreementRow>
+  )
+}
+
+function AnchoredRfpsSection({ anchoredRfps = [], activeParty, onOpenRfp, onCloseRfp, onReopenRfp, onRemoveRfp }) {
+  return (
+    <Section title="Anchored RFPs">
+      {anchoredRfps.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+          No RFPs anchored to this Asset.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {anchoredRfps.map((rfp) => (
+            <AssetPanelRfpRow
+              key={rfp.id}
+              rfp={rfp}
+              isOwner={activeParty === rfp.owner}
+              onOpenRfp={onOpenRfp}
+              onCloseRfp={onCloseRfp}
+              onReopenRfp={onReopenRfp}
+              onRemoveRfp={onRemoveRfp}
+            />
+          ))}
         </div>
       )}
     </Section>

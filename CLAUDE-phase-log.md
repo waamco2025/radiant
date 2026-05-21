@@ -2673,6 +2673,21 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.1.5 completion notes (2026-05-21) — Asset Detail Panel "Anchored RFPs" section
+
+New section in the Asset Detail Panel listing every RFP anchored to the active Asset — the parent-canvas surface for managing RFPs (which are otherwise Directory-layer-only).
+
+**Diff (high-level).**
+- **Section + row components** (`src/components/DetailPanel/V22NodeDetailPanel.jsx`): new `AnchoredRfpsSection` (wraps the shared `Section` with title "Anchored RFPs"; muted "No RFPs anchored to this Asset." empty state, else one row per RFP), `AssetPanelRfpRow` (an `AgreementRow` whose body click-navigates; line 1 = name + `RfpStatusPill`, line 2 = "Posted {formatDateTime} · N requirements"; owner-only right region with inline `ActionLabel`s — Close for open, Reopen + Remove for closed), and `RfpStatusPill` (green `OPEN` / muted `CLOSED`, matching the RfpDetailPanel header badge). `ActionLabel` gained a `danger` prop (red base, brightened-red hover) for Remove; the default path is unchanged (every DA/EA row action). `V22AssetPanel` gained props `anchoredRfps` / `onOpenRfp` / `onCloseRfp` / `onReopenRfp` / `onRemoveRfp` and renders `<AnchoredRfpsSection>` right after `<AgreementsSection>`.
+- **Data + routing** (`src/v2/V2App.jsx`): in the parent Detail Panel mount block, `anchoredRfpsForNode` is derived (when the node is an Asset) from the full merge chain `mergeRemovedRfps(mergeClosedRfps(mergeCreatedRfps(sharedForPanel, v22CreatedRfps), v22ClosedRfpIds), v22RemovedRfpIds).rfps`, filtered to `r.assetId === node.id`, sorted newest-first by `createdDate`. New reusable `routeToRfp(rfpId)` useCallback (declared after `clearEdgeUiState` + `directoryLayerRef` to avoid a deps-array TDZ) mirrors the `v22-rfp-solicitation-received` notification routing: resolve the RFP from the merge chain, `setSel(null)`, `clearEdgeUiState()`, open Directory, clear the Claim panel, set the selected RFP, then rAF-retry `directoryLayerRef.current.selectRfp(targetRfp)` (capped at 60 frames). The V22NodeDetailPanel mount wires `anchoredRfps={anchoredRfpsForNode}`, `onOpenRfp={routeToRfp}`, and `onCloseRfp`/`onReopenRfp`/`onRemoveRfp` to the existing Phase 17.5.1.4 handlers.
+- **Docs + version:** footer + Changelog modal → v0.17.5.1.5; architecture-spec §8 Changelog bullet + §8.11 "RFP management surfaces"; polish-backlog Update Log; CLAUDE.md most-recent-phase + queue.
+
+**Deviations.** None. The handlers (`handleCloseRfp` etc.) take the RFP object (Phase 17.5.1.4 shape), so the row passes `rfp` to close/reopen/remove and `rfp.id` to `routeToRfp` (which the prompt's example expects). `RfpDetailPanel` uses its own `ActionButton`; this section reuses V22NodeDetailPanel's `ActionLabel` (the DA/EA-row primitive) per the prompt's "match the DA/EA revoke button visual pattern" — so the `danger` variant was added to `ActionLabel`, not `ActionButton`.
+
+**Runtime verification.** Unlike RFP-marker clicks (canvas-raycaster-gated), the Asset Detail Panel opens via the HTML parent-canvas Asset card, so this surface is fully scriptable. Verified in the dev preview as Bob: opening the Avionics Module Asset Detail Panel shows the "ANCHORED RFPS" section with the seeded Sentinel-4 row (name + green OPEN pill + "Posted …" line); clicking the row's ✕ Close flips the pill to CLOSED and swaps the action to Reopen + Remove in-place; an Asset with no anchored RFPs shows the muted empty state. `npm run build` clean; no new console errors. The cross-actor non-owner-no-buttons case + click-to-navigate-into-Directory landing are code-verified (the navigation's Directory-side `selectRfp` is the same path exercised by notification routing).
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.1.4 completion notes (2026-05-21) — RFP lifecycle expansion (Close notifications + Remove + Detail Panel refresh + placeholder dimming)
 
 Four bundled items extending the RFP lifecycle.

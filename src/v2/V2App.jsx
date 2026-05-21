@@ -4382,6 +4382,40 @@ export default function V2App() {
     setEdgeMenu(null)
   }, [])
 
+  // Phase 17.5.1.5: navigate to an RFP's Detail Panel on the Directory layer
+  // from anywhere on the parent canvas (used by the Asset Detail Panel's
+  // Anchored RFPs rows). Mirrors the v22-rfp-solicitation-received
+  // notification-click routing: close the parent selection + edge UI, open
+  // the Directory, clear any Claim panel, set the selected RFP, then drive the
+  // imperative `selectRfp` (pan/zoom + on-canvas select) once the Directory's
+  // phase machine + layout are ready (rAF retry, capped). The RFP is resolved
+  // from the full created→closed→removed merge chain so a created/closed RFP
+  // routes correctly and a removed one no-ops.
+  const routeToRfp = useCallback((rfpId) => {
+    const sharedRfps = mergeRemovedRfps(
+      mergeClosedRfps(
+        mergeCreatedRfps(buildV22SharedArtifacts(), v22CreatedRfps),
+        v22ClosedRfpIds,
+      ),
+      v22RemovedRfpIds,
+    ).rfps || []
+    const targetRfp = sharedRfps.find((r) => r.id === rfpId) || null
+    if (!targetRfp) return
+    setSel(null)
+    clearEdgeUiState()
+    setV22DirectoryOpen(true)
+    setV22DirectorySelectedClaim(null)
+    setV22DirectorySelectedRfp(targetRfp)
+    let attempts = 0
+    const trySelect = () => {
+      attempts += 1
+      const ok = directoryLayerRef.current?.selectRfp?.(targetRfp)
+      if (ok || attempts > 60) return
+      requestAnimationFrame(trySelect)
+    }
+    requestAnimationFrame(trySelect)
+  }, [v22CreatedRfps, v22ClosedRfpIds, v22RemovedRfpIds, clearEdgeUiState])
+
   const handleSwitchRole = useCallback((newRoleId) => {
     if (newRoleId === roleId) return
     setRoleId(newRoleId)
@@ -8023,6 +8057,21 @@ export default function V2App() {
           // returns undefined for user-created Assets and .filter(Boolean)
           // silently drops them from the rendered list.
           const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          // Phase 17.5.1.5: RFPs anchored to this Asset (Asset Detail Panel
+          // only). Sourced from the full RFP merge chain (created → closed →
+          // removed) so user-created RFPs appear, closed RFPs reflect status,
+          // and removed RFPs are absent. Newest-first by createdDate.
+          const anchoredRfpsForNode = node.v22Type === 'ASSET'
+            ? (mergeRemovedRfps(
+                mergeClosedRfps(
+                  mergeCreatedRfps(sharedForPanel, v22CreatedRfps),
+                  v22ClosedRfpIds,
+                ),
+                v22RemovedRfpIds,
+              ).rfps || [])
+                .filter((r) => r.assetId === node.id)
+                .sort((a, b) => (b.createdDate || '').localeCompare(a.createdDate || ''))
+            : []
           const isOwnerViewing = node.v22Type === 'CLAIM' && node.owner === activeRole.party
           // Phase 11D.3: detect proof-only-only viewing (every active grantee
           // DA on this Claim is proof-only). Drives the Claim Detail Panel's
@@ -8399,6 +8448,16 @@ export default function V2App() {
                 onCancelTransfer={node.v22Type === 'ASSET' && node.owner === activeRole.party && node._pendingTransfer
                   ? () => handleV22CancelTransfer(node.id)
                   : undefined}
+                // Phase 17.5.1.5: Anchored RFPs section (Asset panels only).
+                // Click-to-navigate via routeToRfp; owner-only lifecycle
+                // actions reuse the same handlers as the RfpDetailPanel footer
+                // + Directory action bar (Close fires solicitor notifications;
+                // Remove is silent + closed-only).
+                anchoredRfps={anchoredRfpsForNode}
+                onOpenRfp={routeToRfp}
+                onCloseRfp={handleCloseRfp}
+                onReopenRfp={handleReopenRfp}
+                onRemoveRfp={handleRemoveRfp}
                 // Phase 10.2: Asset hierarchy
                 onRegisterChildAsset={node.v22Type === 'ASSET' && node.owner === activeRole.party && !node._pendingTransfer
                   ? () => setV22RegisteringAsset({ source: 'asset', parentAsset: node.v22Artifact || node })
@@ -8917,7 +8976,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.1.4 &middot; Changelog
+          v0.17.5.1.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8964,6 +9023,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.1.5', date: '2026-05-21', label: 'Phase 17.5.1.5', items: [
+                  'Asset Detail Panels now list every RFP anchored to that Asset under a new "Anchored RFPs" section.',
+                  'Click any RFP row to jump to its Detail Panel on the Directory layer.',
+                  'Owners can close, reopen, or remove RFPs directly from the row — same actions available on the RFP Detail Panel.',
+                ]},
                 { version: '0.17.5.1.4', date: '2026-05-21', label: 'Phase 17.5.1.4', items: [
                   'Closing an RFP now notifies every party that has submitted a solicitation against it.',
                   'Closed RFPs can be removed entirely via a new "Remove RFP" action on the RFP Detail Panel footer (and the RFP card\'s action bar). Removal is silent — no notifications fire. The action is only available on closed RFPs.',
