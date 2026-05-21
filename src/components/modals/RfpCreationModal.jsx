@@ -18,6 +18,9 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel,
 } from './ModalShared'
+import Tooltip from '../Tooltip'
+
+const OWN_PUBLISHED_TOOLTIP = 'This Requirements Set has been published to the Radiant Network for any party to evaluate against.'
 
 // Globe icon — matches the LibraryModal / BadgesPanel / CombinedRequestModal
 // convention. Indicates a Requirements Set is published on the public network.
@@ -42,7 +45,12 @@ const ROW_LABEL_STYLE = {
   letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 110, flexShrink: 0,
 }
 
+// Phase 17.5.1.1 (Fix 3): three render variants keyed on isOwn/isPublished.
+//   • own + unpublished  → name + version only (no globe)
+//   • own + published    → name + version + trailing globe (right) w/ tooltip
+//   • non-own published  → leading globe + name + version + "Published by" line
 function RsRow({ rs, selected, onToggle }) {
+  const isOwn = !!rs.isOwn
   const isPublished = !!rs.isPublished
   const ownerParty = rs.ownerParty || null
   return (
@@ -72,13 +80,18 @@ function RsRow({ rs, selected, onToggle }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {isPublished && <GlobeIcon size={11} />}
+          {!isOwn && isPublished && <GlobeIcon size={11} />}
           <span>{rs.name}</span>
           <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontWeight: 400 }}>
             v{rs.version ?? 1}
           </span>
+          {isOwn && isPublished && (
+            <Tooltip content={OWN_PUBLISHED_TOOLTIP} width={240}>
+              <span style={{ display: 'inline-flex', alignItems: 'center' }}><GlobeIcon size={11} /></span>
+            </Tooltip>
+          )}
         </div>
-        {isPublished && ownerParty && (
+        {!isOwn && isPublished && ownerParty && (
           <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
             Published by <span style={{ color: 'var(--text-secondary)' }}>{ownerParty}</span>
           </div>
@@ -110,8 +123,9 @@ export default function RfpCreationModal({
     })
   }
 
-  const publishedRows = availableRequirementsSets.filter((r) => r.isPublished)
-  const ownRows = availableRequirementsSets.filter((r) => !r.isPublished)
+  // Phase 17.5.1.1 (Fix 3): section by isOwn (Your first), not isPublished.
+  const ownRows = availableRequirementsSets.filter((r) => r.isOwn)
+  const publishedRows = availableRequirementsSets.filter((r) => !r.isOwn && r.isPublished)
   const rsById = new Map(availableRequirementsSets.map((r) => [r.id, r]))
 
   const canContinue = name.trim().length > 0 && description.trim().length > 0 && selectedRsIds.size > 0
@@ -205,18 +219,18 @@ export default function RfpCreationModal({
                   </div>
                 ) : (
                   <>
-                    {publishedRows.length > 0 && (
-                      <>
-                        <div style={SECTION_HEADER_STYLE}>Published Requirements Sets</div>
-                        {publishedRows.map((rs) => (
-                          <RsRow key={rs.id} rs={rs} selected={selectedRsIds.has(rs.id)} onToggle={() => toggleRs(rs.id)} />
-                        ))}
-                      </>
-                    )}
                     {ownRows.length > 0 && (
                       <>
                         <div style={SECTION_HEADER_STYLE}>Your Requirements Sets</div>
                         {ownRows.map((rs) => (
+                          <RsRow key={rs.id} rs={rs} selected={selectedRsIds.has(rs.id)} onToggle={() => toggleRs(rs.id)} />
+                        ))}
+                      </>
+                    )}
+                    {publishedRows.length > 0 && (
+                      <>
+                        <div style={SECTION_HEADER_STYLE}>Published Requirements Sets</div>
+                        {publishedRows.map((rs) => (
                           <RsRow key={rs.id} rs={rs} selected={selectedRsIds.has(rs.id)} onToggle={() => toggleRs(rs.id)} />
                         ))}
                       </>

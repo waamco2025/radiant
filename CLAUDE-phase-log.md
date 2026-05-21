@@ -2673,6 +2673,25 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.1.1 completion notes (2026-05-20) — Create RFP cleanup (cross-actor visibility + implicit-publication-via-reference + Your-first RS ordering)
+
+Three QA-driven fixes on the 17.5.1 Create RFP flow.
+
+**Diff (high-level).**
+
+- `src/v2/DirectoryLayer.jsx` (Fix 1) — the orphan-RFP positioning loop (RFPs whose owning cluster isn't on canvas) placed *every* such RFP at one fixed coordinate. Added a per-anchor index (`anchorRfpCount` Map keyed by `'cluster:'|'fallback:' + owner`) that offsets each subsequent same-anchor RFP by `idx * DOT_GRID * 2` vertically, so a created GovCo RFP no longer renders exactly on top of the seeded Sentinel-4 RFP on non-creator views.
+- `src/v2/V2App.jsx` (Fix 2 + Fix 3) — new `v22RfpRsLookupPool` useMemo (published RSes + every RFP-referenced RS resolved against `DEMO_REQUIREMENT_SETS` flattened network-wide + the active actor's own `requirementSets`); passed to both the `RfpDetailPanel` mount and the `SolicitationCreateModal` accordion (was `publishedRequirementSets`). Restructured `v22AvailableRequirementsSetRows` to emit `isOwn` + own-first ordering (own-and-published rows carry `isPublished: true` + `ownerParty`). New imports: `mergeCreatedRfps` (v2_2Data), `DEMO_REQUIREMENT_SETS` (requirementSets.js). Footer → v0.17.5.1.1; Changelog modal entry.
+- `src/components/modals/RfpCreationModal.jsx` + `src/components/modals/CombinedRequestModal.jsx` (Fix 3) — both RS scrollboxes section by `isOwn` (Your first, Published second; empty sections skip their header). New `RsRow` variants: own-unpublished (name + version), own-published (name + version + trailing `GlobeIcon` wrapped in a `Tooltip` reading "This Requirements Set has been published to the Radiant Network for any party to evaluate against."), non-own published (leading globe + "Published by {ownerParty}"). Shared `OWN_PUBLISHED_TOOLTIP` string; `Tooltip` imported from `../Tooltip`.
+
+**Deviations.**
+
+- **Fix 1 root cause differed from the brief's leading hypotheses.** The brief's trace order suspected prop-scoping / memo-dep / parallel-derivation / state-reset. All four were verified correct (17.5.1 already wired them). The actual bug was purely a *rendering position collision* — multiple same-owner orphan RFPs drawn at one point. Fixed at the positioning layer, not the data layer.
+- **Extended Fix 2 to the SolicitationCreateModal accordion** (not only RfpDetailPanel). Same RFP-RS lookup; without it, soliciting against an RFP that references a private RS would still show "Standard not found" in the accordion. Consistent with the implicit-publication rule.
+
+**Runtime verification (dev preview).** Fix 3 live: as Bob (owns the published MIL-PRF v1/v2 + System Integration), the Create RFP modal shows a single "YOUR REQUIREMENTS SETS" section — those three rows carry globes, hovering the globe shows the publication tooltip (verified after state flush), and Material Compliance (own-unpublished) shows no globe; the empty Published section is correctly skipped. Switched to Alice: the modal shows "YOUR REQUIREMENTS SETS" (Incoming Quality Control, no globe) FIRST, then "PUBLISHED REQUIREMENTS SETS" with GovCo's RSes under a "Published by GovCo" line — confirming Your-first ordering + the non-own published treatment. No console errors across the role switch + both modal flows. Fix 2 data-layer probe: replicating `v22RfpRsLookupPool` with a created RFP referencing the private `reqset-incoming-qc-v1` (not in `publishedRequirementSets`) + a published RS — the pool resolves BOTH. Fix 1: the 17.5.1 + 17.5.1.1 probes confirm both the seeded and created GovCo RFPs land in `otherRfps` on Alice's view (treated identically); the positioning fix spreads them by construction (per-anchor index → distinct y after `snapGrid`). Build clean (`npm run build`). Per the documented Three.js raycaster limitation, clicking the spread orphan RFP markers in the live Directory is the manual confirmation step; the data + positioning logic are the structural backstop.
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.1 completion notes (2026-05-20) — Create RFP flow (RfpCreationModal scaffolding)
 
 Builds out the RFP creation modal + state plumbing + view-builder integration. Closes the "creation flow (17.5+)" line of #192 Item J. Post-creation orchestration (layer switch + pan/zoom + NEW badge) is Phase 17.5.2.

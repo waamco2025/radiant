@@ -1354,15 +1354,21 @@ function computeLayout(directoryData, viewport) {
 
   // Other RFPs anchored alongside their owning cluster (or near the anchor
   // if the cluster isn't on canvas).
+  // Phase 17.5.1.1 (Fix 1): multiple orphan RFPs from the same owner used to
+  // collapse to one coordinate, so a user-created GovCo RFP rendered exactly
+  // on top of the seeded Sentinel-4 RFP and was invisible on non-creator
+  // views. Track a per-anchor index and step each subsequent RFP down by a
+  // clear 2-cell offset so same-owner RFPs spread into a readable column.
   const otherRfpEntries = []
+  const anchorRfpCount = new Map()
   for (const rfp of directoryData.otherRfps || []) {
     const ownCluster = otherClusters.find((c) => c.ownerParty === rfp.owner)
-    if (ownCluster) {
-      const sq = ownCluster.center
-      otherRfpEntries.push({ rfp, x: snapGrid(sq.x + DOT_GRID * 3), y: snapGrid(sq.y) })
-    } else {
-      otherRfpEntries.push({ rfp, x: snapGrid(userCenterX + 600), y: snapGrid(userCenterY - 320) })
-    }
+    const baseX = ownCluster ? ownCluster.center.x + DOT_GRID * 3 : userCenterX + 600
+    const baseY = ownCluster ? ownCluster.center.y : userCenterY - 320
+    const key = (ownCluster ? 'cluster:' : 'fallback:') + rfp.owner
+    const idx = anchorRfpCount.get(key) || 0
+    anchorRfpCount.set(key, idx + 1)
+    otherRfpEntries.push({ rfp, x: snapGrid(baseX), y: snapGrid(baseY + idx * DOT_GRID * 2) })
   }
 
   // ─── Step 4: flatten per-cluster dots into allDots ──────────────────

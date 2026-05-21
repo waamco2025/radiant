@@ -26,6 +26,9 @@ import {
   mergeClosedRfps,
   // Phase 17.5.1: RFP factory for the Create RFP flow (id via makeArtifactId).
   makeRfp,
+  // Phase 17.5.1.1: created-RFP merge layer — used to derive the RFP-RS
+  // resolution pool (referenced RSes across all RFPs, incl. user-created).
+  mergeCreatedRfps,
   // Phase 17.2: RFP solicitation factory + merge layer.
   makeRfpSolicitation, mergeSolicitations,
   // Phase 17.2.1: acceptSolicitation transitions a pending solicitation to
@@ -138,7 +141,7 @@ import AmendmentResponseModal from '../components/modals/AmendmentResponseModal.
 // standalone forms are no longer mounted from V2App.
 import LibraryModal from '../components/modals/LibraryModal.jsx'
 import { Backdrop, Modal, ModalHeader, ModalBody, ModalFooter, Btn } from '../components/modals/ModalShared.jsx'
-import { getRequirementSetsForRole, SEED_PUBLISHED_REQUIREMENT_SETS } from './requirementSets.js'
+import { getRequirementSetsForRole, SEED_PUBLISHED_REQUIREMENT_SETS, DEMO_REQUIREMENT_SETS } from './requirementSets.js'
 import { getPEPTemplatesForRole } from './pepTemplates.js'
 
 const SESSION_KEY = 'radiant-v2-booted'
@@ -3992,27 +3995,69 @@ export default function V2App() {
   // actor's own (non-published) RSes, deduped by id (own wins so own-private
   // RSes can never disappear if also published). Extracted from the
   // CombinedRequestModal mount's inline IIFE so both modals share one source.
+  // Phase 17.5.1.1 (Fix 3): own RSes first, with an `isOwn` flag. Own-AND-
+  // published rows stay in the own section but carry isPublished=true so the
+  // renderer shows the globe icon + a "this RS has been published" tooltip.
+  // Non-own published RSes follow in the Published section.
   const v22AvailableRequirementsSetRows = useMemo(() => {
+    const ownIds = new Set((requirementSets || []).map((rs) => rs.id))
+    const publishedById = new Map((publishedRequirementSets || []).map((rs) => [rs.id, rs]))
     const rows = []
     const seen = new Set()
-    for (const rs of (publishedRequirementSets || [])) {
-      if (seen.has(rs.id)) continue
-      seen.add(rs.id)
-      rows.push({
-        id: rs.id, name: rs.name, version: rs.version ?? 1,
-        isPublished: true, ownerParty: rs._publishedBy || null,
-      })
-    }
     for (const rs of (requirementSets || [])) {
       if (seen.has(rs.id)) continue
       seen.add(rs.id)
+      const published = publishedById.get(rs.id)
       rows.push({
         id: rs.id, name: rs.name, version: rs.version ?? 1,
-        isPublished: false, ownerParty: null,
+        isOwn: true, isPublished: !!published, ownerParty: published?._publishedBy || null,
+      })
+    }
+    for (const rs of (publishedRequirementSets || [])) {
+      if (seen.has(rs.id)) continue
+      if (ownIds.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push({
+        id: rs.id, name: rs.name, version: rs.version ?? 1,
+        isOwn: false, isPublished: true, ownerParty: rs._publishedBy || null,
       })
     }
     return rows
   }, [publishedRequirementSets, requirementSets])
+
+  // Phase 17.5.1.1 (Fix 2): RFP Detail Panel RS resolution pool. Includes
+  // (a) all published RSes (network-wide) and (b) all RSes referenced by any
+  // RFP (across all actors, incl. user-created), regardless of publication
+  // status. Architectural rule: an RS referenced in an RFP is implicitly
+  // published to anyone who can see the RFP — the RFP's Requirements list IS
+  // the public interface for those RSes. Referenced ids are resolved against
+  // the network-wide seed RS pool (every role's DEMO_REQUIREMENT_SETS) plus
+  // the active actor's own runtime RSes.
+  const v22RfpRsLookupPool = useMemo(() => {
+    const seen = new Set()
+    const rows = []
+    for (const rs of (publishedRequirementSets || [])) {
+      if (seen.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push(rs)
+    }
+    const sharedRfps = (mergeCreatedRfps(
+      mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds),
+      v22CreatedRfps,
+    ).rfps) || []
+    const referencedRsIds = new Set()
+    for (const rfp of sharedRfps) {
+      for (const rsId of (rfp.requirementsSetIds || [])) referencedRsIds.add(rsId)
+    }
+    const networkWide = [...Object.values(DEMO_REQUIREMENT_SETS).flat(), ...(requirementSets || [])]
+    for (const rs of networkWide) {
+      if (seen.has(rs.id)) continue
+      if (!referencedRsIds.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push(rs)
+    }
+    return rows
+  }, [publishedRequirementSets, v22ClosedRfpIds, v22CreatedRfps, requirementSets])
 
   // PEP templates — per-role, defaults from demo data
   const pepTemplates = useMemo(() => {
@@ -6674,7 +6719,10 @@ export default function V2App() {
               <RfpDetailPanel
                 rfp={currentRfp}
                 activeParty={activeRole.party}
-                requirementsSets={publishedRequirementSets || []}
+                // Phase 17.5.1.1 (Fix 2): expanded RS resolution pool so any
+                // RS referenced by any RFP resolves (incl. private RSes the
+                // owner published-by-reference), not just network-published.
+                requirementsSets={v22RfpRsLookupPool}
                 onClose={() => setV22DirectorySelectedRfp(null)}
                 onCloseRfp={(rfp) => {
                   // Phase 17.1: record the closure in session state. The
@@ -6733,9 +6781,10 @@ export default function V2App() {
               activeClaims={myClaims}
               // Phase 17.2.0.2: thread RS lookup so the modal renders
               // a Required-Standards accordion above the Claim picker.
-              // `publishedRequirementSets` is the same source the RFP
-              // Detail Panel uses to resolve RS chips.
-              requirementsSets={publishedRequirementSets}
+              // Phase 17.5.1.1 (Fix 2): use the expanded RFP-RS resolution
+              // pool (same source as RfpDetailPanel) so an RFP's referenced
+              // private RSes resolve in the accordion too.
+              requirementsSets={v22RfpRsLookupPool}
               // Phase 17.2.1.1: thread EA collection + solicitor party so
               // the modal can grey out Claims already mapped to the RFP
               // owner via an active or pending EA.
@@ -8728,7 +8777,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.1 &middot; Changelog
+          v0.17.5.1.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8775,6 +8824,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.1.1', date: '2026-05-20', label: 'Phase 17.5.1.1', items: [
+                  'Newly created RFPs now appear in their owner\'s cluster on every actor\'s Directory layer (previously only visible to the creator).',
+                  'RFP Detail Panel correctly resolves any referenced Requirements Set, including private RSes that the RFP owner published-by-reference.',
+                  'Requirements Set pickers in the Create RFP modal and the Request Agreement modal now list your own Requirements Sets first. Your own RSes that are also published to the Radiant Network keep the globe icon with a tooltip explaining the publication state.',
+                ]},
                 { version: '0.17.5.1', date: '2026-05-20', label: 'Phase 17.5.1', items: [
                   'Click "Create RFP" on any of your Asset cards (right-side action bar or Detail Panel footer) to publish a new Request for Proposals to the Radiant Network.',
                   'Two-step modal: fill in the name + description + requirements, then review and submit.',

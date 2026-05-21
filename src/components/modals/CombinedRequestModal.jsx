@@ -21,6 +21,15 @@ import {
   Backdrop, Modal, ModalHeader, ModalBody, ModalFooter,
   Btn, StepDots, FieldLabel,
 } from './ModalShared'
+import Tooltip from '../Tooltip'
+
+// Phase 17.5.1.1 (Fix 3): shared with RfpCreationModal.
+const OWN_PUBLISHED_TOOLTIP = 'This Requirements Set has been published to the Radiant Network for any party to evaluate against.'
+const RS_SECTION_HEADER_STYLE = {
+  fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
+  letterSpacing: '0.08em', textTransform: 'uppercase',
+  padding: '10px 14px 6px', borderBottom: '1px solid var(--border-faint)',
+}
 
 const PIN_PREFIX = 'PIN-0x'
 
@@ -221,13 +230,15 @@ export default function CombinedRequestModal({
                   <div style={{ padding: '16px', fontSize: 11, color: 'var(--text-dim)', textAlign: 'center' }}>
                     No Requirements Sets available in your library.
                   </div>
-                ) : (
-                  availableRequirementsSets.map((rs) => {
+                ) : (() => {
+                  // Phase 17.5.1.1 (Fix 3): section by isOwn (Your first), with
+                  // the own-published trailing globe + tooltip treatment shared
+                  // with RfpCreationModal.
+                  const ownRows = availableRequirementsSets.filter((r) => r.isOwn)
+                  const publishedRows = availableRequirementsSets.filter((r) => !r.isOwn && r.isPublished)
+                  const renderRow = (rs) => {
                     const selected = selectedReqSets.includes(rs.id)
-                    // Phase 17.2.1.1 — published RSes carry isPublished +
-                    // ownerParty so the row can render a globe icon and a
-                    // "Published by {owner}" line. Rows without those
-                    // fields render in the pre-17.2.1.1 minimal form.
+                    const isOwn = !!rs.isOwn
                     const isPublished = !!rs.isPublished
                     const ownerParty = rs.ownerParty || null
                     return (
@@ -258,27 +269,43 @@ export default function CombinedRequestModal({
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {isPublished && <GlobeIcon size={11} />}
+                            {!isOwn && isPublished && <GlobeIcon size={11} />}
                             <span>{rs.name}</span>
                             <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontWeight: 400 }}>
                               v{rs.version ?? 1}
                             </span>
+                            {isOwn && isPublished && (
+                              <Tooltip content={OWN_PUBLISHED_TOOLTIP} width={240}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center' }}><GlobeIcon size={11} /></span>
+                              </Tooltip>
+                            )}
                           </div>
-                          {isPublished && ownerParty && (
+                          {!isOwn && isPublished && ownerParty && (
                             <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                               Published by <span style={{ color: 'var(--text-secondary)' }}>{ownerParty}</span>
-                            </div>
-                          )}
-                          {!isPublished && (
-                            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                              {rs.id}
                             </div>
                           )}
                         </div>
                       </div>
                     )
-                  })
-                )}
+                  }
+                  return (
+                    <>
+                      {ownRows.length > 0 && (
+                        <>
+                          <div style={RS_SECTION_HEADER_STYLE}>Your Requirements Sets</div>
+                          {ownRows.map(renderRow)}
+                        </>
+                      )}
+                      {publishedRows.length > 0 && (
+                        <>
+                          <div style={RS_SECTION_HEADER_STYLE}>Published Requirements Sets</div>
+                          {publishedRows.map(renderRow)}
+                        </>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
 
               <FieldLabel label="Message (optional)" />
