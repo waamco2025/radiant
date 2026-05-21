@@ -111,12 +111,34 @@ function SectionHeading({ children }) {
   )
 }
 
+// Phase 17.3.1 — canonical globe icon, matches the LibraryModal /
+// BadgesPanel / RequirementsPanel / CombinedRequestModal / RequirementsSet-
+// DetailModal copies. Indicates a Requirements Set is published on the
+// public network.
+function GlobeIcon({ size = 12, color = 'var(--accent-blue)' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, color }}>
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+      <ellipse cx="8" cy="8" rx="2.8" ry="6" stroke="currentColor" strokeWidth="0.9" />
+      <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="0.9" />
+    </svg>
+  )
+}
+
 // Phase 17.3.1 — full-width clickable row for the Requirements section.
 // Replaces the horizontal-chip layout: each RS gets its own row with the
 // name at full width and the version rendered as a small badge pill on
 // the right edge. Click opens RequirementsSetDetailModal (V2App mounts).
 // `onClick === undefined` renders the row non-clickable + no hover state.
-function RequirementRow({ name, version, onClick }) {
+//
+// Phase 17.5.1.2 (Fix 3) — two-line layout:
+//   • Line 1: name → spacer → GlobeIcon (only when `isPublished`, regardless
+//     of who owns it or who's viewing) → version pill (right-aligned).
+//   • Line 2: owner party name in muted secondary text (matches the
+//     "Published by {ownerParty}" treatment in CombinedRequestModal's RS
+//     scrollbox). No "YOU" pill even when the viewer is the owner — the RFP
+//     panel header already carries the YOU indicator for the RFP itself.
+function RequirementRow({ name, version, owner, isPublished, onClick }) {
   const [hovered, setHovered] = useState(false)
   const clickable = !!onClick
   const bg = (clickable && hovered)
@@ -138,9 +160,9 @@ function RequirementRow({ name, version, onClick }) {
       title={clickable ? `Open ${name}` : undefined}
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 12px',
+        flexDirection: 'column',
+        gap: 4,
+        padding: '10px 12px 8px',
         background: bg,
         border: `1px solid ${border}`,
         borderRadius: 6,
@@ -148,29 +170,38 @@ function RequirementRow({ name, version, onClick }) {
         transition: 'background 120ms, border-color 120ms',
       }}
     >
-      <span style={{
-        flex: 1,
-        minWidth: 0,
-        fontSize: 12,
-        color: 'var(--text-primary)',
-        fontWeight: 600,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>{name}</span>
-      {version != null && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{
-          flexShrink: 0,
-          fontSize: 9,
-          fontFamily: 'var(--font-mono)',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12,
+          color: 'var(--text-primary)',
+          fontWeight: 600,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>{name}</span>
+        {isPublished && <GlobeIcon size={12} />}
+        {version != null && (
+          <span style={{
+            flexShrink: 0,
+            fontSize: 9,
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            color: 'var(--text-tertiary)',
+            padding: '2px 6px',
+            borderRadius: 3,
+            background: 'var(--bg-deep)',
+            border: '1px solid var(--border-faint)',
+          }}>v{version}</span>
+        )}
+      </div>
+      {owner && (
+        <div style={{
+          fontSize: 11,
           color: 'var(--text-tertiary)',
-          padding: '2px 6px',
-          borderRadius: 3,
-          background: 'var(--bg-deep)',
-          border: '1px solid var(--border-faint)',
-        }}>v{version}</span>
+        }}>{owner}</div>
       )}
     </div>
   )
@@ -480,6 +511,12 @@ export default function RfpDetailPanel({
                     key={rsId}
                     name={rs.name || rsId}
                     version={rs.version}
+                    // Phase 17.5.1.2 (Fix 3): owner party (line 2) + globe
+                    // gate (line 1). Both derived into the v22RfpRsLookupPool
+                    // shape by V2App; `isPublished` reflects publishedRequirementSets
+                    // membership independent of owner/viewer.
+                    owner={rs.owner}
+                    isPublished={rs.isPublished}
                     onClick={clickable ? () => onRequirementClick(rsId) : undefined}
                   />
                 )

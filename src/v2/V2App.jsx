@@ -4033,13 +4033,39 @@ export default function V2App() {
   // the public interface for those RSes. Referenced ids are resolved against
   // the network-wide seed RS pool (every role's DEMO_REQUIREMENT_SETS) plus
   // the active actor's own runtime RSes.
+  // Phase 17.5.1.2 (Fix 3): each pool entry is enriched with two derived
+  // fields the RFP Detail Panel's RS rows need — `owner` (the seed-level
+  // owner party, used for the new line-2 owner label) and `isPublished`
+  // (membership in `publishedRequirementSets`, used to gate the line-1 globe
+  // icon regardless of who owns the RS or who's viewing). Owner is resolved
+  // from `_publishedBy` on published entries, else from a roleId→party map
+  // over DEMO_REQUIREMENT_SETS (which is keyed by roleId, not party), else
+  // from the active actor's party for their own runtime RSes. The raw RS
+  // fields (name / version / requirements / _publishedBy / …) are spread
+  // through unchanged so the existing chip rendering AND the now-shared
+  // RequirementsSetDetailModal resolution (Fix 2) keep working.
   const v22RfpRsLookupPool = useMemo(() => {
+    const ROLE_PARTY = {
+      'bob-govco': 'GovCo', 'alice-microco': 'MicroCo',
+      'carol-auditco': 'AuditCo', 'dave-chipco': 'ChipCo',
+    }
+    const ownerByRsId = new Map()
+    for (const [rid, sets] of Object.entries(DEMO_REQUIREMENT_SETS)) {
+      for (const rs of (sets || [])) {
+        if (!ownerByRsId.has(rs.id)) ownerByRsId.set(rs.id, ROLE_PARTY[rid] || null)
+      }
+    }
+    const publishedIds = new Set((publishedRequirementSets || []).map((r) => r.id))
+    const enrich = (rs, ownerFallback) => {
+      const owner = rs._publishedBy || ownerByRsId.get(rs.id) || ownerFallback || null
+      return { ...rs, owner, isPublished: publishedIds.has(rs.id) }
+    }
     const seen = new Set()
     const rows = []
     for (const rs of (publishedRequirementSets || [])) {
       if (seen.has(rs.id)) continue
       seen.add(rs.id)
-      rows.push(rs)
+      rows.push(enrich(rs))
     }
     const sharedRfps = (mergeCreatedRfps(
       mergeClosedRfps(buildV22SharedArtifacts(), v22ClosedRfpIds),
@@ -4049,15 +4075,24 @@ export default function V2App() {
     for (const rfp of sharedRfps) {
       for (const rsId of (rfp.requirementsSetIds || [])) referencedRsIds.add(rsId)
     }
-    const networkWide = [...Object.values(DEMO_REQUIREMENT_SETS).flat(), ...(requirementSets || [])]
-    for (const rs of networkWide) {
+    // DEMO seed RSes resolve their owner via the roleId→party map; the
+    // active actor's own runtime RSes fall back to their party.
+    const seedRses = Object.values(DEMO_REQUIREMENT_SETS).flat()
+    const ownRses = requirementSets || []
+    for (const rs of seedRses) {
       if (seen.has(rs.id)) continue
       if (!referencedRsIds.has(rs.id)) continue
       seen.add(rs.id)
-      rows.push(rs)
+      rows.push(enrich(rs))
+    }
+    for (const rs of ownRses) {
+      if (seen.has(rs.id)) continue
+      if (!referencedRsIds.has(rs.id)) continue
+      seen.add(rs.id)
+      rows.push(enrich(rs, activeRole.party))
     }
     return rows
-  }, [publishedRequirementSets, v22ClosedRfpIds, v22CreatedRfps, requirementSets])
+  }, [publishedRequirementSets, v22ClosedRfpIds, v22CreatedRfps, requirementSets, activeRole.party])
 
   // PEP templates — per-role, defaults from demo data
   const pepTemplates = useMemo(() => {
@@ -6965,11 +7000,16 @@ export default function V2App() {
         })()}
 
         {/* Phase 17.3.1 — RequirementsSetDetailModal. Opens from the
-            new Requirements row click in RfpDetailPanel. Resolves the
-            clicked rsId against the canonical publishedRequirementSets
-            catalog. */}
+            new Requirements row click in RfpDetailPanel.
+            Phase 17.5.1.2 (Fix 2): resolve the clicked rsId against
+            `v22RfpRsLookupPool` (published + RFP-referenced RSes) — the
+            same single source the panel uses for chip rendering — instead
+            of `publishedRequirementSets` alone. Without this, own-private
+            RSes referenced by an RFP rendered as clickable rows but the
+            click resolved to null (no modal), since they aren't in the
+            published catalog. */}
         {v22OpenRsId && (() => {
-          const rs = (publishedRequirementSets || []).find((r) => r.id === v22OpenRsId) || null
+          const rs = (v22RfpRsLookupPool || []).find((r) => r.id === v22OpenRsId) || null
           return (
             <RequirementsSetDetailModal
               requirementsSet={rs}
@@ -8777,7 +8817,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.1.1 &middot; Changelog
+          v0.17.5.1.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -8824,6 +8864,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.1.2', date: '2026-05-21', label: 'Phase 17.5.1.2', items: [
+                  'Newly created RFPs now integrate into their owner\'s existing Directory cluster on every viewer\'s Directory — no more duplicate cluster label.',
+                  'Requirements Set chips in the RFP Detail Panel open the RS detail modal regardless of publication status.',
+                  'Requirements Set rows in the RFP Detail Panel now show the RS owner on a second line and a globe icon on published RSes.',
+                ]},
                 { version: '0.17.5.1.1', date: '2026-05-20', label: 'Phase 17.5.1.1', items: [
                   'Newly created RFPs now appear in their owner\'s cluster on every actor\'s Directory layer (previously only visible to the creator).',
                   'RFP Detail Panel correctly resolves any referenced Requirements Set, including private RSes that the RFP owner published-by-reference.',

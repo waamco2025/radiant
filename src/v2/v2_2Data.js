@@ -5530,12 +5530,25 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
     (r) => r.owner !== activeParty && r.status === 'open',
   )
 
-  // Phase 16.2.6.5: RFPs flow through clusters now. Each cluster carries
-  // its owner's RFPs in `cluster.rfps`. RFPs from the 4 primary parties
-  // (GovCo / MicroCo / AuditCo / ChipCo) on views where their cluster
-  // doesn't render fall back to the existing orphan path via `otherRfps`
-  // — preserves the 16.2.6.3 GovCo-on-Alice/Carol/Dave behavior.
-  const PRIMARY_PARTIES_FOR_ORPHAN_RFP = new Set(['GovCo', 'MicroCo', 'AuditCo', 'ChipCo'])
+  // Phase 16.2.6.5 / 17.5.1.2 (Fix 1): RFPs flow through clusters. Each
+  // cluster carries its owner's RFPs in `cluster.rfps`, and every RFP owner
+  // that lacks an existing (Claim-bearing) cluster gets an upserted RFP-only
+  // cluster — INCLUDING the primary switchable parties (GovCo / MicroCo /
+  // AuditCo / ChipCo).
+  //
+  // Why the primary-party carve-out was removed: buyers like GovCo (Bob)
+  // have no public Claims, so they never appear in `otherClusters`. The old
+  // `PRIMARY_PARTIES_FOR_ORPHAN_RFP` exclusion therefore routed ALL of their
+  // RFPs (seeded + user-created) through the orphan path, where DirectoryLayer
+  // renders one owner-pillbox-label PER orphan marker. Two GovCo RFPs (the
+  // seeded Sentinel-4 + a user-created one) thus produced two "GovCo" labels.
+  // Giving every RFP owner exactly one cluster collapses that to a single
+  // cluster label (the cluster-label render emits one label per cluster) and
+  // groups all of an owner's RFPs together — matching the architectural rule
+  // that each switchable actor has exactly one Directory cluster on every
+  // viewer's Directory. The DirectoryLayer orphan-spread fallback (Phase
+  // 17.5.1.1) is preserved below for GENUINE orphans (owners that somehow
+  // end up with no cluster at all — normally none after the upsert).
   const rfpsByOwner = new Map()
   for (const r of otherRfpsBaseline) {
     if (!rfpsByOwner.has(r.owner)) rfpsByOwner.set(r.owner, [])
@@ -5545,26 +5558,27 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
   for (const cluster of otherClusters) {
     cluster.rfps = rfpsByOwner.get(cluster.ownerParty) || []
   }
-  // (b) Upsert clusters for RFP-only owners (parties with RFPs but no
-  // Claims). Primary parties excluded — their RFPs route through the
-  // orphan path so GovCo's RFP on Alice's view still labels adjacently.
+  // (b) Upsert clusters for RFP-only owners (parties with RFPs but no Claims
+  // on this view), now including primary parties.
   const existingOwnersForRfps = new Set(otherClusters.map((c) => c.ownerParty))
   for (const [owner, ownerRfps] of rfpsByOwner.entries()) {
     if (existingOwnersForRfps.has(owner)) continue
-    if (PRIMARY_PARTIES_FOR_ORPHAN_RFP.has(owner)) continue
     otherClusters.push({
       ownerParty: owner,
       publicClaims: [],
       umbrellaClaims: [],
       rfps: ownerRfps,
     })
+    existingOwnersForRfps.add(owner)
   }
-  // (c) otherRfps now contains ONLY orphan RFPs (primary-party RFPs whose
-  // cluster isn't rendered on the active view). The 16.2.6.3 per-marker
-  // owner-pillbox-label render in DirectoryLayer is filtered down to these
-  // — see Item 6 (clusterIdx === -1 guard).
+  // (c) otherRfps now contains ONLY genuine orphans — RFPs whose owner ends
+  // up with no cluster at all. After (a)+(b) every RFP owner has a cluster,
+  // so this is normally empty; the DirectoryLayer orphan-spread fallback
+  // (Phase 17.5.1.1, clusterIdx === -1 per-marker label) is retained for
+  // defensiveness against any future path that surfaces a clusterless owner.
+  const clusterOwnerParties = new Set(otherClusters.map((c) => c.ownerParty))
   const otherRfps = otherRfpsBaseline.filter(
-    (r) => PRIMARY_PARTIES_FOR_ORPHAN_RFP.has(r.owner)
+    (r) => !clusterOwnerParties.has(r.owner)
   )
 
   // Phase 16.1.2 Item 2: `isUserVisible` flag — true when the active actor
