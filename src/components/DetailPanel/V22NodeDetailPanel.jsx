@@ -274,11 +274,11 @@ function PanelHeader({ typeLabel, name, pin, onClose, badge, actions }) {
   // close button. Used by Claim / Eval Result / PoE / Parse Result panels to
   // surface an Expand button alongside the type badge — the same affordance
   // location used on the EA Detail Panel since 11C.2.
-  // Phase 17.3 (#202): `typeLabel` is now optional. ACTOR + ASSET panels
-  // omit it because the Actor's PIN + name (or the Asset's PIN + name + file
-  // chip below) are self-identifying. Claim / Eval Result / Parse Result /
-  // PoE / Badge Template panels keep their type pill since those are
-  // abstract artifact types that benefit from an explicit label.
+  // Phase 17.3 (#202): `typeLabel` is optional (panels may omit it).
+  // Phase 17.5.2.1: ACTOR + ASSET panels pass it again ("ACTOR" / "ASSET")
+  // so every Detail Panel header carries its type badge consistently —
+  // reversing the 17.3 #202 removal for these two. Claim / Eval Result /
+  // Parse Result / PoE / Badge Template have always kept their type pill.
   return (
     <div style={{ padding: '18px 18px 14px', flexShrink: 0, borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -358,7 +358,7 @@ function V22ActorPanel({
   const isOwner = activeParty === node.name && !node.isNetworkNode
   return (
     <PanelLayout
-      header={<PanelHeader name={node.name} pin={node.pin} onClose={onClose} />}
+      header={<PanelHeader typeLabel="ACTOR" name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
           {/* Phase 9A.6.1.1 Fix 1: stripped DOT, Role, Vertical, User rows.
@@ -454,7 +454,7 @@ function V22AssetPanel({
   const isPendingTransfer = !!node._pendingTransfer
   return (
     <PanelLayout
-      header={<PanelHeader name={node.name} pin={node.pin} onClose={onClose} />}
+      header={<PanelHeader typeLabel="ASSET" name={node.name} pin={node.pin} onClose={onClose} />}
       body={
         <>
           {asset?.description && (
@@ -3240,12 +3240,16 @@ function AssetPanelRfpRow({ rfp, isOwner, onOpenRfp, onCloseRfp, onReopenRfp, on
           Posted {formatDateTime(rfp.createdDate)}{reqCount ? ` · ${reqCount} requirement${reqCount === 1 ? '' : 's'}` : ''}
         </div>
       </div>
-      {/* Right: owner-only lifecycle actions (Close, or Reopen + Remove). */}
+      {/* Right: owner-only lifecycle actions. Phase 17.5.2.1: text-only labels
+          (icons dropped); when both Reopen + Remove render (closed RFP) they
+          stack vertically, matching the AMEND/REVOKE column on EA rows above
+          (flexDirection column, flex-end, gap 4, minWidth 52). Open RFP shows
+          a single Close label in the same column. */}
       {isOwner && (
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 52 }}>
           {!isClosed && (
             <ActionLabel
-              label="✕ Close"
+              label="Close"
               onClick={onCloseRfp ? () => onCloseRfp(rfp) : undefined}
               title="Close this RFP"
             />
@@ -3253,12 +3257,12 @@ function AssetPanelRfpRow({ rfp, isOwner, onOpenRfp, onCloseRfp, onReopenRfp, on
           {isClosed && (
             <>
               <ActionLabel
-                label="⟲ Reopen"
+                label="Reopen"
                 onClick={onReopenRfp ? () => onReopenRfp(rfp) : undefined}
                 title="Reopen this RFP"
               />
               <ActionLabel
-                label="⊟ Remove"
+                label="Remove"
                 danger
                 onClick={onRemoveRfp ? () => onRemoveRfp(rfp) : undefined}
                 title="Permanently remove this RFP. Open solicitations will also be removed. This action cannot be undone."

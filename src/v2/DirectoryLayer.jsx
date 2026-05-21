@@ -145,6 +145,11 @@ const MINI_CARD_H = 48
 const MID_LOD_THRESHOLD = 3.4
 const LOD_THRESHOLD = 5.0
 const INITIAL_ZOOM = 0.15
+// Phase 17.5.2.1: target zoom for the camera pull-out that plays while the
+// Directory closes (reverse circle wipe). ~60% reads as "moderately zoomed
+// out — see more of the network as it contracts." Applied via Math.min so a
+// close from an already-wider view never zooms IN (stays outward-only).
+const DIRECTORY_EXIT_ZOOM = 0.6
 // Phase 16.2.6.2: Voronoi-domain insets shrink the tessellation
 // rectangle inward from the full canvas bounds. Left/right reserve a
 // 1-cell buffer so cluster dots aren't visibly cut off at the canvas
@@ -1940,6 +1945,26 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     }
     panAnimRef.current = requestAnimationFrame(tick)
   }, [clampPan, updateCamera])
+
+  // ─── Phase 17.5.2.1: camera pull-out during the reverse close wipe. ──
+  // When the layer starts closing (phase → 'out': globe button, exit chip,
+  // empty-space double-click, OR the RFP "For Asset" route-to-parent), the
+  // Three.js camera eases outward to DIRECTORY_EXIT_ZOOM in parallel with the
+  // 900ms clip-path circle contracting. The Parent canvas has already begun
+  // panning/zooming to its destination underneath (V2App fires its own
+  // animatedPanToWithZoom synchronously on close), so the user perceives one
+  // continuous "pull out through the network → arrive on the Parent layer"
+  // motion rather than the network snapping away. Math.min keeps it
+  // outward-only — closing from an already-wider view doesn't zoom in. The
+  // scene unmounts when phase reaches 'closed' (~600ms), which simply cuts the
+  // tail of the easeOut (most of the movement is front-loaded). 'out' is only
+  // ever entered from 'in'/'opening', so no prev-phase guard is needed.
+  useEffect(() => {
+    if (phase !== 'out') return
+    const targetZoom = Math.min(zoomRef.current, DIRECTORY_EXIT_ZOOM)
+    if (Math.abs(targetZoom - zoomRef.current) < 1e-4) return
+    animatedPanToWithZoom(camPosRef.current.x, camPosRef.current.y, targetZoom, 900)
+  }, [phase, animatedPanToWithZoom])
 
   // ─── Phase 17.2.0.2: focusRfpInternal helper — shared between internal
   // marker / card click paths AND the externally-driven `selectRfp`

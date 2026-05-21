@@ -322,6 +322,15 @@ export default function V2App() {
   // clearEdgeUiState + directoryLayerRef). Lets `handleRfpCreationSubmit`
   // (declared earlier) invoke it at event-time without a forward dep / TDZ.
   const routeToRfpRef = useRef(null)
+  // Phase 17.5.2.1: id of the in-flight `routeToRfp` rAF select-retry loop so
+  // it can be cancelled before a new route starts. Without this, every
+  // navigation to an RFP (Anchored-RFPs row click, For-Asset round trip,
+  // notification routing, post-creation) spawned a fresh uncancelled retry
+  // chain. 17.5.2 raised the cap 60 → 240 frames (~4s @ 60fps), so repeated
+  // navigation stacked multiple concurrent 4-second chains — each filtering
+  // the ~23k-entry `allDots` every frame and firing setPinned/pan-zoom on
+  // resolution — saturating the main thread and freezing the tab.
+  const routeRfpSelectRafRef = useRef(0)
   // Phase 17.2: session-state Map<solicitationId, RfpSolicitation> for
   // seller-initiated solicitations against an RFP. Mirror of
   // `v22ClosedRfpIds` shape — Map so updates (rejection, response date)
@@ -4436,14 +4445,25 @@ export default function V2App() {
     // layout must rebuild to include the new RFP (after the v22CreatedRfps
     // setState flushes) before `selectRfp` can find its marker — that can
     // exceed the old ~1s window, leaving the marker unselected + un-zoomed.
+    // Phase 17.5.2.1: cancel any in-flight retry chain before starting a new
+    // one so concurrent navigations can never stack up (the tab-freeze
+    // regression). Only one chain is ever active; its rAF id lives in
+    // routeRfpSelectRafRef and is zeroed on terminate.
+    if (routeRfpSelectRafRef.current) {
+      cancelAnimationFrame(routeRfpSelectRafRef.current)
+      routeRfpSelectRafRef.current = 0
+    }
     let attempts = 0
     const trySelect = () => {
       attempts += 1
       const ok = directoryLayerRef.current?.selectRfp?.(targetRfp)
-      if (ok || attempts > 240) return
-      requestAnimationFrame(trySelect)
+      if (ok || attempts > 240) {
+        routeRfpSelectRafRef.current = 0
+        return
+      }
+      routeRfpSelectRafRef.current = requestAnimationFrame(trySelect)
     }
-    requestAnimationFrame(trySelect)
+    routeRfpSelectRafRef.current = requestAnimationFrame(trySelect)
   }, [v22CreatedRfps, v22ClosedRfpIds, v22RemovedRfpIds, clearEdgeUiState])
   // Keep the ref pointing at the latest routeToRfp so earlier-declared
   // handlers (handleRfpCreationSubmit) can call it without a forward dep.
@@ -4471,6 +4491,12 @@ export default function V2App() {
   // (no selection).
   const routeToAsset = useCallback((assetId) => {
     if (!assetId) return
+    // Phase 17.5.2.1: kill any in-flight RFP-select retry chain so it can't
+    // fire setPinned/pan-zoom on the closing Directory while it pulls out.
+    if (routeRfpSelectRafRef.current) {
+      cancelAnimationFrame(routeRfpSelectRafRef.current)
+      routeRfpSelectRafRef.current = 0
+    }
     setV22DirectorySelectedRfp(null)
     setV22DirectorySelectedClaim(null)
     setV22DirectoryOpen(false)
@@ -9047,7 +9073,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.2 &middot; Changelog
+          v0.17.5.2.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9087,13 +9113,20 @@ export default function V2App() {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>Prototype Changelog</div>
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>Radiant V2 — PCN Prototyping</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>Changelog</div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', marginTop: 2 }}>Radiant v2.2</div>
               </div>
               <span onClick={() => setShowChangelog(false)} style={{ fontSize: 16, color: 'var(--text-dim)', cursor: 'pointer', padding: '4px 8px' }}>&#10005;</span>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.2.1', date: '2026-05-21', label: 'Phase 17.5.2.1', items: [
+                  'Fixed: clicking an RFP from an Asset\'s "Anchored RFPs" section no longer locks the tab.',
+                  'Smoother transition when clicking "For Asset" inside an RFP — the Directory zooms outward as the layer closes, landing you directly on the Asset.',
+                  'Anchored RFPs row actions are now text-only labels (CLOSE / REOPEN / REMOVE), with REOPEN + REMOVE stacked vertically when an RFP is closed, matching the AMEND/REVOKE treatment on Evaluation Agreement rows.',
+                  'Asset and Actor Detail Panels now show their type badges in the header.',
+                  'Cleaned up the Changelog modal\'s own header.',
+                ]},
                 { version: '0.17.5.2', date: '2026-05-21', label: 'Phase 17.5.2', items: [
                   'Creating an RFP now smoothly transitions to the Directory layer, zooms to the new RFP, opens its Detail Panel, and marks the card with a NEW badge until you move on.',
                   'Click the "For Asset" row in any RFP\'s Detail Panel to jump to that Asset\'s Detail Panel on the parent canvas — the inverse of the click-to-open-RFP shortcut shipped last phase.',
