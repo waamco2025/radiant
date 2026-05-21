@@ -1525,6 +1525,9 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // matching synthetic RFP card so AssetNode renders the NEW badge until the
   // user navigates away (cleared in V2App by a deselect effect).
   recentlyCreatedRfpId,
+  // Phase 17.5.2.2 (Part 4): true when a Directory-side Detail Panel (Claim
+  // or RFP) is open — shifts the zoom controls left so they clear the panel.
+  detailPanelOpen,
   // eslint-disable-next-line no-unused-vars
   onOpenAIShopper,
   onClose,
@@ -2007,7 +2010,7 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // Resolves the dot via `layoutRef` so the most-recent layout is
   // consulted (provisional updates and role switches refresh layout).
   useImperativeHandle(ref, () => ({
-    selectRfp(rfp) {
+    selectRfp(rfp, opts = {}) {
       if (!rfp || !rfp.id) return false
       const layoutCur = layoutRef.current
       if (!layoutCur) return false
@@ -2018,7 +2021,13 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       // Zoom up to at least LOD_THRESHOLD so the marker swaps to its
       // full-card representation. If the user is already zoomed in
       // beyond that, keep their current zoom (don't zoom out).
-      const targetZoom = Math.max(zoomRef.current, LOD_THRESHOLD)
+      // Phase 17.5.2.2 (Part 2): opts.zoom overrides the default full-card
+      // LOD when a caller wants a different target. Notification routing
+      // passes { zoom: 0.6 } to land at 60% — the marker reads clearly but
+      // the surrounding cluster stays in view (context vs. focus, mirroring
+      // 17.5.2.1's DIRECTORY_EXIT_ZOOM = 0.6). routeToRfp + internal click
+      // paths pass no opts, so they stay at full-card LOD.
+      const targetZoom = opts.zoom ?? Math.max(zoomRef.current, LOD_THRESHOLD)
       focusRfpInternal(d, dotIndex, { zoom: targetZoom })
       return true
     },
@@ -4002,12 +4011,19 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       <div style={{
         position: 'absolute',
         top: 73,
-        right: 12,
+        // Phase 17.5.2.2 (Part 4): shift left when a Detail Panel is open on
+        // the Directory layer (Claim or RFP) so the chrome doesn't sit under
+        // the panel. PANEL_W is the panel width; +12 keeps the same 12px gap
+        // from the panel's left edge that the chrome previously had from the
+        // viewport's right edge. The 200ms ease-out matches Detail Panel
+        // transitions so the shift glides rather than snaps.
+        right: detailPanelOpen ? PANEL_W + 12 : 12,
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
         zIndex: 1700,
         pointerEvents: 'auto',
+        transition: 'right 200ms ease-out',
       }}>
         {[
           { label: '+', onClick: zoomIn },

@@ -2673,6 +2673,23 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 17.5.2.2 completion notes (2026-05-21) — RFP arc post-closure cleanup (Request Agreement regression + notification pan/zoom + reopen notification + zoom-controls shift)
+
+Four items from manual QA after the RFP creation arc closed at 17.5.2.1.
+
+**Diff (high-level).**
+- **Part 1 — `handleRequestAgreement` merge chain** (`src/v2/V2App.jsx`): replaced the bare `const shared = buildV22SharedArtifacts()` with the full `mergeRemovedRfps(mergeClosedRfps(mergeCreatedRfps(buildV22SharedArtifacts(), v22CreatedRfps), v22ClosedRfpIds), v22RemovedRfpIds)` chain so user-created RFPs are findable when the owner clicks "Request Agreement" on a solicitation against one (the bare call omitted the session-state overlays → handler bailed at `if (!rfp) return`). Same bug shape as 17.5.1.3's `handleCreateSolicitation` fix. Deps array `[]` → `[v22CreatedRfps, v22ClosedRfpIds, v22RemovedRfpIds]`. Body (anchorAsset/sharedClaim lookups, state setters, AI Shopper pre-fill) unchanged.
+- **Part 2 — `selectRfp` opts.zoom + 60% notification routing** (`src/v2/DirectoryLayer.jsx` + `src/v2/V2App.jsx`): the `selectRfp` imperative handle now takes `(rfp, opts = {})` with `const targetZoom = opts.zoom ?? Math.max(zoomRef.current, LOD_THRESHOLD)`. The notification-routing branch passes `{ zoom: 0.6 }` so RFP notification clicks land at 60% (read the marker, keep cluster context). `routeToRfp` + internal marker/card click paths pass no opts → stay at full-card LOD (post-creation + Anchored-RFPs-row clicks unchanged). Asymmetric on purpose (reactive-context vs deliberate-focus).
+- **Part 3 — Reopen notification** (`src/v2/V2App.jsx`): `handleReopenRfp` now dispatches `v22-rfp-reopened` to every UNIQUE solicitor party (deduped Set, same dispatch shape as `handleCloseRfp`; zero solicitors → zero notifications) — **REVERSES the 17.5.1.4 "Reopen is silent (asymmetric)" decision.** New render branch: `isV22RfpReopened` flag, full-saturation `var(--accent-indigo)` `badgeColor` (vs the closed badge's muted `color-mix` blend), `RFP REOPENED` `badgeLabel`, body "{owner} reopened the RFP "{name}". You can resume engagement.". `v22-rfp-reopened` added to the notification-routing type union so click routes the same as `v22-rfp-closed` (Directory → marker → panel, 60% via Part 2). Deps `[v22CreatedRfps, v22Solicitations, enqueueV22NotificationForRequester]`.
+- **Part 4 — Directory zoom-controls shift** (`src/v2/DirectoryLayer.jsx` + `src/v2/V2App.jsx`): DirectoryLayer gains a `detailPanelOpen` prop; the chrome's `right: 12` → `right: detailPanelOpen ? PANEL_W + 12 : 12` with `transition: 'right 200ms ease-out'` (`PANEL_W` is the existing 480 panel-width const). V2App passes `detailPanelOpen={!!(v22DirectorySelectedClaim || v22DirectorySelectedRfp)}` on the DirectoryLayer mount.
+- **Docs + version:** footer + Changelog modal → v0.17.5.2.2; architecture-spec §8 Changelog bullet + a struck-through-and-superseded note on the 17.5.1.4 §8.11 "Reopen is silent" line; polish-backlog Update Log; CLAUDE.md most-recent-phase + queue.
+
+**Deviations.** None material — the prompt supplied exact snippets and the live code matched the "Currently" blocks verbatim, so each change applied cleanly. `badgeColor` for `v22-rfp-reopened` is set explicitly to `var(--accent-indigo)` even though the chain's final fallback is already `var(--accent-indigo)` — explicit for clarity + robustness against future reordering. The §8.9.3 two-row solicitation notification table was left as-is (it predates `v22-rfp-closed` too; the authoritative close/reopen lifecycle doc is the §8.11 paragraph, which is updated).
+
+**Runtime verification.** Build clean (132 modules, 0 errors). The non-animated parts are directly confirmable and were code-verified; the rAF-driven pan/zoom pacing + notification round-trips are **flagged for manual verification** because the headless dev preview throttles rAF to ~1fps (a self-rescheduling rAF loop never resolves within 30s), so 60fps animation timing can't be exercised in-session — this is the documented Three.js/preview limitation. The notification-routing change mirrors the path verified visually in earlier phases; the `{ zoom: 0.6 }` override is a one-line target-zoom substitution into the already-working `focusRfpInternal` → `animatedPanToWithZoom` path.
+
+**Status:** [x] Complete.
+
 ### Phase 17.5.2.1 completion notes (2026-05-21) — RFP arc closing polish (regression fix + transition smoothing + visual cleanup)
 
 Six bundled items closing out the RFP creation arc.

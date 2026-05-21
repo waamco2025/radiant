@@ -2784,9 +2784,11 @@ export default function V2App() {
     }
   }, [v22CreatedRfps, v22Solicitations, enqueueV22NotificationForRequester])
 
-  // Phase 17.1 / 17.5.1.4: reopen a closed RFP. Silent — no notification (the
-  // close notification is the asymmetric lifecycle signal; reopening doesn't
-  // re-notify solicitors).
+  // Phase 17.1 / 17.5.1.4 / 17.5.2.2: reopen a closed RFP. Phase 17.5.2.2
+  // (Part 3) REVERSES the 17.5.1.4 "Reopen is silent (asymmetric)" decision:
+  // reopening now dispatches a v22-rfp-reopened notification to every UNIQUE
+  // solicitor party so they know an RFP they've solicited is actionable again
+  // and can re-engage. Symmetric with handleCloseRfp's dispatch shape.
   const handleReopenRfp = useCallback((rfp) => {
     if (!rfp) return
     setV22ClosedRfpIds((prev) => {
@@ -2795,7 +2797,31 @@ export default function V2App() {
       next.delete(rfp.id)
       return next
     })
-  }, [])
+    const merged = mergeSolicitations(
+      mergeCreatedRfps(buildV22SharedArtifacts(), v22CreatedRfps),
+      v22Solicitations,
+    )
+    const resolvedRfp = (merged.rfps || []).find((r) => r.id === rfp.id) || rfp
+    const solicitorParties = new Set(
+      (merged.rfpSolicitations || [])
+        .filter((s) => s.rfpId === rfp.id)
+        .map((s) => s.solicitor),
+    )
+    for (const solicitorParty of solicitorParties) {
+      const solicitorRole = ROLES.find((r) => r.party === solicitorParty)
+      if (!solicitorRole) continue
+      enqueueV22NotificationForRequester(solicitorRole.id, {
+        id: `v22-rfp-reopened-${rfp.id}-${solicitorParty}-${Date.now()}`,
+        type: 'v22-rfp-reopened',
+        from: { name: resolvedRfp.owner, dot: resolvedRfp.ownerDot },
+        asset: { name: resolvedRfp.name, pin: null },
+        connectTo: null,
+        rfpId: rfp.id,
+        rfpName: resolvedRfp.name,
+        date: new Date().toISOString().slice(0, 10),
+      })
+    }
+  }, [v22CreatedRfps, v22Solicitations, enqueueV22NotificationForRequester])
 
   // Phase 17.5.1.4: permanently remove a (closed) RFP. Adds it to
   // v22RemovedRfpIds — `mergeRemovedRfps` (last in the Directory merge chain)
@@ -2872,7 +2898,19 @@ export default function V2App() {
   // post-submit branch can fire the solicitation-accepted side effects.
   const handleRequestAgreement = useCallback((solicitation) => {
     if (!solicitation) return
-    const shared = buildV22SharedArtifacts()
+    // Phase 17.5.2.2 (Part 1): use the full created → closed → removed merge
+    // chain so user-created RFPs are findable here. Same bug shape as
+    // 17.5.1.3's handleCreateSolicitation fix — the bare buildV22SharedArtifacts
+    // omits the session-state overlays, so the handler bailed at
+    // `if (!rfp) return` when responding to a solicitation against a
+    // user-created RFP.
+    const shared = mergeRemovedRfps(
+      mergeClosedRfps(
+        mergeCreatedRfps(buildV22SharedArtifacts(), v22CreatedRfps),
+        v22ClosedRfpIds,
+      ),
+      v22RemovedRfpIds,
+    )
     const rfp = (shared.rfps || []).find((r) => r.id === solicitation.rfpId)
     if (!rfp) return
     const anchorAsset = (shared.assets || []).find((a) => a.id === rfp.assetId)
@@ -2901,7 +2939,7 @@ export default function V2App() {
       suggestedRequirementsSetIds: rfpRsIds,
     })
     setV22RequestOpen(true)
-  }, [])
+  }, [v22CreatedRfps, v22ClosedRfpIds, v22RemovedRfpIds])
 
   // Phase 17.3 — Directory-layer Claim "Request Evaluation Agreement" CTA.
   // Triggered from V22NodeDetailPanel's footer button OR from the Claim
@@ -5125,11 +5163,18 @@ export default function V2App() {
                     // Directory → closed RFP marker → RfpDetailPanel (solicitor
                     // view). Muted badge to match the closed-state treatment.
                     const isV22RfpClosed = req.type === 'v22-rfp-closed'
+                    // Phase 17.5.2.2 (Part 3): RFP-reopened notification — lands
+                    // on every solicitor when the RFP owner reopens a closed RFP
+                    // (REVERSES the 17.5.1.4 "Reopen is silent" decision). Click
+                    // routes the same as v22-rfp-closed (Directory → marker →
+                    // panel, 60% zoom). Full-saturation indigo badge (vs the
+                    // closed badge's muted blend) — reopened reads as actionable.
+                    const isV22RfpReopened = req.type === 'v22-rfp-reopened'
                     // Phase 11.6 (#164): amendment-proposal accept/reject get
                     // their own colors — green for accepted, red for rejected
                     // — to match the actionable consequence (vs. the
                     // generic indigo "informational amendment" badges).
-                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked || isV22RfpSolicitationRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted || isV22RfpSolicitationAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale || isV22RfpSolicitationReceived ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : isV22RfpClosed ? 'color-mix(in srgb, var(--accent-indigo) 50%, var(--text-muted))' : 'var(--accent-indigo)'
+                    const badgeColor = isRevocation || isDecline || isV22TransferDeclined || isV22DaRevoked || isV22EaRevoked || isV22EaDeclined || isV22EaAmendmentRejected || isV22BadgeRevoked || isV22RfpSolicitationRejected ? 'var(--accent-red)' : isAcceptance || isV22TransferAccepted || isV22EaAccepted || isV22EaAmendmentAccepted || isV22RfpSolicitationAccepted ? 'var(--accent-green)' : isRevision || isEvaluation || isV22DaAmendment || isV22EaAmendmentProposal || isV22Evaluation || isV22BadgeIssued || isV22BadgeTemplateNewVersion || isV22PoeCreated ? 'var(--accent-indigo)' : isPublishedStandard ? 'var(--accent-blue)' : isV22TransferRequest || isV22EaRequest || isV22EvalResultStale || isV22RfpSolicitationReceived ? 'var(--accent-amber)' : isV22TransferCancelled ? 'var(--text-dim)' : isV22RfpClosed ? 'color-mix(in srgb, var(--accent-indigo) 50%, var(--text-muted))' : isV22RfpReopened ? 'var(--accent-indigo)' : 'var(--accent-indigo)'
                     // Phase 11E.4 (Fix 2): both DA + EA amendments now read
                     // a unified `AMENDMENT` label — the badge is a category
                     // tag, and the body copy already specifies which
@@ -5141,7 +5186,7 @@ export default function V2App() {
                     // consequences (accept/reject), distinct from the
                     // informational AMENDMENT category used for DA
                     // amendments and the rolled-back unilateral EA model.
-                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : isV22RfpSolicitationReceived ? 'SOLICITATION' : isV22RfpSolicitationRejected ? 'REJECTED' : isV22RfpSolicitationAccepted ? 'ACCEPTED' : isV22RfpClosed ? 'RFP CLOSED' : 'REQUEST'
+                    const badgeLabel = isRevocation ? 'REVOKED' : isAcceptance ? 'ACCEPTED' : isDecline ? 'DECLINED' : isRevision ? 'REVISED' : isEvaluation ? (req.isAmend ? 'AMENDED' : 'EVALUATED') : isPublishedStandard ? 'PUBLISHED' : isV22EaAmendmentProposal ? 'AMENDMENT PROPOSAL' : isV22EaAmendmentAccepted ? 'AMENDMENT ACCEPTED' : isV22EaAmendmentRejected ? 'AMENDMENT REJECTED' : isV22DaAmendment ? 'AMENDMENT' : isV22Evaluation ? (req.supersedesPriorResultId ? 'RE-EVALUATED' : 'EVALUATED') : isV22Request ? 'REQUEST' : isV22EaRequest ? 'EA REQUEST' : isV22EaAccepted ? 'EA ACCEPTED' : isV22EaDeclined ? 'EA DECLINED' : isV22TransferRequest ? 'TRANSFER' : isV22TransferAccepted ? 'ACCEPTED' : isV22TransferDeclined ? 'DECLINED' : isV22TransferCancelled ? 'CANCELLED' : isV22DaRevoked || isV22EaRevoked ? 'REVOKED' : isV22EvalResultStale ? 'OUTDATED' : isV22BadgeIssued ? 'BADGE ISSUED' : isV22BadgeRevoked ? 'BADGE REVOKED' : isV22BadgeTemplateNewVersion ? 'BADGE UPDATED' : isV22PoeCreated ? 'POE CREATED' : isV22RfpSolicitationReceived ? 'SOLICITATION' : isV22RfpSolicitationRejected ? 'REJECTED' : isV22RfpSolicitationAccepted ? 'ACCEPTED' : isV22RfpClosed ? 'RFP CLOSED' : isV22RfpReopened ? 'RFP REOPENED' : 'REQUEST'
                     return (
                     <div
                       key={req.id}
@@ -5423,7 +5468,7 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
-                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected' || req.type === 'v22-rfp-solicitation-accepted' || req.type === 'v22-rfp-closed') {
+                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected' || req.type === 'v22-rfp-solicitation-accepted' || req.type === 'v22-rfp-closed' || req.type === 'v22-rfp-reopened') {
                           // Phase 17.2: click navigates to Directory → RFP
                           // marker → RfpDetailPanel. Both notification types
                           // route to the same RFP — received lands on the
@@ -5486,10 +5531,19 @@ export default function V2App() {
                             // returns false until ready — retry on each rAF
                             // tick until success or the 60-frame cap (~1 s
                             // @ 60fps — Directory opening is ~600 ms).
+                            // Phase 17.5.2.2 (Part 2): pass { zoom: 0.6 } so
+                            // notification clicks land at 60% — high enough to
+                            // read the marker, low enough to keep surrounding
+                            // cluster context visible. The post-creation flow
+                            // (routeToRfp, no opts) stays at full-card LOD —
+                            // that's the user's deliberate "look at what I just
+                            // made" focus; notification clicks are reactive
+                            // ("show me where this happened") and want context.
+                            // Asymmetric on purpose.
                             let attempts = 0
                             const trySelect = () => {
                               attempts += 1
-                              const ok = directoryLayerRef.current?.selectRfp?.(targetRfp)
+                              const ok = directoryLayerRef.current?.selectRfp?.(targetRfp, { zoom: 0.6 })
                               if (ok || attempts > 60) return
                               requestAnimationFrame(trySelect)
                             }
@@ -5710,7 +5764,9 @@ export default function V2App() {
                                                                               ? `${req.from.name} accepted your solicitation${req.rfpName ? ` — Re: ${req.rfpName}` : ''}. See your new EA on the parent canvas.`
                                                                               : isV22RfpClosed
                                                                                 ? `${req.from?.name || 'The RFP owner'} closed the RFP${req.rfpName ? ` "${req.rfpName}"` : ''}. Your pending solicitation remains in place but is no longer actionable.`
-                                                                                : req.asset?.name || ''
+                                                                                : isV22RfpReopened
+                                                                                  ? `${req.from?.name || 'The RFP owner'} reopened the RFP${req.rfpName ? ` "${req.rfpName}"` : ''}. You can resume engagement.`
+                                                                                  : req.asset?.name || ''
                         }
                         {/* Phase 9A.5 #77: inline note preview on a pending transfer request.
                             (Full note + Accept/Decline actions live in V22TransferResponseModal.) */}
@@ -6585,6 +6641,9 @@ export default function V2App() {
             // Phase 17.5.2: id of the just-created RFP — DirectoryLayer stamps
             // `_isNew` on its synthetic card so AssetNode renders the NEW badge.
             recentlyCreatedRfpId={v22RecentlyCreatedRfpId}
+            // Phase 17.5.2.2 (Part 4): true when any Directory-side Detail Panel
+            // is open (Claim or RFP) — shifts the zoom controls left to clear it.
+            detailPanelOpen={!!(v22DirectorySelectedClaim || v22DirectorySelectedRfp)}
             // Phase 11.8 #44: route the circular wipe through the screen-space
             // origin captured when the Radiant Network actor node was
             // double-clicked. Null falls back to the chrome globe-button corner.
@@ -9073,7 +9132,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.2.1 &middot; Changelog
+          v0.17.5.2.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9120,6 +9179,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.17.5.2.2', date: '2026-05-21', label: 'Phase 17.5.2.2', items: [
+                  'Fixed: Request Agreement on solicitations against your own newly-created RFPs now opens the request modal correctly.',
+                  'Clicking an RFP notification (solicitation received, solicitation rejected, RFP closed, RFP reopened) now smoothly pans and zooms to the RFP marker at 60% — close enough to read the marker, far enough to see surrounding context.',
+                  'Reopening an RFP now notifies every party that has solicited it (previously silent).',
+                  'Directory layer\'s zoom controls now shift left when a Detail Panel opens, matching the parent canvas behavior.',
+                ]},
                 { version: '0.17.5.2.1', date: '2026-05-21', label: 'Phase 17.5.2.1', items: [
                   'Fixed: clicking an RFP from an Asset\'s "Anchored RFPs" section no longer locks the tab.',
                   'Smoother transition when clicking "For Asset" inside an RFP — the Directory zooms outward as the layer closes, landing you directly on the Asset.',
