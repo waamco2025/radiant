@@ -452,6 +452,37 @@ function V22AssetPanel({
   // cancel. Post-accept the Asset moves off this canvas entirely; pre-accept
   // the other actions would be ambiguous under a change of ownership.
   const isPendingTransfer = !!node._pendingTransfer
+  // Phase 18.0 (Part 2): unified "View File" button — the large full-width
+  // button (formerly only on the non-owner branch, labeled "Open Evidence
+  // Viewer") now renders on BOTH owner + non-owner File sections. The owner
+  // branch drops its small ExpandButton header icon in favor of this. Same
+  // onExpandAsset handler regardless of ownership — the action is identical.
+  const viewFileButton = asset && onExpandAsset ? (
+    <button
+      onClick={() => onExpandAsset(asset)}
+      style={{
+        width: '100%', padding: '10px 14px', borderRadius: 6,
+        cursor: 'pointer',
+        border: '1px solid var(--border)',
+        background: 'var(--bg-card)',
+        color: 'var(--text-primary)',
+        fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 600,
+        transition: 'background 120ms, border-color 120ms, color 120ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
+        e.currentTarget.style.borderColor = 'var(--accent-indigo)'
+        e.currentTarget.style.color = 'var(--accent-indigo)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'var(--bg-card)'
+        e.currentTarget.style.borderColor = 'var(--border)'
+        e.currentTarget.style.color = 'var(--text-primary)'
+      }}
+    >
+      View File
+    </button>
+  ) : null
   return (
     <PanelLayout
       header={<PanelHeader typeLabel="ASSET" name={node.name} pin={node.pin} onClose={onClose} />}
@@ -483,50 +514,24 @@ function V22AssetPanel({
               an active DA can still open the evidence viewer (the disclosure
               grants viewing rights), but the file's metadata fields
               (filename, size, MIME, hash, URI) stay private. */}
+          {/* Phase 18.0 (Part 2): unified File section. Owner sees the
+              owner-only metadata rows (Phase 11D #135) PLUS the large "View
+              File" button (was a small ExpandButton header icon). Non-owner
+              sees just the "View File" button (was "Open Evidence Viewer").
+              Both branches render the same `viewFileButton`. */}
           {isOwner ? (
-            <Section
-              title="File"
-              // Phase 11B.1: Expand button surfaces the file viewer directly
-              // from the Asset's own Detail Panel — previously only reachable
-              // from referenced-Asset rows in a Claim panel. Same wiring +
-              // schema as those rows.
-              action={asset && onExpandAsset ? (
-                <ExpandButton onClick={() => onExpandAsset(asset)} title={`Expand ${asset.name || 'Asset'}`} />
-              ) : null}
-            >
+            <Section title="File">
               <Row label="Filename" value={asset?.file?.filename} mono />
               <Row label="Size" value={formatBytes(asset?.file?.size)} />
               <Row label="MIME" value={asset?.file?.mimeType} mono />
               <Row label="Hash" value={asset?.file?.hash ? <CopyBadge value={asset.file.hash} truncated /> : '—'} />
               <Row label="URI" value={asset?.file?.uri ? <CopyBadge value={asset.file.uri} truncated /> : '—'} />
+              {viewFileButton && <div style={{ marginTop: 12 }}>{viewFileButton}</div>}
             </Section>
           ) : (
-            asset && onExpandAsset && (
+            viewFileButton && (
               <Section title="File">
-                <button
-                  onClick={() => onExpandAsset(asset)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 6,
-                    cursor: 'pointer',
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-card)',
-                    color: 'var(--text-primary)',
-                    fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 600,
-                    transition: 'background 120ms, border-color 120ms, color 120ms',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 8%, transparent)'
-                    e.currentTarget.style.borderColor = 'var(--accent-indigo)'
-                    e.currentTarget.style.color = 'var(--accent-indigo)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'var(--bg-card)'
-                    e.currentTarget.style.borderColor = 'var(--border)'
-                    e.currentTarget.style.color = 'var(--text-primary)'
-                  }}
-                >
-                  Open Evidence Viewer
-                </button>
+                {viewFileButton}
               </Section>
             )
           )}
@@ -1523,7 +1528,25 @@ function V22ClaimPanel({
 }
 
 /* ─── Parse Result Panel ──────────────────────────────────────────────── */
-function V22ParseResultPanel({ node, onClose, sourceAsset, onExpand }) {
+function V22ParseResultPanel({
+  node, onClose, sourceAsset, onExpand,
+  // Phase 18.0 (#116): Agreements section. Parse Results aren't the subject
+  // of DAs in V2.2 (they flow through their parent Asset's disclosure), so
+  // `disclosureAgreementsForNode` resolves empty and AgreementsSection renders
+  // nothing — informationally correct + matches the 9C empty convention. Props
+  // are threaded for parity / future-proofing if a parseResult subject kind
+  // is ever introduced.
+  activeParty,
+  disclosureAgreementsForNode = [],
+  evaluationAgreementsForNode = [],
+  resolveSubjectName,
+  resolveClaimName,
+  onAgreementRowClick,
+  onAmendDa,
+  onAmendEa,
+  onRevokeDa,
+  onRevokeEa,
+}) {
   const pr = node.v22Artifact
   return (
     <PanelLayout
@@ -1562,6 +1585,20 @@ function V22ParseResultPanel({ node, onClose, sourceAsset, onExpand }) {
               ))}
             </div>
           </Section>
+          {/* Phase 18.0 (#116): Agreements section — renders nothing in V2.2
+              (no parseResult-subject DAs), matching the 9C empty convention. */}
+          <AgreementsSection
+            disclosureAgreements={disclosureAgreementsForNode}
+            evaluationAgreements={evaluationAgreementsForNode}
+            activeParty={activeParty}
+            resolveSubjectName={resolveSubjectName}
+            resolveClaimName={resolveClaimName}
+            onRowClick={onAgreementRowClick}
+            onAmendDa={onAmendDa}
+            onAmendEa={onAmendEa}
+            onRevokeDa={onRevokeDa}
+            onRevokeEa={onRevokeEa}
+          />
         </>
       }
     />
@@ -1678,6 +1715,21 @@ function V22EvalResultPanel({
   // Phase 13.4 (#175): Expand button in the panel header — opens the Eval
   // Result expand modal with header + per-RS results tables.
   onExpand,
+  // Phase 18.0 (#116): Agreements section — DAs that disclose this Eval
+  // Result (the evaluator's Proof-of-Evaluation / auto-disclosure DA flowing
+  // to the Claim owner + any further disclosures). Props mirror the
+  // Actor/Asset/Claim AgreementsSection wiring; V2App filters
+  // `disclosureAgreementsForNode` by subject.kind === 'evalResult'. No EAs
+  // target an Eval Result subject, so `evaluationAgreementsForNode` is empty.
+  disclosureAgreementsForNode = [],
+  evaluationAgreementsForNode = [],
+  resolveSubjectName,
+  resolveClaimName,
+  onAgreementRowClick,
+  onAmendDa,
+  onAmendEa,
+  onRevokeDa,
+  onRevokeEa,
 }) {
   const er = node.v22Artifact
   const isOwner = activeParty === node.owner
@@ -1906,6 +1958,22 @@ function V22EvalResultPanel({
               </div>
             </Section>
           )}
+          {/* Phase 18.0 (#116): Agreements section — extends the Phase 9C
+              Actor/Asset/Claim pattern to Eval Results. Lists DAs that
+              disclose this Eval Result (renders nothing when empty, matching
+              the 9C convention). */}
+          <AgreementsSection
+            disclosureAgreements={disclosureAgreementsForNode}
+            evaluationAgreements={evaluationAgreementsForNode}
+            activeParty={activeParty}
+            resolveSubjectName={resolveSubjectName}
+            resolveClaimName={resolveClaimName}
+            onRowClick={onAgreementRowClick}
+            onAmendDa={onAmendDa}
+            onAmendEa={onAmendEa}
+            onRevokeDa={onRevokeDa}
+            onRevokeEa={onRevokeEa}
+          />
         </>
       }
       footer={(() => {

@@ -5775,6 +5775,12 @@ export function deriveAgreementEdges(view) {
       // the user's Dismiss action; the unravel primitive's Stage 1 then
       // visually retracts them as the artifact is removed from view.
       isRevoked: !!da._revokedMeta,
+      // Phase 18.0 (#35): propagate the `_isNew` flag + numeric `_createdAt`
+      // from the source DA onto the derived edge so V2Canvas's edge-draw
+      // animation animates freshly-added Claim ↔ Asset reference edges (set by
+      // makeAmendedClaim) and limits re-animation to the 3s `_createdAt` window.
+      _isNew: !!da._isNew,
+      _createdAt: da._createdAt ?? null,
     })
   }
 
@@ -6858,8 +6864,16 @@ export function makeAmendedClaim({
     ...addedAssetIds,
     ...supersededAssets.map((s) => s.to).filter((aid) => !addedAssetIds.includes(aid)),
   ]
-  const newClaimRefEdges = allNewlyAddedAssetIds.map((assetId) =>
-    makeInternalDisclosureAgreement({
+  const newClaimRefEdges = allNewlyAddedAssetIds.map((assetId) => ({
+    // Phase 18.0 (#35): stamp `_isNew: true` (+ a numeric `_createdAt`) so
+    // V2Canvas's edge-draw animation picks up the freshly-added Claim ↔ Asset
+    // reference edge and animates it in (matching the post-disclosure-accept
+    // reveal). `deriveAgreementEdges` propagates both onto the derived edge;
+    // V2Canvas only re-animates `_isNew` edges within a 3s `_createdAt` window.
+    // The reveal flags are cleared shortly after the draw-in by the amend
+    // handler (these are permanent internal DAs — without the clear the edge
+    // would keep rendering with the brighter/thicker "new" styling).
+    ...makeInternalDisclosureAgreement({
       id: `da-ref-${claim.id}-${assetId}`,
       owner: claim.owner,
       ownerDot: claim.ownerDot,
@@ -6867,7 +6881,9 @@ export function makeAmendedClaim({
       scope: { assetIds: [assetId], includeDerivatives: true },
       terms: { createdDate: amendmentDate },
     }),
-  )
+    _isNew: true,
+    _createdAt: new Date(amendmentDate).getTime(),
+  }))
   return { claim: amendedClaim, newClaimRefEdges }
 }
 

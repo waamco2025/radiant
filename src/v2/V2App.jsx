@@ -2054,6 +2054,28 @@ export default function V2App() {
         evaluationResults: nextProvisionalEvalResults,
       }
     })
+    // Phase 18.0 (#35): the new claim-ref DAs carry `_isNew` + `_createdAt` to
+    // drive the one-time Claim ↔ Asset edge-draw animation. They're permanent
+    // internal DAs, so clear the reveal flags once the draw-in completes (the
+    // V2Canvas draw is ~800ms + a 50ms schedule delay) — otherwise the edge
+    // would keep rendering with the brighter/thicker "new" styling. Scoped to
+    // the just-added DAs by id; idempotent + harmless if re-run.
+    if (addedAssetIds.length > 0 || supersededAssets.length > 0) {
+      const revealedDaIds = new Set(
+        [...addedAssetIds, ...supersededAssets.map((s) => s.to)]
+          .map((assetId) => `da-ref-${v22AmendingClaimId}-${assetId}`),
+      )
+      setTimeout(() => {
+        setV22Provisionals((prev) => ({
+          ...prev,
+          disclosureAgreements: (prev.disclosureAgreements || []).map((da) =>
+            revealedDaIds.has(da.id) && da._isNew
+              ? { ...da, _isNew: false, _createdAt: undefined }
+              : da,
+          ),
+        }))
+      }, 1100)
+    }
     // Fire OUTDATED notifications outside the state updater (need access
     // to ROLES + updateRoleState). Each evaluator gets a single-grantee
     // informational `v22-eval-result-stale` on their inbox.
@@ -8430,6 +8452,24 @@ export default function V2App() {
               d.subject?.kind === 'claim' && d.subject.id === node.id,
             )
             evaluationAgreementsForNode = allEas.filter((e) => e.claimId === node.id)
+          } else if (node.v22Type === 'EVAL RESULT') {
+            // Phase 18.0 (#116): DAs that disclose this Eval Result — the
+            // evaluator's auto-disclosure / Proof-of-Evaluation DA flowing to
+            // the Claim owner, plus any further disclosures of the Eval Result
+            // to a third party. EAs aren't keyed on an Eval Result subject, so
+            // the EA list stays empty.
+            disclosureAgreementsForNode = allDas.filter((d) =>
+              d.subject?.kind === 'evalResult' && d.subject.id === node.id,
+            )
+          } else if (node.v22Type === 'PARSE RESULT') {
+            // Phase 18.0 (#116): Parse Results aren't the subject of DAs in
+            // V2.2 (they flow through their parent Asset's disclosure), so this
+            // resolves empty and the AgreementsSection renders nothing.
+            // Filtered defensively in case a parseResult-subject DA is ever
+            // introduced.
+            disclosureAgreementsForNode = allDas.filter((d) =>
+              d.subject?.kind === 'parseResult' && d.subject.id === node.id,
+            )
           }
           // Phase 9D.1 (#112 UX redo): revoked DAs + EAs scoped to this Claim.
           // buildViewForActor exposes `revokedDisclosureAgreements` and
@@ -9132,7 +9172,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.17.5.2.2 &middot; Changelog
+          v0.18.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9179,6 +9219,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.0', date: '2026-05-21', label: 'Phase 18.0', items: [
+                  'Selection ring on parent-canvas dots is now properly centered.',
+                  'Asset Detail Panels now use a consistent large "View File" button on both your own Assets and Assets disclosed to you.',
+                  'Amending a Claim to add a new Asset reference now animates the new edge in, matching the rest of the reveal animation.',
+                  'Evaluation Result Detail Panels now show the Active Agreements section, listing DAs that disclose the Eval Result (Proof-of-Evaluation DAs from the evaluator + any further disclosures).',
+                ]},
                 { version: '0.17.5.2.2', date: '2026-05-21', label: 'Phase 17.5.2.2', items: [
                   'Fixed: Request Agreement on solicitations against your own newly-created RFPs now opens the request modal correctly.',
                   'Clicking an RFP notification (solicitation received, solicitation rejected, RFP closed, RFP reopened) now smoothly pans and zooms to the RFP marker at 60% — close enough to read the marker, far enough to see surrounding context.',

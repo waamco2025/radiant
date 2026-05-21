@@ -1568,8 +1568,14 @@ export function AssetNodeDot({ node, isSelected, onSelect, onDive, onOpenSubgrap
             background: 'color-mix(in srgb, var(--accent-amber, #C49A45) 18%, transparent)',
             border: '1.5px solid var(--accent-amber, #C49A45)',
             boxSizing: 'border-box',
-            top: -6,
-            left: -6,
+            // Phase 18.0 (Part 1): center on the dot's visual center via
+            // 50%/translate. The prior `top:-6, left:-6` was measured from the
+            // inner dot's padding edge (inside its 1.5px border), so the ring
+            // rendered ~1.5px down-and-right of the dot center. 50%/translate
+            // is immune to the border-width offset and stays concentric.
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
           }} />
         )}
       </div>
