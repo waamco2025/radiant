@@ -20,6 +20,10 @@ import {
   makeAssetRegistrationArtifacts, makeClaimCreationArtifacts,
   makeTransferRecord, makeAsset, makeDotObject,
   makeInternalDisclosureAgreement,
+  // Phase 18.2: public-directory publication mints a Disclosure Agreement
+  // with grantee = Radiant Network via this factory + the Radiant exports.
+  makeDisclosureAgreement,
+  RADIANT_NETWORK_PARTY, RADIANT_NETWORK_DOT,
   makeRevocationRecord,
   buildV22SharedArtifacts, mergeProvisionals,
   // Phase 17.1: closed-RFP lifecycle merge layer.
@@ -90,6 +94,8 @@ import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import RfpCreationModal from '../components/modals/RfpCreationModal.jsx'
+// Phase 18.2: publish-to-Directory flow modal.
+import PublishToDirectoryModal from '../components/modals/PublishToDirectoryModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
@@ -308,6 +314,10 @@ export default function V2App() {
   const [v22CreatedRfps, setV22CreatedRfps] = useState(() => new Map())
   const [v22RfpCreationOpen, setV22RfpCreationOpen] = useState(false)
   const [v22RfpCreationContext, setV22RfpCreationContext] = useState(null)
+  // Phase 18.2: when non-null, carries the Claim being published to the Public
+  // Directory AND signals the PublishToDirectoryModal is open. Single piece of
+  // state — no paired *Open boolean needed.
+  const [v22PublishToDirectoryClaim, setV22PublishToDirectoryClaim] = useState(null)
   // Phase 17.5.1.4: session-state Set<rfpId> of removed (deleted) RFPs.
   // Applied last in the Directory merge chain via `mergeRemovedRfps` so a
   // removed RFP + its solicitations disappear from every actor's view.
@@ -2909,6 +2919,41 @@ export default function V2App() {
     setV22RecentlyCreatedRfpId(newRfp.id)
     routeToRfpRef.current?.(newRfp.id, { rfp: newRfp })
   }, [v22RfpCreationContext, activeRole])
+
+  // Phase 18.2: PublishToDirectoryModal Submit. Mints a Disclosure Agreement
+  // with grantee = Radiant Network and pushes it into
+  // v22Provisionals.disclosureAgreements with its picked type (NOT
+  // 'provisional'), so the Directory builder's `d.type !== 'provisional'`
+  // filter passes immediately and the Claim surfaces in the active actor's
+  // own cluster on next Directory render. No new merge helper required —
+  // mergeProvisionals merges DAs by id and buildV22DirectoryDataForRole
+  // detects grantee.party === 'Radiant Network' to populate publicClaimIds.
+  const handlePublishToDirectorySubmit = useCallback((payload) => {
+    if (!v22PublishToDirectoryClaim || !activeRole) return
+    const claim = v22PublishToDirectoryClaim
+    const slug = (claim.name || 'claim').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
+    const newDa = makeDisclosureAgreement({
+      id: makeArtifactId('da-pub', `${activeRole.party.toLowerCase()}-${slug}-${Date.now()}`),
+      grantor: { party: activeRole.party, dot: activeRole.partyDot },
+      grantee: { party: RADIANT_NETWORK_PARTY, dot: RADIANT_NETWORK_DOT },
+      subject: { kind: 'claim', id: claim.id },
+      type: payload.type,
+      scope: payload.scope,
+      terms: { createdDate: new Date().toISOString(), expires: payload.expiryIso || null, autoRenew: false },
+      status: 'active',
+    })
+    setV22Provisionals((prev) => ({
+      ...prev,
+      disclosureAgreements: [...(prev.disclosureAgreements || []), newDa],
+    }))
+    setV22PublishToDirectoryClaim(null)
+    // Phase 18.2.1 (deferred): post-creation orchestration —
+    //   • setV22DirectoryOpen(true)
+    //   • variant of the load animation that zooms to ~60% on the new dot
+    //   • auto-select the dot + open its Detail Panel
+    //   • NEW badge stamp
+  }, [v22PublishToDirectoryClaim, activeRole])
 
   // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
   // on a SolicitationCard. Phase 17.2.1.1 collapses the prior two-modal
@@ -6297,6 +6342,12 @@ export default function V2App() {
               case 'selfEvaluate':
                 if (node.owner === activeRole.party && node.v22Type === 'CLAIM') handleV22OpenSelfEvaluation(node.v22Artifact)
                 return
+              case 'publishToDirectory':
+                // Phase 18.2: owner-only; surfaces the Publish to Directory modal.
+                if (node.owner === activeRole.party && node.v22Type === 'CLAIM') {
+                  setV22PublishToDirectoryClaim(node.v22Artifact || node)
+                }
+                return
               case 'runEvaluation': {
                 // Find the EA where this actor is grantee on the Claim's DA.
                 const ea = (v22View?.evaluationAgreements || []).find(e => {
@@ -7305,6 +7356,58 @@ export default function V2App() {
             }}
           />
         )}
+
+        {/* Phase 18.2 — PublishToDirectoryModal. Owned Assets referenced by
+            this Claim feed the Full + Selective scope pickers (Selective's
+            field checkboxes come from each Asset's parsed fields, composite
+            id `${parseResultId}::${fieldId}`); PoEs wrapping this Claim's
+            Eval Results feed the Proof-Only picker. */}
+        {v22PublishToDirectoryClaim && (() => {
+          const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+          const claim = v22PublishToDirectoryClaim
+          const allParseResults = shared.parseResults || []
+          // Owned Assets referenced by this Claim, enriched with their parsed
+          // fields (subject of Full + Selective scope).
+          const ownedAssets = (claim.referencedAssetIds || [])
+            .map((aid) => (shared.assets || []).find((a) => a.id === aid))
+            .filter((a) => a && a.owner === activeRole.party)
+            .map((a) => ({
+              id: a.id,
+              name: a.name,
+              parsedFields: allParseResults
+                .filter((pr) => pr.sourceAssetId === a.id)
+                .flatMap((pr) => (pr.fields || []).map((f) => ({
+                  id: `${pr.id}::${f.id}`,
+                  name: f.name,
+                  parseResultName: pr.templateName || pr.id,
+                }))),
+            }))
+          // PoEs that wrap Eval Results of this Claim (subject of Proof-Only
+          // scope). Per Phase 13.1: PoE.wrappedEvalResultId → EvalResult.claimId.
+          const evalResultsById = new Map((shared.evaluationResults || []).map((er) => [er.id, er]))
+          const ownedPoEsOnClaim = (shared.proofsOfEvaluation || []).filter((poe) => {
+            const er = evalResultsById.get(poe.wrappedEvalResultId)
+            return er && er.claimId === claim.id
+          }).map((poe) => {
+            const er = evalResultsById.get(poe.wrappedEvalResultId)
+            return {
+              id: poe.id,
+              name: poe.name,
+              wrappedEvalResultId: poe.wrappedEvalResultId,
+              evaluatorParty: er?.evaluatorParty || er?.owner || 'unknown',
+            }
+          })
+          return (
+            <PublishToDirectoryModal
+              claim={claim}
+              activeRole={activeRole}
+              ownedAssets={ownedAssets}
+              ownedPoEsOnClaim={ownedPoEsOnClaim}
+              onSubmit={handlePublishToDirectorySubmit}
+              onClose={() => setV22PublishToDirectoryClaim(null)}
+            />
+          )
+        })()}
 
         {/* Phase 17.3 — AssetPickerModal for the Directory-layer Claim
             Request EA cold-path CTA. Opens when the user clicks Request EA
@@ -8851,6 +8954,9 @@ export default function V2App() {
                 hasActiveDaWithoutEa={hasActiveDaWithoutEa}
                 onAmendClaim={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => setV22AmendingClaimId(node.id) : undefined}
                 onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
+                // Phase 18.2: Publish to Directory (owner-only). Receives the
+                // Claim artifact; opens PublishToDirectoryModal.
+                onPublishToDirectory={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? (claim) => setV22PublishToDirectoryClaim(claim) : undefined}
                 // Parse Result actions
                 sourceAsset={sourceAsset}
                 // Eval Result actions — Phase 9A item 6: Re-Evaluate locks
@@ -9190,7 +9296,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.1 &middot; Changelog
+          v0.18.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9237,6 +9343,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.2', date: '2026-05-22', label: 'Phase 18.2', items: [
+                  'Publish Claims to the Public Directory — foundation. New two-step modal (Form → Review) on the Claim Detail Panel footer + the Claim card action bar (owner only). Pick a disclosure type (Full / Selective / Proof-Only — the latter disabled until the Claim has a Proof of Evaluation), the scope (which Assets, which parsed fields, or which Proofs), and an expiration. On Publish, a Disclosure Agreement is granted to the Radiant Network and the Claim appears in your Directory cluster on next render.',
+                ]},
                 { version: '0.18.1', date: '2026-05-22', label: 'Phase 18.1', items: [
                   'Placeholder RELEASE action on Internal Disclosure Agreement rows. Every Internal DA row across Actor / Asset / Claim / Eval Result / Parse Result Detail Panels now surfaces a muted RELEASE label with a subject-aware tooltip ("Releasing your disclosure agreement to this [Asset/Claim/Evaluation Result/Parse Result/Proof of Evaluation] will remove it from your network. Coming soon."). Disabled-only surface — no handler, no data-model changes. Sets up the future "release this artifact from my network" mechanism.',
                 ]},

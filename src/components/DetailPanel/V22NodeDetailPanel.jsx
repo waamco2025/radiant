@@ -781,6 +781,9 @@ function V22ClaimPanel({
   onRunEvaluation,
   onAmendClaim,
   onSelfEvaluate,
+  // Phase 18.2: publish this Claim to the Public Directory (owner only).
+  // Opens PublishToDirectoryModal. Receives the Claim artifact.
+  onPublishToDirectory,
   // Phase 12.1 (#120): Referenced Standards section data + handlers.
   // `referencedStandardRows` is the resolved list of {requirementsSetId,
   // addedDate, name, version, provenance, latestVersionId}. Empty array
@@ -1492,6 +1495,10 @@ function V22ClaimPanel({
                 <FooterButton icon="✎" label="Amend Claim" onClick={onAmendClaim} disabled={!onAmendClaim} title="Add Asset references to this Claim." />
                 {onSelfEvaluate && (
                   <FooterButton icon="◆" label="Self-Evaluate" onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
+                )}
+                {/* Phase 18.2: publish this Claim to the Public Directory. */}
+                {onPublishToDirectory && (
+                  <FooterButton icon="⊕" label="Publish to Directory" onClick={() => onPublishToDirectory(claim)} title="Publish this Claim to the Public Directory. Other actors will be able to see it on the Radiant Network." />
                 )}
               </>
             ) : hasEvalAction ? (

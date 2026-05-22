@@ -375,8 +375,9 @@ export default function AssetNode({
   onCreateClaim,
   // Phase 9A item 9: single dispatch prop for V2.2 card-attached actions.
   // V2App routes action names ('requestAgreement' | 'parseEvidence' |
-  // 'createClaim' | 'amendClaim' | 'selfEvaluate' | 'runEvaluation' |
-  // 'reRunEvaluation') to the same handlers V22NodeDetailPanel's footer fires.
+  // 'createClaim' | 'amendClaim' | 'selfEvaluate' | 'publishToDirectory' |
+  // 'runEvaluation' | 'reRunEvaluation') to the same handlers
+  // V22NodeDetailPanel's footer fires.
   onV22CardAction,
   activeParty,
   revealPhase,
@@ -1356,6 +1357,8 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
         if (isOwner) {
           buttons.push({ icon: '✎', tooltip: 'Amend Claim', onClick: fire('amendClaim') })
           buttons.push({ icon: '◆', tooltip: 'Self-Evaluate', onClick: fire('selfEvaluate') })
+          // Phase 18.2: Publish to Directory (owner-only, mirrors footer).
+          buttons.push({ icon: '⊕', tooltip: 'Publish to Directory', onClick: fire('publishToDirectory') })
         } else if (evaluationAgreementForActor) {
           buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: fire('runEvaluation') })
         } else if (node._hasActiveDaWithoutEa) {
