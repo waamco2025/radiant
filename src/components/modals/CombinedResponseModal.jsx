@@ -83,7 +83,16 @@ export default function CombinedResponseModal({
   const isEaOnly = eaOnlyMode || action === 'ea-only'
   const totalSteps = isEaOnly
     ? (isDecline ? 4 : 4) // EA-only: step 3 (terms) → step 4 (review or decline reason)
-    : (isDecline ? 2 : action ? 4 : 1)
+    // Phase 18.2.1 (Bug 1 fix): cold path is always 4 steps for a non-decline
+    // action. The prior `action ? 4 : 1` collapse set totalSteps=1 at Step 1
+    // before a type was picked, making `step === totalSteps` true there — which
+    // rendered the final-step Accept button (ungated) instead of the disabled
+    // Continue button. Clicking it fired handleSubmit() with action===null and
+    // crashed V2App's accept handler with null type+scope. Hardcoding 4 makes
+    // StepDots read "Step 1 of 4" from open and the Continue button (gated by
+    // canAdvanceFromStep1) render until a type is picked; Decline still drops
+    // to 2 once `action === 'decline'` flips isDecline.
+    : (isDecline ? 2 : 4)
 
   const toggle = (arr, setArr, id) => {
     setArr(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
@@ -415,19 +424,13 @@ export default function CombinedResponseModal({
               )}
               {action === 'proofonly' && (
                 <>
-                  <FieldLabel label="Select Evaluation Results to share" required />
+                  <FieldLabel label="Select Proofs of Evaluation to share" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    {request.requesterParty} will see only the pass/fail outcome of the selected Evaluation Results. No access to raw evidence is granted.
+                    {request.requesterParty} will see only the pass/fail outcome of the selected Proofs of Evaluation. No access to raw evidence is granted.
                   </div>
                   {poesForClaim.length === 0 ? (
-                    <div style={{
-                      padding: 14,
-                      background: 'color-mix(in srgb, var(--accent-amber) 8%, transparent)',
-                      border: '1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent)',
-                      borderRadius: 8, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
-                    }}>
-                      No evaluations have been run on <em>{request.claim.name}</em> yet — there is nothing to disclose under Proof-Only.
-                      Consider <strong>Full</strong> or <strong>Selective</strong> instead, which give {request.requesterParty} the access required to run an evaluation themselves.
+                    <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                      No Proofs of Evaluation available. Proof-Only Disclosure requires at least one Proof of Evaluation on this Claim.
                     </div>
                   ) : (
                     <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
@@ -591,7 +594,7 @@ export default function CombinedResponseModal({
                 )}
                 {action === 'proofonly' && (
                   <div style={{ display: 'flex', gap: 14 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Eval Results shared</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Proofs of Evaluation shared</div>
                     <div style={{ color: 'var(--text-primary)' }}>{selectedPoeIds.length}</div>
                   </div>
                 )}

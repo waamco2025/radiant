@@ -9296,7 +9296,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.2 &middot; Changelog
+          v0.18.2.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9343,6 +9343,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.2.1', date: '2026-05-22', label: 'Phase 18.2.1', items: [
+                  'CombinedResponseModal hotfix. The Step 1 "Accept" button no longer renders before you pick a disclosure type (fixes a crash where accepting with no type selected propagated null type + scope into the accept handler) — the cold-path step indicator now reads "Step 1 of 4" from open, with a disabled "Continue" until you pick a type.',
+                  'Proof-Only disclosure copy now says "Proofs of Evaluation" everywhere (picker label, description, empty state, and the review row) instead of the pre-Phase-13 "Evaluation Results"; the empty state now matches the neutral house style used by Selective.',
+                ]},
                 { version: '0.18.2', date: '2026-05-22', label: 'Phase 18.2', items: [
                   'Publish Claims to the Public Directory — foundation. New two-step modal (Form → Review) on the Claim Detail Panel footer + the Claim card action bar (owner only). Pick a disclosure type (Full / Selective / Proof-Only — the latter disabled until the Claim has a Proof of Evaluation), the scope (which Assets, which parsed fields, or which Proofs), and an expiration. On Publish, a Disclosure Agreement is granted to the Radiant Network and the Claim appears in your Directory cluster on next render.',
                 ]},
