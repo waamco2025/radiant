@@ -2740,6 +2740,17 @@ function AgreementRow({ children, onClick }) {
   )
 }
 
+// Phase 18.1: subject-kind label map for the placeholder RELEASE tooltip.
+// Mirrors the subject.kind discriminated union from architecture-spec §10.4
+// (asset | claim | evalResult | parseResult) plus the Phase 13.1 'poe' extension.
+const DA_SUBJECT_KIND_LABEL = {
+  asset: 'Asset',
+  claim: 'Claim',
+  evalResult: 'Evaluation Result',
+  parseResult: 'Parse Result',
+  poe: 'Proof of Evaluation',
+}
+
 function DisclosureAgreementRow({
   da, activeParty, subjectName, onRowClick, onAmendDa, onRevokeDa,
   // Phase 9D.1.3 Fix 1: inline revocation block for Case B (grantor views
@@ -2806,6 +2817,14 @@ function DisclosureAgreementRow({
   const actionsHidden = isInternal || isProofOfEval || isRevoked
   const showAmend = !actionsHidden && isGrantor && !isDeclined
   const showRevoke = !actionsHidden && (isGrantor || isGrantee) && !isProvisional && !isDeclined
+  // Phase 18.1: placeholder RELEASE label on Internal DA rows. Disabled-only
+  // surface; no handler. Tooltip noun resolves from the DA's own subject.kind
+  // (not the panel's node type) so it accurately describes what releasing
+  // THIS agreement would affect. Mutually exclusive with showAmend by
+  // construction (showAmend requires !isInternal; showRelease requires
+  // isInternal), so they share the slot-1 ternary safely.
+  const showRelease = isInternal && !isRevoked
+  const subjectLabel = DA_SUBJECT_KIND_LABEL[da.subject?.kind] || 'artifact'
   const amendLabel = isProvisional ? 'Respond' : 'Amend'
 
   const rowInner = (
@@ -2841,6 +2860,14 @@ function DisclosureAgreementRow({
             label={amendLabel}
             onClick={onAmendDa ? () => onAmendDa(da) : undefined}
             title={isProvisional ? 'Open the response flow for this pending request' : 'Amend this Disclosure Agreement'}
+          />
+        ) : showRelease ? (
+          /* Phase 18.1: placeholder RELEASE label on Internal DA rows.
+             Disabled-only (var(--text-dim)); no onClick, no handler. */
+          <ActionLabel
+            label="Release"
+            disabled
+            title={`Releasing your disclosure agreement to this ${subjectLabel} will remove it from your network. Coming soon.`}
           />
         ) : <span style={{ height: 14 }} />}
         {/* Phase 9D (#112): Revoke is live — opens V22RevocationConfirmModal. */}

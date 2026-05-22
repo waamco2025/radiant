@@ -9190,7 +9190,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.0.1 &middot; Changelog
+          v0.18.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9237,6 +9237,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.1', date: '2026-05-22', label: 'Phase 18.1', items: [
+                  'Placeholder RELEASE action on Internal Disclosure Agreement rows. Every Internal DA row across Actor / Asset / Claim / Eval Result / Parse Result Detail Panels now surfaces a muted RELEASE label with a subject-aware tooltip ("Releasing your disclosure agreement to this [Asset/Claim/Evaluation Result/Parse Result/Proof of Evaluation] will remove it from your network. Coming soon."). Disabled-only surface — no handler, no data-model changes. Sets up the future "release this artifact from my network" mechanism.',
+                ]},
                 { version: '0.18.0.1', date: '2026-05-21', label: 'Phase 18.0.1', items: [
                   'Fixed: the parent-canvas "SELECT EDGE TO VIEW" tooltip no longer persists over the Directory layer after transitioning. Bug surfaced during demo recording.',
                 ]},
