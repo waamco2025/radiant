@@ -4466,6 +4466,14 @@ export default function V2App() {
     canvasRef.current?.clearHoverState?.()
     setEdgeHover(null)
     setEdgeMenu(null)
+    // Phase 18.0.1 (#203): also clear the pinned-menu fade/world-space-tracking
+    // flag. The prompt referenced a `setEdgeMenuProjected` setter, but no such
+    // state exists — the pinned menu re-projects `edgeMenu.anchor` in place via
+    // the fade effect keyed on `edgeMenu?.edgeId`, and `edgeMenuPanning` is the
+    // fade flag. That effect already resets `edgeMenuPanning` to false when
+    // `edgeMenu` goes null, so this is purely belt-and-suspenders for
+    // completeness (covers the pinned-state version of the ghost).
+    setEdgeMenuPanning(false)
   }, [])
 
   // Phase 17.5.1.5: navigate to an RFP's Detail Panel on the Directory layer
@@ -6109,6 +6117,11 @@ export default function V2App() {
           modalOpen={!!modalNode}
           panelWidth={sel && nodeMap[sel] && nodeMap[sel].v22Type && !nodeMap[sel].isNetworkNode ? 480 : 0}
           onLayerChange={setLayerInfo}
+          // Phase 18.0.1 (#203): suppress parent-canvas edge-hover/click events
+          // while the Directory layer is open over the canvas — stops mousemove
+          // during/after the wipe from re-setting edgeHover and ghosting the
+          // "SELECT EDGE TO VIEW" tooltip over the Directory.
+          directoryOpen={v22DirectoryOpen}
           // Phase 11.8 #44: double-click on the Radiant Network actor node
           // opens the Directory Layer with the circular wipe originating
           // from the node's screen-space center. V2Canvas computes the
@@ -6449,8 +6462,12 @@ export default function V2App() {
         {/* Phase 9B: unified rich hover/pinned edge menu. Pinned wins over
             hover when selectedEdgeId is set so the two tooltips never
             stack. Hover-mode is pointer-events:none; pinned-mode is
-            clickable with hover-highlighted rows. */}
-        {edgeMenu && (() => {
+            clickable with hover-highlighted rows.
+            Phase 18.0.1 (#203): defensive `!v22DirectoryOpen` gate — even if a
+            stray V2Canvas onEdgeHover/onEdgeClick somehow set edgeHover/edgeMenu
+            after the Directory-open transition, the menu won't mount over the
+            Directory. Backstop to the V2Canvas-side directoryOpen guard. */}
+        {!v22DirectoryOpen && edgeMenu && (() => {
           const resolved = resolveAgreementsForEdge(edgeMenu.edgeId, v22View, edges)
           if (!resolved || !resolved.disclosureAgreement) return null
           const da = resolved.disclosureAgreement
@@ -6486,8 +6503,9 @@ export default function V2App() {
             />
           )
         })()}
-        {/* Phase 9B §3: hover menu — only when no pinned menu is open. */}
-        {!edgeMenu && edgeHover && (() => {
+        {/* Phase 9B §3: hover menu — only when no pinned menu is open.
+            Phase 18.0.1 (#203): same defensive `!v22DirectoryOpen` gate. */}
+        {!v22DirectoryOpen && !edgeMenu && edgeHover && (() => {
           const resolved = resolveAgreementsForEdge(edgeHover.edgeId, v22View, edges)
           if (!resolved || !resolved.disclosureAgreement) return null
           const da = resolved.disclosureAgreement
@@ -9172,7 +9190,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.0 &middot; Changelog
+          v0.18.0.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9219,6 +9237,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.0.1', date: '2026-05-21', label: 'Phase 18.0.1', items: [
+                  'Fixed: the parent-canvas "SELECT EDGE TO VIEW" tooltip no longer persists over the Directory layer after transitioning. Bug surfaced during demo recording.',
+                ]},
                 { version: '0.18.0', date: '2026-05-21', label: 'Phase 18.0', items: [
                   'Selection ring on parent-canvas dots is now properly centered.',
                   'Asset Detail Panels now use a consistent large "View File" button on both your own Assets and Assets disclosed to you.',

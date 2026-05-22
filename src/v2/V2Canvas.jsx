@@ -426,6 +426,14 @@ const V2Canvas = forwardRef(function V2Canvas({
   selectedEdgeId = null,
   onEdgeClick,
   onEdgeHover,                // Phase 9B: ({ edgeId, sdaType, x, y }) | null
+  // Phase 18.0.1 (#203): when true, the Directory layer is open over the
+  // parent canvas and edge-tooltip events should be suppressed entirely. The
+  // existing `transitioningRef` guard only covers V2Canvas's internal
+  // dive/surface transitions, not the Directory transition — so without this
+  // gate, mousemove events kept firing during/after the Directory wipe,
+  // re-setting V2App's edgeHover state after clearEdgeUiState had cleared it,
+  // leaving the "SELECT EDGE TO VIEW" tooltip stuck over the Directory.
+  directoryOpen = false,
   // Phase 11.8 #44: double-click on the Radiant Network actor card opens
   // the Directory Layer with the circular wipe originating from the
   // node's screen-space center. V2App passes a callback receiving
@@ -3099,6 +3107,10 @@ const V2Canvas = forwardRef(function V2Canvas({
   const handleBackgroundClick = useCallback((e) => {
     if (transitioningRef.current) return
     if (wasDragRef.current) return
+    // Phase 18.0.1 (#203): short-circuit when the Directory is open — a stray
+    // click landing on the parent canvas during/after the wipe shouldn't
+    // raycast a parent edge and pin an edge menu over the Directory.
+    if (directoryOpen) return
     // Only react to clicks that landed on the canvas/overlay/container background.
     if (e.target !== overlayRef.current && e.target !== canvasRef.current && e.target !== containerRef.current) return
 
@@ -3136,7 +3148,7 @@ const V2Canvas = forwardRef(function V2Canvas({
     }
 
     onCloseSel?.()
-  }, [onCloseSel, onEdgeClick])
+  }, [onCloseSel, onEdgeClick, directoryOpen])
 
   // Double-click empty canvas: zoom in at root, surface at child depth
   const handleBackgroundDblClick = useCallback((e) => {
@@ -3292,6 +3304,12 @@ const V2Canvas = forwardRef(function V2Canvas({
     const rc = raycasterRef.current
     if (!camera || !edgeGroup || !container || !rc) return
     if (transitioningRef.current) return
+    // Phase 18.0.1 (#203): short-circuit when the Directory layer is open over
+    // the parent canvas — prevents the post-clearEdgeUiState race where a
+    // mousemove during/after the Directory wipe re-raycasts a parent edge and
+    // re-sets V2App's edgeHover state, rendering the EdgeHoverMenu (z-index
+    // 6000, portaled to document.body) on top of the Directory.
+    if (directoryOpen) return
 
     // Don't show edge tooltips when hovering over HTML card elements
     const overlay = overlayRef.current
@@ -3340,7 +3358,25 @@ const V2Canvas = forwardRef(function V2Canvas({
         edgeHideTimeout.current = null
       }, 150)
     }
-  }, [hoveredEdge, onEdgeHover])
+  }, [hoveredEdge, onEdgeHover, directoryOpen])
+
+  // Phase 18.0.1 (#203): belt-and-suspenders — clear V2Canvas's internal edge
+  // hover state automatically when the Directory opens, so the small SDA
+  // cursor dot (z-index 5900) doesn't ghost during/after the wipe even if a
+  // Directory-open path forgets the imperative clearHoverState. Also cancels
+  // any pending 150ms debounce timeout so a stale hide-timer can't fire
+  // onEdgeHover?.(null) after the Directory is already open.
+  useEffect(() => {
+    if (directoryOpen) {
+      setHoveredEdge(null)
+      setEdgeTooltipPos(null)
+      setHoveredEdgeSdaType(null)
+      if (edgeHideTimeout.current) {
+        clearTimeout(edgeHideTimeout.current)
+        edgeHideTimeout.current = null
+      }
+    }
+  }, [directoryOpen])
 
   const isDot = zoom < MID_LOD_THRESHOLD
   const isMidLOD = zoom >= MID_LOD_THRESHOLD && zoom < LOD_THRESHOLD
