@@ -2714,7 +2714,7 @@ export default function V2App() {
   // Reject updates the existing solicitation status to 'rejected', stamps
   // respondedDate + rejectionMessage, and fires a v22-rfp-solicitation-
   // rejected notification on the solicitor's inbox.
-  const handleCreateSolicitation = useCallback(({ rfpId, claimId, message }) => {
+  const handleCreateSolicitation = useCallback(({ rfpId, claimId, message, disclosureType, scope, daExpiryIso }) => {
     // Resolve the target RFP from the seed set + closed-RFP + created-RFP
     // merges so the owner party is available for notification routing.
     // Phase 17.5.1.3 (Fix 1B): the lookup previously omitted
@@ -2729,6 +2729,30 @@ export default function V2App() {
     const rfp = (sharedForLookup.rfps || []).find((r) => r.id === rfpId)
     if (!rfp) return
     const id = `solicit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    // Phase 18.3: mint the paired Disclosure Agreement atomically. The DA is
+    // granted by the solicitor (active actor) to the RFP owner, scoped to the
+    // offered Claim per the modal's disclosure-type + scope selections. It's
+    // stamped with `_solicitationId` + `_rfpId` so either party can navigate
+    // the link in either direction, and pushed into v22Provisionals with
+    // `status: 'active'` (same pattern as Phase 18.2's publish DAs). On Bob's
+    // Directory the Claim then surfaces as a dot in Alice's cluster via the
+    // existing directed/umbrella claim-DA pass in buildV22DirectoryDataForRole.
+    const recipientRole = ROLES.find((r) => r.party === rfp.owner)
+    const recipientDot = recipientRole?.partyDot || rfp.ownerDot || null
+    const claimSlug = String(claimId).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)
+    const daId = `da-solicit-${activeRole.party.toLowerCase()}-${claimSlug}-${Date.now()}`
+    const newDa = makeDisclosureAgreement({
+      id: daId,
+      grantor: { party: activeRole.party, dot: activeRole.partyDot },
+      grantee: { party: rfp.owner, dot: recipientDot },
+      subject: { kind: 'claim', id: claimId },
+      type: disclosureType,
+      scope,
+      terms: { createdDate: new Date().toISOString(), expires: daExpiryIso || null, autoRenew: false },
+      status: 'active',
+    })
+    newDa._solicitationId = id
+    newDa._rfpId = rfpId
     const solicitation = makeRfpSolicitation({
       id,
       rfpId,
@@ -2736,7 +2760,13 @@ export default function V2App() {
       solicitor: activeRole.party,
       recipient: rfp.owner,
       message: message || '',
+      disclosureAgreementId: daId, // Phase 18.3 link-back
     })
+    // Push the DA + solicitation to session state atomically.
+    setV22Provisionals((prev) => ({
+      ...prev,
+      disclosureAgreements: [...(prev.disclosureAgreements || []), newDa],
+    }))
     setV22Solicitations((prev) => {
       const next = new Map(prev)
       next.set(id, solicitation)
@@ -2747,7 +2777,6 @@ export default function V2App() {
     // switchable role (mock supplier actor), the notification simply has
     // no inbox to land in — that's OK, the demo flow only exercises
     // primary-party RFPs (Bob's Sentinel-4).
-    const recipientRole = ROLES.find((r) => r.party === rfp.owner)
     if (recipientRole) {
       enqueueV22NotificationForRequester(recipientRole.id, {
         id: `v22-rfp-solicitation-received-${id}`,
@@ -2758,6 +2787,9 @@ export default function V2App() {
         solicitationId: id,
         rfpId,
         rfpName: rfp.name,
+        // Phase 18.3: include claimId so 18.3.1's notification routing can
+        // navigate directly to the offered Claim on the owner's Directory.
+        claimId,
         date: new Date().toISOString().slice(0, 10),
       })
     }
@@ -2765,8 +2797,28 @@ export default function V2App() {
     setV22SolicitOpenForRfp(null)
   }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, v22CreatedRfps, enqueueV22NotificationForRequester])
 
+  // Phase 18.3: revoke a solicitation's linked Disclosure Agreement by id.
+  // Stamps status:'revoked' + _revokedMeta so buildV22DirectoryDataForRole's
+  // `activeDas` filter drops it and the offered Claim disappears from the RFP
+  // owner's Directory cluster (and buildViewForActor's `_revokedMeta` guards
+  // stop pulling it onto the parent canvas). Shared by handleRejectSolicitation
+  // (reject) and handleCloseRfp (close cascade) so the revoke logic lives in
+  // one place (Part C5 — no duplicated DA-revoke logic across the two sites).
+  const revokeSolicitationDa = useCallback((daId, reason) => {
+    if (!daId) return
+    setV22Provisionals((prev) => ({
+      ...prev,
+      disclosureAgreements: (prev.disclosureAgreements || []).map((d) =>
+        d.id === daId
+          ? { ...d, status: 'revoked', _revokedMeta: { revokedDate: new Date().toISOString(), reason } }
+          : d,
+      ),
+    }))
+  }, [])
+
   const handleRejectSolicitation = useCallback(({ solicitationId, rejectionMessage }) => {
     let updated = null
+    let linkedDaId = null
     setV22Solicitations((prev) => {
       const existing = prev.get(solicitationId)
       if (!existing) return prev
@@ -2778,8 +2830,12 @@ export default function V2App() {
         rejectionMessage: rejectionMessage || null,
       }
       next.set(solicitationId, updated)
+      linkedDaId = existing.disclosureAgreementId
       return next
     })
+    // Phase 18.3: cascade-revoke the linked Disclosure Agreement so the
+    // offered Claim disappears from the RFP owner's view.
+    if (linkedDaId) revokeSolicitationDa(linkedDaId, 'solicitation_rejected')
     // Resolve outside the setter so notification payload reads the final
     // shape. We close over `updated` set inside the updater; React calls
     // the updater synchronously in the same tick.
@@ -2803,7 +2859,7 @@ export default function V2App() {
       }
     }
     setV22SolicitationToReject(null)
-  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester])
+  }, [activeRole.party, activeRole.partyDot, v22ClosedRfpIds, enqueueV22NotificationForRequester, revokeSolicitationDa])
 
   // Phase 17.1 / 17.5.1.4: close an RFP. Records the closure timestamp in
   // session state (stable across re-renders) AND dispatches a v22-rfp-closed
@@ -2845,7 +2901,29 @@ export default function V2App() {
         date: new Date().toISOString().slice(0, 10),
       })
     }
-  }, [v22CreatedRfps, v22Solicitations, enqueueV22NotificationForRequester])
+    // Phase 18.3: closing an RFP rejects every open (pending) solicitation on
+    // it and cascade-revokes each linked Disclosure Agreement, so offered
+    // Claims disappear from the RFP owner's Directory. The status transition
+    // mirrors handleRejectSolicitation but WITHOUT per-solicitation rejected
+    // notifications (the v22-rfp-closed notification above already informs each
+    // solicitor — avoids double-notifying). The DA-revoke delegates to the
+    // shared revokeSolicitationDa so the logic lives in one place (Part C5).
+    const openSolicitations = (merged.rfpSolicitations || []).filter(
+      (s) => s.rfpId === rfp.id && s.status === 'pending',
+    )
+    if (openSolicitations.length > 0) {
+      const closedDate = new Date().toISOString()
+      setV22Solicitations((prev) => {
+        const next = new Map(prev)
+        for (const s of openSolicitations) {
+          const existing = next.get(s.id) || s
+          next.set(s.id, { ...existing, status: 'rejected', respondedDate: closedDate, rejectionMessage: 'RFP closed' })
+        }
+        return next
+      })
+      for (const s of openSolicitations) revokeSolicitationDa(s.disclosureAgreementId, 'rfp_closed')
+    }
+  }, [v22CreatedRfps, v22Solicitations, enqueueV22NotificationForRequester, revokeSolicitationDa])
 
   // Phase 17.1 / 17.5.1.4 / 17.5.2.2: reopen a closed RFP. Phase 17.5.2.2
   // (Part 3) REVERSES the 17.5.1.4 "Reopen is silent (asymmetric)" decision:
@@ -7287,6 +7365,40 @@ export default function V2App() {
         {v22SolicitOpenForRfp && (() => {
           const sharedForModal = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const myClaims = (sharedForModal.claims || []).filter((c) => c.owner === activeRole.party)
+          // Phase 18.3: pre-compute per-Claim scope sources so the modal can
+          // render the Step 3 picker once a Claim is selected. Mirrors the
+          // CombinedResponseModal mount contract (Phase 18.2.2): owner-held
+          // referenced Assets (Full), their Parse Results' fields (Selective),
+          // and PoEs on the Claim (Proof-Only — Claim-membership filter only
+          // per Phase 18.2.1.1, so third-party-authored PoEs are valid).
+          const evalResultByIdForPoe = new Map((sharedForModal.evaluationResults || []).map((er) => [er.id, er]))
+          const referencedAssetsByClaim = {}
+          const parseResultsByClaim = {}
+          const poesByClaim = {}
+          for (const c of myClaims) {
+            const refAssets = (c.referencedAssetIds || [])
+              .map((aid) => (sharedForModal.assets || []).find((a) => a.id === aid))
+              .filter((a) => a && a.owner === activeRole.party)
+              .map((a) => ({ id: a.id, name: a.name }))
+            referencedAssetsByClaim[c.id] = refAssets
+            const refAssetIdSet = new Set(refAssets.map((a) => a.id))
+            parseResultsByClaim[c.id] = (sharedForModal.parseResults || [])
+              .filter((pr) => refAssetIdSet.has(pr.sourceAssetId))
+              .map((pr) => ({ id: pr.id, sourceAssetId: pr.sourceAssetId, templateName: pr.templateName, fields: pr.fields || [] }))
+            poesByClaim[c.id] = (sharedForModal.proofsOfEvaluation || [])
+              .filter((poe) => poe.claimId === c.id)
+              .map((poe) => {
+                let sat = 0, unsat = 0
+                const er = evalResultByIdForPoe.get(poe.wrappedEvalResultId)
+                if (er) {
+                  for (const r of (er.results || [])) {
+                    if (r.status === 'satisfactory') sat += 1
+                    else if (r.status === 'unsatisfactory') unsat += 1
+                  }
+                }
+                return { id: poe.id, name: poe.name, owner: poe.owner, wrappedCount: 1, sat, unsat }
+              })
+          }
           return (
             <SolicitationCreateModal
               rfp={v22SolicitOpenForRfp.rfp}
@@ -7302,6 +7414,10 @@ export default function V2App() {
               // owner via an active or pending EA.
               evaluationAgreements={sharedForModal.evaluationAgreements || []}
               solicitorParty={activeRole.party}
+              // Phase 18.3: per-Claim scope sources for the Step 3 picker.
+              referencedAssetsByClaim={referencedAssetsByClaim}
+              parseResultsByClaim={parseResultsByClaim}
+              poesByClaim={poesByClaim}
               onSubmit={handleCreateSolicitation}
               onCancel={() => setV22SolicitOpenForRfp(null)}
             />
@@ -9422,7 +9538,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.2.3 &middot; Changelog
+          v0.18.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9469,6 +9585,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3', date: '2026-05-22', label: 'Phase 18.3', items: [
+                  'Solicitations now carry a Disclosure Agreement. The solicitation creation flow is redesigned from a single-step Claim picker into a 4-step flow: Required Standards + Claim → Disclosure Type → Scope + Expiry + Message → Review. On submit, a paired Disclosure Agreement is minted atomically (grantor = solicitor, grantee = RFP owner, subject = the offered Claim, type + scope per the modal selections) and granted to the RFP owner, so they get real visibility into the offered Claim instead of just a message and a reference.',
+                  'The RFP owner now sees the offered Claim as a dot in the solicitor\'s cluster on their Directory (the existing umbrella outline wraps it). Rejecting a solicitation — or closing the RFP — revokes the linked Disclosure Agreement, and the Claim disappears from the owner\'s view.',
+                  'Bob-side UI (RFP Detail Panel solicitation rows, Claim Detail Panel solicitation-context actions, warm-path Request EA wiring, notification routing) lands in Phase 18.3.1.',
+                ]},
                 { version: '0.18.2.3', date: '2026-05-22', label: 'Phase 18.2.3', items: [
                   'Post-publish orchestration. Publishing a Claim to the Directory now auto-transitions from the parent canvas to the Directory layer, pans and zooms to the new dot at ~60%, opens its Detail Panel, and marks the card with a NEW badge until you navigate away — mirroring the RFP post-creation flow.',
                   'The Publish to Directory action is now disabled (with an explanatory tooltip) on Claims that already have an active Radiant Network Disclosure Agreement. Revoke the existing agreement to republish. Disabled on both the Detail Panel footer and the card action bar.',

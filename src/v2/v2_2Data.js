@@ -1483,6 +1483,15 @@ export function makeRfpSolicitation({
   // Null in pending / rejected states. Lets the solicitor-side accepted
   // view link back to the EA artifact on the parent canvas.
   acceptedEaId = null,
+  // Phase 18.3: every new solicitation now carries a paired Disclosure
+  // Agreement granting the recipient (RFP owner) visibility into the offered
+  // Claim. The DA is minted atomically at the V2App handler level and its id
+  // is stored here for O(1) lookup in both directions (solicitation → DA via
+  // this field, DA → solicitation via the DA's `_solicitationId` stamp).
+  // Legacy solicitations (pre-18.3) don't exist in the seed, so this field
+  // has no migration path — it's null only for any defensively-constructed
+  // solicitation that omits it.
+  disclosureAgreementId = null,
 }) {
   if (!id) throw new Error('makeRfpSolicitation: id required')
   if (!rfpId) throw new Error('makeRfpSolicitation: rfpId required')
@@ -1505,6 +1514,7 @@ export function makeRfpSolicitation({
     respondedDate,
     rejectionMessage,
     acceptedEaId,
+    disclosureAgreementId,
   }
 }
 
@@ -5479,6 +5489,18 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
 
   // Umbrella DAs to the active Actor: subject kind=claim, grantee=activeParty,
   // grantor is a non-active, non-network party.
+  // Phase 18.3: a solicitation's paired Disclosure Agreement (solicitor →
+  // RFP owner, subject = the offered Claim) is structurally a directed claim
+  // DA to the active actor — it lands here automatically. When Bob views his
+  // Directory, Alice's solicited Claim is pulled into Alice's (MicroCo's)
+  // cluster via this pass (the cluster is upserted below if Alice has none),
+  // and the umbrella outline wraps it. No separate directed-DA cluster pass
+  // is needed — the override semantics are also automatic, because the
+  // viewer's `partyDisclosureAgreements` (in buildViewForActor) only ever
+  // contains DAs where the viewer is grantor/grantee, so a Radiant-Network
+  // public DA on the same Claim is never in the viewer's set to conflict.
+  // Revoking the linked DA (on solicitation reject / RFP close) drops it from
+  // `activeDas` above, so the Claim disappears from the cluster on next build.
   const umbrellaClaimIdsByGrantor = new Map()
   for (const da of activeDas) {
     if (da.subject?.kind !== 'claim') continue
