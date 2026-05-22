@@ -2673,6 +2673,24 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 18.2.1.1 completion notes (2026-05-22) — V2App PoE picker filter hotfix
+
+Single-symbol fix at two parallel V2App modal-mount sites. Both proof-only PoE pickers wrongly required the PoE to be owned by the DA grantor; the correct filter is by Claim membership only.
+
+**Diff (high-level).** Two edits in `src/v2/V2App.jsx`, plus footer/Changelog:
+- **Edit 1 — `CombinedResponseModal` mount (`poesForClaim`, ~line 7476):** `.filter(poe => poe.claimId === claim.id && poe.owner === da.grantor.party)` → `.filter(poe => poe.claimId === claim.id)`. Comment updated with the Claim-ownership rationale. The `.map(...)` body (SAT/UNSAT aggregate, wrapped count, `by {owner}`) is untouched.
+- **Edit 2 — `AmendDisclosureModal` mount (`candidatePoEs`, ~line 7882):** `.filter(poe => poe.claimId === da.subject.id && poe.owner === da.grantor.party)` → `.filter(poe => poe.claimId === da.subject.id)`. Comment updated.
+- **Edit 3 — `src/v2/V2App.jsx`:** footer `v0.18.2.1 → v0.18.2.1.1`; prepended Changelog modal entry. No handler/prop edits.
+- **Docs:** architecture-spec §8 Changelog bullet (§10.4); polish-backlog Update Log; CLAUDE.md most-recent-phase + queue (18.2.1 demoted).
+
+**Why it was wrong.** A proof-only Claim DA carries `subject.kind === 'claim'` + `scope.poeIds` (Phase 13 / spec §10.4). The grantor is the Claim owner, but the PoEs in scope can be authored by *any evaluator visible to that owner* — they reach the owner via the original proof-of-evaluation DA (evaluator → claim owner). The `&& poe.owner === da.grantor.party` clause excluded every third-party-authored PoE (the common evaluator-to-claim-owner case) and only matched self-evaluation PoEs. Surfaced by 18.2.1 QA: Carol completed an eval chain on Alice's EMI Shield Assembly Claim + created a PoE (AuditCo-owned); it rendered on Alice's netgraph (proof-of-evaluation DA Carol → Alice gives Alice visibility), but when Bob requested DA+EA and Alice opened the response modal with Proof-Only, the picker showed the empty state because the PoE owner (AuditCo) ≠ DA grantor (MicroCo). The two sites were pre-PoE-era code that survived the Phase 13 migration with stale ownership semantics; this aligns them with the seed precedent (Phase 17.5.0.4 mock-supplier proof-only Directory DAs publish third-party PoEs) and Phase 18.2's correctly-wired `PublishToDirectoryModal` Claim-only filter.
+
+**Deviations.** None — exactly the two filter edits + version/Changelog the brief specified. The new filter is a strict superset of the old (drops a conjunct), so the self-evaluation case (`owner === grantor`) still matches — no regression to that path.
+
+**Structured Review / Runtime verification.** Build clean (133 modules, 0 errors). The change is a deterministic filter-predicate edit — **code- + build- + data-probe-verified**: the seeded PoEs `poeBobPrm` (owner GovCo) and `poeCarolPrm` (owner AuditCo) both carry `claimId === cPrm.id` (Alice's PRM Assembly Claim, owner MicroCo); the old filter (`owner === grantor MicroCo`) excluded *both* (neither owner is MicroCo), the new filter includes both → for Alice-as-grantor the Proof-Only picker now lists Bob's + Carol's PoEs (QA #1-2) instead of the empty state. The self-eval superset property (QA #7-8) holds by construction. Out of scope per the brief and confirmed: no view-builder change needed (Alice's `v22View.proofsOfEvaluation` already contains Carol's PoE — proven by the netgraph render) and no modal change (picker rows already show `by {owner}`). Live confirmation of the response/amend modal at the picker step is blocked in-session by the documented harness limits (no seeded `v22-request` notification; generating one needs an undisclosed-Claim PIN + a multi-role request→respond flow; canvas card-selection friction) — flagged for a manual pass (QA #1-11). Empty-state (QA #11), Full/Selective/Decline smoke tests (QA #12-14) are unaffected by a proof-only filter change.
+
+**Status:** [x] Complete.
+
 ### Phase 18.2.1 completion notes (2026-05-22) — CombinedResponseModal hotfix (Step 1 button gating + Proof-Only copy parity)
 
 Two surgical fixes to `src/components/modals/CombinedResponseModal.jsx`, both surfaced during Phase 18.2 QA but predating it (the modal is Phase 11/13-era). Sole code change is the modal + the V2App footer/Changelog. No new components, props, handlers, or data-model changes. **Note:** this 18.2.1 slot was re-scoped by the prompt away from the originally-predicted publish-to-Directory post-creation orchestration (now an un-numbered deferred follow-up).

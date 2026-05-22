@@ -7470,11 +7470,16 @@ export default function V2App() {
               fields: pr.fields.map(f => ({ id: f.id, name: f.name })),
             }))
           // Phase 13 (#168): Proof-Only step picks PoEs (not Eval Results).
-          // Pull PoEs the grantor owns wrapping evaluations of this Claim.
+          // Phase 18.2.1.1: filter by Claim membership only. The DA grantor's
+          // right to grant proof-only disclosure derives from their ownership
+          // of the Claim, not the PoE — third-party-authored PoEs visible to
+          // the grantor (via the original proof-of-evaluation DA from
+          // evaluator → claim owner) are valid scope candidates. The picker
+          // row's `by {owner}` line keeps evaluator attribution clear in the UI.
           // The picker row shows the wrapped count + SAT/UNSAT aggregate.
           const evalResultByIdForPoe = new Map((v22View?.evaluationResults || []).map((er) => [er.id, er]))
           const poesForClaim = (v22View?.proofsOfEvaluation || [])
-            .filter(poe => poe.claimId === claim.id && poe.owner === da.grantor.party)
+            .filter(poe => poe.claimId === claim.id)
             .map((poe) => {
               let sat = 0, unsat = 0
               const er = evalResultByIdForPoe.get(poe.wrappedEvalResultId)
@@ -7871,11 +7876,13 @@ export default function V2App() {
               parseTemplateName: pr.templateName,
             })))
           // Phase 13 (#168): proof-only Claim DAs now disclose PoEs (which
-          // wrap Eval Results) instead of individual Eval Results. Picker
-          // candidates are the active PoEs that wrap evaluations of this
-          // Claim — owned by the DA grantor (the disclosing actor).
+          // wrap Eval Results) instead of individual Eval Results.
+          // Phase 18.2.1.1: filter by Claim membership only. Amending the
+          // scope of a proof-only DA can add/remove any PoE visible to the
+          // grantor on this Claim — see the parallel CombinedResponseModal
+          // mount comment for the architectural rationale.
           const candidatePoEs = (v22View?.proofsOfEvaluation || [])
-            .filter(poe => poe.claimId === da.subject.id && poe.owner === da.grantor.party)
+            .filter(poe => poe.claimId === da.subject.id)
             .map(poe => ({ id: poe.id, name: poe.name }))
           // §11.2: items already evaluated (referenced by an active eval result)
           // cannot be removed. Compute lock sets per scope dimension.
@@ -9296,7 +9303,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.2.1 &middot; Changelog
+          v0.18.2.1.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9343,6 +9350,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.2.1.1', date: '2026-05-22', label: 'Phase 18.2.1.1', items: [
+                  'PoE picker fix. The Proof-Only step of the Disclosure Response modal and the Proof-Only scope picker in Amend Disclosure now surface every Proof of Evaluation visible to you on the target Claim — including PoEs authored by other parties (e.g. an evaluator\'s PoE on your Claim). They previously only listed PoEs you authored yourself, which hid the common evaluator-to-claim-owner case.',
+                ]},
                 { version: '0.18.2.1', date: '2026-05-22', label: 'Phase 18.2.1', items: [
                   'CombinedResponseModal hotfix. The Step 1 "Accept" button no longer renders before you pick a disclosure type (fixes a crash where accepting with no type selected propagated null type + scope into the accept handler) — the cold-path step indicator now reads "Step 1 of 4" from open, with a disabled "Continue" until you pick a type.',
                   'Proof-Only disclosure copy now says "Proofs of Evaluation" everywhere (picker label, description, empty state, and the review row) instead of the pre-Phase-13 "Evaluation Results"; the empty state now matches the neutral house style used by Selective.',
