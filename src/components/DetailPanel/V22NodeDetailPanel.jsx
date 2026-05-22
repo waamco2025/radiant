@@ -781,8 +781,9 @@ function V22ClaimPanel({
   onRunEvaluation,
   onAmendClaim,
   onSelfEvaluate,
-  // Phase 18.2: publish this Claim to the Public Directory (owner only).
-  // Opens PublishToDirectoryModal. Receives the Claim artifact.
+  // Phase 18.2 / 18.2.2: publish this Claim to the Public Directory (owner
+  // only). Opens the publish modal (CombinedResponseModal in
+  // directoryPublishMode). Receives the Claim artifact.
   onPublishToDirectory,
   // Phase 12.1 (#120): Referenced Standards section data + handlers.
   // `referencedStandardRows` is the resolved list of {requirementsSetId,

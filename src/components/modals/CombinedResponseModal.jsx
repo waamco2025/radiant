@@ -43,6 +43,15 @@ export default function CombinedResponseModal({
   // `scope: null`, and just the EA terms; the V2App handler routes to
   // handleV22AcceptEAOnly.
   eaOnlyMode = false,
+  // Phase 18.2.2: when true, the modal runs the Publish-to-Directory flow:
+  // 3 steps (Type → Scope → Review), no Decline card, no EA Terms step,
+  // no Acknowledgments row. Submit fires onAccept with
+  // { type, scope, daTerms: { expires } } — no eaTerms.
+  // V2App mounts with a synthesized `request` shape carrying activeRole
+  // as ownerParty and 'Radiant Network' as requesterParty (the latter
+  // unused for copy because directoryPublishMode replaces the
+  // requesterParty references with publish-specific copy).
+  directoryPublishMode = false,
 }) {
   const [action, setAction] = useState(eaOnlyMode ? 'ea-only' : null) // 'full' | 'selective' | 'proofonly' | 'decline' | 'ea-only'
   // EA-only mode opens directly at step 3 (the EA-terms review step).
@@ -81,7 +90,16 @@ export default function CombinedResponseModal({
   // standard cold-path flow applies.
   const isDecline = action === 'decline'
   const isEaOnly = eaOnlyMode || action === 'ea-only'
-  const totalSteps = isEaOnly
+  // Phase 18.2.2: publish-to-Directory flow toggle. Mutually exclusive
+  // with eaOnlyMode (V2App never mounts both at once).
+  const isDirectoryPublish = directoryPublishMode === true
+  // Phase 18.2.2: publish mode is always 3 steps (Type → Scope → Review).
+  // It short-circuits first because it never has a decline or EA-only
+  // sub-state — the Decline card is filtered out and eaOnlyMode is never
+  // co-mounted.
+  const totalSteps = isDirectoryPublish
+    ? 3
+    : isEaOnly
     ? (isDecline ? 4 : 4) // EA-only: step 3 (terms) → step 4 (review or decline reason)
     // Phase 18.2.1 (Bug 1 fix): cold path is always 4 steps for a non-decline
     // action. The prior `action ? 4 : 1` collapse set totalSteps=1 at Step 1
@@ -150,6 +168,17 @@ export default function CombinedResponseModal({
   }
 
   const handleSubmit = () => {
+    // Phase 18.2.2: publish-to-Directory emits a DA-only payload (no EA half).
+    if (isDirectoryPublish) {
+      onAccept?.({
+        type: action,
+        scope: buildScope(),
+        daTerms: {
+          expires: computeDaExpiryIso(),
+        },
+      })
+      return
+    }
     if (action === 'decline') {
       onDecline?.({ reason: declineReason.trim() })
       return
@@ -212,19 +241,29 @@ export default function CombinedResponseModal({
   // Warm path (eaOnlyMode = true):
   //   Step 3 (EA Terms) → "Respond to Evaluation Request" (shared with cold)
   //   Step 4 (Review)   → "Review your Evaluation Agreement Response"
+  // Phase 18.2.2: directoryPublishMode overrides the response-flow copy
+  // entirely. Step 1–2: action; Step 3 (final): review.
   let acceptTitle
-  if (step === 4) {
-    acceptTitle = isEaOnly
-      ? 'Review your Evaluation Agreement Response'
-      : 'Review your Disclosure + Evaluation Agreement Response'
-  } else if (isEaOnly || step === 3) {
-    acceptTitle = 'Respond to Evaluation Request'
+  let acceptSubtitle
+  if (isDirectoryPublish) {
+    acceptTitle = step === totalSteps
+      ? 'Review your Public Directory Disclosure'
+      : 'Publish to the Public Directory'
+    acceptSubtitle = `Publish ${request.claim.name} to the Radiant Network. Pick how much of the Claim other actors can see — then it appears as a dot in your Directory cluster.`
   } else {
-    acceptTitle = 'Respond to Disclosure Request'
+    if (step === 4) {
+      acceptTitle = isEaOnly
+        ? 'Review your Evaluation Agreement Response'
+        : 'Review your Disclosure + Evaluation Agreement Response'
+    } else if (isEaOnly || step === 3) {
+      acceptTitle = 'Respond to Evaluation Request'
+    } else {
+      acceptTitle = 'Respond to Disclosure Request'
+    }
+    acceptSubtitle = isEaOnly
+      ? `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.`
+      : `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.`
   }
-  const acceptSubtitle = isEaOnly
-    ? `${request.requesterParty} has requested an Evaluation Agreement on ${request.claim.name}. Review the proposed terms.`
-    : `${request.requesterParty} has requested access to ${request.claim.name}. Set disclosure type, scope, and evaluation terms.`
   const header = isDecline
     ? isEaOnly
       ? { title: 'Decline Evaluation Agreement Request', subtitle: `Decline ${request.requesterParty}'s Evaluation Agreement request. The provisional EA will be removed.` }
@@ -249,7 +288,8 @@ export default function CombinedResponseModal({
         />
 
         <ModalBody>
-          {/* Request summary (always visible) */}
+          {/* Request summary (always visible) — Phase 18.2.2: directoryPublishMode
+              renders a publish-context banner instead of the Requester / Message rows. */}
           <div style={{
             padding: '12px 16px', borderRadius: 8,
             background: 'var(--bg-card)',
@@ -257,39 +297,63 @@ export default function CombinedResponseModal({
             marginBottom: 24,
             display: 'flex', flexDirection: 'column', gap: 8,
           }}>
-            <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Requester</div>
-              <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{request.requesterParty}</div>
-            </div>
-            <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Claim</div>
-              <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{request.claim.name}</div>
-            </div>
-            {request.message && (
-              <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Message</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, flex: 1 }}>"{request.message}"</div>
-              </div>
+            {isDirectoryPublish ? (
+              <>
+                <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 110 }}>Publishing to</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>Radiant Network</div>
+                </div>
+                <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 110 }}>Claim</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{request.claim.name}</div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Requester</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{request.requesterParty}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Claim</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{request.claim.name}</div>
+                </div>
+                {request.message && (
+                  <div style={{ display: 'flex', gap: 18, alignItems: 'baseline' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', minWidth: 90 }}>Message</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, flex: 1 }}>"{request.message}"</div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
-          {/* STEP 1 — Type decision (four-card grid) */}
+          {/* STEP 1 — Type decision (four-card grid; three when directoryPublishMode) */}
           {step === 1 && (
             <>
-              <FieldLabel label="Select how you'd like to respond" required />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 8 }}>
-                {TYPE_DECISIONS.map((d) => (
-                  <DecisionCard
-                    key={d.id}
-                    id={d.id}
-                    label={d.label}
-                    desc={d.desc}
-                    color={d.color}
-                    icon={d.icon}
-                    active={action === d.id}
-                    onClick={() => setAction(d.id)}
-                  />
-                ))}
+              <FieldLabel
+                label={isDirectoryPublish ? 'Choose disclosure type' : "Select how you'd like to respond"}
+                required
+              />
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${isDirectoryPublish ? 3 : 4}, 1fr)`,
+                gap: 10, marginTop: 8,
+              }}>
+                {TYPE_DECISIONS
+                  .filter((d) => !isDirectoryPublish || d.id !== 'decline')
+                  .map((d) => (
+                    <DecisionCard
+                      key={d.id}
+                      id={d.id}
+                      label={d.label}
+                      desc={d.desc}
+                      color={d.color}
+                      icon={d.icon}
+                      active={action === d.id}
+                      onClick={() => setAction(d.id)}
+                    />
+                  ))}
               </div>
             </>
           )}
@@ -306,7 +370,7 @@ export default function CombinedResponseModal({
                   responder consciously opts in to a finite term. */}
               <FieldLabel label="Disclosure Agreement expiry" />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                Set when this Disclosure Agreement expires. Until then {request.requesterParty} retains visibility into the items disclosed below per the chosen Disclosure type.
+                Set when this Disclosure Agreement expires. Until then {isDirectoryPublish ? 'the Public Directory will surface' : `${request.requesterParty} retains visibility into`} the items disclosed below per the chosen Disclosure type.
               </div>
               <ExpiryPicker
                 expiry={daExpiry}
@@ -318,7 +382,7 @@ export default function CombinedResponseModal({
                 <>
                   <FieldLabel label="Select Assets to disclose" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    Assets in scope will have their <strong>evidence files</strong> revealed to {request.requesterParty}. Pick which referenced Assets to include.
+                    Assets in scope will have their <strong>evidence files</strong> {isDirectoryPublish ? 'accessible from the Public Directory' : `revealed to ${request.requesterParty}`}. Pick which referenced Assets to include.
                   </div>
                   {referencedAssets.length === 0 ? (
                     <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
@@ -426,7 +490,7 @@ export default function CombinedResponseModal({
                 <>
                   <FieldLabel label="Select Proofs of Evaluation to share" required />
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-                    {request.requesterParty} will see only the pass/fail outcome of the selected Proofs of Evaluation. No access to raw evidence is granted.
+                    {isDirectoryPublish ? 'Actors browsing the Public Directory' : request.requesterParty} will see only the pass/fail outcome of the selected Proofs of Evaluation. No access to raw evidence is granted.
                   </div>
                   {poesForClaim.length === 0 ? (
                     <div style={{ padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
@@ -508,7 +572,7 @@ export default function CombinedResponseModal({
               only term ahead of pure-platform terms today). The requester's
               acknowledgments — references to the Claim's pre-set
               acknowledgments[] — render as a read-only audit panel. */}
-          {step === 3 && !isDecline && (() => {
+          {step === 3 && !isDecline && !isDirectoryPublish && (() => {
             const claimAcks = Array.isArray(request?.claim?.acknowledgments) ? request.claim.acknowledgments : []
             const acceptedIds = Array.isArray(request?.proposedEaTerms?.acknowledgmentsAccepted)
               ? request.proposedEaTerms.acknowledgmentsAccepted
@@ -559,14 +623,18 @@ export default function CombinedResponseModal({
             )
           })()}
 
-          {/* STEP 4 — Review (accept flows only) */}
-          {step === 4 && !isDecline && (
+          {/* STEP 4 — Review (accept flows only). Phase 18.2.2: gate on
+              `step === totalSteps` so this renders at the correct final step
+              in both the 4-step cold-path flow and the 3-step publish flow. */}
+          {step === totalSteps && !isDecline && (
             <>
               <FieldLabel label="Review your response" />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
-                {isEaOnly
-                  ? 'Accepting flips the Evaluation Agreement to active. The existing Disclosure Agreement is unaffected.'
-                  : 'Accepting creates an active Disclosure Agreement and Evaluation Agreement. Both parties\' canvases will update.'}
+                {isDirectoryPublish
+                  ? 'Publishing creates an active Disclosure Agreement with the Radiant Network as grantee. Your Claim appears as a dot in your Directory cluster.'
+                  : isEaOnly
+                    ? 'Accepting flips the Evaluation Agreement to active. The existing Disclosure Agreement is unaffected.'
+                    : 'Accepting creates an active Disclosure Agreement and Evaluation Agreement. Both parties\' canvases will update.'}
               </div>
               {/* Phase 11E.1.7 Fix 1: label column widened from 130 → 230
                   to accommodate "DISCLOSURE AGREEMENT EXPIRES" /
@@ -609,11 +677,15 @@ export default function CombinedResponseModal({
                     <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(daExpiry, daCustomExpiry)}</div>
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Evaluation Agreement expires</div>
-                  <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
-                </div>
-                {(() => {
+                {/* Phase 18.2.2: publish mode has no EA half — hide the EA
+                    expiration row + the acknowledgments row entirely. */}
+                {!isDirectoryPublish && (
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minWidth: 230, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>Evaluation Agreement expires</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{expiryLabel(expiry, customExpiry)}</div>
+                  </div>
+                )}
+                {!isDirectoryPublish && (() => {
                   // Phase 11C.1: review step shows the count of acknowledgments
                   // the requester accepted (pre-set terms from the Claim).
                   const acceptedCount = Array.isArray(request?.proposedEaTerms?.acknowledgmentsAccepted)
@@ -696,7 +768,11 @@ export default function CombinedResponseModal({
             )}
             {/* Final Accept / Decline buttons */}
             {step === totalSteps && !isDecline && (
-              <Btn label="Accept" accent onClick={handleSubmit} />
+              <Btn
+                label={isDirectoryPublish ? 'Publish to Directory' : 'Accept'}
+                accent
+                onClick={handleSubmit}
+              />
             )}
             {step === totalSteps && isDecline && (
               <Btn label="Decline" danger onClick={handleSubmit} disabled={!canSubmitDecline} />

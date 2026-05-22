@@ -94,8 +94,6 @@ import AssetPickerModal from '../components/modals/AssetPickerModal.jsx'
 import SolicitationRejectModal from '../components/modals/SolicitationRejectModal.jsx'
 import CombinedRequestModal from '../components/modals/CombinedRequestModal.jsx'
 import RfpCreationModal from '../components/modals/RfpCreationModal.jsx'
-// Phase 18.2: publish-to-Directory flow modal.
-import PublishToDirectoryModal from '../components/modals/PublishToDirectoryModal.jsx'
 import EARequestModal from '../components/modals/EARequestModal.jsx'
 import AIShopperModal from '../components/modals/AIShopperModal.jsx'
 import DirectoryLayer from './DirectoryLayer.jsx'
@@ -314,9 +312,10 @@ export default function V2App() {
   const [v22CreatedRfps, setV22CreatedRfps] = useState(() => new Map())
   const [v22RfpCreationOpen, setV22RfpCreationOpen] = useState(false)
   const [v22RfpCreationContext, setV22RfpCreationContext] = useState(null)
-  // Phase 18.2: when non-null, carries the Claim being published to the Public
-  // Directory AND signals the PublishToDirectoryModal is open. Single piece of
-  // state — no paired *Open boolean needed.
+  // Phase 18.2 / 18.2.2: when non-null, carries the Claim being published to
+  // the Public Directory AND signals the publish modal (CombinedResponseModal
+  // in directoryPublishMode) is open. Single piece of state — no paired
+  // *Open boolean needed.
   const [v22PublishToDirectoryClaim, setV22PublishToDirectoryClaim] = useState(null)
   // Phase 17.5.1.4: session-state Set<rfpId> of removed (deleted) RFPs.
   // Applied last in the Directory merge chain via `mergeRemovedRfps` so a
@@ -2920,14 +2919,16 @@ export default function V2App() {
     routeToRfpRef.current?.(newRfp.id, { rfp: newRfp })
   }, [v22RfpCreationContext, activeRole])
 
-  // Phase 18.2: PublishToDirectoryModal Submit. Mints a Disclosure Agreement
-  // with grantee = Radiant Network and pushes it into
+  // Phase 18.2 / 18.2.2: Publish-to-Directory Submit. Mints a Disclosure
+  // Agreement with grantee = Radiant Network and pushes it into
   // v22Provisionals.disclosureAgreements with its picked type (NOT
   // 'provisional'), so the Directory builder's `d.type !== 'provisional'`
   // filter passes immediately and the Claim surfaces in the active actor's
   // own cluster on next Directory render. No new merge helper required —
   // mergeProvisionals merges DAs by id and buildV22DirectoryDataForRole
   // detects grantee.party === 'Radiant Network' to populate publicClaimIds.
+  // Phase 18.2.2: the payload now arrives from CombinedResponseModal as
+  // { type, scope, daTerms: { expires } } (was { type, scope, expiryIso }).
   const handlePublishToDirectorySubmit = useCallback((payload) => {
     if (!v22PublishToDirectoryClaim || !activeRole) return
     const claim = v22PublishToDirectoryClaim
@@ -2940,7 +2941,7 @@ export default function V2App() {
       subject: { kind: 'claim', id: claim.id },
       type: payload.type,
       scope: payload.scope,
-      terms: { createdDate: new Date().toISOString(), expires: payload.expiryIso || null, autoRenew: false },
+      terms: { createdDate: new Date().toISOString(), expires: payload.daTerms?.expires || null, autoRenew: false },
       status: 'active',
     })
     setV22Provisionals((prev) => ({
@@ -2948,7 +2949,7 @@ export default function V2App() {
       disclosureAgreements: [...(prev.disclosureAgreements || []), newDa],
     }))
     setV22PublishToDirectoryClaim(null)
-    // Phase 18.2.1 (deferred): post-creation orchestration —
+    // Phase 18.2.3 (deferred): post-publish orchestration —
     //   • setV22DirectoryOpen(true)
     //   • variant of the load animation that zooms to ~60% on the new dot
     //   • auto-select the dot + open its Detail Panel
@@ -7357,54 +7358,76 @@ export default function V2App() {
           />
         )}
 
-        {/* Phase 18.2 — PublishToDirectoryModal. Owned Assets referenced by
-            this Claim feed the Full + Selective scope pickers (Selective's
-            field checkboxes come from each Asset's parsed fields, composite
-            id `${parseResultId}::${fieldId}`); PoEs wrapping this Claim's
-            Eval Results feed the Proof-Only picker. */}
+        {/* Phase 18.2.2 — Publish to Directory now reuses CombinedResponseModal
+            with directoryPublishMode. Same prop contract as the cold-path
+            Disclosure Response (referencedAssets / parseResults / poesForClaim);
+            the synthesized `request` carries the active actor as ownerParty +
+            'Radiant Network' as requesterParty. On accept the modal emits a
+            DA-only payload { type, scope, daTerms: { expires } }. */}
         {v22PublishToDirectoryClaim && (() => {
           const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const claim = v22PublishToDirectoryClaim
-          const allParseResults = shared.parseResults || []
-          // Owned Assets referenced by this Claim, enriched with their parsed
-          // fields (subject of Full + Selective scope).
-          const ownedAssets = (claim.referencedAssetIds || [])
+          // Active actor's Assets referenced by this Claim — Full/Selective scope source.
+          const referencedAssets = (claim.referencedAssetIds || [])
             .map((aid) => (shared.assets || []).find((a) => a.id === aid))
             .filter((a) => a && a.owner === activeRole.party)
-            .map((a) => ({
-              id: a.id,
-              name: a.name,
-              parsedFields: allParseResults
-                .filter((pr) => pr.sourceAssetId === a.id)
-                .flatMap((pr) => (pr.fields || []).map((f) => ({
-                  id: `${pr.id}::${f.id}`,
-                  name: f.name,
-                  parseResultName: pr.templateName || pr.id,
-                }))),
+            .map((a) => ({ id: a.id, name: a.name }))
+          // Parse Results on those Assets — Selective field-picker source.
+          const refAssetIdSet = new Set(referencedAssets.map((a) => a.id))
+          const parseResults = (shared.parseResults || [])
+            .filter((pr) => refAssetIdSet.has(pr.sourceAssetId))
+            .map((pr) => ({
+              id: pr.id,
+              sourceAssetId: pr.sourceAssetId,
+              templateName: pr.templateName,
+              fields: pr.fields || [],
             }))
-          // PoEs that wrap Eval Results of this Claim (subject of Proof-Only
-          // scope). Per Phase 13.1: PoE.wrappedEvalResultId → EvalResult.claimId.
-          const evalResultsById = new Map((shared.evaluationResults || []).map((er) => [er.id, er]))
-          const ownedPoEsOnClaim = (shared.proofsOfEvaluation || []).filter((poe) => {
-            const er = evalResultsById.get(poe.wrappedEvalResultId)
-            return er && er.claimId === claim.id
-          }).map((poe) => {
-            const er = evalResultsById.get(poe.wrappedEvalResultId)
-            return {
-              id: poe.id,
-              name: poe.name,
-              wrappedEvalResultId: poe.wrappedEvalResultId,
-              evaluatorParty: er?.evaluatorParty || er?.owner || 'unknown',
-            }
-          })
+          // PoEs on this Claim — Proof-Only picker source. Claim-membership
+          // filter only (per Phase 18.2.1.1 — the grantor can publish any
+          // PoE visible on their Claim, regardless of evaluator).
+          const evalResultByIdForPoe = new Map((shared.evaluationResults || []).map((er) => [er.id, er]))
+          const poesForClaim = (shared.proofsOfEvaluation || [])
+            .filter((poe) => poe.claimId === claim.id)
+            .map((poe) => {
+              let sat = 0, unsat = 0
+              const er = evalResultByIdForPoe.get(poe.wrappedEvalResultId)
+              if (er) {
+                for (const r of (er.results || [])) {
+                  if (r.status === 'satisfactory') sat += 1
+                  else if (r.status === 'unsatisfactory') unsat += 1
+                }
+              }
+              return {
+                id: poe.id,
+                name: poe.name,
+                owner: poe.owner,
+                wrappedCount: 1,
+                sat,
+                unsat,
+              }
+            })
+          // Synthesized request shape — directoryPublishMode replaces the
+          // requesterParty interpolations with publish-specific copy, but the
+          // field is still read at a few sites so we pass a sensible value.
+          // proposedEaTerms stays null because there's no EA half here.
+          const syntheticRequest = {
+            claim,
+            ownerParty: activeRole.party,
+            requesterParty: RADIANT_NETWORK_PARTY,
+            requesterAsset: null,
+            message: '',
+            requestedRequirementsSetIds: [],
+            proposedEaTerms: null,
+          }
           return (
-            <PublishToDirectoryModal
-              claim={claim}
-              activeRole={activeRole}
-              ownedAssets={ownedAssets}
-              ownedPoEsOnClaim={ownedPoEsOnClaim}
-              onSubmit={handlePublishToDirectorySubmit}
+            <CombinedResponseModal
+              request={syntheticRequest}
+              referencedAssets={referencedAssets}
+              parseResults={parseResults}
+              poesForClaim={poesForClaim}
+              onAccept={handlePublishToDirectorySubmit}
               onClose={() => setV22PublishToDirectoryClaim(null)}
+              directoryPublishMode={true}
             />
           )
         })()}
@@ -8961,8 +8984,9 @@ export default function V2App() {
                 hasActiveDaWithoutEa={hasActiveDaWithoutEa}
                 onAmendClaim={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => setV22AmendingClaimId(node.id) : undefined}
                 onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
-                // Phase 18.2: Publish to Directory (owner-only). Receives the
-                // Claim artifact; opens PublishToDirectoryModal.
+                // Phase 18.2 / 18.2.2: Publish to Directory (owner-only).
+                // Receives the Claim artifact; opens the publish modal
+                // (CombinedResponseModal in directoryPublishMode).
                 onPublishToDirectory={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? (claim) => setV22PublishToDirectoryClaim(claim) : undefined}
                 // Parse Result actions
                 sourceAsset={sourceAsset}
@@ -9303,7 +9327,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.2.1.1 &middot; Changelog
+          v0.18.2.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9350,6 +9374,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.2.2', date: '2026-05-22', label: 'Phase 18.2.2', items: [
+                  'Publish-to-Directory refactored to reuse the Disclosure Response modal. The bespoke publish modal from 18.2 is retired; publishing now runs through the same modal as a cold-path Disclosure Response, branched into 3 steps (Type → Scope → Review): no Decline card, no Evaluation Agreement terms step, no Acknowledgments row. Submit grants the Disclosure Agreement to the Radiant Network exactly as before. One modal, one set of primitives — future improvements to either surface now land on both.',
+                ]},
                 { version: '0.18.2.1.1', date: '2026-05-22', label: 'Phase 18.2.1.1', items: [
                   'PoE picker fix. The Proof-Only step of the Disclosure Response modal and the Proof-Only scope picker in Amend Disclosure now surface every Proof of Evaluation visible to you on the target Claim — including PoEs authored by other parties (e.g. an evaluator\'s PoE on your Claim). They previously only listed PoEs you authored yourself, which hid the common evaluator-to-claim-owner case.',
                 ]},
