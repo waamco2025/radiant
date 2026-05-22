@@ -231,8 +231,12 @@ function EvidenceClip() {
   )
 }
 
-function ActionButton({ icon, tooltip, onClick, categoryColor }) {
+function ActionButton({ icon, tooltip, onClick, categoryColor, disabled }) {
   const [hovered, setHovered] = useState(false)
+  // Phase 18.2.3: disabled support — muted, cursor: not-allowed, no onClick.
+  // The button still renders (with its tooltip) so the explanatory copy is
+  // reachable on hover; the click is inert. Used by the V22ActionBar
+  // already-published Publish to Directory gate.
   return (
     <Tooltip content={tooltip}>
       <div
@@ -240,17 +244,19 @@ function ActionButton({ icon, tooltip, onClick, categoryColor }) {
         onMouseLeave={() => setHovered(false)}
       >
         <button
-          onClick={e => { e.stopPropagation(); onClick() }}
+          disabled={disabled}
+          onClick={disabled ? (e => e.stopPropagation()) : (e => { e.stopPropagation(); onClick() })}
           onDoubleClick={e => e.stopPropagation()}
           style={{
             width: 24, height: 24,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: hovered ? 'var(--bg-raised)' : 'var(--bg-surface)',
-            border: hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)',
+            background: disabled ? 'var(--bg-surface)' : (hovered ? 'var(--bg-raised)' : 'var(--bg-surface)'),
+            border: disabled ? '1px solid var(--border)' : (hovered ? '1px solid var(--border-hover)' : '1px solid var(--border)'),
             borderRadius: 4,
-            color: hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+            color: disabled ? 'var(--text-dim)' : (hovered ? 'var(--text-primary)' : 'var(--text-secondary)'),
             fontSize: 12,
-            cursor: 'pointer',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.55 : 1,
             padding: 0,
             lineHeight: 1,
             fontFamily: 'var(--font-mono)',
@@ -305,7 +311,7 @@ function ActionBar({ onCreateAsset, onCreateSDA, onAddEvidence, onParseEvidence,
         }
       `}</style>
       {buttons.map((b, i) => (
-        <ActionButton key={i} icon={b.icon} tooltip={b.tooltip} onClick={b.onClick} categoryColor={categoryColor} />
+        <ActionButton key={i} icon={b.icon} tooltip={b.tooltip} onClick={b.onClick} categoryColor={categoryColor} disabled={b.disabled} />
       ))}
     </div>
   )
@@ -1331,7 +1337,7 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           // ACTOR branch's "+" pattern — same icon, same dispatch verb).
           buttons.push({ icon: '＋', tooltip: 'Register Asset', onClick: fire('registerAsset') })
           buttons.push({ icon: '⤴', tooltip: 'Request Agreement', onClick: fire('requestAgreement') })
-          buttons.push({ icon: '⊞', tooltip: 'Parse Evidence', onClick: fire('parseEvidence') })
+          buttons.push({ icon: '⊞', tooltip: 'Parse Asset', onClick: fire('parseEvidence') })
           buttons.push({ icon: '◇', tooltip: 'Create Claim', onClick: fire('createClaim') })
           // Phase 17.5: Create RFP (between Create Claim and Transfer). Not
           // shown in the _pendingTransfer branch — posting an RFP while
@@ -1358,7 +1364,16 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           buttons.push({ icon: '✎', tooltip: 'Amend Claim', onClick: fire('amendClaim') })
           buttons.push({ icon: '◆', tooltip: 'Self-Evaluate', onClick: fire('selfEvaluate') })
           // Phase 18.2: Publish to Directory (owner-only, mirrors footer).
-          buttons.push({ icon: '⊕', tooltip: 'Publish to Directory', onClick: fire('publishToDirectory') })
+          // Phase 18.2.3 (B3): disabled + parity tooltip once the Claim is
+          // already published to the Directory (`node._publishedToDirectory`).
+          buttons.push({
+            icon: '⊕',
+            tooltip: node._publishedToDirectory
+              ? 'This Claim is already published to the Public Directory.'
+              : 'Publish to Directory',
+            onClick: node._publishedToDirectory ? undefined : fire('publishToDirectory'),
+            disabled: !!node._publishedToDirectory,
+          })
         } else if (evaluationAgreementForActor) {
           buttons.push({ icon: '◆', tooltip: 'Run Evaluation', onClick: fire('runEvaluation') })
         } else if (node._hasActiveDaWithoutEa) {
@@ -1455,7 +1470,7 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
       animation: 'v2-action-slide 150ms ease',
     }}>
       {buttons.map((b, i) => (
-        <ActionButton key={i} icon={b.icon} tooltip={b.tooltip} onClick={b.onClick} categoryColor={categoryColor} />
+        <ActionButton key={i} icon={b.icon} tooltip={b.tooltip} onClick={b.onClick} categoryColor={categoryColor} disabled={b.disabled} />
       ))}
     </div>
   )

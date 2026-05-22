@@ -26,6 +26,7 @@
 // keeps the default fixed-height behavior so the modal sizes its tab body
 // region the same way it has since Phase 11B.
 
+import { useState, useEffect } from 'react'
 import CopyBadge from './DetailPanel/shared/CopyBadge.jsx'
 // Phase 15.0 (#172 part 1): PDF.js renderer with annotation overlay.
 // Opt-in via `usePdfJs` prop. Default behaviour (iframe) preserved for
@@ -70,6 +71,16 @@ export function AssetFileViewer({
   onAnchorClick = null,
 }) {
   const file = asset?.file || {}
+  // Phase 18.2.3 (#C4/C5): the plain-iframe path renders `src={file.localPath}`.
+  // Many demo Assets reference a `/…pdf` path whose physical file doesn't exist
+  // under public/ — the Vite dev server (and the Netlify SPA fallback) then
+  // serve index.html for that path, so the iframe ends up rendering the whole
+  // app inside itself. We detect that on load (the loaded document is the app
+  // shell: same-origin, has `#root` / the app title) and swap to a "No preview
+  // available" placeholder; onError covers genuine load failures. Reset the
+  // flag when the file changes (e.g. multi-Asset flip in the expand modal).
+  const [iframeFailed, setIframeFailed] = useState(false)
+  useEffect(() => { setIframeFailed(false) }, [file.localPath])
   const stretchStyle = fillHeight ? { flex: 1, minHeight: 200 } : { height: iframeHeight }
   const renderViaPdfJs = usePdfJs && file.mimeType === 'application/pdf' && !!file.localPath
   if (renderViaPdfJs) {
@@ -87,10 +98,26 @@ export function AssetFileViewer({
       </div>
     )
   }
-  if (file.localPath) {
+  const fileLooksValid = !!(file.localPath && String(file.localPath).trim().length > 0)
+  const handleIframeLoad = (e) => {
+    try {
+      const doc = e.target?.contentDocument
+      // A real PDF renders in the browser's native viewer → contentDocument is
+      // null/inaccessible. The SPA fallback is same-origin HTML carrying the
+      // app root (`#root`) / the app title → readable → flag as failed.
+      if (doc && (doc.getElementById('root') || /radiant/i.test(doc.title || ''))) {
+        setIframeFailed(true)
+      }
+    } catch {
+      // Native PDF viewer / cross-origin document → treat as a real document.
+    }
+  }
+  if (fileLooksValid && !iframeFailed) {
     return (
       <iframe
         src={file.localPath}
+        onLoad={handleIframeLoad}
+        onError={() => setIframeFailed(true)}
         style={{
           width: '100%', ...stretchStyle, border: '1px solid var(--border)',
           borderRadius: 6, background: 'var(--bg-deep)',
@@ -113,7 +140,7 @@ export function AssetFileViewer({
       textAlign: 'center',
       padding: 24,
     }}>
-      Document preview not available
+      No preview available.
     </div>
   )
 }

@@ -266,7 +266,7 @@ export default function V22ParseEvidenceModal({
         {stage === 2 && (
           <>
           <ModalHeader
-            title="Parse Evidence"
+            title="Parse Asset"
             subtitle={`Review extracted fields for ${sourceAsset?.name || 'this Asset'}`}
             step={3} totalSteps={3} onClose={onClose}
           />
@@ -349,7 +349,7 @@ export default function V22ParseEvidenceModal({
         {stage === 0 && (
             <>
               <ModalHeader
-                title="Parse Evidence"
+                title="Parse Asset"
                 subtitle={<>Extract structured data from <strong style={{ color: 'var(--text-primary)' }}>{sourceAsset?.name}</strong></>}
                 step={1} totalSteps={3} onClose={onClose}
               />
@@ -492,7 +492,7 @@ export default function V22ParseEvidenceModal({
               )}
               <ModalFooter>
                 <StepDots current={0} total={3} />
-                <Btn label="Parse Evidence →" accent disabled={!canStart} onClick={handleStart} />
+                <Btn label="Parse Asset →" accent disabled={!canStart} onClick={handleStart} />
               </ModalFooter>
             </>
           )}
@@ -500,7 +500,7 @@ export default function V22ParseEvidenceModal({
           {stage === 1 && (
             <>
               <ModalHeader
-                title="Parse Evidence"
+                title="Parse Asset"
                 subtitle="Processing evidence file…"
                 step={2} totalSteps={3} onClose={onClose}
               />

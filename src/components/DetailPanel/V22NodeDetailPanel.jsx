@@ -611,7 +611,7 @@ function V22AssetPanel({
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', flexWrap: 'nowrap', overflow: 'hidden', flex: 1 }}>
               <FooterButton icon="＋" label="Register Asset" onClick={onRegisterChildAsset} disabled={!onRegisterChildAsset} title="Register a new Asset as a child of this Asset" />
               <FooterButton icon="⤴" label="Request Agreement" onClick={onRequestAgreement} title="Request a Disclosure + Evaluation Agreement anchored to this Asset" />
-              <FooterButton icon="⊞" label="Parse Evidence" onClick={onParseEvidence} disabled={!onParseEvidence} title="Extract structured fields from this Asset using a Parsing Template" />
+              <FooterButton icon="⊞" label="Parse Asset" onClick={onParseEvidence} disabled={!onParseEvidence} title="Parse this Asset's evidence file with a parsing template to extract structured fields." />
               <FooterButton icon="◇" label="Create Claim" onClick={onCreateClaim} disabled={!onCreateClaim} title="Create a Claim referencing this Asset" />
               <FooterButton icon="⬚" label="Create RFP" onClick={onCreateRfp} disabled={!onCreateRfp} title="Post a public RFP anchored to this Asset — other actors will be able to solicit their Claims for review" />
               <FooterButton icon="→" label="Transfer" onClick={onTransferAsset} disabled={!onTransferAsset} title="Transfer ownership of this Asset to another actor" />
@@ -1497,9 +1497,20 @@ function V22ClaimPanel({
                 {onSelfEvaluate && (
                   <FooterButton icon="◆" label="Self-Evaluate" onClick={onSelfEvaluate} title="Run an evaluation against this Claim under your own authority — no Evaluation Agreement required." />
                 )}
-                {/* Phase 18.2: publish this Claim to the Public Directory. */}
+                {/* Phase 18.2: publish this Claim to the Public Directory.
+                    Phase 18.2.3 (B2): disabled with an explanatory tooltip once
+                    the Claim already has an active Radiant Network DA
+                    (`node._publishedToDirectory`) — revoke it first to republish. */}
                 {onPublishToDirectory && (
-                  <FooterButton icon="⊕" label="Publish to Directory" onClick={() => onPublishToDirectory(claim)} title="Publish this Claim to the Public Directory. Other actors will be able to see it on the Radiant Network." />
+                  <FooterButton
+                    icon="⊕"
+                    label="Publish to Directory"
+                    onClick={node._publishedToDirectory ? undefined : () => onPublishToDirectory(claim)}
+                    disabled={!!node._publishedToDirectory}
+                    title={node._publishedToDirectory
+                      ? "This Claim is already published to the Public Directory. Revoke the existing Disclosure Agreement in the Agreements section to republish."
+                      : "Publish this Claim to the Public Directory. Other actors will be able to see it on the Radiant Network."}
+                  />
                 )}
               </>
             ) : hasEvalAction ? (

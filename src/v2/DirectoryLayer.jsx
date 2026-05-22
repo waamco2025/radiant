@@ -1525,6 +1525,10 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // matching synthetic RFP card so AssetNode renders the NEW badge until the
   // user navigates away (cleared in V2App by a deselect effect).
   recentlyCreatedRfpId,
+  // Phase 18.2.3: id of the just-published Claim. Stamped as `_isNew` on the
+  // matching synthetic Claim card so AssetNode renders the NEW badge until the
+  // user navigates away (cleared in V2App by a deselect effect).
+  recentlyPublishedClaimId,
   // Phase 17.5.2.2 (Part 4): true when a Directory-side Detail Panel (Claim
   // or RFP) is open — shifts the zoom controls left so they clear the panel.
   detailPanelOpen,
@@ -1761,6 +1765,9 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
   // the marker (full-card LOD) owns the camera instead of being overridden.
   const recentlyCreatedRfpIdRef = useRef(null)
   recentlyCreatedRfpIdRef.current = recentlyCreatedRfpId
+  // Phase 18.2.3: same ref-mirror pattern for the recently-published Claim.
+  const recentlyPublishedClaimIdRef = useRef(null)
+  recentlyPublishedClaimIdRef.current = recentlyPublishedClaimId
 
   const [hover, setHover] = useState(null)
   const [pinned, setPinned] = useState(null)
@@ -2000,6 +2007,26 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
     animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
   }, [worldToScreen, animatedPanToWithZoom])
 
+  // ─── Phase 18.2.3: focusClaimInternal — shared focus helper for Claim
+  // dots, parallel to focusRfpInternal. Sets pinned (drives the dot's
+  // pinned-tooltip state + select brightening) AND pans + zooms with the
+  // panel-offset compensation. Consumed by selectClaim's imperative path
+  // (post-publish orchestration); Claim-dot click paths can adopt it later.
+  const focusClaimInternal = useCallback((d, dotIndex, opts = {}) => {
+    if (!d || !d.claim) return
+    const screen = worldToScreen(d.x, d.y)
+    setPinned({
+      claim: d.claim,
+      x: d.x, y: d.y,
+      screenX: screen.x, screenY: screen.y,
+      ownerParty: d.claim.owner,
+      dotIndex,
+    })
+    const targetZoom = opts.zoom ?? zoomRef.current
+    const panelOffsetWorld = (PANEL_W / 2) / targetZoom
+    animatedPanToWithZoom(d.x + panelOffsetWorld, d.y, targetZoom, 500)
+  }, [worldToScreen, animatedPanToWithZoom])
+
   // ─── Phase 17.2.0.2: imperative `selectRfp(rfp)` for notification-
   // driven full-select. Behavioural parity with a manual marker click —
   // sets pinned (drives tooltip + brightening) AND pans + zooms — plus
@@ -2031,7 +2058,25 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
       focusRfpInternal(d, dotIndex, { zoom: targetZoom })
       return true
     },
-  }), [focusRfpInternal])
+    // Phase 18.2.3: imperative selectClaim — mirror of selectRfp for
+    // post-publish (and future notification) routing. Looks up the Claim dot
+    // in layoutRef, calls focusClaimInternal at the target zoom (default
+    // full-card LOD; opts.zoom overrides — post-publish routing passes 0.6).
+    // Returns true on success, false if the dot isn't in the current layout
+    // yet (the caller's rAF retry consumes the false return).
+    selectClaim(claim, opts = {}) {
+      if (!claim || !claim.id) return false
+      const layoutCur = layoutRef.current
+      if (!layoutCur) return false
+      const claimDots = (layoutCur.allDots || []).filter((dot) => dot.kind !== 'rfp')
+      const dotIndex = claimDots.findIndex((dot) => dot.claim?.id === claim.id)
+      if (dotIndex < 0) return false
+      const d = claimDots[dotIndex]
+      const targetZoom = opts.zoom ?? Math.max(zoomRef.current, LOD_THRESHOLD)
+      focusClaimInternal(d, dotIndex, { zoom: targetZoom })
+      return true
+    },
+  }), [focusRfpInternal, focusClaimInternal])
 
   // ─── Overlay refresh ─────────────────────────────────────────────────
   const updateOverlayRef = useRef(() => {})
@@ -3948,6 +3993,13 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               _directoryRequestEaCandidate: !existingEa && !hasActiveDa,
               _directoryWarmPathRequestCandidate: warmPathCandidate,
             }
+          }
+          // Phase 18.2.3: NEW badge on the just-published Claim card — AssetNode
+          // reads `node._isNew` (same surface that handles provisional Claims +
+          // freshly-created RFPs). Applied after the owner/non-owner branch so
+          // it lands regardless of which path built directoryClaimNode.
+          if (recentlyPublishedClaimId && d.claim?.id === recentlyPublishedClaimId) {
+            directoryClaimNode = { ...directoryClaimNode, _isNew: true }
           }
           return (
             <div

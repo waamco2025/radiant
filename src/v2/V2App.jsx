@@ -340,6 +340,18 @@ export default function V2App() {
   // the ~23k-entry `allDots` every frame and firing setPinned/pan-zoom on
   // resolution — saturating the main thread and freezing the tab.
   const routeRfpSelectRafRef = useRef(0)
+  // Phase 18.2.3: post-publish orchestration. v22RecentlyPublishedClaimId
+  // stamps the just-published Claim's synthetic Directory card with `_isNew`
+  // so it renders the NEW badge until the user navigates away (cleared by the
+  // deselect effect below). routeToPublishedClaimRef holds the latest
+  // routeToPublishedClaim so handlePublishToDirectorySubmit (declared earlier)
+  // can fire it without a forward dependency — same pattern as routeToRfpRef.
+  // routePublishedClaimSelectRafRef holds the in-flight rAF select-retry id so
+  // it can be cancelled before a new route starts (no stacking — mirrors
+  // routeRfpSelectRafRef).
+  const [v22RecentlyPublishedClaimId, setV22RecentlyPublishedClaimId] = useState(null)
+  const routeToPublishedClaimRef = useRef(null)
+  const routePublishedClaimSelectRafRef = useRef(0)
   // Phase 17.2: session-state Map<solicitationId, RfpSolicitation> for
   // seller-initiated solicitations against an RFP. Mirror of
   // `v22ClosedRfpIds` shape — Map so updates (rejection, response date)
@@ -584,6 +596,23 @@ export default function V2App() {
       // Phase 13.1: 1:1 wrapping — singular `wrappedEvalResultId`.
       if (poe.wrappedEvalResultId) wrappedByOwnedPoe.add(poe.wrappedEvalResultId)
     }
+    // Phase 18.2.3: build the set of Claim ids the active actor has already
+    // published to the Public Directory (an active Radiant-Network-grantee DA
+    // exists). AssetNode reads `_publishedToDirectory` to disable the Publish
+    // to Directory action on the V22ClaimPanel footer + the V22ActionBar CLAIM
+    // branch — an already-published Claim must have its existing public DA
+    // revoked before it can be re-published. Same shape as the Phase 18.2.1.1
+    // predicate (Claim-ownership grants disclosure rights; the existing public
+    // DA gates the entry). Clears reactively when the DA is revoked because
+    // v22View recomputes from v22Provisionals.
+    const publishedToDirectoryClaimIds = new Set()
+    for (const da of (v22View?.disclosureAgreements || [])) {
+      if (da.subject?.kind !== 'claim') continue
+      if (da.grantor?.party !== activeRole.party) continue
+      if (da.grantee?.party !== RADIANT_NETWORK_PARTY) continue
+      if (da.type === 'provisional' || da._declineMeta || da._revokedMeta) continue
+      publishedToDirectoryClaimIds.add(da.subject.id)
+    }
     // Phase 13.3 (Step 2): for each owned, active, non-PoE-wrapped Eval
     // Result, decide whether Re-Run is permitted. Re-Run requires at
     // least one Asset in the Claim's currently-disclosed in-scope set
@@ -651,6 +680,8 @@ export default function V2App() {
       const eaForClaim = n.v22Type === 'CLAIM' ? eaByClaimForActor[n.id] : null
       const hasActiveDaWithoutEa = n.v22Type === 'CLAIM' && claimsWithActiveDaWithoutEa.has(n.id)
       const alreadyWrapped = n.v22Type === 'EVAL RESULT' && wrappedByOwnedPoe.has(n.id)
+      // Phase 18.2.3: only owned Claims that already have an active public DA.
+      const publishedToDir = n.v22Type === 'CLAIM' && n.owner === activeRole.party && publishedToDirectoryClaimIds.has(n.id)
       const canRerunFlag = n.v22Type === 'EVAL RESULT' && canRerunByErId.has(n.id)
         ? canRerunByErId.get(n.id)
         : null  // null = N/A; AssetNode treats !== false as "show button"
@@ -698,10 +729,11 @@ export default function V2App() {
       const skipNewBadge = needsReveal && n.v22Type === 'ASSET' && n.owner === activeRole.party
       const activeBadges = badgesByNodeId.get(n.id) || null
       const claimOwnerParty = claimOwnerByNodeId.get(n.id) || null
-      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional && !alreadyWrapped && canRerunFlag === null && !activeBadges && !claimOwnerParty) return n
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional && !alreadyWrapped && canRerunFlag === null && !activeBadges && !claimOwnerParty && !publishedToDir) return n
       return {
         ...n,
         ...(alreadyWrapped ? { _alreadyWrapped: true } : {}),
+        ...(publishedToDir ? { _publishedToDirectory: true } : {}),
         ...(canRerunFlag !== null ? { _canRerun: canRerunFlag } : {}),
         ...(activeBadges ? { _activeBadges: activeBadges } : {}),
         ...(claimOwnerParty ? { _claimOwnerParty: claimOwnerParty } : {}),
@@ -2949,11 +2981,14 @@ export default function V2App() {
       disclosureAgreements: [...(prev.disclosureAgreements || []), newDa],
     }))
     setV22PublishToDirectoryClaim(null)
-    // Phase 18.2.3 (deferred): post-publish orchestration —
-    //   • setV22DirectoryOpen(true)
-    //   • variant of the load animation that zooms to ~60% on the new dot
-    //   • auto-select the dot + open its Detail Panel
-    //   • NEW badge stamp
+    // Phase 18.2.3: post-publish orchestration. Stamp the NEW-badge target +
+    // route Parent → Directory to the new dot (60% LOD, Detail Panel
+    // auto-open). Mirrors handleRfpCreationSubmit setting recentlyCreatedRfpId
+    // + firing routeToRfpRef.current. The ref indirection avoids a forward dep
+    // (routeToPublishedClaim is declared later, after clearEdgeUiState +
+    // directoryLayerRef are in scope).
+    setV22RecentlyPublishedClaimId(claim.id)
+    routeToPublishedClaimRef.current?.(claim.id)
   }, [v22PublishToDirectoryClaim, activeRole])
 
   // Phase 17.2.1 / Phase 17.2.1.1: RFP owner clicked "Request Agreement"
@@ -4583,6 +4618,46 @@ export default function V2App() {
   // handlers (handleRfpCreationSubmit) can call it without a forward dep.
   routeToRfpRef.current = routeToRfp
 
+  // Phase 18.2.3: post-publish routing. Mirror of routeToRfp for the just-
+  // published Claim — route Parent → Directory, pan + zoom the new Claim dot
+  // to 60% LOD (Andrew's target — the dot reads clearly but the surrounding
+  // cluster stays visible), and open its Detail Panel.
+  const routeToPublishedClaim = useCallback((claimId, opts = {}) => {
+    const shared = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
+    const targetClaim = (shared.claims || []).find((c) => c.id === claimId) || opts.claim || null
+    if (!targetClaim) return
+    setSel(null)
+    clearEdgeUiState()
+    setV22DirectoryOpen(true)
+    setV22DirectorySelectedRfp(null)
+    setV22DirectorySelectedClaim(targetClaim)
+    // Phase 18.2.3: rAF retry loop — the Directory layout may still be
+    // rebuilding after the v22Provisionals setState flushes (the just-pushed
+    // DA needs to flow through mergeProvisionals → buildV22DirectoryDataForRole
+    // → publicClaimIds → ownClaims → the new dot in layout). Same 240-frame
+    // ceiling as routeToRfp's chain. Cancel any in-flight retry before
+    // starting a new one (no stacking).
+    if (routePublishedClaimSelectRafRef.current) {
+      cancelAnimationFrame(routePublishedClaimSelectRafRef.current)
+      routePublishedClaimSelectRafRef.current = 0
+    }
+    let attempts = 0
+    const trySelect = () => {
+      attempts += 1
+      const ok = directoryLayerRef.current?.selectClaim?.(targetClaim, { zoom: 0.6 })
+      if (ok || attempts > 240) {
+        routePublishedClaimSelectRafRef.current = 0
+        return
+      }
+      routePublishedClaimSelectRafRef.current = requestAnimationFrame(trySelect)
+    }
+    routePublishedClaimSelectRafRef.current = requestAnimationFrame(trySelect)
+  }, [v22Provisionals, clearEdgeUiState])
+  // Keep the ref pointing at the latest routeToPublishedClaim so
+  // handlePublishToDirectorySubmit (declared earlier) can call it without a
+  // forward dep. Same pattern as routeToRfpRef.
+  routeToPublishedClaimRef.current = routeToPublishedClaim
+
   // Phase 17.5.2: clear the NEW-badge reveal once the user navigates away from
   // the freshly-created RFP — when the selected Directory RFP is no longer the
   // recently-created one (selected another marker, closed the panel, or
@@ -4594,6 +4669,18 @@ export default function V2App() {
       setV22RecentlyCreatedRfpId(null)
     }
   }, [v22DirectorySelectedRfp, v22RecentlyCreatedRfpId])
+
+  // Phase 18.2.3: clear the NEW-badge reveal once the user navigates away from
+  // the freshly-published Claim — when the selected Directory Claim is no
+  // longer the recently-published one (selected another dot, closed the panel,
+  // or returned to Parent → v22DirectorySelectedClaim becomes null). Mirrors
+  // the routeToRfp clear-on-deselect effect above.
+  useEffect(() => {
+    if (!v22RecentlyPublishedClaimId) return
+    if (v22DirectorySelectedClaim?.id !== v22RecentlyPublishedClaimId) {
+      setV22RecentlyPublishedClaimId(null)
+    }
+  }, [v22DirectorySelectedClaim, v22RecentlyPublishedClaimId])
 
   // Phase 17.5.2 (Part B): navigate from an RFP's Detail Panel "For Asset"
   // row to that Asset on the parent canvas — the inverse of routeToRfp. Closes
@@ -6345,7 +6432,11 @@ export default function V2App() {
                 return
               case 'publishToDirectory':
                 // Phase 18.2: owner-only; surfaces the Publish to Directory modal.
-                if (node.owner === activeRole.party && node.v22Type === 'CLAIM') {
+                // Phase 18.2.3 (B4): defensive `_publishedToDirectory` no-op gate —
+                // belt-and-suspenders against any path that renders the action as
+                // active on an already-published Claim (the button is disabled at
+                // both surfaces, but this guards a forced/stale click).
+                if (node.owner === activeRole.party && node.v22Type === 'CLAIM' && !node._publishedToDirectory) {
                   setV22PublishToDirectoryClaim(node.v22Artifact || node)
                 }
                 return
@@ -6733,6 +6824,10 @@ export default function V2App() {
             // Phase 17.5.2: id of the just-created RFP — DirectoryLayer stamps
             // `_isNew` on its synthetic card so AssetNode renders the NEW badge.
             recentlyCreatedRfpId={v22RecentlyCreatedRfpId}
+            // Phase 18.2.3: id of the just-published Claim — DirectoryLayer
+            // stamps `_isNew` on its synthetic Claim card (NEW badge), parallel
+            // to recentlyCreatedRfpId.
+            recentlyPublishedClaimId={v22RecentlyPublishedClaimId}
             // Phase 17.5.2.2 (Part 4): true when any Directory-side Detail Panel
             // is open (Claim or RFP) — shifts the zoom controls left to clear it.
             detailPanelOpen={!!(v22DirectorySelectedClaim || v22DirectorySelectedRfp)}
@@ -9327,7 +9422,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.2.2 &middot; Changelog
+          v0.18.2.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9374,6 +9469,12 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.2.3', date: '2026-05-22', label: 'Phase 18.2.3', items: [
+                  'Post-publish orchestration. Publishing a Claim to the Directory now auto-transitions from the parent canvas to the Directory layer, pans and zooms to the new dot at ~60%, opens its Detail Panel, and marks the card with a NEW badge until you navigate away — mirroring the RFP post-creation flow.',
+                  'The Publish to Directory action is now disabled (with an explanatory tooltip) on Claims that already have an active Radiant Network Disclosure Agreement. Revoke the existing agreement to republish. Disabled on both the Detail Panel footer and the card action bar.',
+                  'Parse modal renamed "Parse Evidence" → "Parse Asset" across the modal title and entry-point labels.',
+                  'Asset preview now shows a "No preview available" placeholder when an Asset\'s file can\'t be resolved, instead of accidentally rendering the app inside the preview frame.',
+                ]},
                 { version: '0.18.2.2', date: '2026-05-22', label: 'Phase 18.2.2', items: [
                   'Publish-to-Directory refactored to reuse the Disclosure Response modal. The bespoke publish modal from 18.2 is retired; publishing now runs through the same modal as a cold-path Disclosure Response, branched into 3 steps (Type → Scope → Review): no Decline card, no Evaluation Agreement terms step, no Acknowledgments row. Submit grants the Disclosure Agreement to the Radiant Network exactly as before. One modal, one set of primitives — future improvements to either surface now land on both.',
                 ]},
