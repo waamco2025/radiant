@@ -268,7 +268,7 @@ export default function SolicitationCreateModal({
 
   const headerTitle = step === totalSteps
     ? 'Review your Solicitation'
-    : `Solicit with my Claim — Re: ${rfp?.name || 'RFP'}`
+    : `Solicit '${rfp?.name || 'RFP'}' with my Claim`
   const headerSubtitle = step === totalSteps
     ? `Confirm before sending to ${rfp?.owner || 'the RFP owner'}. A Disclosure Agreement is created so they can see the Claim you're offering.`
     : "Pick one of your Claims to offer against this RFP, choose how much of it to disclose, then send it to the RFP owner."
@@ -346,7 +346,24 @@ export default function SolicitationCreateModal({
                             )}
                             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-tertiary)', padding: '2px 6px', borderRadius: 4, background: 'var(--bg-deep)', textTransform: 'uppercase', flexShrink: 0 }}>{c.owner}</span>
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-dim)', paddingLeft: 24, fontFamily: 'var(--font-mono)' }}>{refCount} referenced asset{refCount === 1 ? '' : 's'}</div>
+                          {/* Phase 18.3.0.1: surface parse-result + PoE counts alongside
+                              referenced assets so the user can see at a glance which Claims
+                              support Selective (needs parse results) or Proof-Only (needs
+                              PoEs) disclosure in Step 2. Counts come from the per-Claim props
+                              V2App's mount already threads. Zero counts are shown, not
+                              suppressed — "0 PoEs" is itself informative. */}
+                          {(() => {
+                            const parseCount = (parseResultsByClaim[c.id] || []).length
+                            const poeCount = (poesByClaim[c.id] || []).length
+                            const parts = [
+                              `${refCount} referenced asset${refCount === 1 ? '' : 's'}`,
+                              `${parseCount} parse result${parseCount === 1 ? '' : 's'}`,
+                              `${poeCount} PoE${poeCount === 1 ? '' : 's'}`,
+                            ]
+                            return (
+                              <div style={{ fontSize: 11, color: 'var(--text-dim)', paddingLeft: 24, fontFamily: 'var(--font-mono)' }}>{parts.join(' • ')}</div>
+                            )
+                          })()}
                         </div>
                       )
                     })}

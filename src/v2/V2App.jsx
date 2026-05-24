@@ -9308,6 +9308,20 @@ export default function V2App() {
                   const er = node.v22Artifact
                   if (!er || !er.evaluationAgreementId) return false
                   if (er.status === 'superseded') return false
+                  // Phase 18.3.0.1: self-evaluation bypass. Self-eval EAs are
+                  // synthetic (built at evaluation-submit time and never
+                  // persisted to v22Provisionals.evaluationAgreements — see
+                  // handleV22EvaluationSubmit ~line 1912), so the EA lookup
+                  // below would return undefined and falsely flag the result
+                  // orphaned. The Claim owner has an implicit, inherent right
+                  // to evaluate their own Claim, so look at the evaluator↔owner
+                  // relationship instead of EA persistence. `evaluatorParty` is
+                  // stamped by makeEvaluationRunArtifacts (ea.grantee.party);
+                  // for self-eval that equals the Claim owner. Strict
+                  // relaxation — every previously-orphaned result stays
+                  // orphaned except this self-eval case.
+                  const claim = (v22View?.claims || []).find((c) => c.id === er.claimId)
+                  if (claim && er.evaluatorParty === claim.owner) return false
                   const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
                   return !ea
                 })()}
@@ -9538,7 +9552,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.3 &middot; Changelog
+          v0.18.3.0.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9585,6 +9599,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3.0.1', date: '2026-05-24', label: 'Phase 18.3.0.1', items: [
+                  'Solicitation modal polish. The modal title now reads "Solicit \'{RFP name}\' with my Claim" (was "Solicit with my Claim — Re: {RFP name}"), and the step counter no longer wraps. Step 1 Claim picker rows now show three counts — referenced assets • parse results • PoEs — so you can see at a glance which Claims support Selective or Proof-Only disclosure in Step 2.',
+                  'Self-evaluation Eval Results no longer show a false "Orphaned Evaluation Result" banner. The synthetic self-eval Evaluation Agreement is unpersisted by design, but the Claim owner has an implicit right to evaluate their own Claim — the orphan check now treats an evaluation by the Claim\'s own owner as never orphaned. This restores the Re-run Evaluation + Create Proof of Evaluation actions to the Eval Result Detail Panel footer, matching the action bar.',
+                ]},
                 { version: '0.18.3', date: '2026-05-22', label: 'Phase 18.3', items: [
                   'Solicitations now carry a Disclosure Agreement. The solicitation creation flow is redesigned from a single-step Claim picker into a 4-step flow: Required Standards + Claim → Disclosure Type → Scope + Expiry + Message → Review. On submit, a paired Disclosure Agreement is minted atomically (grantor = solicitor, grantee = RFP owner, subject = the offered Claim, type + scope per the modal selections) and granted to the RFP owner, so they get real visibility into the offered Claim instead of just a message and a reference.',
                   'The RFP owner now sees the offered Claim as a dot in the solicitor\'s cluster on their Directory (the existing umbrella outline wraps it). Rejecting a solicitation — or closing the RFP — revokes the linked Disclosure Agreement, and the Claim disappears from the owner\'s view.',

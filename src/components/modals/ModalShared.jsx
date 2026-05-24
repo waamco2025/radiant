@@ -113,6 +113,9 @@ export function ModalHeader({ title, subtitle, step, totalSteps, onClose }) {
             <span style={{
               fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)',
               padding: '3px 10px', background: 'var(--bg-raised)', borderRadius: 10,
+              // Phase 18.3.0.1 (Item 2): keep "Step N of M" on one line even when
+              // a long modal title wraps and squeezes the remaining flex column.
+              whiteSpace: 'nowrap', flexShrink: 0,
             }}>Step {step} of {totalSteps}</span>
           )}
         </div>
