@@ -9297,31 +9297,46 @@ export default function V2App() {
                   // Reverse so the oldest-first ordering reads as a timeline.
                   return reverseChain.reverse()
                 })()}
-                // Phase 9D.1.3 Fix 6: orphan detection for Eval Result panel.
-                // An ER is orphaned when its backing EA is no longer in the
-                // active view — either revoked or already dismissed. Self-
-                // evaluated ERs (no evaluationAgreementId) are never orphaned.
-                // Superseded ERs aren't flagged orphaned either; the existing
-                // SUPERSEDED treatment handles that case.
+                // Phase 9D.1.3 Fix 6 / Phase 18.3.0.2: orphan detection for
+                // Eval Result panel. An ER is orphaned when its backing EA
+                // is no longer in the active view — either revoked or
+                // already dismissed. Superseded ERs aren't flagged orphaned
+                // either; the existing SUPERSEDED treatment handles that.
+                //
+                // Self-evaluation bypass: the synthetic self-eval EA built
+                // at handleV22EvaluationSubmit (V2App ~line 1912) has the
+                // form `{ id: `self-eval-${claimId}`, grantor === grantee
+                // === active actor }` and is fed to makeEvaluationRunArtifacts
+                // without being persisted to v22Provisionals.evaluationAgreements.
+                // The EA lookup below therefore returns undefined for every
+                // self-eval result and would falsely flag it orphaned without
+                // a bypass.
+                //
+                // 18.3.0.1 tried `er.evaluatorParty === claim.owner` as the
+                // self-eval signal, but `evaluatorParty` isn't preserved on
+                // the output Eval Result artifact by makeEvaluationRunArtifacts
+                // — there are no `er.evaluatorParty` read sites anywhere in
+                // V2.2 (only `node.evaluatorParty`, which is an adapter-
+                // computed property on the synthetic card node). The check
+                // returned false against undefined and never fired.
+                //
+                // 18.3.0.2 switches to the synthetic-EA id prefix
+                // (`self-eval-`), which V2App:1913 is the sole site to emit.
+                // The check operates on the same `evaluationAgreementId`
+                // field the EA lookup below already reads, so the field is
+                // guaranteed populated. Architecturally aligns with "the
+                // Claim owner has an implicit, inherent right to evaluate
+                // their own Claim" — the synthetic EA stands in for that
+                // implicit right; its non-persistence shouldn't propagate
+                // into an orphan state. Strict relaxation: every previously-
+                // orphaned cross-party result stays orphaned.
                 isOrphaned={(() => {
                   if (node.v22Type !== 'EVAL RESULT') return false
                   const er = node.v22Artifact
                   if (!er || !er.evaluationAgreementId) return false
                   if (er.status === 'superseded') return false
-                  // Phase 18.3.0.1: self-evaluation bypass. Self-eval EAs are
-                  // synthetic (built at evaluation-submit time and never
-                  // persisted to v22Provisionals.evaluationAgreements — see
-                  // handleV22EvaluationSubmit ~line 1912), so the EA lookup
-                  // below would return undefined and falsely flag the result
-                  // orphaned. The Claim owner has an implicit, inherent right
-                  // to evaluate their own Claim, so look at the evaluator↔owner
-                  // relationship instead of EA persistence. `evaluatorParty` is
-                  // stamped by makeEvaluationRunArtifacts (ea.grantee.party);
-                  // for self-eval that equals the Claim owner. Strict
-                  // relaxation — every previously-orphaned result stays
-                  // orphaned except this self-eval case.
-                  const claim = (v22View?.claims || []).find((c) => c.id === er.claimId)
-                  if (claim && er.evaluatorParty === claim.owner) return false
+                  // Self-eval bypass — see comment block above.
+                  if (er.evaluationAgreementId.startsWith('self-eval-')) return false
                   const ea = (v22View?.evaluationAgreements || []).find(e => e.id === er.evaluationAgreementId)
                   return !ea
                 })()}
@@ -9552,7 +9567,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.3.0.1 &middot; Changelog
+          v0.18.3.0.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9599,6 +9614,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3.0.2', date: '2026-05-24', label: 'Phase 18.3.0.2', items: [
+                  'Self-eval orphan check signal swap. Phase 18.3.0.1\'s bypass used `er.evaluatorParty === claim.owner`, but `evaluatorParty` isn\'t preserved on the output Eval Result artifact by makeEvaluationRunArtifacts — no `er.evaluatorParty` read sites exist anywhere in V2.2, only `node.evaluatorParty` on adapter-computed card nodes. The check returned false against undefined and never fired. Replaced with `er.evaluationAgreementId.startsWith(\'self-eval-\')` — V2App is the sole site that emits the `self-eval-` prefix, so the check is unique and complete. It operates on the same field the EA lookup already reads (guaranteed populated).',
+                  'Self-eval Eval Results no longer show the false "Orphaned Evaluation Result" banner; the Detail Panel footer correctly shows Re-run Evaluation + Create Proof of Evaluation for self-evaluations, matching action-bar parity. Cross-party orphan cases (e.g. revoking Carol\'s Evaluation Agreement on an Alice Claim) still correctly flag orphan and present Dismiss-only.',
+                ]},
                 { version: '0.18.3.0.1', date: '2026-05-24', label: 'Phase 18.3.0.1', items: [
                   'Solicitation modal polish. The modal title now reads "Solicit \'{RFP name}\' with my Claim" (was "Solicit with my Claim — Re: {RFP name}"), and the step counter no longer wraps. Step 1 Claim picker rows now show three counts — referenced assets • parse results • PoEs — so you can see at a glance which Claims support Selective or Proof-Only disclosure in Step 2.',
                   'Self-evaluation Eval Results no longer show a false "Orphaned Evaluation Result" banner. The synthetic self-eval Evaluation Agreement is unpersisted by design, but the Claim owner has an implicit right to evaluate their own Claim — the orphan check now treats an evaluation by the Claim\'s own owner as never orphaned. This restores the Re-run Evaluation + Create Proof of Evaluation actions to the Eval Result Detail Panel footer, matching the action bar.',
