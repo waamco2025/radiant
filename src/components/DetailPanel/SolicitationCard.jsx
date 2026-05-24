@@ -78,22 +78,6 @@ function StatusBadge({ status }) {
   )
 }
 
-function ActorPill({ party }) {
-  return (
-    <span style={{
-      fontSize: 9,
-      fontFamily: 'var(--font-mono)',
-      fontWeight: 700,
-      letterSpacing: '0.08em',
-      color: 'var(--text-tertiary)',
-      padding: '2px 6px',
-      borderRadius: 4,
-      background: 'var(--bg-deep)',
-      textTransform: 'uppercase',
-    }}>ACTOR</span>
-  )
-}
-
 function MessageBlock({ label, text }) {
   if (!text) return null
   return (
@@ -101,7 +85,6 @@ function MessageBlock({ label, text }) {
       marginTop: 10,
       padding: '8px 10px',
       background: 'var(--bg-deep)',
-      borderLeft: '2px solid color-mix(in srgb, var(--accent-indigo) 60%, var(--border))',
       borderRadius: 3,
     }}>
       <div style={{
@@ -164,6 +147,11 @@ export default function SolicitationCard({
   viewerRole,            // 'owner' | 'solicitor'
   onReject,              // owner-only: (solicitation) => void
   onRequestAgreement,    // owner-only: (solicitation) => void  (Phase 17.2.1)
+  // Phase 18.3.1: click the card body to navigate to the offered Claim
+  // on Directory. Wired for both viewer roles — both end up on the same
+  // Claim. Optional; when omitted the click is a no-op and the cursor
+  // stays default.
+  onSelectSolicitation,
 }) {
   if (!solicitation) return null
 
@@ -183,75 +171,85 @@ export default function SolicitationCard({
       background: 'var(--bg-card)',
       marginBottom: 10,
     }}>
-      {/* Header row — solicitor party + status badge */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 8,
-      }}>
-        <ActorPill party={solicitation.solicitor} />
-        <span style={{
-          fontSize: 12,
-          color: 'var(--text-primary)',
-          fontWeight: 600,
-        }}>{solicitation.solicitor}</span>
-        <span style={{
+      {/* Phase 18.3.1: clickable card body. Click navigates to the offered
+          Claim in Directory (V2App's onSelectSolicitation → routeToPublishedClaim).
+          Buttons below sit outside this region so they capture their own clicks.
+          Wired for both viewer roles. */}
+      <div
+        onClick={onSelectSolicitation ? () => onSelectSolicitation(solicitation) : undefined}
+        style={{
+          cursor: onSelectSolicitation ? 'pointer' : 'default',
+        }}
+        onMouseEnter={(e) => {
+          if (onSelectSolicitation) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent-indigo) 4%, transparent)'
+        }}
+        onMouseLeave={(e) => {
+          if (onSelectSolicitation) e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        {/* Title row: Claim name + StatusBadge top-right */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 8,
+          marginBottom: 4,
+        }}>
+          <div style={{
+            flex: 1,
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            lineHeight: 1.35,
+            wordBreak: 'break-word',
+          }}>{claimName}</div>
+          <StatusBadge status={status} />
+        </div>
+
+        {/* Subtitle: "from {owner}" */}
+        <div style={{
           fontSize: 11,
           color: 'var(--text-tertiary)',
-        }}>solicited</span>
-        <div style={{ flex: 1 }} />
-        <StatusBadge status={status} />
-      </div>
-
-      {/* Referenced Claim row */}
-      <div style={{
-        fontSize: 12,
-        color: 'var(--text-secondary)',
-        lineHeight: 1.5,
-        marginBottom: 6,
-        wordBreak: 'break-word',
-      }}>
-        <span style={{ color: 'var(--text-tertiary)' }}>Re: </span>
-        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{claimName}</span>
-        <span style={{ color: 'var(--text-tertiary)' }}> from </span>
-        <span style={{ color: 'var(--text-primary)' }}>{claimOwner}</span>
-      </div>
-
-      {/* Solicitor's message (if any) */}
-      <MessageBlock label="Seller's message" text={solicitation.message} />
-
-      {/* Buyer's rejection reply (solicitor view, rejected status, message present) */}
-      {isRejected && (
-        <MessageBlock label="Buyer's reply" text={solicitation.rejectionMessage} />
-      )}
-
-      {/* Dates */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        marginTop: 10,
-        fontSize: 11,
-        fontFamily: 'var(--font-mono)',
-        color: 'var(--text-tertiary)',
-      }}>
-        <div>
-          <span style={{ color: 'var(--text-dim)' }}>Solicited </span>
-          <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.createdDate)}</span>
+          marginBottom: 8,
+          lineHeight: 1.4,
+        }}>
+          from <span style={{ color: 'var(--text-secondary)' }}>{claimOwner}</span>
         </div>
-        {isRejected && solicitation.respondedDate && (
-          <div>
-            <span style={{ color: 'var(--text-dim)' }}>Rejected </span>
-            <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
-          </div>
+
+        {/* Solicitor's message (if any) */}
+        <MessageBlock label="Seller's message" text={solicitation.message} />
+
+        {/* Buyer's rejection reply (rejected status, message present) */}
+        {isRejected && (
+          <MessageBlock label="Buyer's reply" text={solicitation.rejectionMessage} />
         )}
-        {isAccepted && solicitation.respondedDate && (
+
+        {/* Dates */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 3,
+          marginTop: 10,
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-tertiary)',
+        }}>
           <div>
-            <span style={{ color: 'var(--text-dim)' }}>Agreement requested </span>
-            <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
+            <span style={{ color: 'var(--text-dim)' }}>Solicited </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.createdDate)}</span>
           </div>
-        )}
+          {isRejected && solicitation.respondedDate && (
+            <div>
+              <span style={{ color: 'var(--text-dim)' }}>Rejected </span>
+              <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
+            </div>
+          )}
+          {isAccepted && solicitation.respondedDate && (
+            <div>
+              <span style={{ color: 'var(--text-dim)' }}>Agreement requested </span>
+              <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(solicitation.respondedDate)}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Phase 17.2.1: accepted-state pointer. The provisional EA+DA now

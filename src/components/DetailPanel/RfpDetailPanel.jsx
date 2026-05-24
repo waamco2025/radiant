@@ -303,6 +303,10 @@ export default function RfpDetailPanel({
   claimsById = null,    // optional Map<claimId, claim> used to resolve Claim metadata for SolicitationCard
   onOpenSolicitModal,    // ({ rfp }) => void — parent opens SolicitationCreateModal
   onRejectSolicitation,  // (solicitation) => void — parent opens SolicitationRejectModal
+  // Phase 18.3.1: clicking a SolicitationCard body navigates to the offered
+  // Claim on Directory. Threaded to both the owner-side (incoming) and
+  // solicitor-side (your-solicitation) card mounts.
+  onSelectSolicitation,  // (solicitation) => void
   // Phase 17.2.1: owner-side accept entry point. Click on the
   // SolicitationCard's "Request Agreement" button fires this; V2App opens
   // the CombinedRequestModal pre-filled with the RFP's assetId + Claim.
@@ -631,6 +635,7 @@ export default function RfpDetailPanel({
                       viewerRole="owner"
                       onReject={onRejectSolicitation}
                       onRequestAgreement={onRequestAgreement}
+                      onSelectSolicitation={onSelectSolicitation}
                     />
                   )
                 })}
@@ -645,6 +650,7 @@ export default function RfpDetailPanel({
               solicitation={userSolicitation}
               claim={claimsById ? claimsById.get(userSolicitation.claimId) : null}
               viewerRole="solicitor"
+              onSelectSolicitation={onSelectSolicitation}
             />
           </div>
         )}

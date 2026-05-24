@@ -815,6 +815,13 @@ function V22ClaimPanel({
   existingEaForActor = null,
   onRequestEa,
   onViewEa,
+  // Phase 18.3.1: Reject Solicitation entry point. Visible when
+  // node._solicitationContext is set (i.e. the viewer is being offered this
+  // Claim via a pending solicitation). Click fires the SolicitationRejectModal
+  // via V2App, which on submit cascade-revokes the linked DA + transitions the
+  // solicitation to 'rejected'. Receives the solicitation id (not the
+  // artifact) — V2App resolves the full artifact from v22Solicitations.
+  onRejectSolicitation,
   referencedAssetNames = [],
   // Phase 11D.3: when the viewer's active disclosure on this Claim is
   // proof-only (and only proof-only), the Referenced Assets section renders
@@ -1485,7 +1492,12 @@ function V22ClaimPanel({
         // Phase 14.2 (#169a): Issue Badge footer button on Claim panel.
         // Visible to any non-owner with an Issue Badge handler wired.
         const hasIssueBadgeAction = !isOwner && !!onIssueBadge
-        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction && !hasColdRequestAction && !hasViewEaAction && !hasIssueBadgeAction) return null
+        // Phase 18.3.1: Reject affordance composes additively with the existing
+        // non-owner branches. The warm-path Request EA button continues to
+        // render via hasWarmPathAction (the solicitation DA satisfies that
+        // predicate); Reject appends after it.
+        const hasRejectSolicitationAction = !isOwner && !!node._solicitationContext && !!onRejectSolicitation
+        if (!noticeForPanel && !hasOwnerActions && !hasEvalAction && !hasWarmPathAction && !hasColdRequestAction && !hasViewEaAction && !hasIssueBadgeAction && !hasRejectSolicitationAction) return null
         return (
           <>
             {noticeForPanel && (
@@ -1531,6 +1543,18 @@ function V22ClaimPanel({
             ) : hasColdRequestAction ? (
               <FooterButton icon="▷" label="Request Evaluation Agreement" onClick={() => onRequestEa(claim)} title="Request a Disclosure + Evaluation Agreement on this Claim." />
             ) : null}
+            {/* Phase 18.3.1: Reject Solicitation — additive, after the
+                Run Eval / Request EA / View EA branch and before Issue Badge.
+                Fires SolicitationRejectModal via V2App, which cascade-revokes
+                the linked DA on confirm. */}
+            {hasRejectSolicitationAction && (
+              <FooterButton
+                icon="✕"
+                label="Reject Solicitation"
+                onClick={() => onRejectSolicitation(node._solicitationContext.solicitationId)}
+                title="Reject this solicitation. The Disclosure Agreement will be revoked; the solicitor will be notified."
+              />
+            )}
             {hasIssueBadgeAction && (
               <FooterButton
                 icon={<BadgeShieldIcon size={13} color="currentColor" />}

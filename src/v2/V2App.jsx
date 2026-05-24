@@ -181,6 +181,31 @@ function findClearY(targetX, idealY, allNodes, spacingY = 300, toleranceX = 150)
   return idealY + spacingY * 50
 }
 
+// Phase 18.3.1: compute solicitation context for a Claim from the viewer's
+// perspective. Returns { solicitationId, rfpId } when an active solicitation-DA
+// targets the viewer AND the linked solicitation is still pending; null
+// otherwise. Pending-only gating is intentional — after acceptance, the
+// solicitation's role is complete (the EA takes over) and the Reject affordance
+// no longer makes sense. Inputs are pure (no render-state closure), so this
+// lives at module scope. The signal that a DA is a solicitation DA is the
+// `_solicitationId` stamp minted in handleCreateSolicitation (Phase 18.3).
+function computeSolicitationContext(claim, activeParty, disclosureAgreements, solicitationsMap) {
+  if (!claim || !activeParty) return null
+  const da = (disclosureAgreements || []).find((d) =>
+    d.subject?.kind === 'claim' &&
+    d.subject?.id === claim.id &&
+    d.grantee?.party === activeParty &&
+    !!d._solicitationId &&
+    d.type !== 'provisional' &&
+    !d._declineMeta &&
+    !d._revokedMeta,
+  )
+  if (!da) return null
+  const sol = solicitationsMap?.get?.(da._solicitationId)
+  if (!sol || sol.status !== 'pending') return null
+  return { solicitationId: da._solicitationId, rfpId: da._rfpId }
+}
+
 export default function V2App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('radiant-theme') || 'dark')
   const [roleId, setRoleId] = useState('bob-govco')
@@ -613,6 +638,26 @@ export default function V2App() {
       if (da.type === 'provisional' || da._declineMeta || da._revokedMeta) continue
       publishedToDirectoryClaimIds.add(da.subject.id)
     }
+    // Phase 18.3.1: solicitation-context stamps. For each Claim the active
+    // actor does NOT own, check whether a pending solicitation-DA offers it to
+    // them. When present, the node carries the solicitation pointer so
+    // V22ActionBar + V22ClaimPanel can surface the Reject affordance (the
+    // warm-path Request EA appears automatically via _hasActiveDaWithoutEa,
+    // since the solicitation DA is structurally a directed DA without an EA).
+    // Pending solicitations only — see computeSolicitationContext.
+    const solicitationContextByClaimId = new Map()
+    if (v22View) {
+      for (const claim of (v22View.claims || [])) {
+        if (claim.owner === activeRole.party) continue
+        const ctx = computeSolicitationContext(
+          claim,
+          activeRole.party,
+          v22View.disclosureAgreements || [],
+          v22Solicitations,
+        )
+        if (ctx) solicitationContextByClaimId.set(claim.id, ctx)
+      }
+    }
     // Phase 13.3 (Step 2): for each owned, active, non-PoE-wrapped Eval
     // Result, decide whether Re-Run is permitted. Re-Run requires at
     // least one Asset in the Claim's currently-disclosed in-scope set
@@ -673,6 +718,7 @@ export default function V2App() {
       || v22RevealActiveClaimId != null
       || wrappedByOwnedPoe.size > 0
       || badgesByNodeId.size > 0
+      || solicitationContextByClaimId.size > 0
     if (!anyDecoration) return v22Data
     const nodes = v22Data.nodes.map(n => {
       const needsReveal = flagged.has(n.id)
@@ -682,6 +728,11 @@ export default function V2App() {
       const alreadyWrapped = n.v22Type === 'EVAL RESULT' && wrappedByOwnedPoe.has(n.id)
       // Phase 18.2.3: only owned Claims that already have an active public DA.
       const publishedToDir = n.v22Type === 'CLAIM' && n.owner === activeRole.party && publishedToDirectoryClaimIds.has(n.id)
+      // Phase 18.3.1: solicitation context on non-owned Claims offered to the
+      // active actor via a pending solicitation DA.
+      const solicitationContext = n.v22Type === 'CLAIM' && n.owner !== activeRole.party
+        ? (solicitationContextByClaimId.get(n.id) || null)
+        : null
       const canRerunFlag = n.v22Type === 'EVAL RESULT' && canRerunByErId.has(n.id)
         ? canRerunByErId.get(n.id)
         : null  // null = N/A; AssetNode treats !== false as "show button"
@@ -729,11 +780,12 @@ export default function V2App() {
       const skipNewBadge = needsReveal && n.v22Type === 'ASSET' && n.owner === activeRole.party
       const activeBadges = badgesByNodeId.get(n.id) || null
       const claimOwnerParty = claimOwnerByNodeId.get(n.id) || null
-      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional && !alreadyWrapped && canRerunFlag === null && !activeBadges && !claimOwnerParty && !publishedToDir) return n
+      if (!needsReveal && !isEndpoint && !eaForClaim && !hasActiveDaWithoutEa && !isUnraveling && !showAsProvisional && !alreadyWrapped && canRerunFlag === null && !activeBadges && !claimOwnerParty && !publishedToDir && !solicitationContext) return n
       return {
         ...n,
         ...(alreadyWrapped ? { _alreadyWrapped: true } : {}),
         ...(publishedToDir ? { _publishedToDirectory: true } : {}),
+        ...(solicitationContext ? { _solicitationContext: solicitationContext } : {}),
         ...(canRerunFlag !== null ? { _canRerun: canRerunFlag } : {}),
         ...(activeBadges ? { _activeBadges: activeBadges } : {}),
         ...(claimOwnerParty ? { _claimOwnerParty: claimOwnerParty } : {}),
@@ -783,7 +835,7 @@ export default function V2App() {
       ))
     }
     return { ...v22Data, nodes, edges, nodeMap }
-  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId, v22PendingRevealsByRole, roleId, badgeIssuances, badgeTemplates])
+  }, [v22Data, v22RecentlyAcceptedClaimId, v22RevealActiveClaimId, v22RecentlyAcceptedAssetId, selectedEdgeId, v22View, activeRole.party, v22UnravelingNodeId, v22PendingRevealsByRole, roleId, badgeIssuances, badgeTemplates, v22Solicitations])
 
   // V2.2 Phase 4–5 handlers + pan-to-node effect are declared *below*
   // updateRoleState (further down in this component) because they depend on
@@ -4736,6 +4788,20 @@ export default function V2App() {
   // forward dep. Same pattern as routeToRfpRef.
   routeToPublishedClaimRef.current = routeToPublishedClaim
 
+  // Phase 18.3.1: clicking a solicitation row anywhere routes the viewer to
+  // the offered Claim in Directory. Reuses the Phase 18.2.3
+  // routeToPublishedClaim machinery — the function name is a holdover (the
+  // Claim isn't necessarily "published"; it's directed-disclosed via the
+  // solicitation DA), but the routing behavior (open Directory → select Claim
+  // imperatively → open Detail Panel) is identical to the publish case. Wired
+  // from both RfpDetailPanel solicitation rows (any viewerRole, any status)
+  // and from the notification-click handler (Part F). Declared after
+  // routeToPublishedClaim so the useCallback dep is initialized.
+  const handleSelectSolicitation = useCallback((solicitation) => {
+    if (!solicitation || !solicitation.claimId) return
+    routeToPublishedClaim(solicitation.claimId)
+  }, [routeToPublishedClaim])
+
   // Phase 17.5.2: clear the NEW-badge reveal once the user navigates away from
   // the freshly-created RFP — when the selected Directory RFP is no longer the
   // recently-created one (selected another marker, closed the panel, or
@@ -5709,7 +5775,29 @@ export default function V2App() {
                             ...prev,
                             dismissedReqs: [...prev.dismissedReqs, req.id],
                           }))
-                        } else if (req.type === 'v22-rfp-solicitation-received' || req.type === 'v22-rfp-solicitation-rejected' || req.type === 'v22-rfp-solicitation-accepted' || req.type === 'v22-rfp-closed' || req.type === 'v22-rfp-reopened') {
+                        } else if (req.type === 'v22-rfp-solicitation-received') {
+                          // Phase 18.3.1: receivers (Bob) navigate to the
+                          // offered Claim on Directory rather than the RFP
+                          // marker. The solicitation context is semantically
+                          // Claim-centric — Bob's primary task on click is to
+                          // review the Claim's scope, request an EA, or reject.
+                          // Routing to the RFP would land him on the RFP card
+                          // with the solicitation buried in the incoming list;
+                          // routing to the Claim drops him into the panel that
+                          // surfaces the action affordances directly. Click is
+                          // auto-dismissed (mirrors the previous combined
+                          // branch).
+                          updateRoleState(roleId, prev => ({
+                            ...prev,
+                            dismissedReqs: [...prev.dismissedReqs, req.id],
+                          }))
+                          // claimId was populated on this notification type in
+                          // Phase 18.3 (handleCreateSolicitation).
+                          if (req.claimId) {
+                            clearEdgeUiState()
+                            handleSelectSolicitation({ claimId: req.claimId })
+                          }
+                        } else if (req.type === 'v22-rfp-solicitation-rejected' || req.type === 'v22-rfp-solicitation-accepted' || req.type === 'v22-rfp-closed' || req.type === 'v22-rfp-reopened') {
                           // Phase 17.2: click navigates to Directory → RFP
                           // marker → RfpDetailPanel. Both notification types
                           // route to the same RFP — received lands on the
@@ -6548,6 +6636,20 @@ export default function V2App() {
                 })
                 return
               }
+              case 'rejectSolicitation': {
+                // Phase 18.3.1: action-bar entry — mirror of the Detail Panel
+                // footer Reject button. Look up the solicitation via
+                // node._solicitationContext; open the existing
+                // SolicitationRejectModal which on confirm fires
+                // handleRejectSolicitation (cascade-revoke included since
+                // Phase 18.3).
+                if (node.v22Type !== 'CLAIM') return
+                const ctx = node._solicitationContext
+                if (!ctx) return
+                const sol = v22Solicitations.get(ctx.solicitationId)
+                if (sol) setV22SolicitationToReject(sol)
+                return
+              }
               case 'reRunEvaluation': {
                 const er = node.v22Artifact
                 if (!er) return
@@ -7012,6 +7114,21 @@ export default function V2App() {
           const sharedForPanel = mergeProvisionals(buildV22SharedArtifacts(), v22Provisionals)
           const claim = v22DirectorySelectedClaim
           const syntheticNode = buildClaimNodeForDirectoryMaterialization(claim, sharedForPanel.evaluationResults || [])
+          // Phase 18.3.1: solicitation-context stamp on the Directory-materialized
+          // Claim. Same predicate as v22DataWithReveal but scoped to the Directory
+          // mount's own data (sharedForPanel). Required for the Reject affordance
+          // to appear when Bob lands on Alice's Claim via the notification →
+          // Directory → Claim panel routing path (Part F). syntheticNode is a
+          // freshly-built local object, so a direct stamp is safe.
+          if (claim.owner !== activeRole.party) {
+            const solCtx = computeSolicitationContext(
+              claim,
+              activeRole.party,
+              sharedForPanel.disclosureAgreements || [],
+              v22Solicitations,
+            )
+            if (solCtx) syntheticNode._solicitationContext = solCtx
+          }
           // Build the in-scope referenced-Asset rows (same shape as the
           // standard panel mount). For non-owners, scope-filter to Assets
           // covered by an active DA where the active actor is grantee.
@@ -7181,6 +7298,15 @@ export default function V2App() {
                 // so the row's Revoke button fires the same flow the parent canvas does.
                 onRevokeDa={(da) => handleOpenRevocationConfirm(da, 'DA')}
                 onRevokeEa={(ea) => handleOpenRevocationConfirm(ea, 'EA')}
+                // Phase 18.3.1: Reject Solicitation entry on the Directory-
+                // materialized Claim panel. Required so the notification →
+                // Directory → Claim routing path (Part F) surfaces Reject when
+                // Bob lands on Alice's solicited Claim. syntheticNode carries
+                // _solicitationContext (stamped above).
+                onRejectSolicitation={(solicitationId) => {
+                  const sol = v22Solicitations.get(solicitationId)
+                  if (sol) setV22SolicitationToReject(sol)
+                }}
                 // Phase 11C: warm-path entry from the directory-materialized
                 // panel. Detect the umbrella DA from the materialized Claim's
                 // owner to the active actor, and surface the CTA when no EA
@@ -7340,6 +7466,9 @@ export default function V2App() {
                 assetsById={assetsByIdMap}
                 onOpenSolicitModal={({ rfp: targetRfp }) => setV22SolicitOpenForRfp({ rfp: targetRfp })}
                 onRejectSolicitation={(solicitation) => setV22SolicitationToReject(solicitation)}
+                // Phase 18.3.1: clicking a solicitation card body navigates to
+                // the offered Claim on Directory (both viewer roles).
+                onSelectSolicitation={handleSelectSolicitation}
                 // Phase 17.2.1 / 17.2.1.1: owner-side Accept flow entry.
                 // Click on the SolicitationCard's "Request Agreement"
                 // button opens CombinedRequestModal directly (no Asset
@@ -9193,6 +9322,15 @@ export default function V2App() {
                   })
                   : undefined}
                 hasActiveDaWithoutEa={hasActiveDaWithoutEa}
+                // Phase 18.3.1: Reject Solicitation entry — visible when the
+                // Claim node carries _solicitationContext (Bob viewing Alice's
+                // pending-solicited Claim). Opens the existing
+                // SolicitationRejectModal; on confirm handleRejectSolicitation
+                // cascade-revokes the linked DA (Phase 18.3).
+                onRejectSolicitation={(solicitationId) => {
+                  const sol = v22Solicitations.get(solicitationId)
+                  if (sol) setV22SolicitationToReject(sol)
+                }}
                 onAmendClaim={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => setV22AmendingClaimId(node.id) : undefined}
                 onSelfEvaluate={node.owner === activeRole.party && node.v22Type === 'CLAIM' ? () => handleV22OpenSelfEvaluation(node.v22Artifact) : undefined}
                 // Phase 18.2 / 18.2.2: Publish to Directory (owner-only).
@@ -9567,7 +9705,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.3.0.2 &middot; Changelog
+          v0.18.3.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9614,6 +9752,11 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3.1', date: '2026-05-24', label: 'Phase 18.3.1', items: [
+                  'Bob-side solicitation UI. SolicitationCard rows are redesigned — the actor pill + "solicited" prefix row is removed, the title becomes the Claim name with a "from {owner}" subtitle, the message box drops its indigo left edge, and the whole card body is now clickable (any viewer role). Clicking a solicitation card routes to the offered Claim in Directory.',
+                  'The Claim Detail Panel footer + the Claim card action bar gain a "Reject Solicitation" affordance when the Claim is being offered to you via a pending solicitation. Reject revokes the linked Disclosure Agreement and notifies the solicitor. Requesting an Evaluation Agreement on a solicited Claim reuses the existing warm-path — a solicitation Disclosure Agreement satisfies the same predicate.',
+                  '"Solicitation received" notification clicks now route you to the offered Claim instead of the RFP card. The other RFP notification types (rejected / accepted / closed / reopened) continue routing to the RFP.',
+                ]},
                 { version: '0.18.3.0.2', date: '2026-05-24', label: 'Phase 18.3.0.2', items: [
                   'Self-eval orphan check signal swap. Phase 18.3.0.1\'s bypass used `er.evaluatorParty === claim.owner`, but `evaluatorParty` isn\'t preserved on the output Eval Result artifact by makeEvaluationRunArtifacts — no `er.evaluatorParty` read sites exist anywhere in V2.2, only `node.evaluatorParty` on adapter-computed card nodes. The check returned false against undefined and never fired. Replaced with `er.evaluationAgreementId.startsWith(\'self-eval-\')` — V2App is the sole site that emits the `self-eval-` prefix, so the check is unique and complete. It operates on the same field the EA lookup already reads (guaranteed populated).',
                   'Self-eval Eval Results no longer show the false "Orphaned Evaluation Result" banner; the Detail Panel footer correctly shows Re-run Evaluation + Create Proof of Evaluation for self-evaluations, matching action-bar parity. Cross-party orphan cases (e.g. revoking Carol\'s Evaluation Agreement on an Alice Claim) still correctly flag orphan and present Dismiss-only.',

@@ -1406,6 +1406,16 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
           // to AssetPickerModal → CombinedRequestModal).
           buttons.push({ icon: '▷', tooltip: 'Request Evaluation Agreement', onClick: fire('requestEvaluationAgreement') })
         }
+        // Phase 18.3.1: Reject Solicitation icon. Composes additively with the
+        // existing Request Evaluation Agreement branch (which fires via
+        // _hasActiveDaWithoutEa for solicitation DAs by virtue of structural
+        // identity — a solicitation DA is a directed DA with no EA pair). Bob's
+        // view of Alice's solicited Claim shows ▷ (Request EA, existing) + ✕
+        // (Reject Solicitation, new). Standalone `if` (not else-if) so it
+        // renders alongside Request EA, mirroring the panel footer.
+        if (!isOwner && node._solicitationContext) {
+          buttons.push({ icon: '✕', tooltip: 'Reject Solicitation', onClick: fire('rejectSolicitation') })
+        }
         // Phase 14.2 (#169a): Issue Badge entry point on Claim cards.
         // Gate: any non-owner can issue (badges target Claims now). Visible
         // alongside any other non-owner actions (Run Evaluation, Request
