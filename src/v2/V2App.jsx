@@ -9718,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.19.0 &middot; Changelog
+          v0.19.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9765,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.19.1', date: '2026-05-26', label: 'Phase 19.1', items: [
+                  'Per-chain slot allocation. Each evaluation chain (one per Claim in your view) now occupies its own vertical slot — the Claim and its source/counterparty Assets on the slot\'s data row, the Parse Results / Evaluation Results / Proofs of Evaluation on the slot\'s eval row 300 below. Slots distribute symmetrically by Claim creation date (oldest at center, newer alternating outward) with 600 of vertical pitch between adjacent slots, so one chain\'s eval row never collides with the next chain\'s data row.',
+                  'Shared endpoints (a counterparty Asset that anchors several of your chains — e.g. their single Asset evaluated against multiple of your Claims) stay at the Y of the first chain that uses them, with diagonal edges drawing into subsequent chains\' slots. Closes the Phase 19 follow-on where the second Claim in a view could land in the first chain\'s eval band.',
+                ]},
                 { version: '0.19.0', date: '2026-05-26', label: 'Phase 19', items: [
                   'Node mapping cleanup. Evaluation-chain artifacts (Eval Results + Proofs of Evaluation) now render in a vertical band below the central data row instead of piling onto Y=0 alongside the Assets and Claims they connect to. The four-node chain Asset → Eval Result → PoE → Counterparty Claim reads as a "hump" — diagonal down from the data row, horizontal across the eval band, diagonal back up to the counterparty — so disclosure edges no longer overlap horizontally through the data row.',
                   'Collision resolution within the band biases away from center, so additional chains stack further below rather than crisscrossing back through the data row. Single positioning rule in the parent-canvas layout; renders identically for seeded scenes and any newly-created Eval Results from Run Evaluation. Aligns with the prior proof-only-pulled Eval Result convention by extending the same 300-unit offset to all eval-chain artifacts.',

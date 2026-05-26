@@ -6083,6 +6083,14 @@ const COL_Y_OFFSET = 100
 // offset (`sourceClaim.y + 300`), which already used this band by hand — so
 // own-chain ERs and proof-only-pulled ERs now land on the same band.
 const EVAL_BAND_OFFSET = 300
+// Phase 19.1: vertical pitch between chain slots. Each evaluation chain
+// (one per Claim in the view) occupies a slot of 2 rows — data row (Claim,
+// source Assets, counterparty granteeAssets) and eval row (Parse Results,
+// ERs, PoEs offset by EVAL_BAND_OFFSET). SLOT_HEIGHT must exceed
+// EVAL_BAND_OFFSET so adjacent slots' rows don't collide: slot N's eval row
+// is at N*SLOT_HEIGHT + 300, slot N+1's data row is at (N+1)*600 = N*600 +
+// 600, leaving 300 of breathing room.
+const SLOT_HEIGHT = 600
 
 /**
  * Phase 10.2.1: distribute N indices symmetrically around y=0 so the Actor
@@ -7580,6 +7588,112 @@ export function resolveAgreementsForEdge(edgeId, view, edges) {
 }
 
 /**
+ * Phase 19.1: per-chain slot allocation. One chain per visible Claim. A chain
+ * owns:
+ *   dataNodes  → at slot Y: the Claim, its referencedAssets (source Assets
+ *                owned by the Claim owner), and the counterparty granteeAssets
+ *                (the evaluator's Asset on each backing EA — visible in the
+ *                view via proof-of-eval DAs, or the actor's own Asset on the
+ *                seller side).
+ *   evalNodes  → at slot Y + EVAL_BAND_OFFSET: Parse Results derived from any
+ *                source Asset, ERs targeting this Claim, and PoEs wrapping
+ *                those ERs.
+ * Chains are sorted by Claim createdDate (ISO string compare — seed dates are
+ * ISO-8601), ties by Claim id. Slots distribute symmetrically (0, +1, -1,
+ * +2, -2, …) so the oldest Claim sits at center and newer chains alternate
+ * outward. Shared endpoints (a node appearing in multiple chains, e.g. Bob's
+ * Avionics Module across his PRM + VReg chains) anchor to the FIRST chain that
+ * claims them by sort order — `chainYByNodeId.set` is a no-op if the id is
+ * already present. Returns `Map<nodeId, y>`; nodes not in any chain are absent
+ * (the post-pass leaves their earlier-assigned Y untouched).
+ */
+function assignChainSlots(view) {
+  const chains = []
+  for (const claim of view.claims || []) {
+    const dataNodes = new Set([claim.id])
+    const evalNodes = new Set()
+
+    // Source Assets — referenced by the Claim.
+    for (const assetId of claim.referencedAssetIds || []) {
+      dataNodes.add(assetId)
+    }
+
+    // Parse Results — those whose sourceAssetId is one of this Claim's
+    // source Assets.
+    for (const pr of view.parseResults || []) {
+      if (dataNodes.has(pr.sourceAssetId)) {
+        evalNodes.add(pr.id)
+      }
+    }
+
+    // ERs targeting this Claim (+ the counterparty granteeAsset on each
+    // backing EA).
+    const erIdsForClaim = new Set()
+    for (const er of view.evaluationResults || []) {
+      if (er.claimId === claim.id) {
+        evalNodes.add(er.id)
+        erIdsForClaim.add(er.id)
+        const ea = (view.evaluationAgreements || []).find((e) => e.id === er.evaluationAgreementId)
+        // Schema: the EA carries a flat `granteeAssetId` (see makeEvaluationAgreement
+        // + getActiveEaForClaimAndRequester). `grantee.assetId` kept as a
+        // defensive fallback only. Absent for self-evals / some proof-only
+        // flows — then no counterparty Asset joins the chain (fine).
+        const granteeAssetId = ea?.granteeAssetId || ea?.grantee?.assetId
+        if (granteeAssetId) dataNodes.add(granteeAssetId)
+      }
+    }
+
+    // PoEs wrapping any ER in this chain.
+    for (const poe of view.proofsOfEvaluation || []) {
+      if (erIdsForClaim.has(poe.wrappedEvalResultId)) {
+        evalNodes.add(poe.id)
+      }
+    }
+
+    chains.push({
+      claimId: claim.id,
+      // Claims store createdDate as a top-level field (makeClaim) — NOT
+      // claim.terms.createdDate (that's the DA/EA factory shape). Fall back
+      // defensively, then to '' (which sorts first, tie-broken by id).
+      createdDate: claim.createdDate || claim?.terms?.createdDate || '',
+      dataNodes,
+      evalNodes,
+    })
+  }
+
+  // Sort by Claim creation date, tie-break by Claim id.
+  chains.sort((a, b) => {
+    if (a.createdDate !== b.createdDate) {
+      return a.createdDate < b.createdDate ? -1 : 1
+    }
+    return a.claimId < b.claimId ? -1 : 1
+  })
+
+  // Symmetric slot indices: 0, +1, -1, +2, -2, …
+  const symmetricSlot = (i) => {
+    if (i === 0) return 0
+    const magnitude = Math.ceil(i / 2)
+    return i % 2 === 1 ? +magnitude : -magnitude
+  }
+
+  // First-chain-wins for shared endpoints.
+  const chainYByNodeId = new Map()
+  chains.forEach((chain, i) => {
+    const slotIdx = symmetricSlot(i)
+    const slotY = slotIdx * SLOT_HEIGHT
+    const evalY = slotY + EVAL_BAND_OFFSET
+    for (const id of chain.dataNodes) {
+      if (!chainYByNodeId.has(id)) chainYByNodeId.set(id, slotY)
+    }
+    for (const id of chain.evalNodes) {
+      if (!chainYByNodeId.has(id)) chainYByNodeId.set(id, evalY)
+    }
+  })
+
+  return chainYByNodeId
+}
+
+/**
  * Convert a view into the `{ nodes, edges, nodeMap }` shape V2Canvas expects.
  * Layout is column-based and deterministic so that repeated renders produce
  * stable coordinates.
@@ -8157,6 +8271,22 @@ export function buildV22Canvas(view) {
       : sourceClaim.y + EVAL_BAND_OFFSET + (stackIdx * COL_Y_OFFSET)
     nodes.push(poeToNode(poe, x, y, view.evaluationResults))
   })
+
+  // Phase 19.1: per-chain slot reassignment. Override Y on chain-related
+  // nodes so each Claim's chain occupies its own vertical slot (data row at
+  // slotY, eval row at slotY + EVAL_BAND_OFFSET). This supersedes the Phase
+  // 19 per-anchor band for nodes that belong to a chain — the band offset is
+  // preserved (eval row = data row + EVAL_BAND_OFFSET), but the slot Y is now
+  // allocated per-chain so a second Claim can't land in the first chain's
+  // eval band. Non-chain nodes (orphan Assets, the actor pillbox, etc.) keep
+  // the Y set by earlier placement logic. Mutates node.y in place; runs
+  // before nodeMap is built so map entries reflect the final Y.
+  const chainYByNodeId = assignChainSlots(view)
+  for (const node of nodes) {
+    if (chainYByNodeId.has(node.id)) {
+      node.y = chainYByNodeId.get(node.id)
+    }
+  }
 
   // ── Edges ────────────────────────────────────────────────────────────
   const edges = deriveAgreementEdges(view)
