@@ -6074,6 +6074,15 @@ const ASSET_COL_GAP = 400
 // columns gain a guaranteed vertical component instead of stacking on the
 // same horizontal line. Generalises the Phase 6.5 #17 EVAL_ROW_OFFSET nudge.
 const COL_Y_OFFSET = 100
+// Phase 19: vertical band for evaluation-chain artifacts (Eval Results +
+// PoEs). The chain Asset → ER → PoE → Counterparty-Claim now reads as a
+// "hump" — Asset/Claim stay on the data row (Y≈0), ER+PoE sit in this band
+// below center. Removes the prior collision where chain nodes shared Y with
+// their anchor Asset/Claim and edges overlapped the horizontal traffic lane
+// through Y=0. The value matches the Phase 11D.4.1 proof-only-pulled ER
+// offset (`sourceClaim.y + 300`), which already used this band by hand — so
+// own-chain ERs and proof-only-pulled ERs now land on the same band.
+const EVAL_BAND_OFFSET = 300
 
 /**
  * Phase 10.2.1: distribute N indices symmetrically around y=0 so the Actor
@@ -7943,10 +7952,16 @@ export function buildV22Canvas(view) {
   for (const origin of orderedOrigins) {
     const anchorId = anchorIdForOrigin(origin)
     const anchorY = anchorYForOrigin(origin)
-    if (anchorId && !seenAnchors.has(anchorId) && Number.isFinite(anchorY) && !usedErYs.has(anchorY)) {
+    // Phase 19: Pass 1 chain Y inherits the anchor's Y BUT offset by
+    // EVAL_BAND_OFFSET so eval-chain artifacts land below the anchor
+    // Asset/Claim instead of overlapping it. Collision tracking (usedErYs)
+    // tracks the offset Y, not the bare anchor Y, since that's what gets
+    // placed. seenAnchors still tracks the anchor id (one chain per anchor).
+    const chainY = anchorY + EVAL_BAND_OFFSET
+    if (anchorId && !seenAnchors.has(anchorId) && Number.isFinite(anchorY) && !usedErYs.has(chainY)) {
       seenAnchors.add(anchorId)
-      usedErYs.add(anchorY)
-      chainYByOriginId.set(origin, anchorY)
+      usedErYs.add(chainY)
+      chainYByOriginId.set(origin, chainY)
       continue
     }
     deferred.push(origin)
@@ -7959,14 +7974,25 @@ export function buildV22Canvas(view) {
   let fallbackIdx = 0
   for (const origin of deferred) {
     const anchorY = anchorYForOrigin(origin)
+    // Phase 19: Pass 2 baseY also picks up the band offset so deferred
+    // chains start their collision search in the same band as Pass 1's
+    // happy path. The orphan fallback (anchor not on canvas) still uses
+    // symmetricRowY for vertical distribution but adds the eval band offset
+    // on top of its existing COL_Y_OFFSET.
     const baseY = Number.isFinite(anchorY)
-      ? anchorY
-      : symmetricRowY(fallbackIdx++) + COL_Y_OFFSET
+      ? anchorY + EVAL_BAND_OFFSET
+      : symmetricRowY(fallbackIdx++) + COL_Y_OFFSET + EVAL_BAND_OFFSET
     let y = baseY
     let step = 1
     while (usedErYs.has(y)) {
-      const offset = Math.ceil(step / 2) * ROW_STEP
-      y = baseY + (step % 2 === 1 ? offset : -offset)
+      // Phase 19 Change B: prefer FURTHER from center over closer. baseY is
+      // below center (positive Y) when the anchor is at or near Y=0, so
+      // stepping +magnitude first pushes the next chain further below; only
+      // the even steps reach back toward center. Prevents the crisscross
+      // where colliding chains landed on the opposite side of the data row.
+      const magnitude = Math.ceil(step / 2) * ROW_STEP
+      const direction = step % 2 === 1 ? +1 : -1  // toward-far first, then toward-center
+      y = baseY + direction * magnitude
       step++
     }
     usedErYs.add(y)
@@ -8002,8 +8028,11 @@ export function buildV22Canvas(view) {
   // the connecting edge crossed unrelated nodes). The Eval Result hangs
   // off-and-below the source Claim:
   //   x = sourceClaim.x + 200  (slight offset right; reads as "attached")
-  //   y = sourceClaim.y + 300  (clearly below the Claim's row, leaving
-  //                            the Claim's horizontal traffic lane clean)
+  //   y = sourceClaim.y + EVAL_BAND_OFFSET  (clearly below the Claim's row,
+  //                            leaving the Claim's horizontal traffic lane
+  //                            clean — Phase 19 sources the 300 from the
+  //                            shared band constant so all eval-chain
+  //                            artifacts co-band)
   // Multiple ERs disclosed under one DA stack vertically by COL_Y_OFFSET.
   const claimNodeById = new Map(nodes.filter((n) => n.v22Type === 'CLAIM').map((n) => [n.id, n]))
   const erPulledPerClaim = new Map() // claimId → count placed so far (for stacking)
@@ -8015,11 +8044,15 @@ export function buildV22Canvas(view) {
       // Defensive fallback — source Claim isn't on canvas (shouldn't
       // happen since W1 of Phase 11D.3 pulls it in). Drop at the far-right
       // edge of the actor's own evaluation flow.
-      nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, stackIdx * ROW_STEP, claimById.get(er.claimId)))
+      // Phase 19: carry the eval band offset so even the fallback lands
+      // below the data row instead of at Y=0 (stackIdx 0 was Y=0).
+      nodes.push(evalResultToNode(er, COL_PULLED_EVAL_eff, EVAL_BAND_OFFSET + stackIdx * ROW_STEP, claimById.get(er.claimId)))
       return
     }
     const x = sourceClaim.x + 200
-    const y = sourceClaim.y + 300 + (stackIdx * COL_Y_OFFSET)
+    // Phase 19: source the band offset from the constant (was a hardcoded
+    // 300) so own-chain ERs and proof-only-pulled ERs share the same band.
+    const y = sourceClaim.y + EVAL_BAND_OFFSET + (stackIdx * COL_Y_OFFSET)
     nodes.push(evalResultToNode(er, x, y, claimById.get(er.claimId)))
   })
 
@@ -8055,9 +8088,12 @@ export function buildV22Canvas(view) {
   ownedPoEs.forEach((poe, i) => {
     const wrapped = poe.wrappedEvalResultId ? erIdToErArtifact.get(poe.wrappedEvalResultId) : null
     const wrappedY = evalNodeById.get(poe.wrappedEvalResultId)?.y
+    // Phase 19: the happy path inherits the wrapped ER's Y (already banded
+    // via yForEr). The fallback (wrapped ER not on canvas) carries the band
+    // offset so it lands below the data row instead of at symmetricRowY+100.
     const y = typeof wrappedY === 'number'
       ? wrappedY
-      : symmetricRowY(i) + COL_Y_OFFSET
+      : EVAL_BAND_OFFSET + symmetricRowY(i) + COL_Y_OFFSET
     let x
     if (wrapped) {
       const len = chainLengthForEr(wrapped)
@@ -8070,9 +8106,11 @@ export function buildV22Canvas(view) {
   proofOfEvalPulledPoEs.forEach((poe, i) => {
     const wrapped = poe.wrappedEvalResultId ? erIdToErArtifact.get(poe.wrappedEvalResultId) : null
     const wrappedY = evalNodeById.get(poe.wrappedEvalResultId)?.y
+    // Phase 19: happy path inherits the (banded) wrapped ER Y; the fallback
+    // carries the band offset so it doesn't land on the data row.
     const y = typeof wrappedY === 'number'
       ? wrappedY
-      : symmetricRowY(ownedPoEs.length + i) + COL_Y_OFFSET
+      : EVAL_BAND_OFFSET + symmetricRowY(ownedPoEs.length + i) + COL_Y_OFFSET
     let x
     if (wrapped) {
       // Phase 16.2.2: on the Claim owner's canvas (grantor-direction),
@@ -8099,19 +8137,24 @@ export function buildV22Canvas(view) {
     const stackIdx = poePulledPerClaim.get(poe.claimId) || 0
     poePulledPerClaim.set(poe.claimId, stackIdx + 1)
     if (!sourceClaim) {
-      nodes.push(poeToNode(poe, COL_OWN_POE_eff, stackIdx * ROW_STEP, view.evaluationResults))
+      // Phase 19: band offset so the defensive fallback lands below the data
+      // row (stackIdx 0 was Y=0).
+      nodes.push(poeToNode(poe, COL_OWN_POE_eff, EVAL_BAND_OFFSET + stackIdx * ROW_STEP, view.evaluationResults))
       return
     }
     const x = sourceClaim.x + 400
     // Phase 16.2.2: inherit y from the wrapped Eval Result when on canvas
     // so PoE + wrapped ER share a chain row (matches the brief's
     // "ER + PoE on the same y-row" rule for grantee-direction views).
-    // Falls back to the legacy sourceClaim.y + offset pattern when the
-    // wrapped ER isn't visible on this canvas.
+    // Falls back to the band-offset position when the wrapped ER isn't
+    // visible on this canvas. Phase 19: the fallback now uses the eval band
+    // offset (was a hardcoded 200) so it lands on the same band as where its
+    // wrapped ER would sit (the proof-only-pulled ER fallback is at
+    // sourceClaim.y + EVAL_BAND_OFFSET), keeping PoE + ER co-banded.
     const wrappedErY = evalNodeById.get(poe.wrappedEvalResultId)?.y
     const y = typeof wrappedErY === 'number'
       ? wrappedErY
-      : sourceClaim.y + 200 + (stackIdx * COL_Y_OFFSET)
+      : sourceClaim.y + EVAL_BAND_OFFSET + (stackIdx * COL_Y_OFFSET)
     nodes.push(poeToNode(poe, x, y, view.evaluationResults))
   })
 
