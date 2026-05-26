@@ -9718,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.19.1 &middot; Changelog
+          v0.19.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9765,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.19.2', date: '2026-05-26', label: 'Phase 19.2', items: [
+                  'Compact slots for lean chains. Phase 19.1 reserved a 600-tall slot for every Claim in your view, regardless of whether the chain had Evaluation Results or PoEs to occupy the eval row. Phase 19.2 makes the slot pitch variable — chains with eval activity still reserve the full 600 (data row + eval row + breathing room); chains without eval activity reserve only 300 (data row only). Dramatic spread reduction on canvases with many Asset→Claim pairs and few evaluations (Dave\'s view drops ~50% in vertical extent; Alice ~30%). Bob\'s two-chain view is unchanged — both chains have eval activity, both still take 600. Symmetric distribution by Claim creation date is preserved.',
+                ]},
                 { version: '0.19.1', date: '2026-05-26', label: 'Phase 19.1', items: [
                   'Per-chain slot allocation. Each evaluation chain (one per Claim in your view) now occupies its own vertical slot — the Claim and its source/counterparty Assets on the slot\'s data row, the Parse Results / Evaluation Results / Proofs of Evaluation on the slot\'s eval row 300 below. Slots distribute symmetrically by Claim creation date (oldest at center, newer alternating outward) with 600 of vertical pitch between adjacent slots, so one chain\'s eval row never collides with the next chain\'s data row.',
                   'Shared endpoints (a counterparty Asset that anchors several of your chains — e.g. their single Asset evaluated against multiple of your Claims) stay at the Y of the first chain that uses them, with diagonal edges drawing into subsequent chains\' slots. Closes the Phase 19 follow-on where the second Claim in a view could land in the first chain\'s eval band.',

@@ -7601,11 +7601,16 @@ export function resolveAgreementsForEdge(edgeId, view, edges) {
  * Chains are sorted by Claim createdDate (ISO string compare — seed dates are
  * ISO-8601), ties by Claim id. Slots distribute symmetrically (0, +1, -1,
  * +2, -2, …) so the oldest Claim sits at center and newer chains alternate
- * outward. Shared endpoints (a node appearing in multiple chains, e.g. Bob's
- * Avionics Module across his PRM + VReg chains) anchor to the FIRST chain that
- * claims them by sort order — `chainYByNodeId.set` is a no-op if the id is
- * already present. Returns `Map<nodeId, y>`; nodes not in any chain are absent
- * (the post-pass leaves their earlier-assigned Y untouched).
+ * outward. Phase 19.2: the pitch each chain consumes is VARIABLE — a chain
+ * with eval activity (non-empty evalNodes) reserves SLOT_HEIGHT (600) to
+ * defend its eval row at slotY + EVAL_BAND_OFFSET; a lean chain (Asset →
+ * Claim only, empty evalNodes) reserves just ROW_STEP (300) since it has no
+ * eval row to defend. Cumulative cursors track the next free Y in each
+ * direction. Shared endpoints (a node appearing in multiple chains, e.g.
+ * Bob's Avionics Module across his PRM + VReg chains) anchor to the FIRST
+ * chain that claims them by sort order — `chainYByNodeId.set` is a no-op if
+ * the id is already present. Returns `Map<nodeId, y>`; nodes not in any chain
+ * are absent (the post-pass leaves their earlier-assigned Y untouched).
  */
 function assignChainSlots(view) {
   const chains = []
@@ -7669,18 +7674,44 @@ function assignChainSlots(view) {
     return a.claimId < b.claimId ? -1 : 1
   })
 
-  // Symmetric slot indices: 0, +1, -1, +2, -2, …
-  const symmetricSlot = (i) => {
-    if (i === 0) return 0
-    const magnitude = Math.ceil(i / 2)
-    return i % 2 === 1 ? +magnitude : -magnitude
-  }
+  // Phase 19.2: variable slot pitch. A chain with eval activity (ERs,
+  // PoEs, Parse Results in evalNodes) reserves SLOT_HEIGHT (600) so its
+  // eval row at slotY + EVAL_BAND_OFFSET doesn't collide with the next
+  // slot's data row. A lean chain (Asset → Claim only, no eval nodes)
+  // reserves just ROW_STEP (300) since it has no eval row to defend.
+  // Symmetric distribution by Claim creation date is preserved — chains
+  // stack outward from center alternating positive/negative — but the
+  // pitch each chain consumes depends on its content.
+  const chainPitch = (chain) => (chain.evalNodes.size > 0 ? SLOT_HEIGHT : ROW_STEP)
 
+  const slotYByChainId = new Map()
+  let posCursor = 0  // Y immediately after the latest positive-direction chain's slot
+  let negCursor = 0  // Y of the latest negative-direction chain's slot (which extends from negCursor down to its pitch boundary)
+
+  chains.forEach((chain, i) => {
+    let slotY
+    if (i === 0) {
+      // Center chain — slot 0 anchored at Y=0
+      slotY = 0
+      posCursor = chainPitch(chain)  // Next positive chain starts here
+      negCursor = 0                  // Next negative chain will subtract its pitch
+    } else if (i % 2 === 1) {
+      // Positive direction (+1, +2, ...)
+      slotY = posCursor
+      posCursor += chainPitch(chain)
+    } else {
+      // Negative direction (-1, -2, ...)
+      negCursor -= chainPitch(chain)
+      slotY = negCursor
+    }
+    slotYByChainId.set(chain.claimId, slotY)
+  })
+
+  // Build chainYByNodeId from the per-chain slot Ys.
   // First-chain-wins for shared endpoints.
   const chainYByNodeId = new Map()
-  chains.forEach((chain, i) => {
-    const slotIdx = symmetricSlot(i)
-    const slotY = slotIdx * SLOT_HEIGHT
+  for (const chain of chains) {
+    const slotY = slotYByChainId.get(chain.claimId)
     const evalY = slotY + EVAL_BAND_OFFSET
     for (const id of chain.dataNodes) {
       if (!chainYByNodeId.has(id)) chainYByNodeId.set(id, slotY)
@@ -7688,7 +7719,7 @@ function assignChainSlots(view) {
     for (const id of chain.evalNodes) {
       if (!chainYByNodeId.has(id)) chainYByNodeId.set(id, evalY)
     }
-  })
+  }
 
   return chainYByNodeId
 }

@@ -2673,6 +2673,33 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 19.2 completion notes (2026-05-26) — Variable slot pitch (compact lean chains)
+
+Phase 19.1 applied a uniform `SLOT_HEIGHT = 600` pitch to *every* Claim in the view, including chains with no eval activity to occupy the eval row, so catalog-heavy views over-spread vertically (Dave's 15-Claim view ≈ 9000 units when ~half would suffice; Alice and the heavy-Claim views showed similar over-spread). Phase 19.2 makes the slot pitch variable — chains with eval activity reserve the full 600 (data row + eval row + buffer); chains without reserve only `ROW_STEP = 300` (data row only). The symmetric distribution by Claim creation date is preserved; chains stack outward from center as before, just with cumulative pitches sized to each chain's actual content.
+
+**Diff (single-function change in `src/v2/v2_2Data.js`, except the version/changelog in `V2App.jsx`).** Per the brief, only `assignChainSlots` is modified — the rest of the Phase 19.1 post-pass mechanism (the chain identification, the post-pass at the end of `buildV22Canvas`) is unchanged.
+- **Replaced the slot-index allocation block.** The old `symmetricSlot(i)` local helper + `slotY = slotIdx × SLOT_HEIGHT` is gone; in its place: a `chainPitch(chain)` helper returning `chain.evalNodes.size > 0 ? SLOT_HEIGHT : ROW_STEP`, and a cumulative-cursor loop. `posCursor` tracks the next free Y above center, `negCursor` below. The center chain (i=0) sits at slot 0 (`slotY = 0`), sets `posCursor = chainPitch(chain)` and `negCursor = 0`. Odd i (positive direction): `slotY = posCursor; posCursor += chainPitch(chain)`. Even i (negative direction): `negCursor -= chainPitch(chain); slotY = negCursor`. The per-chain `slotY` lands in a `slotYByChainId` Map, then a second loop builds `chainYByNodeId` from it — `dataNodes` at `slotY`, `evalNodes` at `slotY + EVAL_BAND_OFFSET`, first-chain-wins for shared endpoints (unchanged from 19.1).
+- **`symmetricSlot` deleted.** Grep-confirmed it was used nowhere else in `assignChainSlots` or the module — the separate module-level positioning helper is `symmetricRowY` (used by the legacy column placement, untouched).
+- **No constant changes.** `SLOT_HEIGHT = 600`, `EVAL_BAND_OFFSET = 300`, `ROW_STEP = 300` all unchanged. `SLOT_HEIGHT` is now used only as the pitch for eval-having chains; `ROW_STEP` is reused as the pitch for lean chains.
+- **Docstring updated** to describe the variable-pitch rule + cumulative cursors.
+- **Version + Changelog:** footer `v0.19.1 → v0.19.2`; prepended the Phase 19.2 in-app Changelog modal entry (one bullet).
+
+**Why the invariant holds.** The eval row of a chain at `slotY` occupies `slotY + 300`. A lean chain has nothing there, so the next slot starts 300 away (its pitch) without collision. An eval chain reserves 600, so its eval row at `slotY + 300` sits exactly in the middle of its own band (`slotY` data, `slotY + 300` eval, `slotY + 600` next-slot boundary) — 300 clearance from the adjacent data row. This holds symmetrically in the negative direction: the chain that owns the 600 pitch fully defends its own eval band regardless of what kind its neighbors are. Verified by a programmatic check probing every chain's eval row against every other chain's data row: **zero collisions across all four roles.**
+
+**Deviation vs the prompt's QA #4 premise.** The prompt said Dave's view is "1 eval chain + 14 lean Asset→Claim pairs." A live probe shows Dave actually has **2** eval chains: the proof-only-pulled PRM ER+PoE chain (`claim-prm-assembly`) *and* `claim-chipco-prm-ic`, which carries a Parse Result (`parse-chipco-prm-ic-datasheet`) on its eval row. The `evalNodes.size > 0` test correctly catches Parse-Result-only chains (Parse Results are part of `evalNodes`), so reserving 600 for `claim-chipco-prm-ic` is correct — a 300 pitch would collide its Parse Result at `slotY + 300` with the next slot's data row. The total spread still lands at the predicted ~4800 (the off-by-one on the eval count doesn't change the cumulative arithmetic materially). Surfaced rather than silently special-cased.
+
+**Runtime status (build clean — 132 modules, 0 errors; app boots clean, no console errors; footer reads v0.19.2 in the live app; Changelog modal shows the Phase 19.2 entry at top above 19.1).** Data-probe-verified via `buildV22Canvas(getV22DataForRole(roleId, null))`, with the programmatic data-row/eval-row collision check returning zero collisions for all four roles:
+- **Bob — unchanged (QA #1).** 2 eval chains × 600, spread 600. PRM slot 0, VReg slot 600. Identical to Phase 19.1.
+- **Carol — unchanged (QA #2).** 2 eval chains × 600, spread 600. EMI slot 0, PRM slot 600.
+- **Alice — compacted ~30% (QA #3).** Spread 4200 → 3000. Slots: EMI 0, PRM +600, PCB-stack −300, VReg +1200, conn-spec −600, thermal-pad +1800, fw-bootloader −900, rf-filter +2100 (3 eval × 600 + 5 lean × 300). Each Claim at its own slot; eval-having Claims hump cleanly.
+- **Dave — compacted ~50% (QA #4/#7).** Spread 8400 → 4800. 2 eval × 600 + 13 lean × 300. The eval chain `claim-chipco-prm-ic` at slotY=1200 has its Parse Result at eval row 1500; the next positive slot (`claim-chipco-sramctl`) is at 1800 — 300 clearance, no collision. The proof-only PRM chain at slotY=−2400 likewise defends its eval row.
+- **Symmetric ordering preserved (QA #5).** Oldest Claim at slot 0 across all roles; newer alternating outward.
+- **Re-slot + self-eval (QA #8/#9).** A new evaluation adds an ER to the view → that chain's `evalNodes` becomes non-empty → its pitch flips 300 → 600 on the next `buildV22Canvas`; subsequent same-direction slots shift to accommodate. Self-eval chains carry the synthetic ER (`er.claimId === claim.id`) → non-empty `evalNodes` → 600. Both by construction, since `assignChainSlots` recomputes on every view build.
+
+The on-screen rendering is canvas-gated (the V2Canvas 3D layout) → flagged for a manual visual pass; the Y data feeding the layout is fully probe-verified.
+
+**Status:** [x] Complete.
+
 ### Phase 19.1 completion notes (2026-05-26) — Per-chain slot allocation (post-pass)
 
 Phase 19 banded Eval Results + PoEs *relative to each chain's anchor* but placed the anchor Claims independently (each by its column's `symmetricRowY`), so a second Claim could land in a prior chain's eval band — on Bob's view the Voltage Regulator Claim at `symmetricRowY(1)=+300` collided with the PRM chain's eval row at +300. Phase 19.1 makes **the evaluation chain the layout unit** on the parent canvas via a post-pass that overrides Y on chain-related nodes only (no refactor of existing column placement, per the brief).
