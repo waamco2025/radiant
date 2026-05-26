@@ -6091,6 +6091,11 @@ const EVAL_BAND_OFFSET = 300
 // is at N*SLOT_HEIGHT + 300, slot N+1's data row is at (N+1)*600 = N*600 +
 // 600, leaving 300 of breathing room.
 const SLOT_HEIGHT = 600
+// Phase 19.3: pitch for lean chains (no eval row to defend). Tighter than
+// ROW_STEP=300 — just enough vertical separation between card rows to keep
+// them visually distinct without the wasted breathing room of a full
+// SLOT_HEIGHT.
+const LEAN_PITCH = 200
 
 /**
  * Phase 10.2.1: distribute N indices symmetrically around y=0 so the Actor
@@ -7666,8 +7671,17 @@ function assignChainSlots(view) {
     })
   }
 
-  // Sort by Claim creation date, tie-break by Claim id.
+  // Phase 19.3: activity-based primary sort. Eval chains (chains whose
+  // evalNodes set is non-empty — i.e. has Parse Results, ERs, or PoEs)
+  // sort to the start of the array so they take the center symmetric
+  // slots (0, +1, -1, ...) where the demo viewer's eye lands. Lean
+  // chains (Asset → Claim with no eval activity) splay outward to the
+  // extremes. Within each activity tier, `createdDate` then `claimId`
+  // preserve the prior deterministic ordering.
   chains.sort((a, b) => {
+    const aHasEval = a.evalNodes.size > 0
+    const bHasEval = b.evalNodes.size > 0
+    if (aHasEval !== bHasEval) return aHasEval ? -1 : 1
     if (a.createdDate !== b.createdDate) {
       return a.createdDate < b.createdDate ? -1 : 1
     }
@@ -7678,11 +7692,12 @@ function assignChainSlots(view) {
   // PoEs, Parse Results in evalNodes) reserves SLOT_HEIGHT (600) so its
   // eval row at slotY + EVAL_BAND_OFFSET doesn't collide with the next
   // slot's data row. A lean chain (Asset → Claim only, no eval nodes)
-  // reserves just ROW_STEP (300) since it has no eval row to defend.
-  // Symmetric distribution by Claim creation date is preserved — chains
-  // stack outward from center alternating positive/negative — but the
-  // pitch each chain consumes depends on its content.
-  const chainPitch = (chain) => (chain.evalNodes.size > 0 ? SLOT_HEIGHT : ROW_STEP)
+  // reserves just LEAN_PITCH (Phase 19.3: 200, tighter than ROW_STEP)
+  // since it has no eval row to defend. Symmetric distribution is
+  // preserved — chains stack outward from center alternating
+  // positive/negative — but the pitch each chain consumes depends on
+  // its content.
+  const chainPitch = (chain) => (chain.evalNodes.size > 0 ? SLOT_HEIGHT : LEAN_PITCH)
 
   const slotYByChainId = new Map()
   let posCursor = 0  // Y immediately after the latest positive-direction chain's slot
@@ -8316,6 +8331,49 @@ export function buildV22Canvas(view) {
   for (const node of nodes) {
     if (chainYByNodeId.has(node.id)) {
       node.y = chainYByNodeId.get(node.id)
+    }
+  }
+
+  // Phase 19.3: orphan Asset compression. Assets not placed by chain
+  // logic (i.e., not in chainYByNodeId — they're owned Assets with no
+  // Claim referencing them, no Parse Results derived from them, and no
+  // ER with them as granteeAsset) were placed by the pre-pass at
+  // symmetricRowY(i) on ROW_STEP=300 pitch. Compact them to
+  // ORPHAN_PITCH=150 symmetric around Y=0, skipping Y values already
+  // taken by chain-placed Assets in the same X column.
+  const ORPHAN_PITCH = 150
+
+  const orphanAssets = nodes
+    .filter((n) => n.v22Type === 'ASSET' && !chainYByNodeId.has(n.id))
+    .sort((a, b) => (a.id < b.id ? -1 : 1)) // deterministic order
+
+  if (orphanAssets.length > 0) {
+    // Build per-X-column set of Y values taken by chain-placed Assets.
+    // Orphans must avoid these to prevent intra-column card overlap.
+    const takenYsByColumn = new Map()
+    for (const n of nodes) {
+      if (n.v22Type === 'ASSET' && chainYByNodeId.has(n.id)) {
+        if (!takenYsByColumn.has(n.x)) takenYsByColumn.set(n.x, new Set())
+        takenYsByColumn.get(n.x).add(n.y)
+      }
+    }
+
+    // Each orphan finds the next free Y in its column, starting at the
+    // smallest non-zero symmetric step (+150, then -150, then +300, ...).
+    // Search is column-local so orphans in different X columns can both
+    // sit at Y=±150 without conflict.
+    for (const orphan of orphanAssets) {
+      if (!takenYsByColumn.has(orphan.x)) takenYsByColumn.set(orphan.x, new Set())
+      const taken = takenYsByColumn.get(orphan.x)
+      let attemptIdx = 1
+      let y
+      do {
+        const magnitude = Math.ceil(attemptIdx / 2) * ORPHAN_PITCH
+        y = attemptIdx % 2 === 1 ? +magnitude : -magnitude
+        attemptIdx++
+      } while (taken.has(y))
+      orphan.y = y
+      taken.add(y)
     }
   }
 

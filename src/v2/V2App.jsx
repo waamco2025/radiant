@@ -9718,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.19.2 &middot; Changelog
+          v0.19.3 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9765,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.19.3', date: '2026-05-26', label: 'Phase 19.3', items: [
+                  'Three vertical-compactness refinements. (1) Evaluation chains now cluster at the center of your canvas — the eye lands on the active relationships first, with quieter Asset→Claim pairs splaying outward. (2) Lean chains (no Eval Results or Proofs of Evaluation yet) reserve a tighter 200-unit pitch instead of 300, since they have no eval row to defend. (3) Owned Assets unconnected to any Claim ("orphan" Assets like Thermal Subsystem on the buyer side) compact to a 150-unit pitch around the actor row, freeing significant vertical space above and below the chain stack. Spread reductions: Dave ~20%, Alice ~10%, Bob\'s orphan band by 50%.',
+                ]},
                 { version: '0.19.2', date: '2026-05-26', label: 'Phase 19.2', items: [
                   'Compact slots for lean chains. Phase 19.1 reserved a 600-tall slot for every Claim in your view, regardless of whether the chain had Evaluation Results or PoEs to occupy the eval row. Phase 19.2 makes the slot pitch variable — chains with eval activity still reserve the full 600 (data row + eval row + breathing room); chains without eval activity reserve only 300 (data row only). Dramatic spread reduction on canvases with many Asset→Claim pairs and few evaluations (Dave\'s view drops ~50% in vertical extent; Alice ~30%). Bob\'s two-chain view is unchanged — both chains have eval activity, both still take 600. Symmetric distribution by Claim creation date is preserved.',
                 ]},

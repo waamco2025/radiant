@@ -2673,6 +2673,33 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 19.3 completion notes (2026-05-26) — Vertical compactness (activity sort + lean pitch + orphan compression)
+
+Three independent vertical-compactness changes, all in `src/v2/v2_2Data.js`, stacking additively. None interact with each other.
+
+**Diff.**
+- **Change A — activity-based primary sort** (`assignChainSlots`). The chain sort gained a leading activity tier: `const aHasEval = a.evalNodes.size > 0; const bHasEval = b.evalNodes.size > 0; if (aHasEval !== bHasEval) return aHasEval ? -1 : 1;` before the existing `createdDate` then `claimId` comparisons. Eval chains sort to the front → they take the center symmetric slots (0, +1, −1, …); lean chains splay outward to the extremes. The Phase 19.2 Dave anomaly (the proof-only-pulled `claim-prm-assembly`, with the latest `createdDate`, landed at slot −2400) is cleared — it now sits at slot +600.
+- **Change B — tighter lean pitch.** New module-scoped `const LEAN_PITCH = 200` alongside `SLOT_HEIGHT`/`EVAL_BAND_OFFSET`; the `chainPitch` helper inside `assignChainSlots` now returns `chain.evalNodes.size > 0 ? SLOT_HEIGHT : LEAN_PITCH` (was `ROW_STEP`). `ROW_STEP = 300` is untouched (still used by `symmetricRowY` + the pre-pass column placement).
+- **Change C — orphan Asset compression.** A new post-pass at the end of `buildV22Canvas`, immediately after the chain-Y override loop and before `deriveAgreementEdges`. Filters `nodes` to `v22Type === 'ASSET' && !chainYByNodeId.has(n.id)` (owned Assets with no Claim referencing them, no Parse Result derived from them, no ER using them as `granteeAsset`), sorted deterministically by id. Builds a `takenYsByColumn: Map<x, Set<y>>` of Ys held by *chain-placed* Assets per X column, then assigns each orphan the next free symmetric step (`+150, −150, +300, …` at `ORPHAN_PITCH = 150`) in its own column, skipping taken Ys. Column-local so orphans in different columns can both sit at ±150, and an orphan never overlaps the slot-0 chain Asset (Y=0 is in the taken set for that column).
+- **Version + Changelog:** footer `v0.19.2 → v0.19.3`; prepended the Phase 19.3 in-app Changelog modal entry.
+
+**Deviations vs the prompt's QA premises.**
+1. **QA #6 (Bob's orphan +/− assignment).** The prompt's parenthetical guessed *name*-alphabetical order ("Guidance Computer at +150, Thermal Subsystem at −150"), but the spec text + the code both sort by node **id**: `asset-6iucywsi` (Thermal Subsystem) < `asset-saseewi2` (Guidance Computer), so Thermal Subsystem gets attemptIdx=1 → +150 and Guidance Computer gets attemptIdx=2 → −150. Both land at ±150 as required; only the sign assignment differs from the QA narrative. The implementation matches the spec ("alphabetical-by-id orphan order").
+2. **QA #8 (Alice/Dave have no orphans).** Dave indeed has zero orphans. **Alice has two**, both with zero edges: the Phase 15.4 floating "Voltage Regulator IC Test Report" (`asset-vreg-test-report`, genuinely unreferenced in the seed — it attaches to the VReg Claim only during the Re-Run demo prereq the user runs at runtime) at the own-asset column, and a visible-but-unconnected ChipCo "PRM-3A IC Datasheet" (`asset-chipco-prm-ic-datasheet`) at the pulled column x=2800. Both have no edges on Alice's canvas, so compressing them to ±150 is purely cosmetic — no edge geometry to distort, and the probe confirmed the datasheet is the lone node at (x=2800, y=150). Surfaced rather than silently special-cased.
+3. **Spread estimates.** The prompt estimated Dave's spread dropping to ~3800 and Alice's by ~10%; the probe shows Dave 4800 → 3600 (~25%) and Alice 3000 → 2600 (~13%). Within the prompt's ballpark; the exact numbers follow from the cumulative-cursor arithmetic.
+
+**Runtime status (build clean — 132 modules, 0 errors; app boots clean, no console errors; footer reads v0.19.3 in the live app; Changelog modal shows the Phase 19.3 entry at top above 19.2/19.1).** Data-probe-verified via `buildV22Canvas(getV22DataForRole(roleId, null))`, with a programmatic eval-row-vs-data-row collision check returning zero collisions for all four roles:
+- **Dave — anomaly cleared (QA #1/#4).** 2 eval chains at slots 0 (`claim-chipco-prm-ic`) and +600 (`claim-prm-assembly`); 13 lean chains at 200 pitch (`[-1400, -1200, …, -200, 1200, …, 2200]`, all adjacent diffs 200 within each run); total spread 4800 → 3600.
+- **Alice — eval chains centered (QA #2/#5).** 3 eval chains at slots 0 (EMI), +600 (PRM), −600 (VReg); 5 lean chains at 200 pitch; total spread 3000 → 2600.
+- **Bob & Carol — chain slots unchanged (QA #3).** Both all-eval, so the activity tier is a single group; slot Ys match Phase 19.2 (Bob PRM 0 / VReg 600; Carol EMI 0 / PRM 600). Their orphan Assets, however, do compress per Change C.
+- **Orphan compression (QA #6/#7).** Bob → Thermal Subsystem +150 / Guidance Computer −150 (was ±300), both edgeless; Carol → Compliance Audit Queue +150, edgeless. The slot-0 chain Asset (Bob's Avionics at COL_OWN_ASSET, Y=0) is in `takenYsByColumn`, so orphans skip Y=0 — confirmed no collision.
+- **No orphans for Dave (QA #8).** All his Assets are chain-bound; the post-pass is a no-op for his view. (Alice is the deviation above.)
+- **Re-sort on new eval (QA #9).** By construction — a Claim gaining an ER flips its `evalNodes` to non-empty → the activity tier promotes it ahead of lean chains → it moves to a more central slot on the next `buildV22Canvas`.
+
+The on-screen 3D-canvas rendering is gated by the documented V2Canvas raycaster limitation → flagged for a manual visual pass; all Y data feeding the layout is fully probe-verified.
+
+**Status:** [x] Complete.
+
 ### Phase 19.2 completion notes (2026-05-26) — Variable slot pitch (compact lean chains)
 
 Phase 19.1 applied a uniform `SLOT_HEIGHT = 600` pitch to *every* Claim in the view, including chains with no eval activity to occupy the eval row, so catalog-heavy views over-spread vertically (Dave's 15-Claim view ≈ 9000 units when ~half would suffice; Alice and the heavy-Claim views showed similar over-spread). Phase 19.2 makes the slot pitch variable — chains with eval activity reserve the full 600 (data row + eval row + buffer); chains without reserve only `ROW_STEP = 300` (data row only). The symmetric distribution by Claim creation date is preserved; chains stack outward from center as before, just with cumulative pitches sized to each chain's actual content.
