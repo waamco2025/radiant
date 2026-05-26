@@ -3993,6 +3993,38 @@ const DirectoryLayer = forwardRef(function DirectoryLayer({
               _directoryRequestEaCandidate: !existingEa && !hasActiveDa,
               _directoryWarmPathRequestCandidate: warmPathCandidate,
             }
+            // Phase 18.3.1.1: stamp solicitation context on the Directory card
+            // node. Closes the gap from 18.3.1 Deviation #2 — the parent-canvas
+            // adapter (v22DataWithReveal) + the Directory panel synthetic node
+            // got the stamp, but the Directory CARD node (where the _directory*
+            // stamps land) did not, so the V22ActionBar Reject Solicitation icon
+            // was never reached on a solicited Claim's dot. Inlined rather than
+            // imported from V2App (wrong dependency direction — V2App imports
+            // DirectoryLayer); `solicitations` here is the array form, so this
+            // matches on .find rather than the Map .get used by
+            // computeSolicitationContext in V2App. Same predicate otherwise:
+            // an active solicitation DA (identified by the _solicitationId
+            // stamp) targeting the active actor, whose linked solicitation is
+            // still pending.
+            const solicitationDa = Array.isArray(disclosureAgreements)
+              ? disclosureAgreements.find((da) =>
+                  da.subject?.kind === 'claim' && da.subject?.id === d.claim.id &&
+                  da.grantee?.party === layout.activeParty &&
+                  !!da._solicitationId &&
+                  da.type !== 'provisional' && !da._declineMeta && !da._revokedMeta,
+                )
+              : null
+            if (solicitationDa) {
+              const linkedSol = Array.isArray(solicitations)
+                ? solicitations.find((s) => s && s.id === solicitationDa._solicitationId)
+                : null
+              if (linkedSol && linkedSol.status === 'pending') {
+                directoryClaimNode = {
+                  ...directoryClaimNode,
+                  _solicitationContext: { solicitationId: solicitationDa._solicitationId, rfpId: solicitationDa._rfpId },
+                }
+              }
+            }
           }
           // Phase 18.2.3: NEW badge on the just-published Claim card — AssetNode
           // reads `node._isNew` (same surface that handles provisional Claims +

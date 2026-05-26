@@ -1422,7 +1422,21 @@ function V22ActionBar({ node, activeParty, onV22CardAction, evaluationAgreementF
         // Eval Agreement) — independent affordance.
         // Phase 14.6.2 Item 6: icon swapped from `★` to the canonical
         // BadgeShieldIcon so it matches the badge chip stack rendering.
-        if (!isOwner) {
+        // Phase 18.3.1.1: hide Issue Badge in Directory context. Issue Badge
+        // dispatches through onV22CardAction → onClaimCardAction for Directory
+        // cards, but that handler isn't wired for 'issueBadge' (no anchored
+        // Asset / parent-canvas position to attach the badge to) — so the
+        // button was a dead affordance. Detect Directory context by the
+        // presence of any Phase 17.3-18.3.1 _directory* / _solicitationContext
+        // stamp, which the Directory adapter applies and the parent-canvas
+        // adapter does not.
+        const isDirectoryMountedClaim = !!(
+          node._directoryWarmPathRequestCandidate ||
+          node._directoryExistingEa ||
+          node._directoryRequestEaCandidate ||
+          node._solicitationContext
+        )
+        if (!isOwner && !isDirectoryMountedClaim) {
           buttons.push({ icon: <BadgeShieldIcon size={13} color="currentColor" />, tooltip: 'Issue Badge', onClick: fire('issueBadge') })
         }
       }

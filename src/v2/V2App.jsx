@@ -7068,6 +7068,19 @@ export default function V2App() {
                 handleRequestEaWarmPathForClaim(claim)
               } else if (action === 'viewEvaluationAgreement') {
                 handleViewEa(existingEa)
+              } else if (action === 'rejectSolicitation') {
+                // Phase 18.3.1.1: Directory CARD Reject. The Directory card's
+                // V22ActionBar dispatches through this handler (not the
+                // parent-canvas onV22CardAction switch), so the rejectSolicitation
+                // case must live here too. `_node` is the Directory card synthetic
+                // node, which carries `_solicitationContext` (stamped in
+                // DirectoryLayer, Fix 2a). Opens the existing SolicitationRejectModal
+                // → handleRejectSolicitation cascade-revoke (Phase 18.3).
+                const ctx = _node?._solicitationContext
+                if (ctx) {
+                  const sol = v22Solicitations.get(ctx.solicitationId)
+                  if (sol) setV22SolicitationToReject(sol)
+                }
               }
             }}
             // Phase 17.3.1 — session-state solicitations threaded so the
@@ -9705,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.3.1 &middot; Changelog
+          v0.18.3.1.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9752,6 +9765,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3.1.1', date: '2026-05-24', label: 'Phase 18.3.1.1', items: [
+                  'Directory action-bar fixes. Issue Badge no longer surfaces on Directory Claim cards — its handler isn\'t wired through to Directory synthetic nodes, so the button was a dead affordance. Detection uses the existing Directory stamp family.',
+                  'Reject Solicitation now surfaces on Directory cards for solicited Claims — the solicitation context is stamped on the Directory card node alongside the existing Request EA / View EA markers, and the Directory card action handler now opens the rejection modal. Parity with the Detail Panel footer restored at the Directory card surface.',
+                ]},
                 { version: '0.18.3.1', date: '2026-05-24', label: 'Phase 18.3.1', items: [
                   'Bob-side solicitation UI. SolicitationCard rows are redesigned — the actor pill + "solicited" prefix row is removed, the title becomes the Claim name with a "from {owner}" subtitle, the message box drops its indigo left edge, and the whole card body is now clickable (any viewer role). Clicking a solicitation card routes to the offered Claim in Directory.',
                   'The Claim Detail Panel footer + the Claim card action bar gain a "Reject Solicitation" affordance when the Claim is being offered to you via a pending solicitation. Reject revokes the linked Disclosure Agreement and notifies the solicitor. Requesting an Evaluation Agreement on a solicited Claim reuses the existing warm-path — a solicitation Disclosure Agreement satisfies the same predicate.',
