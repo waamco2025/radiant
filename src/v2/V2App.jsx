@@ -9718,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.19.3 &middot; Changelog
+          v0.19.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9765,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.19.4', date: '2026-05-26', label: 'Phase 19.4', items: [
+                  'Two spacing fixes closing the Phase 19 compactness arc. (1) Radiant Network moves slightly above the actor row so its edges from public-disclosed Claims don\'t pile up as overlapping horizontal segments at Y=0 alongside the actor row and slot-0 chain Claims. (2) Chain-artifact X-spacing matches the standard column gap of 400 instead of 300, giving Eval Result and Proof of Evaluation cards visible breathing room between them.',
+                ]},
                 { version: '0.19.3', date: '2026-05-26', label: 'Phase 19.3', items: [
                   'Three vertical-compactness refinements. (1) Evaluation chains now cluster at the center of your canvas — the eye lands on the active relationships first, with quieter Asset→Claim pairs splaying outward. (2) Lean chains (no Eval Results or Proofs of Evaluation yet) reserve a tighter 200-unit pitch instead of 300, since they have no eval row to defend. (3) Owned Assets unconnected to any Claim ("orphan" Assets like Thermal Subsystem on the buyer side) compact to a 150-unit pitch around the actor row, freeing significant vertical space above and below the chain stack. Spread reductions: Dave ~20%, Alice ~10%, Bob\'s orphan band by 50%.',
                 ]},

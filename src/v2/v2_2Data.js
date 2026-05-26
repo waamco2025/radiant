@@ -7783,7 +7783,10 @@ export function buildV22Canvas(view) {
   // shift for downstream columns so chain ancestors don't collide with
   // the Pulled Claim / Pulled Asset / Public columns. Compute once here
   // before all placement runs so every column is consistent.
-  const ER_COL_SPACING = 300
+  // Phase 19.4: 400 (matching the COL_OWN_* 400-unit standard gap) gives
+  // visible separation between chain artifact cards. Was 300, which left
+  // the ER and PoE cards flush.
+  const ER_COL_SPACING = 400
   const erIdToErArtifact = new Map(view.evaluationResults.map((e) => [e.id, e]))
   const chainPositionByErId = new Map()
   const chainOriginByErId = new Map()
@@ -7862,7 +7865,14 @@ export function buildV22Canvas(view) {
   // Now that assetColShift is known, push the Radiant Network anchor at
   // the shifted public column.
   if (hasNetworkAnchor) {
-    nodes.push(actorToNode(RADIANT_NETWORK_ACTOR, COL_PUBLIC_eff, 0))
+    // Phase 19.4: Radiant Network sits one EVAL_BAND_OFFSET above the
+    // actor row so its DA edges to chain Claims (Y=0 for slot-0 chains,
+    // or other slot Ys) don't pile up as overlapping horizontal segments
+    // at Y=0 alongside the actor pillbox + the slot-0 chain's
+    // counterparty Assets. The new Y is clearly separated from the data
+    // row but not so far that the public Directory destination feels
+    // disconnected from the canvas center.
+    nodes.push(actorToNode(RADIANT_NETWORK_ACTOR, COL_PUBLIC_eff, -EVAL_BAND_OFFSET))
   }
 
   // Phase 6 carry-over #4: do NOT append "· PROVISIONAL" / "· DECLINED" to v22Type.
@@ -8302,7 +8312,15 @@ export function buildV22Canvas(view) {
       nodes.push(poeToNode(poe, COL_OWN_POE_eff, EVAL_BAND_OFFSET + stackIdx * ROW_STEP, view.evaluationResults))
       return
     }
-    const x = sourceClaim.x + 400
+    // Phase 19.4: sourceClaim.x + 600 puts this proof-only-pulled PoE one
+    // 400-unit gap to the RIGHT of its wrapped proof-only-pulled ER (which
+    // sits at sourceClaim.x + 200), matching the ER_COL_SPACING=400 standard
+    // applied to happy-path PoEs. Was + 400 (200 from the ER → cards flush).
+    // This path is hardcoded relative to sourceClaim.x rather than via
+    // ER_COL_SPACING, so the Change B constant bump alone doesn't reach it.
+    // Only Dave's view has a proof-only-pulled PoE; the target X (e.g. 3000
+    // at Y=900) is clear of the Radiant Network pillbox (Y=-300).
+    const x = sourceClaim.x + 600
     // Phase 16.2.2: inherit y from the wrapped Eval Result when on canvas
     // so PoE + wrapped ER share a chain row (matches the brief's
     // "ER + PoE on the same y-row" rule for grantee-direction views).

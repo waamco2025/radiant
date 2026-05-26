@@ -2673,6 +2673,31 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 19.4 completion notes (2026-05-26) — Y=0 disambiguation + chain X-spacing parity
+
+Two targeted spacing fixes surfaced by Phase 19.3 QA, both in `src/v2/v2_2Data.js`. Phase 19.4 closes the demo-prep arc of Phase 19; further compactness polish is deferred to Round 21.
+
+**Diff.**
+- **Change A — Radiant Network off Y=0.** The Radiant Network pseudo-Actor pillbox placement changed from `nodes.push(actorToNode(RADIANT_NETWORK_ACTOR, COL_PUBLIC_eff, 0))` to `… -EVAL_BAND_OFFSET` (Y=−300). It is now the only actor pillbox not on the Y=0 actor row. On Alice's view, Y=0 simultaneously held her actor pillbox (left edge), the slot-0 chain's data nodes (the oldest eval Claim + its shared counterparty Assets, first-chain-wins-anchored at slot 0), and the Radiant Network pillbox (right edge) — so the DA edges between them drew as overlapping horizontal segments. The slot-0 Claims are deterministically anchored and the own actor can't move (the actor-at-Y=0 convention spans all four roles), so the singleton public-destination Radiant Network moves up one band instead.
+- **Change B — chain X-spacing = 400.** The local `const ER_COL_SPACING = 300` in `buildV22Canvas` bumped to `400`, matching the `COL_OWN_*` standard 400-unit column gap. This governs the happy-path PoE column (`COL_OWN_EVAL_eff + len × ER_COL_SPACING`) and feeds `chainColShift` (which stays 0 for the length-1 seed chains).
+- **Change B addendum (necessary-completion) — proof-only-pulled PoE offset.** The proof-only-pulled PoE placement (`const x = sourceClaim.x + 400`, ~line 8315) bumped to `sourceClaim.x + 600`. See the deviation below.
+- **Version + Changelog:** footer `v0.19.3 → v0.19.4`; prepended the Phase 19.4 in-app Changelog modal entry.
+
+**Why Y=−300 specifically (Change A).** It's the symmetric counterpart of the eval band below center. It's never a chain slot Y (slots step by `LEAN_PITCH=200` or `SLOT_HEIGHT=600` from center, so −300 is unreachable for any pitch combination), and it shares Y only with a slot-(−1) eval row — but that content is at `COL_OWN_EVAL_eff` (≈1700) while Radiant Network is at `COL_PUBLIC_eff` (≈3200), so no card collision. Grep-confirmed no code reads Radiant Network's parent-canvas Y: every `RADIANT_NETWORK_ACTOR` reference is id-based (edge derivation, actor lists, `hasNetworkAnchor`, the Directory `isDirectory` check which uses entirely separate positioning). The placement line I edited is the sole writer of its parent-canvas Y.
+
+**Deviation / necessary-completion (Dave / QA #4).** The prompt prescribed Change B as a single-line `ER_COL_SPACING` bump and asserted (QA #4) that this would give Dave's ER+PoE a ~400 gap, citing "ER at `COL_OWN_EVAL_eff`, PoE at `COL_OWN_EVAL_eff + 400`." That premise is **incorrect about the code path**: Dave's chain is the **proof-only-pulled** PRM ER+PoE (he pulls Bob's PRM evaluation via the Phase 11D.3 carveout), and the proof-only-pulled placement is hardcoded relative to `sourceClaim.x` — the ER at `sourceClaim.x + 200` (line ~8222, intentional "reads as attached" offset) and the PoE at `sourceClaim.x + 400` (line ~8315) — **not** `ER_COL_SPACING`. So the prescribed constant bump leaves Dave's ER↔PoE center gap at 200 (cards ~300 wide → ~100 overlap, i.e. still flush), and QA #4 fails as literally probed. Because Dave is Change B's explicitly-named motivating case ("Dave's view shows an Eval Result card directly adjacent to its wrapping PoE card with effectively zero visual gap"), shipping the constant bump alone would miss the fix's own primary target. I therefore bumped the proof-only-pulled PoE offset `+ 400` → `+ 600`, putting it one 400-unit gap right of its wrapped ER (at `+ 200`) — the same visible separation the happy-path 400 bump gives Bob/Alice/Carol. This is a third one-literal edit beyond the prompt's stated two. It's safe: a per-role probe confirms **only Dave's view has a proof-only-pulled PoE** (Bob/Alice/Carol: zero), and the target X (3000 at Y=900) is clear — the only node further right is the Radiant Network pillbox at x=3200, which after Change A sits at Y=−300 (1200 units away in Y). Surfaced here rather than silently special-cased.
+
+**Runtime status (build clean — 132 modules, 0 errors; app boots clean, no console errors; footer reads v0.19.4 in the live app; Changelog modal shows the Phase 19.4 entry at top above 19.3/19.2).** Data-probe-verified via `buildV22Canvas(getV22DataForRole(roleId, null))`:
+- **Change A (QA #1/#3/#6).** Radiant Network at (x=3200, y=−300) on Alice + Dave (the two views with a network anchor; Bob/Carol have no published-to-network anchor so no Radiant Network pillbox on their parent canvas). All four own-actor pillboxes (GovCo/MicroCo/AuditCo/ChipCo) remain at Y=0.
+- **Change B (QA #4/#5).** ER→PoE center gap = 400 across all four roles: Bob (ER 1700 → PoE 2100), Alice (×2, both 1700 → 2100), Carol (1700 → 2100) via the constant; **Dave (ER 2600 → PoE 3000) via the parallel proof-only-pulled bump** (was 2600 → 2800 = 200).
+- **No new collisions (QA #7).** Dave's relocated PoE at (3000, 900) is the lone node at that position; the nearest rightward node (Radiant Network, 3200) is 1200 units away in Y. No other canvas changed X.
+- **Directory unaffected (QA #8).** The Directory layer uses its own scene/positioning; the parent-canvas Y change to Radiant Network doesn't touch it.
+- **Footer + Changelog (QA #9/#10).** Confirmed live: footer v0.19.4, Changelog Phase 19.4 at top.
+
+The literal on-screen rendering (the diagonal Radiant Network edges, the ER/PoE card gap) is gated by the documented V2Canvas raycaster/3D limitation → flagged for a manual visual pass; all X/Y data feeding the layout is fully probe-verified.
+
+**Status:** [x] Complete.
+
 ### Phase 19.3 completion notes (2026-05-26) — Vertical compactness (activity sort + lean pitch + orphan compression)
 
 Three independent vertical-compactness changes, all in `src/v2/v2_2Data.js`, stacking additively. None interact with each other.
