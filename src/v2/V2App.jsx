@@ -9718,7 +9718,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.18.3.1.1 &middot; Changelog
+          v0.18.3.1.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9765,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.18.3.1.2', date: '2026-05-24', label: 'Phase 18.3.1.2', items: [
+                  'Umbrella outline scope refinement. A cluster\'s "disclosure agreement border" now wraps every Claim the active viewer has a directed Disclosure Agreement on — including Claims that are also publicly disclosed. Previously the outline only wrapped directed-only Claims (the public-takes-precedence rule applies to dot color, not outline membership). Your view of another actor\'s cluster now correctly shows public+directed Claims inside the umbrella, matching the meaning of "you have a direct disclosure relationship with these specific Claims." Dot coloring is unchanged — public Claims stay indigo, directed-only Claims stay amber.',
+                ]},
                 { version: '0.18.3.1.1', date: '2026-05-24', label: 'Phase 18.3.1.1', items: [
                   'Directory action-bar fixes. Issue Badge no longer surfaces on Directory Claim cards — its handler isn\'t wired through to Directory synthetic nodes, so the button was a dead affordance. Detection uses the existing Directory stamp family.',
                   'Reject Solicitation now surfaces on Directory cards for solicited Claims — the solicitation context is stamped on the Directory card node alongside the existing Request EA / View EA markers, and the Directory card action handler now opens the rejection modal. Parity with the Detail Panel footer restored at the Directory card surface.',

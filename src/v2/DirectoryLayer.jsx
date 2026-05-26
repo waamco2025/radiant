@@ -1128,6 +1128,9 @@ function computeLayout(directoryData, viewport) {
     publicItems: activeOwnPublic,
     rfpItems: activeOwnRfp,
     isUserVisible: !!directoryData.isUserVisible,
+    // Phase 18.3.1.2: own cluster has no umbrella outline — the active actor
+    // is the owner, not a viewer-grantee, so the perimeter set is empty.
+    umbrellaPerimeterClaimIds: new Set(),
   })
   // Other clusters in deterministic alphabetical order.
   const otherClustersInput = [...directoryData.otherClusters].sort(
@@ -1142,6 +1145,12 @@ function computeLayout(directoryData, viewport) {
       publicItems,
       rfpItems,
       isUserVisible: true,
+      // Phase 18.3.1.2: outline-membership set from the view builder — every
+      // Claim the active viewer has a directed DA on (public+directed
+      // included). Drives the umbrella outline perimeter (the amber
+      // umbrellaItems subset still drives dot color + the packer's inner-blob
+      // grouping). Empty Set fallback for older view shapes / RFP-only owners.
+      umbrellaPerimeterClaimIds: c.umbrellaPerimeterClaimIds || new Set(),
     })
   }
 
@@ -1373,8 +1382,19 @@ function computeLayout(directoryData, viewport) {
       }
     }
 
-    // Umbrella outline path: convex hull of umbrella dots, +1 cell margin.
-    const umbrellaDots = placedDots.filter((d) => d.kind === 'umbrella')
+    // Umbrella outline path: convex hull of the directed-DA dots, +1 cell
+    // margin. Phase 18.3.1.2: membership is the full perimeter set (every
+    // Claim the active viewer has a directed DA on), NOT just the amber
+    // `kind === 'umbrella'` (directed-only) subset. Public+directed Claims
+    // (indigo dots, in `publicItems`) now join the perimeter so the outline
+    // wraps them too — §8.2.2's public-takes-precedence rule governs dot
+    // COLOR, not outline membership. RFP dots carry `claim: null` so they're
+    // naturally excluded. Falls back to the old amber-only behavior when the
+    // perimeter set is absent (defensive).
+    const perimeterIds = spec.umbrellaPerimeterClaimIds || new Set()
+    const umbrellaDots = perimeterIds.size > 0
+      ? placedDots.filter((d) => d.claim && perimeterIds.has(d.claim.id))
+      : placedDots.filter((d) => d.kind === 'umbrella')
     const umbrellaPathWorld = umbrellaDots.length > 0
       ? umbrellaOutlinePath(umbrellaDots)
       : null

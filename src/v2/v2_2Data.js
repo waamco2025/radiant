@@ -5443,6 +5443,8 @@ export function getV22DataForRole(roleId, provisionals) {
  *       ownerParty: string,
  *       publicClaims: Claim[],            // indigo dots
  *       umbrellaClaims: Claim[],          // amber dots — present only when active is umbrella grantee
+ *       umbrellaPerimeterClaimIds: Set,   // Phase 18.3.1.2: outline membership — every Claim the
+ *                                         //   active viewer has a directed DA on (public+directed included)
  *     }],
  *     umbrellaEdges: [{ targetParty: string }],
  *     otherRfps: RFP[],                   // non-active-Actor RFPs (status === 'open')
@@ -5526,7 +5528,18 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
   // subset).
   const clustersByOwner = new Map()
   const upsertCluster = (owner) => {
-    if (!clustersByOwner.has(owner)) clustersByOwner.set(owner, { ownerParty: owner, publicClaims: [], umbrellaClaims: [] })
+    if (!clustersByOwner.has(owner)) clustersByOwner.set(owner, {
+      ownerParty: owner,
+      publicClaims: [],
+      umbrellaClaims: [],
+      // Phase 18.3.1.2: outline-membership set. Includes every Claim the
+      // active viewer has a directed DA on, whether also publicly disclosed
+      // or not. Dot coloring stays unchanged via publicClaims/umbrellaClaims
+      // (public takes precedence per §8.2.2 for color); the umbrella outline
+      // reads from this Set so the "disclosure agreement border" wraps the
+      // full directed-DA subset including public+directed Claims.
+      umbrellaPerimeterClaimIds: new Set(),
+    })
     return clustersByOwner.get(owner)
   }
   for (const id of publicClaimIds) {
@@ -5535,11 +5548,17 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
     upsertCluster(c.owner).publicClaims.push(c)
   }
   for (const [grantor, idSet] of umbrellaClaimIdsByGrantor.entries()) {
+    const cluster = upsertCluster(grantor)
     for (const id of idSet) {
-      if (publicClaimIds.has(id)) continue // public takes precedence — already added as public
+      // Phase 18.3.1.2: every directed-DA subject id joins the outline-
+      // perimeter set, including those that are also publicly disclosed.
+      // Public+directed Claims keep their indigo dot color (added to
+      // publicClaims above) but the outline wraps them too.
+      cluster.umbrellaPerimeterClaimIds.add(id)
+      if (publicClaimIds.has(id)) continue // public takes precedence for dot color
       const c = claimsById.get(id)
       if (!c) continue
-      upsertCluster(grantor).umbrellaClaims.push(c)
+      cluster.umbrellaClaims.push(c)
     }
   }
   const otherClusters = Array.from(clustersByOwner.values())
@@ -5614,6 +5633,11 @@ export function buildV22DirectoryDataForRole(roleId, provisionals, closedRfpIds,
       ownerParty: owner,
       publicClaims: [],
       umbrellaClaims: [],
+      // Phase 18.3.1.2: shape parity — RFP-only clusters carry no directed-DA
+      // Claims (the active viewer has no DA to an RFP-only owner with no
+      // Claims on this view), so the perimeter set stays empty and the
+      // DirectoryLayer outline guard renders no umbrella for them.
+      umbrellaPerimeterClaimIds: new Set(),
       rfps: ownerRfps,
     })
     existingOwnersForRfps.add(owner)
