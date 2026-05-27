@@ -145,7 +145,10 @@ export { HealthBar }
 function StackBadge({ count, categoryColor }) {
   const [hovered, setHovered] = useState(false)
   if (!count || count === 0) return null
-  const tooltipText = `${count} associated asset${count === 1 ? '' : 's'} — evidence, evaluations, and linked records. Double-click or use the dive button to explore.`
+  // Phase 20.1: V2.2-specific Parse Result language (replaces the V2.1-era
+  // "evidence, evaluations, and linked records" phrasing — the child layer
+  // now holds only Parse Results).
+  const tooltipText = `${count} associated Parse Result${count === 1 ? '' : 's'}. Double-click to explore.`
   return (
     <Tooltip content={tooltipText} width={260}>
       <div

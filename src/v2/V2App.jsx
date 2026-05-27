@@ -9230,6 +9230,21 @@ export default function V2App() {
                   setForceExpandSda(null)
                   setV22PanToClaimId(assetId)
                 }}
+                onSelectParseResult={(prId) => {
+                  // Phase 20.1: dive into the currently-selected Asset's child
+                  // layer and auto-select the target Parse Result. Reuses the
+                  // Phase 20.0 v22PendingParseDive deferred-effect — single code
+                  // path for "dive into Asset, select child PR" shared by Parse
+                  // Evidence completion and these Detail Panel row clicks. `sel`
+                  // is the Asset's id (the panel showing this row belongs to it),
+                  // and the PR already lives in the Asset's synthesized children
+                  // (it's an existing PR), so the effect's "PR present in
+                  // children" guard passes on the first run → it dives + selects
+                  // immediately. The key MUST be `parseResultId` (the effect
+                  // destructures that exact field).
+                  if (!sel) return
+                  setV22PendingParseDive({ assetId: sel, parseResultId: prId })
+                }}
                 parseResultsForAsset={parseResultsForAsset}
                 // Claim actions
                 referencedAssetNames={referencedAssetNames}
@@ -9773,7 +9788,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.20.0 &middot; Changelog
+          v0.20.1 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9820,6 +9835,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.1', date: '2026-05-27', label: 'Phase 20.1', items: [
+                  'Parse Result rows in the Asset Detail Panel. The "Parse Results" Registration row is now a list of clickable rows — each shows the Parse Result\'s name and the count of parsed fields. Clicking a row dives into the source Asset\'s child layer and opens the Parse Result\'s Detail Panel. Plus a StackBadge tooltip refresh: "1 associated Parse Result. Double-click to explore." replaces the older multi-artifact phrasing.',
+                ]},
                 { version: '0.20.0', date: '2026-05-27', label: 'Phase 20.0', items: [
                   'Child Layer revival — Parse Result burial. Parse Results no longer clutter the parent canvas: they\'re now tucked beneath their source Asset on a child layer. Double-click an Asset that has Parse Results to dive in — the Asset becomes the anchor card at the top with its Parse Results in a row below, connected by Full edges. Surface back out via empty-canvas double-click, the Escape key, or the breadcrumb at the top of the canvas. Assets with Parse Results show a stacked-card silhouette so you can tell at a glance which ones are divable.',
                   'Running Parse Evidence on an Asset now auto-dives into that Asset\'s child layer and selects the freshly-created Parse Result, opening its Detail Panel. Pulled (counterparty) Assets stay flat and non-divable — Parse Results are owner-only artifacts.',

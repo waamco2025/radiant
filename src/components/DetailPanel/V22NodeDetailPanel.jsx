@@ -424,6 +424,9 @@ function V22AssetPanel({
   childAssets = [],
   parentAsset = null,
   onSelectAsset,
+  // Phase 20.1: dive into this Asset's child layer + auto-select the clicked
+  // Parse Result. Wired to the Phase 20.0 v22PendingParseDive mechanism.
+  onSelectParseResult,
   // Phase 11B.1: Expand button on the File section opens the file viewer
   // for this Asset directly. Same wiring shape as the Expand button on
   // Asset rows in V22ClaimPanel — receives the Asset artifact.
@@ -541,7 +544,22 @@ function V22AssetPanel({
           {isOwner && (
             <Section title="Registration">
               <Row label="Registered" value={formatDateTime(asset?.registrationDate)} />
-              <Row label="Parse Results" value={parseResultsForAsset.length} />
+              {/* Phase 20.1: the static "Parse Results: N" count row becomes a
+                  list of clickable rows that dive into this Asset's child layer
+                  and select the Parse Result. Zero-PR Assets (e.g. Bob's
+                  Avionics) keep the "Parse Results: 0" Row for zero visual
+                  regression; pulled Assets have an empty parseResultsForAsset
+                  (owner-only artifacts, arch-spec §3.3) so they hit the same
+                  zero-state path. */}
+              {parseResultsForAsset.length === 0 ? (
+                <Row label="Parse Results" value={0} />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                  {parseResultsForAsset.map((pr) => (
+                    <ParseResultRow key={pr.id} parseResult={pr} onSelect={onSelectParseResult} />
+                  ))}
+                </div>
+              )}
             </Section>
           )}
           {/* Phase 10.2: Asset hierarchy. Parent shown above Children so the
@@ -2780,6 +2798,31 @@ function AgreementRow({ children, onClick }) {
         transition: 'background 120ms',
       }}
     >{children}</div>
+  )
+}
+
+// Phase 20.1: clickable Parse Result row in the Asset Detail Panel's
+// Registration section. Replaces the static "Parse Results: N" count row.
+// Line 1 = templateName (matches the Parse Result Detail Panel header, so
+// list → dive → opened-panel reads consistently); line 2 = parsed-field
+// count. Click dives into the Asset's child layer + auto-selects the PR via
+// onSelectParseResult (Phase 20.0 v22PendingParseDive mechanism). Reuses the
+// shared AgreementRow wrapper (hover/padding/border) for visual parity with
+// the Anchored RFPs rows in the same panel.
+function ParseResultRow({ parseResult, onSelect }) {
+  const fieldCount = Array.isArray(parseResult.fields) ? parseResult.fields.length : 0
+  return (
+    <AgreementRow onClick={onSelect ? () => onSelect(parseResult.id) : undefined}>
+      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: 'var(--text-primary)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }} title={parseResult.templateName}>{parseResult.templateName || '(Unnamed Parse Result)'}</span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+          {fieldCount} parsed field{fieldCount === 1 ? '' : 's'}
+        </span>
+      </div>
+    </AgreementRow>
   )
 }
 

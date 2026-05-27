@@ -2673,6 +2673,38 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 20.1 completion notes (2026-05-27) — Detail Panel Parse Result Rows + Tooltip
+
+Finishes the child-layer entry affordances on top of the Phase 20.0 burial. Pure UI surface — the dive-and-select mechanism (`v22PendingParseDive` state + deferred effect) shipped in 20.0; this phase only adds a new caller from the Asset Detail Panel and a one-string tooltip fix. No new effect, no new state field, no parallel code path.
+
+**Diff (changes A–D).**
+- **Change A (`src/v2/AssetNode.jsx`, `StackBadge`).** Tooltip string rewritten from the V2.1-era `` `${count} associated asset${count === 1 ? '' : 's'} — evidence, evaluations, and linked records. Double-click or use the dive button to explore.` `` to `` `${count} associated Parse Result${count === 1 ? '' : 's'}. Double-click to explore.` ``. The child layer now holds only Parse Results, so the multi-artifact phrasing was stale. `width={260}` kept (the shorter string wraps fine). StackPeeks silhouettes (no tooltip) unchanged.
+- **Change B (`src/components/DetailPanel/V22NodeDetailPanel.jsx`).** (1) New `ParseResultRow({ parseResult, onSelect })` component placed after `AgreementRow` — reuses the shared `AgreementRow` wrapper (same hover/padding/border as the Anchored RFPs rows for visual parity), two-line left column: line 1 = `parseResult.templateName` (ellipsized, matches the PR Detail Panel header), line 2 = "{N} parsed field(s)" (`fields.length`, mono, tertiary). Click → `onSelect(parseResult.id)`. (2) New `onSelectParseResult` prop on `V22AssetPanel`. (3) The Registration section's static `<Row label="Parse Results" value={parseResultsForAsset.length} />` is replaced with a conditional: `length === 0` → the original `<Row label="Parse Results" value={0} />` (zero visual regression for Bob's Avionics + every pulled Asset, which have empty `parseResultsForAsset` since Parse Results are owner-only per §3.3); `length > 0` → a `flex column` of `ParseResultRow`s (no static count row — the rows are self-describing).
+- **Change C (`src/v2/V2App.jsx`).** `onSelectParseResult={(prId) => { if (!sel) return; setV22PendingParseDive({ assetId: sel, parseResultId: prId }) }}` wired alongside `onSelectAsset` in the Detail Panel prop block. `sel` is the Asset's id (the panel showing the row belongs to it). Reuses the Phase 20.0 deferred effect — the single "dive into Asset, select child PR" path shared with Parse Evidence completion.
+- **Change D (`src/v2/V2App.jsx`).** Footer `v0.20.0 → v0.20.1`; prepended a Phase 20.1 Changelog modal entry.
+
+**Deviations.**
+- **Field-name correction vs the prompt's Change C snippet.** The prompt sketched `setV22PendingParseDive({ assetId: sel, prId })` — but `prId` shorthand sets a `prId` key, while the Phase 20.0 effect destructures `const { assetId, parseResultId } = v22PendingParseDive`. Using the prompt's shorthand verbatim would leave `parseResultId` undefined → the effect's `children.some(c => c.id === parseResultId)` guard never passes → the dive never fires. Corrected to `{ assetId: sel, parseResultId: prId }`.
+- **No fallback to inlining needed.** The prompt flagged a possible constraint ("the existing effect waits for a NEW PR to materialize and won't fire for an already-existing one"). It doesn't: the effect's guard is "PR present in the Asset's `children`," which is already true for an existing PR (the Detail Panel row case), so the dive fires on the first effect run. The Phase 20.0 effect serves both the parse-completion case (waits for the new PR to fold in) and the direct-click case (PR already present) without modification.
+- **Minor:** Change B keeps the "Parse Results: 0" Row for the empty case rather than hiding the row, since that's the pre-20.1 behavior (zero regression). The non-empty case drops the count row entirely (per QA #2) — the row list communicates the count.
+
+**Runtime verification.** Build clean (`npm run build` — 132 modules, 0 errors). Preview boots clean, no console errors across the full walkthrough (role switch → Asset selection → row click → dive → surface). Footer reads v0.20.1; Changelog modal shows the Phase 20.1 entry at top above 20.0. Because the parent-canvas Asset cards are HTML overlays (clickable via DOM, unlike the 3D dot raycaster) and the View-Transitions dive completed in-preview, most of the flow was **live-verified** this session:
+- **QA #1 (Verified):** hovering the StackBadge "1" on Alice's PRM Datasheet → tooltip reads exactly "1 associated Parse Result. Double-click to explore."; the old "evidence, evaluations, and linked records" phrasing is absent.
+- **QA #2 (Verified):** Alice's PRM Datasheet Registration section shows the clickable row "Electronics Component Profile" (line 1) + "5 parsed fields" (line 2); no static "Parse Results: 1" count row.
+- **QA #3 (Verified):** clicking the row dove into the PRM Datasheet's child layer (PR card on-canvas) AND opened the Parse Result's Detail Panel on the right (in-panel PARSE RESULT label) — single-panel handoff.
+- **QA #4 (Verified):** Escape surfaced back to Alice's parent layer (0 PR labels) and re-opened the Asset Detail Panel with the new row (V2Canvas line 1917 `onSelect?.(diveParentNode)` preserved).
+- **QA #5 (Code-verified):** `ParseResultRow` reuses `AgreementRow` → padding/hover/border identical to the Anchored RFPs rows by construction.
+- **QA #6 (Verified):** Bob's Avionics Module (0 PRs) → Registration shows "Parse Results 0" — unchanged from pre-20.1.
+- **QA #7 (Code-verified):** pulled Assets have empty `parseResultsForAsset` (owner-only artifacts) → hit the same 0-PR path as QA #6.
+- **QA #8 (Code-verified):** demo data has 1 PR per owned Asset, so multi-PR pluralization is code-only — `count === 1 ? '' : 's'` confirmed in both the tooltip string and the row's "parsed field(s)".
+- **QA #9 (Code-verified + corroborated):** the Phase 20.0 `v22PendingParseDive` effect is untouched; this phase added a caller. The QA #3 row-click exercise confirms the shared dive-and-select path works end-to-end, so the Parse Evidence completion path (same mechanism) is unaffected.
+- **QA #10 (Verified):** the Asset panel's other Registration rows (Registered date) + structure render unchanged; only the Parse Results row changed.
+- **QA #11 (Verified):** build clean + preview boots clean, no console errors.
+
+**Known constraints / scope boundaries:** demo data has 1 PR per owned Asset, so multi-PR row rendering + pluralization are code-verified-only; Parse Result rows in the Claim / Eval Result Detail Panels are separate listing patterns (out of scope); `LayerTransitionOverlay.jsx` deletion deferred to Phase 20.2. Backlog #82 (Parse Result DOT decision — the surviving half from the 20.0 split) is unchanged by this UI-surface phase.
+
+**Status:** [x] Complete.
+
 ### Phase 20.0 completion notes (2026-05-27) — Child Layer Revival: Parse Result Burial
 
 Opens the child-layer arc per `references/child-layer-design.md`. Parse Results stop being parent-layer nodes and become child-layer children of their source Asset, riding the dive/surface machinery (layer stack, FLIP View Transitions, `StackPeeks` silhouette, `LayerPill` breadcrumb, Escape + empty-canvas-dblclick exit, `key={roleId}` role-switch remount) preserved in `V2Canvas.jsx` since Phase 1 and gated behind the now-removed `addedChildren` shape. This phase feeds that infrastructure with V2.2 data.
