@@ -291,6 +291,12 @@ export default function V2App() {
   // the NEW badge. Consumers normalise via `toIdArray(...)` below.
   const [v22RecentlyAcceptedAssetId, setV22RecentlyAcceptedAssetId] = useState(null)
   const [v22PanToClaimId, setV22PanToClaimId] = useState(null) // drives pan-to-node on creation/accept
+  // Phase 20.0 (Change F): deferred Parse Evidence auto-dive. Holds
+  // { assetId, parseResultId }. Set after a parse completes; a post-render
+  // effect (mirroring the v22PanToClaimId pattern) waits until the fresh
+  // asset node carries the new PR in its synthesized children, then dives
+  // into the source Asset's child layer and selects the new Parse Result.
+  const [v22PendingParseDive, setV22PendingParseDive] = useState(null)
   // V2.2 Phase 7 — Directory Layer + AI Shopper (spec §8 / §9)
   const [v22DirectoryOpen, setV22DirectoryOpen] = useState(false)
   // Phase 11.8 #44: when the Radiant Network actor node is double-clicked,
@@ -809,6 +815,24 @@ export default function V2App() {
     })
     const nodeMap = {}
     for (const n of nodes) nodeMap[n.id] = n
+    // Phase 20.0 (Change F / Gap 3): also index buried child-layer Parse
+    // Results so the Detail Panel mount (gated on `nodeMap[sel]`, V2App
+    // ~8730) can resolve a selected child node. After burial a Parse Result
+    // is no longer a top-level parent node, but selecting one — via the
+    // Parse-Evidence auto-dive's setSel, or a direct child-layer card click
+    // (onSelect → handleSelect → setSel) — must still open its Detail Panel.
+    // Without this, every child-layer Parse Result is un-openable (a worse
+    // regression than missing the auto-select). Flagged `_layer: 'child'`
+    // (a copy, leaving the asset.children originals untouched) so any
+    // parent-only consumer can distinguish; the `!nodeMap[c.id]` guard keeps
+    // top-level nodes authoritative on the rare event of an id clash.
+    for (const n of nodes) {
+      if (n.children) {
+        for (const c of n.children) {
+          if (!nodeMap[c.id]) nodeMap[c.id] = { ...c, _layer: 'child' }
+        }
+      }
+    }
     // Phase 11C.4 W1 + 11C.5 W1: stamp `_showAsProvisional: true` on edges
     // incident to the recently-accepted Claim so V2Canvas renders them
     // dashed during the reveal window. V2Canvas already reads this flag at
@@ -2257,12 +2281,20 @@ export default function V2App() {
       disclosureAgreements: [...prev.disclosureAgreements, artifacts.refDisclosureAgreement],
     }))
     setV22ParsingAsset(null)
-    setSel(artifacts.parseResult.id)
     setForcePanelTab(null)
     setForceExpandSda(null)
-    setV22PanToClaimId(artifacts.parseResult.id)
-    setV22RecentlyAcceptedClaimId(artifacts.parseResult.id)
-    // Phase 7 carry-over #1: no timeout; clears on deselection.
+    // Phase 20.0 (Change F): the Parse Result is now buried on the source
+    // Asset's child layer, so the old parent-layer select + pan no longer
+    // works (the PR isn't a parent node). Hand off to the deferred-dive
+    // effect: it waits until the re-render folds the new PR into the
+    // asset's synthesized children, then dives into the child layer and
+    // selects the PR. (The synchronous `await dive(); setSel()` the Phase
+    // 20.0 brief sketched would capture the stale pre-parse asset node —
+    // the new PR wouldn't be on the child layer yet. Per Andrew's Option 4
+    // resolution, the reveal pill is skipped in 20.0 — the auto-dive itself
+    // is the "new thing here" signal — so setV22RecentlyAcceptedClaimId is
+    // dropped from this path.)
+    setV22PendingParseDive({ assetId: asset.id, parseResultId: artifacts.parseResult.id })
   }, [v22ParsingAsset, activeRole.party, activeRole.partyDot])
 
   // Phase 13.1 (#168a): Create Proof of Evaluation, 1:1 wrap. Atomically:
@@ -3628,6 +3660,29 @@ export default function V2App() {
     }
     setV22PanToClaimId(null)
   }, [v22PanToClaimId, v22Data])
+
+  // Phase 20.0 (Change F): deferred Parse Evidence auto-dive. After a parse
+  // completes, handleV22ParseSubmit stamps { assetId, parseResultId } here.
+  // This effect (re-running on v22Data changes, like the v22PanToClaimId
+  // effect above) waits until the post-parse re-render folds the new Parse
+  // Result into the source Asset's synthesized `children`, THEN dives into
+  // the Asset's child layer and selects the new PR once the dive Promise
+  // resolves (Change E made handleDive awaitable). Diving with the fresh
+  // node guarantees the new PR is on the child layer; selecting after the
+  // transition settles avoids the mid-FLIP selection-pan race (design §6.2).
+  useEffect(() => {
+    if (!v22PendingParseDive) return
+    const { assetId, parseResultId } = v22PendingParseDive
+    const assetNode = v22Data?.nodeMap?.[assetId]
+    // Wait for the re-render that adds the new PR to the asset's children.
+    if (!assetNode || !assetNode.children?.some((c) => c.id === parseResultId)) return
+    const ref = canvasRef.current
+    setV22PendingParseDive(null) // consume the request before diving (prevents re-dive on later v22Data changes)
+    if (!ref?.dive) return
+    Promise.resolve(ref.dive(assetNode)).then(() => {
+      setSel(parseResultId)
+    })
+  }, [v22PendingParseDive, v22Data])
 
   // Phase 9A.1.5 item 5: edge-select framing. When the user selects an
   // Agreement Edge, animate-pan + animate-zoom the canvas to frame both
@@ -9718,7 +9773,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.19.4 &middot; Changelog
+          v0.20.0 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9765,6 +9820,10 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.0', date: '2026-05-27', label: 'Phase 20.0', items: [
+                  'Child Layer revival — Parse Result burial. Parse Results no longer clutter the parent canvas: they\'re now tucked beneath their source Asset on a child layer. Double-click an Asset that has Parse Results to dive in — the Asset becomes the anchor card at the top with its Parse Results in a row below, connected by Full edges. Surface back out via empty-canvas double-click, the Escape key, or the breadcrumb at the top of the canvas. Assets with Parse Results show a stacked-card silhouette so you can tell at a glance which ones are divable.',
+                  'Running Parse Evidence on an Asset now auto-dives into that Asset\'s child layer and selects the freshly-created Parse Result, opening its Detail Panel. Pulled (counterparty) Assets stay flat and non-divable — Parse Results are owner-only artifacts.',
+                ]},
                 { version: '0.19.4', date: '2026-05-26', label: 'Phase 19.4', items: [
                   'Two spacing fixes closing the Phase 19 compactness arc. (1) Radiant Network moves slightly above the actor row so its edges from public-disclosed Claims don\'t pile up as overlapping horizontal segments at Y=0 alongside the actor row and slot-0 chain Claims. (2) Chain-artifact X-spacing matches the standard column gap of 400 instead of 300, giving Eval Result and Proof of Evaluation cards visible breathing room between them.',
                 ]},

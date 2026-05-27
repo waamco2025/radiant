@@ -1641,9 +1641,15 @@ const V2Canvas = forwardRef(function V2Canvas({
   // ===== DIVE (View Transitions API + WebGL environmental effects) =====
 
   const handleDive = useCallback((node) => {
-    if (transitioningRef.current) return
-    if (!node.children || node.children.length === 0) return
+    // Phase 20.0 (Change E): return a Promise that resolves when the dive
+    // transition fully settles (resolve() fires after setTransitioning(false)
+    // at every completion site below), so callers can `await dive(node)` and
+    // then `setSel(...)` with the layer state guaranteed settled. The early
+    // guards return Promise.resolve() so awaiting is always safe.
+    if (transitioningRef.current) return Promise.resolve()
+    if (!node.children || node.children.length === 0) return Promise.resolve()
 
+    return new Promise((resolve) => {
     transitioningRef.current = true
     setTransitioning(true)
     setDiveTargetId(node.id)
@@ -1787,6 +1793,7 @@ const V2Canvas = forwardRef(function V2Canvas({
         buildGrid(targetDepth)
         transitioningRef.current = false
         setTransitioning(false)
+        resolve() // Phase 20.0: dive settled (fallback path)
         requestAnimationFrame(() => setUnfurlSettle(true))
       })
       return
@@ -1826,6 +1833,7 @@ const V2Canvas = forwardRef(function V2Canvas({
       delete document.documentElement.dataset.vtDirection
       transitioningRef.current = false
       setTransitioning(false)
+      resolve() // Phase 20.0: dive settled (View Transitions success path)
       buildGrid(targetDepth)
       // Fade in child cards after edges have drawn
       requestAnimationFrame(() => setUnfurlSettle(true))
@@ -1833,8 +1841,10 @@ const V2Canvas = forwardRef(function V2Canvas({
       delete document.documentElement.dataset.vtDirection
       transitioningRef.current = false
       setTransitioning(false)
+      resolve() // Phase 20.0: dive settled (View Transitions error path)
       buildGrid(targetDepth)
     })
+    }) // end Phase 20.0 dive Promise
   }, [layerStack, updateCamera, computeFitCamera, clearGroup, buildEdges, animateEdgeDraw, fadeEdgesIn, updateClearColor, worldToScreen, animateDotStreaks, onCloseSel, buildGrid])
 
   // ===== SURFACE (View Transitions API + WebGL environmental effects) =====
