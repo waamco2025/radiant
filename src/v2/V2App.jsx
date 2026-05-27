@@ -9788,7 +9788,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.20.4 &middot; Changelog
+          v0.20.5 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9835,6 +9835,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.5', date: '2026-05-27', label: 'Phase 20.5', items: [
+                  'Demo-prep swap: the previewable picker file is now `inrush-current-limiter-datasheet.pdf` (Inrush Current Limiter ICL-150), not `emi-shield-spec.pdf`. The previous file collided with Alice\'s existing EMI Shield Assembly Asset and would have created a duplicate at registration. ICL-150 is a genuinely new MicroCo part — no collision in Alice\'s seed.',
+                ]},
                 { version: '0.20.4', date: '2026-05-27', label: 'Phase 20.4', items: [
                   'Mock qualified storage picker: `emi-shield-spec.pdf` now ships as a real PDF and previews live in the picker File Details panel; selecting it for Asset registration carries the file forward to the new Asset\'s File Viewer. Demo-prep polish — the other five mock files stay as preview-less placeholders.',
                 ]},

@@ -2673,6 +2673,32 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 20.5 completion notes (2026-05-27) — Demo Seed PDF Swap (EMI Shield → ICL-150)
+
+Standalone demo-prep polish (same family as 20.3/20.4; the Phase 20 child-layer arc stays CLOSED). Phase 20.4 wired `emi-shield-spec.pdf` as the one previewable qualified-storage file — but demo-prep review caught a **seed collision**: every existing filename under MicroCo's `/product-data/datasheets/` already maps to an Asset in Alice's seed (EMI Shield → `asset-emi-datasheet`, PRM → `asset-prm-datasheet`, VReg → `asset-vreg-datasheet`, …), so registering one at demo time would mint a duplicate Asset card next to the existing one (confusing on camera). 20.5 swaps the previewable file to a genuinely **new** MicroCo part — Inrush Current Limiter ICL-150 (`inrush-current-limiter-datasheet.pdf`) — which has no seed Asset and registers cleanly. It's added as a **seventh** datasheets entry rather than replacing one of the six (the six stay as preview-less catalog filler — realistic that Alice's QS mirrors her actively-maintained product family).
+
+**Diff (bidirectional swap).**
+- **File 1 — new PDF.** `public/seed-pdfs/inrush-current-limiter-datasheet.pdf` (PDF 1.4, 4 pages, 12121 bytes, MicroCo-branded ICL-150 datasheet) added (was attached by Andrew, now committed).
+- **File 2 — old PDF deleted.** `git rm public/seed-pdfs/emi-shield-spec.pdf` (the Phase 20.4 file; no code references it as a `localPath` after the picker edits).
+- **File 3 — picker mock data (`V22QualifiedStoragePicker.jsx`).** Removed `localPath: '/seed-pdfs/emi-shield-spec.pdf'` from the `emi-shield-spec.pdf` entry (reverts it to a preview-less placeholder like its siblings — it stays in the picker as filler). Added a 7th entry to the same `/product-data/datasheets/` array: `{ name: 'inrush-current-limiter-datasheet.pdf', size: '1.9 MB', date: '2026-03-13', type: 'pdf', localPath: '/seed-pdfs/inrush-current-limiter-datasheet.pdf' }` (the 1.9 MB display size is decorative — the actual PDF is ~12 KB — and the 2026-03-13 date slots chronologically between connector-assembly 03-12 and emi-shield 03-15).
+- **File 4 — comment references.** Updated the four `emi-shield-spec` "canonical previewable file" comment refs to name ICL-150: the header docblock (line ~16), the datasheets-array inline comment (now a Phase 20.5 comment with the collision rationale), the `selectedFileToV22Payload` comment, and the File Details preview-slot comment. Grep-confirmed the only remaining `emi-shield-spec` mentions are intentional (the now-preview-less mock entry, my rationale comment, and the historical Phase 20.4 Changelog modal entry).
+- **No changes to the Phase 20.4 wiring.** `selectedFileToV22Payload`, the `mimeType` resolution (`.pdf` → `application/pdf` via `MIME_BY_EXT`), the File Details PDF.js preview slot, and the registration carry-through (`makeAsset` preserves `file.localPath`/`file.mimeType`) are all filename-agnostic and pick up the new entry automatically.
+- **File 5 — footer + Changelog (`V2App.jsx`).** `v0.20.4 → v0.20.5`; prepended the Phase 20.5 Changelog modal entry. (The Phase 20.4 Changelog entry stays as-is per the prompt — 20.5 supersedes it forward.)
+
+**Deviations.**
+- **QA #5 — old PDF returns the SPA fallback, not a strict 404.** The prompt's QA #5 says `/seed-pdfs/emi-shield-spec.pdf` should 404. In the Vite **dev** server, a deleted `public/` file falls through to the SPA catch-all → `index.html` (200, `text/html`, 831 bytes), NOT a 404. The substance holds: the path no longer serves PDF content (`content-type: text/html`, not `application/pdf`), and grep confirms zero orphaned references to the old path (the `localPath` was removed; nothing fetches it). Production (Netlify) behavior depends on its SPA config, but either way the PDF content is gone and unreferenced. No console errors result from the deletion.
+
+**Verification (live, as Alice — drove the full flow via DOM: Establish Session → switch to Alice → MicroCo Actor panel → Register Asset → Open Qualified Storage → product-data → datasheets):**
+- **QA #1 (Verified):** datasheets folder now lists **7 files** ("Select all (7 files)"), with `inrush-current-limiter-datasheet.pdf` (1.9 MB, 2026-03-13) alongside the original six.
+- **QA #2 (Verified):** clicking the ICL-150 row rendered 4 PDF.js page canvases; screenshot confirmed MICROCO branding, "Inrush Current Limiter ICL-150" title, "NTC Thermistor-Based Limiter…" subtitle, "1. Scope" + "2. Electrical Characteristics" table. EMI Shield title gone.
+- **QA #3 (Verified):** clicking `emi-shield-spec.pdf` → File Details shows "Preview not available", 0 PDF canvases (reverted to pre-20.4 state).
+- **QA #4 (Verified):** registered ICL-150 (deselected the accidental second pick, Step 1→2→3 → Register Asset); the new "inrush current limiter datasheet" Asset appeared on Alice's canvas, auto-selected; its "View File" opened the File Viewer with iframe `src="/seed-pdfs/inrush-current-limiter-datasheet.pdf"`, filename `inrush-current-limiter-datasheet.pdf`, MIME `application/pdf`, no "No preview available". Non-colliding — ICL-150 is absent from Alice's seed, so it's a fresh single card (no duplicate of any existing Asset).
+- **QA #5 (Verified, with the dev-server nuance above):** `/seed-pdfs/emi-shield-spec.pdf` no longer serves a PDF (returns the SPA HTML fallback); no orphaned references; no deletion-related console errors.
+- **QA #6 (Verified):** `/seed-pdfs/inrush-current-limiter-datasheet.pdf` fetches 200 OK, `content-type: application/pdf`, `%PDF-` magic, 12121 bytes. Build clean (132 modules, 0 errors).
+- **Console:** only the pre-existing picker-hover "mix shorthand/non-shorthand border" dev warnings (diagnosed in Phase 20.4 — `V22QualifiedStoragePicker.jsx:661-662` + file-row hovers, present in both the stashed pre-20.4 code and after); dev-mode-only, interaction-triggered, not a 20.5 regression.
+
+**Status:** [x] Complete.
+
 ### Phase 20.4 completion notes (2026-05-27) — Mock PDF Wired into Picker + File Viewer
 
 Standalone demo-prep polish (same family as 20.3; the Phase 20 child-layer arc stays CLOSED). Wires ONE qualified-storage file (`emi-shield-spec.pdf`, a 4-page MicroCo-branded EMI Shield Specification) end-to-end so it previews live both in the picker File Details panel and in the resulting registered Asset's File Viewer. The other five MicroCo datasheets remain preview-less placeholders by design.

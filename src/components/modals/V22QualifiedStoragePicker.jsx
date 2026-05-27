@@ -13,7 +13,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 // Phase 20.4: reuse the Phase 15 PDF.js renderer for the File Details preview
-// of qualified-storage files that ship as real PDFs (currently emi-shield-spec).
+// of qualified-storage files that ship as real PDFs (Phase 20.5: currently
+// inrush-current-limiter-datasheet).
 import AnnotatedPdfViewer from '../AnnotatedPdfViewer.jsx'
 
 const MOCK_BUCKETS = {
@@ -73,10 +74,15 @@ const MOCK_BUCKETS = {
       '/product-data/datasheets': [
         { name: 'powerregulationmodule-datasheet.pdf', size: '3.8 MB', date: '2026-03-20', type: 'pdf' },
         { name: 'voltageregulator-datasheet.pdf', size: '2.1 MB', date: '2026-03-18', type: 'pdf' },
-        // Phase 20.4: the only qualified-storage file that ships as a real,
-        // previewable PDF (served from public/seed-pdfs/). The other five stay
-        // preview-less placeholders — intentional, for the demo walkthrough.
-        { name: 'emi-shield-spec.pdf', size: '1.4 MB', date: '2026-03-15', type: 'pdf', localPath: '/seed-pdfs/emi-shield-spec.pdf' },
+        { name: 'emi-shield-spec.pdf', size: '1.4 MB', date: '2026-03-15', type: 'pdf' },
+        // Phase 20.5: the only qualified-storage file that ships as a real,
+        // previewable PDF (served from public/seed-pdfs/). Swapped here from
+        // emi-shield-spec.pdf (Phase 20.4) — that filename collides with Alice's
+        // existing EMI Shield Assembly Asset, so registering it would create a
+        // duplicate card. The Inrush Current Limiter ICL-150 is a genuinely new
+        // MicroCo part with no seed Asset, so it registers cleanly. The other
+        // six datasheets stay preview-less placeholders — intentional.
+        { name: 'inrush-current-limiter-datasheet.pdf', size: '1.9 MB', date: '2026-03-13', type: 'pdf', localPath: '/seed-pdfs/inrush-current-limiter-datasheet.pdf' },
         { name: 'thermal-interface-pad-spec.pdf', size: '980 KB', date: '2026-03-14', type: 'pdf' },
         { name: 'connector-assembly-drawing.pdf', size: '2.6 MB', date: '2026-03-12', type: 'pdf' },
         { name: 'pcb-substrate-stackup.pdf', size: '1.7 MB', date: '2026-03-10', type: 'pdf' },
@@ -196,9 +202,10 @@ function selectedFileToV22Payload(file) {
     mimeType: MIME_BY_EXT[ext] || 'application/octet-stream',
     hash: null,
     // Phase 20.4: carry the served PDF path forward when the mock entry has
-    // one (only emi-shield-spec today). makeAsset stores file.localPath, so the
-    // registered Asset's File Viewer renders the real PDF. Preview-less files
-    // pass `localPath: null` and keep the existing no-preview fallback.
+    // one (Phase 20.5: only inrush-current-limiter-datasheet today). makeAsset
+    // stores file.localPath, so the registered Asset's File Viewer renders the
+    // real PDF. Preview-less files pass `localPath: null` and keep the existing
+    // no-preview fallback.
     localPath: file.localPath || null,
     // Carry the display size / type / date through too — V22CreateAssetModal
     // uses these for the "Review & Confirm" step without reformatting.
@@ -1101,7 +1108,8 @@ export default function V22QualifiedStoragePicker({
 
                 {previewFile.localPath ? (
                   // Phase 20.4: live PDF.js preview for qualified-storage files
-                  // that ship as real PDFs (emi-shield-spec today). Reuses the
+                  // that ship as real PDFs (Phase 20.5: inrush-current-limiter-
+                  // datasheet today). Reuses the
                   // Phase 15 AnnotatedPdfViewer — fit-to-container, scrolls
                   // internally for the full multi-page view; no annotation
                   // anchors here (none apply to a not-yet-registered file).
