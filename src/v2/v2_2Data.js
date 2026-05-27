@@ -730,6 +730,41 @@ export function makeInternalDisclosureAgreement({
 }
 
 /**
+ * Phase 20.2 (#204): emit the standard internal ownership DAs for an actor's
+ * owned items (Assets or Claims). One `da-own-${item.id}` Full internal DA per
+ * item.
+ *
+ * The filter on `item.owner === actor.party` runs FIRST, so callers may pass an
+ * unfiltered superset (e.g. the full multi-party `claims` array) without minting
+ * cross-party ownership DAs. This structural guard makes the Phase 17.4.5
+ * over-iteration bug — `aliceOwnClaims` mapping the whole `claims` array with a
+ * hardcoded `owner: alice.party`, minting spurious MicroCo→MicroCo DAs over
+ * ChipCo's Claims — impossible by construction.
+ *
+ * The `createdDate` SOURCE field varies by kind (Assets: `registrationDate`;
+ * Claims: `createdDate`) but lands on the same `terms.createdDate` destination.
+ * Output is byte-identical to the prior hand-rolled per-actor blocks:
+ * `makeInternalDisclosureAgreement` defaults `scope` to the same null-scope
+ * object whether or not `scope` is passed, so the Asset blocks (which omitted
+ * scope) and the Claim blocks (which passed `scope: {}`) both produced the
+ * identical DA shape this helper reproduces.
+ */
+function makeOwnershipDAsForActor(actor, ownedItems, itemKind) {
+  const dateField = itemKind === 'asset' ? 'registrationDate' : 'createdDate'
+  return ownedItems
+    .filter((item) => item.owner === actor.party)
+    .map((item) =>
+      makeInternalDisclosureAgreement({
+        id: `da-own-${item.id}`,
+        owner: actor.party,
+        ownerDot: actor.partyDot,
+        subject: { kind: itemKind, id: item.id },
+        terms: { createdDate: item[dateField] },
+      }),
+    )
+}
+
+/**
  * Proof-of-Evaluation Disclosure Agreement — evaluator (grantor) → claim owner
  * (grantee). Phase 13.1 (#168a): discriminated union. Pass either
  * `evaluationResultId` (auto-disclosure created at Eval Result save time) or
@@ -3611,7 +3646,12 @@ function buildV22SharedArtifactsUncached() {
   // ── Disclosure Agreements ─────────────────────────────────────────────
   // Ownership/internal: Actor → each of their Assets (Full, implicit).
   // Edge derivation (Phase 2): grantor's Actor node ↔ subject.
-  const aliceOwnAssets = [
+  // Phase 20.2 (#204): the six per-actor ownership-DA blocks now route through
+  // makeOwnershipDAsForActor, whose internal `owner === actor.party` filter is
+  // the structural guard against the Phase 17.4.5 over-iteration bug. The five
+  // curated arrays below pass through the filter as a no-op; aliceOwnClaims
+  // (further down) relies on it to safely receive the full multi-party array.
+  const aliceOwnAssets = makeOwnershipDAsForActor(alice, [
     aPrmDatasheet,
     aPrmTestReport,
     aPrmThermal,
@@ -3624,110 +3664,44 @@ function buildV22SharedArtifactsUncached() {
     aThermalPad,
     aFwBootloaderSource,
     aRfFilterSpec,
-  ].map((a) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${a.id}`,
-      owner: alice.party,
-      ownerDot: alice.partyDot,
-      subject: { kind: 'asset', id: a.id },
-      terms: { createdDate: a.registrationDate },
-    }),
-  )
-  const bobOwnAssets = [bAvionics, bGuidance, bThermal].map((a) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${a.id}`,
-      owner: bob.party,
-      ownerDot: bob.partyDot,
-      subject: { kind: 'asset', id: a.id },
-      terms: { createdDate: a.registrationDate },
-    }),
-  )
-  const carolOwnAssets = [cAuditWorkspace, cComplianceQueue].map((a) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${a.id}`,
-      owner: carol.party,
-      ownerDot: carol.partyDot,
-      subject: { kind: 'asset', id: a.id },
-      terms: { createdDate: a.registrationDate },
-    }),
-  )
-  // Phase 11A: ChipCo's ownership DAs (Assets + Claims + Parse Result).
+  ], 'asset')
+  const bobOwnAssets = makeOwnershipDAsForActor(bob, [bAvionics, bGuidance, bThermal], 'asset')
+  const carolOwnAssets = makeOwnershipDAsForActor(carol, [cAuditWorkspace, cComplianceQueue], 'asset')
+  // Phase 11A: ChipCo's ownership DAs (Assets + Claims).
   // Phase 17.5.0.4: + the 12 ChipCo catalog-Claim stub Asset anchors.
-  const daveOwnAssets = [
+  const daveOwnAssets = makeOwnershipDAsForActor(dave, [
     dPrmIcDatasheet, dPrmIcTestReport, dVrefDatasheet,
     dOpAmpDatasheet, dBuckRegQualReport, dTimingIcDatasheet, dLdoRegDatasheet,
     dMixedSigQualReport, dBandgapDatasheet, dFlashMemQualReport, dSramCtlQualReport,
     dAdcDacDatasheet, dMpuQualReport, dSerdesDatasheet, dPmicDatasheet,
-  ].map((a) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${a.id}`,
-      owner: dave.party,
-      ownerDot: dave.partyDot,
-      subject: { kind: 'asset', id: a.id },
-      terms: { createdDate: a.registrationDate },
-    }),
-  )
+  ], 'asset')
   // Phase 16.0: ownership DAs cover all 14 of Dave's Claims.
-  const daveOwnClaims = [
+  const daveOwnClaims = makeOwnershipDAsForActor(dave, [
     cChipcoPrmIc, cChipcoVref,
     cChipcoOpAmp, cChipcoBuckReg, cChipcoTimingIc, cChipcoLdoReg,
     cChipcoMixedSig, cChipcoBandgap, cChipcoFlashMem, cChipcoSramCtl,
     cChipcoAdcDac, cChipcoMpu, cChipcoSerdes, cChipcoPowerMgmt,
-  ].map((c) =>
-    makeInternalDisclosureAgreement({
-      id: `da-own-${c.id}`,
-      owner: dave.party,
-      ownerDot: dave.partyDot,
-      subject: { kind: 'claim', id: c.id },
-      scope: {},
-      terms: { createdDate: c.createdDate },
-    }),
-  )
-  const daveClaimRefEdges = [cChipcoPrmIc, cChipcoVref].flatMap((claim) =>
-    claim.referencedAssetIds.map((assetId) =>
-      makeInternalDisclosureAgreement({
-        id: `da-ref-${claim.id}-${assetId}`,
-        owner: claim.owner,
-        ownerDot: claim.ownerDot,
-        subject: { kind: 'claim', id: claim.id },
-        scope: { assetIds: [assetId], includeDerivatives: true },
-        terms: { createdDate: claim.createdDate },
-      }),
-    ),
-  )
-  const daveParseResultRefEdge = makeInternalDisclosureAgreement({
-    id: `da-parse-${prChipcoPrmIcDatasheet.id}`,
-    owner: dave.party,
-    ownerDot: dave.partyDot,
-    subject: { kind: 'parseResult', id: prChipcoPrmIcDatasheet.id },
-    scope: { assetIds: [prChipcoPrmIcDatasheet.sourceAssetId], includeDerivatives: true },
-    terms: { createdDate: prChipcoPrmIcDatasheet.parseDate },
-  })
+  ], 'claim')
+  // Phase 20.2 (#205): the former actor-specific daveClaimRefEdges +
+  // daveParseResultRefEdge blocks are removed. Their da-ref-* / da-parse-* ids
+  // (3 da-ref for cChipcoPrmIc/cChipcoVref + 1 da-parse for the PrmIc datasheet)
+  // are already emitted by the generic claimRefEdges / parseResultRefEdges loops
+  // below, which iterate the full claims / parseResults arrays with
+  // per-iteration owner. The duplicate blocks only produced redundant ids that
+  // mergeById deduped at runtime — the merged registry is unchanged.
 
   // Actor → each of their Claims (Full, implicit). Edge: Actor ↔ Claim.
-  // Phase 17.4.5: filter to Alice's OWN claims. The primary `claims` array
-  // holds claims from multiple parties — Alice's (cPrm/cVreg/cEmi + the five
-  // Phase 17.4 MicroCo claims) AND Dave/ChipCo's 14 claims. Mapping the whole
-  // array with a hardcoded `owner: alice.party` minted spurious MicroCo-owned
-  // internal ownership DAs over ChipCo's claims, colliding with
-  // `daveOwnClaims`' identical `da-own-${c.id}` ids. The MicroCo/MicroCo
-  // duplicate then leaked an "Internal" Full Disclosure row into the Directory
-  // Claim Detail Panel whenever Alice viewed a ChipCo umbrella Claim (the
-  // V2App party-presence filter admits it because Alice IS both parties of the
-  // internal DA). Restricting to claims Alice actually owns keeps each
-  // ownership DA's party aligned with the claim's owner.
-  const aliceOwnClaims = claims
-    .filter((c) => c.owner === alice.party)
-    .map((c) =>
-      makeInternalDisclosureAgreement({
-        id: `da-own-${c.id}`,
-        owner: alice.party,
-        ownerDot: alice.partyDot,
-        subject: { kind: 'claim', id: c.id },
-        scope: {},
-        terms: { createdDate: c.createdDate },
-      }),
-    )
+  // Phase 17.4.5 / 20.2 (#204): the primary `claims` array holds claims from
+  // multiple parties — Alice's (cPrm/cVreg/cEmi + the five Phase 17.4 MicroCo
+  // claims) AND Dave/ChipCo's 14 claims. Mapping the whole array with a
+  // hardcoded `owner: alice.party` (the original bug) minted spurious
+  // MicroCo→MicroCo ownership DAs over ChipCo's claims, colliding with
+  // `daveOwnClaims`' identical `da-own-${c.id}` ids and leaking an "Internal"
+  // Full Disclosure row into the Directory Claim Detail Panel on Alice's view.
+  // makeOwnershipDAsForActor's internal `owner === actor.party` filter now
+  // enforces the guard structurally, so passing the full unfiltered `claims`
+  // array is safe — Alice only gets ownership DAs for the claims she owns.
+  const aliceOwnClaims = makeOwnershipDAsForActor(alice, claims, 'claim')
 
   // Claim → each referenced Asset (Full, implicit) — one DA per (claim, asset) pair.
   // subject is the Claim; scope.assetIds names the referenced Asset. Edge: Claim ↔ Asset.
@@ -4668,9 +4642,7 @@ function buildV22SharedArtifactsUncached() {
     ...aliceOwnClaims,
     ...daveOwnClaims,
     ...claimRefEdges,
-    ...daveClaimRefEdges,
     ...parseResultRefEdges,
-    daveParseResultRefEdge,
     daAliceToBobPrm,
     daAliceToBobVreg,
     daAliceToCarolPrm,

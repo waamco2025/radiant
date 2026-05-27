@@ -150,7 +150,7 @@ function StackBadge({ count, categoryColor }) {
   // now holds only Parse Results).
   const tooltipText = `${count} associated Parse Result${count === 1 ? '' : 's'}. Double-click to explore.`
   return (
-    <Tooltip content={tooltipText} width={260}>
+    <Tooltip content={tooltipText} width={200}>
       <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}

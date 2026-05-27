@@ -7,7 +7,6 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import AssetNode, { AssetNodeDot, AssetNodeMini, CARD_W, CARD_H, MINI_CARD_W, MINI_CARD_H, CATEGORY_CONFIG } from './AssetNode.jsx'
 import LayerBorder from './LayerBorder.jsx'
 import LayerPill from './LayerPill.jsx'
-// LayerTransitionOverlay kept as file but no longer used — View Transitions API replaces it
 
 const MIN_ZOOM = 0.20
 const MAX_ZOOM = 1.50

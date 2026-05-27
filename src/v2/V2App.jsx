@@ -9788,7 +9788,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.20.1 &middot; Changelog
+          v0.20.2 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9835,6 +9835,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.2', date: '2026-05-27', label: 'Phase 20.2', items: [
+                  'Phase 20 wrap. StackBadge tooltip width tuned for a clean two-line break. Dead LayerTransitionOverlay file removed (the View Transitions API replaced it). Seed cleanup: extracted a makeOwnershipDAsForActor helper that makes per-actor internal-disclosure bugs structurally impossible, and dropped duplicate disclosure-agreement blocks in favor of the generic loops — both pure refactors with byte-identical output. Edge-selection-through-dive verified (selection is intentionally cleared on layer transitions to prevent stale highlights).',
+                ]},
                 { version: '0.20.1', date: '2026-05-27', label: 'Phase 20.1', items: [
                   'Parse Result rows in the Asset Detail Panel. The "Parse Results" Registration row is now a list of clickable rows — each shows the Parse Result\'s name and the count of parsed fields. Clicking a row dives into the source Asset\'s child layer and opens the Parse Result\'s Detail Panel. Plus a StackBadge tooltip refresh: "1 associated Parse Result. Double-click to explore." replaces the older multi-artifact phrasing.',
                 ]},
