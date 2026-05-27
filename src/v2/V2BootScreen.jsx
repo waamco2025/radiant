@@ -130,7 +130,7 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
         const col = Math.round((x - startX) / spacing)
         const row = Math.round((y - startY) / spacing)
         const idx = dots.length
-        dots.push({ x, y, dist, col, row, brightness: 0, fadeStart: 0 })
+        dots.push({ x, y, dist, col, row, brightness: 0, fadeStart: 0, color: null })
         dotGrid[`${col},${row}`] = idx
         if (dist > maxDist) maxDist = dist
       }
@@ -144,6 +144,32 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
     const normR = 59, normG = 61, normB = 64
     const waveFrontWidth = 0.10
     const fadeTailLength = 0.30
+
+    // Phase 20.3: five-color palette for login-screen lightning. Each bolt
+    // picks one color at spawn and holds it for its lifetime; dots inherit the
+    // color of the brightest bolt that touched them. Three colors resolve from
+    // the live design tokens (so the boot screen tracks the design system),
+    // one is the provisional-edge grey, and the fifth is hardcoded white for
+    // the lightning-strike feel. The boot-phase gold ripple is unaffected.
+    const parseColor = (str) => {
+      const s = (str || '').trim()
+      let m = s.match(/^#([0-9a-fA-F]{6})$/)
+      if (m) { const n = parseInt(m[1], 16); return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 } }
+      m = s.match(/^#([0-9a-fA-F]{3})$/)
+      if (m) { const c = m[1]; return { r: parseInt(c[0] + c[0], 16), g: parseInt(c[1] + c[1], 16), b: parseInt(c[2] + c[2], 16) } }
+      m = s.match(/^rgba?\(([^)]+)\)$/)
+      if (m) { const p = m[1].split(',').map((x) => parseInt(x.trim(), 10)); if (p.length >= 3 && p.every((v) => Number.isFinite(v))) return { r: p[0], g: p[1], b: p[2] } }
+      return null
+    }
+    const cs = getComputedStyle(document.documentElement)
+    const tokenColor = (name, fallback) => parseColor(cs.getPropertyValue(name)) || fallback
+    const PALETTE = [
+      tokenColor('--accent-indigo', { r: 129, g: 140, b: 248 }),
+      tokenColor('--accent-amber', { r: 245, g: 158, b: 11 }),
+      tokenColor('--accent-green', { r: 34, g: 197, b: 94 }),
+      tokenColor('--text-dim', { r: 122, g: 131, b: 153 }),
+      { r: 255, g: 255, b: 255 },
+    ]
 
     // Lightning system
     const activeBolts = []
@@ -185,7 +211,9 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
           }
         }
       }
-      activeBolts.push({ path, spawnTime: now, revealedCount: 0 })
+      // Phase 20.3: assign a stable random color from the palette to this bolt.
+      const color = PALETTE[Math.floor(Math.random() * PALETTE.length)]
+      activeBolts.push({ path, spawnTime: now, revealedCount: 0, color })
     }
 
     let phaseRef = skipLogin ? 'boot' : 'login'
@@ -228,6 +256,7 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
             if (fadeIn > dot.brightness) {
               dot.brightness = fadeIn
               dot.fadeStart = dotRevealTime + 800
+              dot.color = bolt.color  // Phase 20.3: brighter bolt wins → dot adopts its color
             }
           }
         })
@@ -245,9 +274,12 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
           const dot = dots[i]
           const b = dot.brightness
           if (b > 0.01) {
-            const r = normR + (goldR - normR) * b
-            const g = normG + (goldG - normG) * b
-            const bl = normB + (goldB - normB) * b
+            // Phase 20.3: interpolate toward the dot's stored bolt color
+            // (falls back to gold for any dot a bolt never colored).
+            const target = dot.color || { r: goldR, g: goldG, b: goldB }
+            const r = normR + (target.r - normR) * b
+            const g = normG + (target.g - normG) * b
+            const bl = normB + (target.b - normB) * b
             ctx.beginPath()
             ctx.arc(dot.x, dot.y, dotRadius + b * 0.5, 0, Math.PI * 2)
             ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(bl)},${0.18 + b * 0.82})`

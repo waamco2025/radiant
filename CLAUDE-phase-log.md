@@ -2673,6 +2673,32 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 20.3 completion notes (2026-05-27) — Login Screen Lightning Color Randomization
+
+Standalone demo-prep visual polish (the Phase 20 child-layer arc closed at 20.2; this is a discrete one-file item before Phase 21). All login-phase lightning bolts previously interpolated toward a single gold tone; now each bolt picks one of five equal-weighted colors at spawn and holds it stable for its lifetime, with dots inheriting the color of the brightest bolt that touched them. Single file `src/v2/V2BootScreen.jsx` + footer/Changelog in `V2App.jsx`.
+
+**Diff (four code changes in `V2BootScreen.jsx`, all inside the canvas-building useEffect).**
+- **Palette resolution (Option α — recommended).** After the `goldR/G/B` / `normR/G/B` constants, added a small inline `parseColor(str)` (handles `#RRGGBB` primarily, `#RGB` + `rgb()/rgba()` defensively, returns `null` on anything else), then resolved a `const PALETTE` of five `{r,g,b}` triplets: `--accent-indigo` / `--accent-amber` / `--accent-green` / `--text-dim` read live from `getComputedStyle(document.documentElement).getPropertyValue(name)` (with hardcoded dark-theme fallbacks if a token fails to parse) + hardcoded white. Keeps the boot screen synced to the design tokens.
+- **Dot init.** Each dot's constructor object gains `color: null` (draw loop falls back to gold for any never-touched dot — defensive; untouched dots route through the unlit white-dot branch anyway).
+- **Spawn-time pick.** `spawnBolt` adds `const color = PALETTE[Math.floor(Math.random() * PALETTE.length)]` and pushes `{ path, spawnTime, revealedCount: 0, color }`.
+- **Per-dot propagation.** The brightness-update loop's existing `if (fadeIn > dot.brightness)` "brighter bolt wins" guard now also sets `dot.color = bolt.color` — so a dot adopts the brighter overlapping bolt's color along with its brightness; stable per chain until a brighter bolt overrides.
+- **Draw substitution.** The login-phase bright-dot branch (`b > 0.01`) interpolates from `normR/G/B` toward `const target = dot.color || { r: goldR, g: goldG, b: goldB }` instead of the hardcoded `goldR/G/B`.
+- **Footer + Changelog (`V2App.jsx`):** `v0.20.2 → v0.20.3`; prepended the Phase 20.3 Changelog modal entry.
+
+**Boot-phase ripple untouched.** The post-Establish-Session gold network-build ripple (lines ~327-336) still reads `goldR/G/B` directly — unchanged. `goldR/G/B` stay defined (used by both the ripple and the login-phase fallback). No timing/spawn/speed/radius changes; `normR/G/B` baseline unchanged; the unlit background-dot `rgba(255,255,255,0.18)` treatment unchanged.
+
+**Deviations.** None. Option α resolved cleanly — the four tokens are clean 6-digit hex (`#818cf8` / `#f59e0b` / `#22c55e` / `#7a8399` in dark theme), so the primary `#RRGGBB` parser branch handles them with no surprises; no fallback to Option β (hardcoding) needed.
+
+**Verification.** Build clean (`npm run build` — 132 modules, 0 errors). Preview boots into the login screen with no console errors; the lightning canvas renders.
+- **Palette correctness (Verified):** a live eval replicating the resolution produced exactly five colors — indigo (129,140,248), amber (245,158,11), green (34,197,94), grey (122,131,153), white (255,255,255) — `allParsed: true`.
+- **Randomization renders (Verified by canvas pixel-sampling):** a live `getImageData` scan of the lightning canvas found **indigo (blue-dominant) lit pixels — impossible under the old gold-only version** (gold `212,175,55` has near-zero blue) — alongside amber, grey, and white. Two samples taken seconds apart showed the color distribution shifting frame-to-frame (sample 1: 38 indigo / 49 amber / 17 grey / 783 white; sample 2: 0 indigo / 181 amber / 215 grey / 569 white), confirming per-bolt color variation over time (corroborates QA #3). The gold central Prime Radiant emblem (a separate edge-based render, not the dot-based lightning) is correctly unaffected.
+- **QA #1 (five colors over 30-60s) — Manual-visual:** the prompt flags QA #1-3 as inherently manual (random distribution can't be code-verified meaningfully). Four of five (indigo/amber/grey/white) were confirmed in live pixels; green resolves correctly in the PALETTE and uses the identical spawn/propagate/draw path, but is transient (no green bolt happened to be mid-strike in the two sampled frames) — it will appear over the full window by construction. Flagged for a manual 30-60s watch.
+- **QA #2 (stable per chain) — Code-verified:** one `color` per bolt, written to every dot it touches via the brightness guard; no per-frame re-randomization, so a chain is uniform from reveal to fade.
+- **QA #4 (ripple still gold) — Code-verified:** the boot-phase ripple branch is byte-unchanged; `goldR/G/B` still drive it.
+- **QA #5 (build + boot clean) — Verified.**
+
+**Status:** [x] Complete.
+
 ### Phase 20.2 completion notes (2026-05-27) — Phase 20 cleanup bundle
 
 Five independent S-effort cleanup items closing the Phase 20 child-layer arc: one tooltip polish, one dead-code deletion, one verify-or-fix backlog item, and two seed-resilience refactors carried over from the Phase 17.4.5 post-mortem. Bundled into one commit per the prompt.
