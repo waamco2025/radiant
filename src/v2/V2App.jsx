@@ -9788,7 +9788,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.20.3 &middot; Changelog
+          v0.20.4 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9835,6 +9835,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.4', date: '2026-05-27', label: 'Phase 20.4', items: [
+                  'Mock qualified storage picker: `emi-shield-spec.pdf` now ships as a real PDF and previews live in the picker File Details panel; selecting it for Asset registration carries the file forward to the new Asset\'s File Viewer. Demo-prep polish — the other five mock files stay as preview-less placeholders.',
+                ]},
                 { version: '0.20.3', date: '2026-05-27', label: 'Phase 20.3', items: [
                   'Login screen lightning chains now render in randomized colors — indigo, amber, green, grey, and white — picked at chain spawn time and held stable through each chain\'s lifetime. The post-login boot ripple stays gold. Demo-prep polish.',
                 ]},

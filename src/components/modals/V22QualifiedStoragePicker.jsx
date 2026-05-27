@@ -12,6 +12,9 @@
 // Alice's to PRM / VReg / EMI parts, Carol's to audit evidence).
 
 import { useState, useEffect, useCallback } from 'react'
+// Phase 20.4: reuse the Phase 15 PDF.js renderer for the File Details preview
+// of qualified-storage files that ship as real PDFs (currently emi-shield-spec).
+import AnnotatedPdfViewer from '../AnnotatedPdfViewer.jsx'
 
 const MOCK_BUCKETS = {
   GovCo: {
@@ -70,7 +73,10 @@ const MOCK_BUCKETS = {
       '/product-data/datasheets': [
         { name: 'powerregulationmodule-datasheet.pdf', size: '3.8 MB', date: '2026-03-20', type: 'pdf' },
         { name: 'voltageregulator-datasheet.pdf', size: '2.1 MB', date: '2026-03-18', type: 'pdf' },
-        { name: 'emi-shield-spec.pdf', size: '1.4 MB', date: '2026-03-15', type: 'pdf' },
+        // Phase 20.4: the only qualified-storage file that ships as a real,
+        // previewable PDF (served from public/seed-pdfs/). The other five stay
+        // preview-less placeholders — intentional, for the demo walkthrough.
+        { name: 'emi-shield-spec.pdf', size: '1.4 MB', date: '2026-03-15', type: 'pdf', localPath: '/seed-pdfs/emi-shield-spec.pdf' },
         { name: 'thermal-interface-pad-spec.pdf', size: '980 KB', date: '2026-03-14', type: 'pdf' },
         { name: 'connector-assembly-drawing.pdf', size: '2.6 MB', date: '2026-03-12', type: 'pdf' },
         { name: 'pcb-substrate-stackup.pdf', size: '1.7 MB', date: '2026-03-10', type: 'pdf' },
@@ -189,6 +195,11 @@ function selectedFileToV22Payload(file) {
     size: parseDisplaySizeToBytes(file.size),
     mimeType: MIME_BY_EXT[ext] || 'application/octet-stream',
     hash: null,
+    // Phase 20.4: carry the served PDF path forward when the mock entry has
+    // one (only emi-shield-spec today). makeAsset stores file.localPath, so the
+    // registered Asset's File Viewer renders the real PDF. Preview-less files
+    // pass `localPath: null` and keep the existing no-preview fallback.
+    localPath: file.localPath || null,
     // Carry the display size / type / date through too — V22CreateAssetModal
     // uses these for the "Review & Confirm" step without reformatting.
     displaySize: file.size,
@@ -1088,33 +1099,47 @@ export default function V22QualifiedStoragePicker({
                   ))}
                 </div>
 
-                <div style={{
-                  flex: 1, display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center',
-                  padding: '24px 16px',
-                  color: 'var(--text-dim)',
-                }}>
+                {previewFile.localPath ? (
+                  // Phase 20.4: live PDF.js preview for qualified-storage files
+                  // that ship as real PDFs (emi-shield-spec today). Reuses the
+                  // Phase 15 AnnotatedPdfViewer — fit-to-container, scrolls
+                  // internally for the full multi-page view; no annotation
+                  // anchors here (none apply to a not-yet-registered file).
                   <div style={{
-                    width: 80, height: 100, borderRadius: 8,
-                    border: '2px dashed var(--border)',
-                    display: 'flex', flexDirection: 'column',
+                    flex: 1, minHeight: 0, overflow: 'hidden',
+                    background: 'var(--bg-deep)',
+                  }}>
+                    <AnnotatedPdfViewer fileUrl={previewFile.localPath} height="100%" />
+                  </div>
+                ) : (
+                  <div style={{
+                    flex: 1, display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center',
-                    marginBottom: 16,
-                    background: 'color-mix(in srgb, var(--border) 20%, transparent)',
+                    padding: '24px 16px',
+                    color: 'var(--text-dim)',
                   }}>
-                    <FileIcon type={previewFile.type} />
+                    <div style={{
+                      width: 80, height: 100, borderRadius: 8,
+                      border: '2px dashed var(--border)',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center',
+                      marginBottom: 16,
+                      background: 'color-mix(in srgb, var(--border) 20%, transparent)',
+                    }}>
+                      <FileIcon type={previewFile.type} />
+                    </div>
+                    <div style={{
+                      fontSize: 11, fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.6,
+                    }}>
+                      Preview not available
+                      <br />
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        Select to attach this file
+                      </span>
+                    </div>
                   </div>
-                  <div style={{
-                    fontSize: 11, fontFamily: 'var(--font-mono)',
-                    color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.6,
-                  }}>
-                    Preview not available
-                    <br />
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                      Select to attach this file
-                    </span>
-                  </div>
-                </div>
+                )}
 
                 <div style={{
                   padding: '10px 16px',
