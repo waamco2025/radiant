@@ -9788,7 +9788,7 @@ export default function V2App() {
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
         >
-          v0.20.5 &middot; Changelog
+          v0.20.6 &middot; Changelog
         </span>
       </div>
       {showFooterTip && footerTipRef.current && createPortal(
@@ -9835,6 +9835,9 @@ export default function V2App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
               {[
+                { version: '0.20.6', date: '2026-05-27', label: 'Phase 20.6', items: [
+                  'Demo hand-off: the CAC login screen is now a username + password gate. Single shared credential, no session persistence (every refresh returns to login). Perception-only security — the credential check happens in client-side JS and can be bypassed by anyone with DevTools — calibrated for "random Netlify URL discoverer doesn\'t poke around," not for protecting state secrets. Marked for removal when production auth lands.',
+                ]},
                 { version: '0.20.5', date: '2026-05-27', label: 'Phase 20.5', items: [
                   'Demo-prep swap: the previewable picker file is now `inrush-current-limiter-datasheet.pdf` (Inrush Current Limiter ICL-150), not `emi-shield-spec.pdf`. The previous file collided with Alice\'s existing EMI Shield Assembly Asset and would have created a duplicate at registration. ICL-150 is a genuinely new MicroCo part — no collision in Alice\'s seed.',
                 ]},

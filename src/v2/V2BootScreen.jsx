@@ -11,13 +11,71 @@ const WAVE_GAP = 200
 export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
   const radiantCanvasRef = useRef(null)
   const dotCanvasRef = useRef(null)
-  const [phase, setPhase] = useState(skipLogin ? 'boot' : 'login')
+  // PHASE 20.6: ignore skipLogin so refresh always returns to the login
+  // screen (temporary demo auth gate, Path C). Restore
+  // `skipLogin ? 'boot' : 'login'` when removing the auth gate.
+  const [phase, setPhase] = useState('login')
   const [bootText, setBootText] = useState('')
 
   const startBoot = useCallback(() => {
     setPhase('boot')
     setBootText('Initializing node explorer...')
   }, [])
+
+  // ─────────────────────────────────────────────────────────────────────
+  // PHASE 20.6: TEMPORARY DEMO AUTH GATE (Path C — perception-only security)
+  // Hand-off period only. Remove this entire block, the credential UI in the
+  // 'login' phase render below, and the phase initial-state overrides above
+  // when migrating to production auth. Credentials documented in Phase 20.6
+  // phase-log notes. Single shared credential, no session persistence.
+  // Client-side SHA-256 compare — bypassable in DevTools by intent.
+  // ─────────────────────────────────────────────────────────────────────
+  const DEMO_AUTH_USERNAME = 'user@radiant.com'
+  const DEMO_AUTH_PASSWORD_HASH = 'cd4a9521daa3bafc3a07e66c1813f237d024fb8fbab3f8bb34a612db39d2c517'
+
+  async function sha256Hex(input) {
+    const bytes = new TextEncoder().encode(input)
+    const hashBuf = await crypto.subtle.digest('SHA-256', bytes)
+    return Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+
+  const [authUsername, setAuthUsername] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState(null)
+  const [authChecking, setAuthChecking] = useState(false)
+
+  const handleAuthSubmit = async (e) => {
+    e?.preventDefault?.()
+    if (authChecking) return
+    setAuthChecking(true)
+    const usernameOk = authUsername.trim() === DEMO_AUTH_USERNAME
+    const hashed = await sha256Hex(authPassword)
+    const passwordOk = hashed === DEMO_AUTH_PASSWORD_HASH
+    setAuthChecking(false)
+    if (usernameOk && passwordOk) {
+      setAuthError(null)
+      startBoot()
+    } else {
+      setAuthError('Authentication failed. Check your credentials and try again.')
+    }
+  }
+
+  // Clear the error message the moment the user starts editing either field.
+  const handleUsernameChange = (e) => {
+    setAuthUsername(e.target.value)
+    if (authError) setAuthError(null)
+  }
+  const handlePasswordChange = (e) => {
+    setAuthPassword(e.target.value)
+    if (authError) setAuthError(null)
+  }
+  // ─────────────────────────────────────────────────────────────────────
+  // END Phase 20.6 demo auth gate (remove the block above + the credential
+  // UI in the 'login' phase render + the phase initial-state overrides
+  // above). Grep for `PHASE 20.6` to find all sites.
+  // ─────────────────────────────────────────────────────────────────────
 
   // Boot text + phase timers
   useEffect(() => {
@@ -216,8 +274,11 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
       activeBolts.push({ path, spawnTime: now, revealedCount: 0, color })
     }
 
-    let phaseRef = skipLogin ? 'boot' : 'login'
-    let bootStartTime = skipLogin ? performance.now() : null
+    // PHASE 20.6: ignore skipLogin (temporary demo auth gate). Restore
+    // `skipLogin ? 'boot' : 'login'` + `skipLogin ? performance.now() : null`
+    // when removing the gate.
+    let phaseRef = 'login'
+    let bootStartTime = null
     let animId = null
     const phaseCallback = (newPhase) => {
       phaseRef = newPhase
@@ -376,42 +437,91 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
       }}>RADIANT</div>
 
       {isLogin && (
-        <div style={{ marginTop: 28, position: 'relative', zIndex: 1, width: 300 }}>
+        // ─────────────────────────────────────────────────────────────────
+        // PHASE 20.6: TEMPORARY DEMO AUTH GATE — credential entry UI.
+        // Replaces the prior CAC identity certificate panel (Identity
+        // Certificate / Authentication / Credentials sections + a plain
+        // ESTABLISH SESSION button). Remove this whole {isLogin && (...)}
+        // block and restore the original CAC panel when removing the gate.
+        // Grep for `PHASE 20.6` to find all sites.
+        // ─────────────────────────────────────────────────────────────────
+        <form onSubmit={handleAuthSubmit} style={{ marginTop: 28, position: 'relative', zIndex: 1, width: 300 }}>
           <div style={{
             border: '1px solid rgba(212, 175, 55, 0.35)', borderRadius: 8, overflow: 'hidden',
             background: 'rgba(180, 140, 50, 0.06)',
           }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(212, 175, 55, 0.15)' }}>
-              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'rgba(212, 175, 55, 0.4)', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>Identity Certificate</div>
-              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono, monospace)', color: 'rgba(212, 175, 55, 0.7)', letterSpacing: '0.02em' }}>WINSLOW.ROBERT.J.1384297560</div>
-            </div>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(212, 175, 55, 0.15)' }}>
-              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'rgba(212, 175, 55, 0.4)', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>Authentication</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: 'var(--font-mono, monospace)' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', flexShrink: 0, boxShadow: '0 0 6px rgba(34, 197, 94, 0.5)' }} />
-                <span style={{ color: 'rgba(34, 197, 94, 0.85)' }}>CAC VERIFIED</span>
-                <span style={{ color: 'rgba(212, 175, 55, 0.35)' }}>&middot;</span>
-                <span style={{ color: 'rgba(212, 175, 55, 0.5)' }}>PIV-I</span>
-              </div>
+              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'rgba(212, 175, 55, 0.4)', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>Username</div>
+              <input
+                type="text"
+                value={authUsername}
+                onChange={handleUsernameChange}
+                autoFocus
+                autoComplete="username"
+                spellCheck={false}
+                placeholder="user@radiant.com"
+                style={{
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  padding: 0,
+                  fontSize: 12,
+                  fontFamily: 'var(--font-mono, monospace)',
+                  color: 'rgba(212, 175, 55, 0.85)',
+                  letterSpacing: '0.02em',
+                }}
+              />
             </div>
             <div style={{ padding: '10px 14px' }}>
-              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'rgba(212, 175, 55, 0.4)', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>Credentials</div>
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono, monospace)', color: 'rgba(212, 175, 55, 0.55)', letterSpacing: '0.02em' }}>
-                DOD ID 1384297560 &middot; NRO &middot; TS/SCI
-              </div>
+              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'rgba(212, 175, 55, 0.4)', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>Password</div>
+              <input
+                type="password"
+                value={authPassword}
+                onChange={handlePasswordChange}
+                autoComplete="current-password"
+                style={{
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  padding: 0,
+                  fontSize: 12,
+                  fontFamily: 'var(--font-mono, monospace)',
+                  color: 'rgba(212, 175, 55, 0.85)',
+                  letterSpacing: '0.02em',
+                }}
+              />
             </div>
           </div>
-          <button onClick={startBoot} style={{
+          {authError && (
+            <div style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              borderRadius: 4,
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: 'rgba(239, 68, 68, 0.85)',
+              fontSize: 10,
+              fontFamily: 'var(--font-mono, monospace)',
+              letterSpacing: '0.05em',
+            }}>{authError}</div>
+          )}
+          <button type="submit" disabled={authChecking} style={{
             marginTop: 16, width: '100%', padding: '12px 0',
             border: '1px solid rgba(212, 175, 55, 0.5)', borderRadius: 6,
             background: 'rgba(212, 175, 55, 0.08)', color: 'rgba(212, 175, 55, 0.85)',
             fontSize: 11, fontFamily: 'var(--font-mono, monospace)', fontWeight: 700,
-            letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 200ms ease',
+            letterSpacing: '0.2em', textTransform: 'uppercase',
+            cursor: authChecking ? 'not-allowed' : 'pointer',
+            opacity: authChecking ? 0.6 : 1,
+            transition: 'all 200ms ease',
           }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212, 175, 55, 0.15)'; e.currentTarget.style.borderColor = 'rgba(212, 175, 55, 0.7)'; e.currentTarget.style.color = 'rgba(212, 175, 55, 1)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(212, 175, 55, 0.08)'; e.currentTarget.style.borderColor = 'rgba(212, 175, 55, 0.5)'; e.currentTarget.style.color = 'rgba(212, 175, 55, 0.85)' }}
+            onMouseEnter={e => { if (authChecking) return; e.currentTarget.style.background = 'rgba(212, 175, 55, 0.15)'; e.currentTarget.style.borderColor = 'rgba(212, 175, 55, 0.7)'; e.currentTarget.style.color = 'rgba(212, 175, 55, 1)' }}
+            onMouseLeave={e => { if (authChecking) return; e.currentTarget.style.background = 'rgba(212, 175, 55, 0.08)'; e.currentTarget.style.borderColor = 'rgba(212, 175, 55, 0.5)'; e.currentTarget.style.color = 'rgba(212, 175, 55, 0.85)' }}
           >ESTABLISH SESSION</button>
-        </div>
+        </form>
+        // END PHASE 20.6 demo auth gate UI
       )}
 
       {(phase === 'boot' || isFading) && (

@@ -2673,6 +2673,51 @@ Pivoted Phase 12.6's split-container layout to Option A (single overflow contain
 
 **Status:** [x] Complete.
 
+### Phase 20.6 completion notes (2026-05-27) — Demo Auth Gate (Path C, temporary)
+
+Prototype development is pausing for hand-off. Before the Netlify preview goes to the client for review, the CAC login screen is replaced with a real (perception-only) username + password gate so the URL isn't fully public to whoever finds it. **Path C** from the auth discussion — client-side SHA-256 hash compare embedded in the JS bundle, bypassable in DevTools by intent. The threat model is "random Netlify URL discoverer doesn't poke around," not skilled-attacker resistance — the actual protection comes from the password's 120-bit entropy plus the social friction of a login screen on a URL no one knows about. Single shared credential, no session persistence (every refresh and every new tab return to the login screen). This is temporary code; clearly-marked comment delimiters flag it for grep-and-removal when production auth lands.
+
+**Credentials (private project doc — not shipped in the JS bundle).**
+```
+Username: user@radiant.com
+Password: BECRlRwUIvwAsuPJxxL%
+```
+The SHA-256 of the password (UTF-8 bytes, no salt, no iteration) is `cd4a9521daa3bafc3a07e66c1813f237d024fb8fbab3f8bb34a612db39d2c517`, embedded in `V2BootScreen.jsx` as the `DEMO_AUTH_PASSWORD_HASH` constant.
+
+**Removal-marker convention.** All temporary code is wrapped in `PHASE 20.6: TEMPORARY DEMO AUTH GATE` (opening) and `END Phase 20.6 demo auth gate` (closing) comment delimiters. `grep -n "PHASE 20.6" src/v2/V2BootScreen.jsx` lists every site. There are four:
+1. **Auth state + helpers block** (after `startBoot`). Contains `DEMO_AUTH_USERNAME`, `DEMO_AUTH_PASSWORD_HASH`, the async `sha256Hex` helper, the four `useState` hooks (`authUsername` / `authPassword` / `authError` / `authChecking`), and the three handlers (`handleAuthSubmit`, `handleUsernameChange`, `handlePasswordChange`).
+2. **Credential UI** in the `{isLogin && (...)}` render. The whole block — `<form onSubmit={handleAuthSubmit}>` with the USERNAME + PASSWORD sections, the error slot, and the submit button — replaces the original three-section CAC identity certificate panel (Identity Certificate / Authentication / Credentials) + the plain ESTABLISH SESSION button.
+3. **Phase initial-state override** at the top of the component: `useState('login')` (restore `useState(skipLogin ? 'boot' : 'login')`).
+4. **Lightning-canvas `phaseRef` / `bootStartTime` overrides** inside the canvas-building useEffect: `let phaseRef = 'login'` / `let bootStartTime = null` (restore `skipLogin ? 'boot' : 'login'` / `skipLogin ? performance.now() : null`).
+
+The `skipLogin` prop stays in the component signature (`V2BootScreen({ onComplete, onFading, skipLogin })`) for a clean revert — the prop continues to be accepted; the demo just ignores its value.
+
+**Diff (`src/v2/V2BootScreen.jsx` + `src/v2/V2App.jsx`).**
+- **Step 1 — Auth state + helpers.** New module-internal block after `startBoot` containing the credential constants, `sha256Hex`, the four auth `useState` hooks, and the three handlers. `handleAuthSubmit` async-validates via `crypto.subtle.digest('SHA-256', new TextEncoder().encode(password))` then `setAuthChecking(false)` + either `startBoot()` on match or `setAuthError('Authentication failed. Check your credentials and try again.')` on mismatch. The username + password change handlers both clear `authError` on first keystroke.
+- **Step 2 — Phase initial-state + lightning-canvas overrides.** `useState('login')` (was `useState(skipLogin ? 'boot' : 'login')`). Inside the canvas useEffect: `let phaseRef = 'login'` / `let bootStartTime = null` (were `skipLogin ? 'boot' : 'login'` / `skipLogin ? performance.now() : null`).
+- **Step 3 — Credential UI.** The `{isLogin && (...)}` block: outer container reused (same `marginTop: 28, width: 300` styling) but the inner `<div>` is now a `<form onSubmit={handleAuthSubmit}>`. The three CAC sections (Identity Certificate / Authentication / Credentials) → two input sections (USERNAME / PASSWORD), each `<input>` styled to match the original section content (`var(--font-mono)`, `rgba(212, 175, 55, 0.85)`, transparent background, no border/outline/padding, `letterSpacing: 0.02em`); USERNAME has `type="text"` + `autoFocus` + `autoComplete="username"` + `spellCheck={false}` + `placeholder="user@radiant.com"` (mild paste-into-the-right-field affordance — credentials are shared via a separate channel); PASSWORD has `type="password"` + `autoComplete="current-password"`. Below the input panel: an `authError && (<div>...)` error slot using Tailwind red-500 in rgba (`239, 68, 68`) at the same opacity scale as the existing amber treatments for visual coherence (`background: 0.08`, `border: 0.3`, `color: 0.85`). The submit button is the ESTABLISH SESSION button reused with `type="submit"`, `disabled={authChecking}`, and `opacity: 0.6 / cursor: not-allowed` while checking; hover handlers and full original styling preserved (only an `if (authChecking) return` early-out added so hover doesn't change colors mid-validation).
+- **Step 4 — V2App footer + Changelog.** `v0.20.5 → v0.20.6`; prepended the Phase 20.6 Changelog modal entry.
+
+**Deviations.** None of substance — the prompt's example snippets were adopted directly. Minor structural choices: (1) the auth state + helpers block is placed AFTER `startBoot` (not before) so it reads top-down and the handler can reference `startBoot` lexically; closure semantics make this position-agnostic anyway. (2) Two `// END PHASE 20.6 demo auth gate UI` style closing comments appear (one closing the auth helpers block, one inside the `{isLogin && (...)}` block after the form) — minor stylistic embellishment for grep-ability; not in the prompt's literal snippet, harmless.
+
+**Verification (live, on a fresh preview boot — all 10 QA items).**
+- **QA #1 (Verified):** initial visit → boot screen renders the new credential UI (USERNAME + PASSWORD inputs + ESTABLISH SESSION). The old CAC certificate UI (WINSLOW.ROBERT, DOD ID, CAC VERIFIED, Identity Certificate) is gone. The username input has `autoFocus`.
+- **QA #2 (Verified):** entered `user@radiant.com` + `BECRlRwUIvwAsuPJxxL%`, submitted via `form.requestSubmit()`; the login UI disappeared and the boot animation began ("Initializing node explorer..." text rendered).
+- **QA #3 (Verified):** `location.reload()` returned to the login screen (USERNAME + PASSWORD visible again); `sessionStorage.getItem('radiant-v2-booted')` was null.
+- **QA #4 (Code-verified):** new-tab behavior is the same as refresh by construction — nothing is stored in `localStorage`, and `sessionStorage` is per-tab.
+- **QA #5 (Verified):** empty submission → "Authentication failed. Check your credentials and try again." error rendered; still on login.
+- **QA #6 (Verified):** `wrong@radiant.com` + correct password → same generic error; doesn't mention `username` or `email` in the message.
+- **QA #7 (Verified):** correct username + `wrongpassword` → same generic error; doesn't mention `password` or `pwd`.
+- **QA #8 (Verified):** simulated a controlled-component value change on the username input via `Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set` + `input` event → the error disappeared immediately (the change handler clears `authError` on first keystroke).
+- **QA #9 (Verified):** `form.requestSubmit()` (the browser-equivalent of pressing Enter inside a form input) fired the form's `onSubmit` → `handleAuthSubmit` ran → boot animation started (confirmed in QA #2's flow).
+- **QA #10 (Verified):** `npm run build` clean (132 modules, 0 errors); preview boots cleanly to the login screen with no console errors.
+
+The Prime Radiant 3D rendering, the golden ripple, the fading transitions, the BOOT_DURATION sequencing, and the Phase 20.3 randomized-color login lightning are all unchanged (the canvas useEffect's body is unchanged apart from the two-line `phaseRef`/`bootStartTime` initial-value override at its top).
+
+**Backlog impact.** Filed **#207 — Production auth replacement** in `polish-backlog.md` under Future Features, marked as a **pre-deployment blocker** (the temp gate is acceptable for hand-off only, not for non-demo deployment). The Phase 20 child-layer arc stays CLOSED. Prototype development is now PAUSED for hand-off (post-20.6); Phase 21 is deferred until development resumes.
+
+**Status:** [x] Complete.
+
 ### Phase 20.5 completion notes (2026-05-27) — Demo Seed PDF Swap (EMI Shield → ICL-150)
 
 Standalone demo-prep polish (same family as 20.3/20.4; the Phase 20 child-layer arc stays CLOSED). Phase 20.4 wired `emi-shield-spec.pdf` as the one previewable qualified-storage file — but demo-prep review caught a **seed collision**: every existing filename under MicroCo's `/product-data/datasheets/` already maps to an Asset in Alice's seed (EMI Shield → `asset-emi-datasheet`, PRM → `asset-prm-datasheet`, VReg → `asset-vreg-datasheet`, …), so registering one at demo time would mint a duplicate Asset card next to the existing one (confusing on camera). 20.5 swaps the previewable file to a genuinely **new** MicroCo part — Inrush Current Limiter ICL-150 (`inrush-current-limiter-datasheet.pdf`) — which has no seed Asset and registers cleanly. It's added as a **seventh** datasheets entry rather than replacing one of the six (the six stay as preview-less catalog filler — realistic that Alice's QS mirrors her actively-maintained product family).
