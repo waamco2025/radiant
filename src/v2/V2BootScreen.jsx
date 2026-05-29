@@ -459,7 +459,6 @@ export default function V2BootScreen({ onComplete, onFading, skipLogin }) {
                 autoFocus
                 autoComplete="username"
                 spellCheck={false}
-                placeholder="user@radiant.com"
                 style={{
                   width: '100%',
                   background: 'transparent',
