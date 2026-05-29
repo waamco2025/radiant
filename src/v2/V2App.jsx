@@ -6420,7 +6420,6 @@ export default function V2App() {
                   {[
                     { icon: '⚙', label: 'Account Settings' },
                     { icon: '☰', label: 'Preferences' },
-                    { icon: '↗', label: 'Logout' },
                   ].map(a => (
                     <div
                       key={a.label}
@@ -6440,6 +6439,32 @@ export default function V2App() {
                       <span style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>COMING SOON</span>
                     </div>
                   ))}
+                  {/* PHASE 20.6: Logout enabled. Reloads the page; the Phase
+                      20.6 boot screen always starts in the 'login' phase and
+                      sessionStorage is cleared on reload, so the user lands
+                      on the auth gate. Remove this enabled treatment + restore
+                      Logout to the disabled array above when the temporary
+                      auth gate is replaced by production auth. */}
+                  <div
+                    onClick={() => {
+                      setShowAcct(false)
+                      sessionStorage.removeItem(SESSION_KEY)
+                      location.reload()
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '7px 14px',
+                      cursor: 'pointer',
+                      transition: 'background .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.04)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 16, textAlign: 'center' }}>↗</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-primary)', flex: 1 }}>Logout</span>
+                  </div>
                 </div>
               </div>
             )}
